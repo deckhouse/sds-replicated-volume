@@ -211,21 +211,24 @@ func (r *Reconciler) reconcileMultiPrimary(
 		"ReplicatedVolume %q is multi-primary (attached diskful members: %v); snapshots are not allowed",
 		rv.Name, attached)
 
+	datamesh := r.buildDatamesh(rvs, rv, rvrs, childRVRSs)
+	sourceRVRSName := sourceReplicaSnapshotName(rv.Status.Datamesh.Members, childRVRSs)
+
 	prepareInFlight := rvs.Status.PrepareRevision > 0 || len(rvs.Status.PrepareTransitions) > 0
 	if !prepareInFlight {
-		outcome = r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+		outcome = r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
 			msg,
 			false,
-			rvs.Status.SourceReplicaSnapshotName)
+			sourceRVRSName)
 		return outcome, true
 	}
 
-	statusOut := r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+	statusOut := r.reconcileStatus(rf.Ctx(), rvs, datamesh,
 		v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress,
 		"Prepare cleanup is in progress: "+msg,
 		false,
-		rvs.Status.SourceReplicaSnapshotName)
+		sourceRVRSName)
 	if statusOut.ShouldReturn() {
 		outcome = statusOut
 		return outcome, true
