@@ -651,7 +651,7 @@
       "id": 48,
       "type": "timeseries",
       "title": "Backing Volume / LVM Proxy Completed Rate",
-      "description": "Rolling average of completed BackingVolumeReady observations per hour over the selected dashboard range. Compare with RVR phases to see whether provisioning is moving.",
+      "description": "Rolling average of completed BackingVolumeReady observations per second over the selected dashboard range. Compare with RVR phases to see whether provisioning is moving.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -664,7 +664,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (node) (increase(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) / $__range_s",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -677,7 +677,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -760,7 +760,7 @@
       "id": 49,
       "type": "timeseries",
       "title": "RVA Ready / Detach Completed Rate by Node",
-      "description": "Rolling average of completed RVA attach and detach operations per hour over the selected dashboard range.",
+      "description": "Rolling average of completed RVA attach and detach operations per second over the selected dashboard range.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -773,12 +773,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (node) (increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__range])) / $__range_s",
           "legendFormat": "ready {{node}}",
           "refId": "A"
         },
         {
-          "expr": "sum by (node) (increase(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (node) (increase(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__range])) / $__range_s",
           "legendFormat": "detach {{node}}",
           "refId": "B"
         }
@@ -791,7 +791,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -925,7 +925,7 @@
       "id": 50,
       "type": "timeseries",
       "title": "DRBDR Configure / Delete Completed Rate",
-      "description": "Rolling average of completed DRBDResource configure and delete operations per hour over the selected dashboard range.",
+      "description": "Rolling average of completed DRBDResource configure and delete operations per second over the selected dashboard range.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -938,12 +938,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (increase(sds_drbdr_configured_duration_seconds_count[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (instance) (increase(sds_drbdr_configured_duration_seconds_count[$__range])) / $__range_s",
           "legendFormat": "configure {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "sum by (instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__range])) / $__range_s",
           "legendFormat": "delete {{instance}}",
           "refId": "B"
         }
@@ -956,7 +956,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -1090,7 +1090,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Datamesh Completed Transition Rate",
-      "description": "Rolling average of completed datamesh transitions per hour over the selected dashboard range. This is less spiky than instant rate for rare transitions.",
+      "description": "Rolling average of completed datamesh transitions per second over the selected dashboard range. This is less spiky than instant rate for rare transitions.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1103,14 +1103,14 @@
       },
       "targets": [
         {
-          "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (type) (increase(sds_rv_datamesh_transitions_completed_total{type=~\"$transition_type\"}[$__range])) / $__range_s",
           "legendFormat": "{{type}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -1245,7 +1245,7 @@
       "id": 46,
       "type": "timeseries",
       "title": "RV Deletion Completed Rate by Storage Class",
-      "description": "Rolling average of completed RV deletions per hour over the selected dashboard range. Compare with current deleting count: growing current with low completed rate points to stuck deletion.",
+      "description": "Rolling average of completed RV deletions per second over the selected dashboard range. Compare with current deleting count: growing current with low completed rate points to stuck deletion.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1258,7 +1258,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range])) / $__range_s",
           "legendFormat": "{{storage_class}}",
           "refId": "A"
         }
@@ -1271,7 +1271,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -1337,7 +1337,7 @@
       "id": 47,
       "type": "timeseries",
       "title": "RVR Deletion Completed Rate by Node and Storage Class",
-      "description": "Rolling average of completed RVR deletions per hour over the selected dashboard range. Compare with current deleting count: growing current with low completed rate points to stuck deletion.",
+      "description": "Rolling average of completed RVR deletions per second over the selected dashboard range. Compare with current deleting count: growing current with low completed rate points to stuck deletion.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1350,7 +1350,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) / ($__range_s / 3600)",
+          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) / $__range_s",
           "legendFormat": "{{node}} / {{storage_class}}",
           "refId": "A"
         }
@@ -1363,7 +1363,7 @@
             "spanNulls": false,
             "showPoints": "never"
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
