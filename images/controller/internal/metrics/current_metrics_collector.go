@@ -34,6 +34,8 @@ import (
 const (
 	currentMetricsRVPhaseActive   = "Active"
 	currentMetricsRVPhaseDeleting = "Deleting"
+	currentMetricsNodeGlobal      = "global"
+	currentMetricsNodeUnknown     = "unknown"
 )
 
 var registerCurrentMetricsCollectorOnce sync.Once
@@ -50,14 +52,13 @@ type currentMetricsCollector struct {
 	reader client.Reader
 	log    logr.Logger
 
-	rvCountDesc             *prometheus.Desc
-	rvrCountDesc            *prometheus.Desc
-	rvaCountDesc            *prometheus.Desc
-	rvrUnhealthyCountDesc   *prometheus.Desc
-	rvDeletionStartDesc     *prometheus.Desc
-	rvrDeletionStartDesc    *prometheus.Desc
-	datameshActiveDesc      *prometheus.Desc
-	datameshActiveStartDesc *prometheus.Desc
+	rvCountDesc           *prometheus.Desc
+	rvrCountDesc          *prometheus.Desc
+	rvaCountDesc          *prometheus.Desc
+	rvrUnhealthyCountDesc *prometheus.Desc
+	rvDeletingCountDesc   *prometheus.Desc
+	rvrDeletingCountDesc  *prometheus.Desc
+	datameshActiveDesc    *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -88,28 +89,22 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelNode, LabelPhase},
 			nil,
 		),
-		rvDeletionStartDesc: prometheus.NewDesc(
-			"sds_rv_deletion_started_timestamp_seconds",
-			"Unix timestamp when the RV started deleting. Built from controller cache at scrape time.",
-			[]string{LabelName, LabelStorageClass},
+		rvDeletingCountDesc: prometheus.NewDesc(
+			"sds_rv_deleting_count",
+			"Current number of deleting ReplicatedVolume objects by storage class. Built from controller cache at scrape time.",
+			[]string{LabelStorageClass},
 			nil,
 		),
-		rvrDeletionStartDesc: prometheus.NewDesc(
-			"sds_rvr_deletion_started_timestamp_seconds",
-			"Unix timestamp when the RVR started deleting. Built from controller cache at scrape time.",
-			[]string{LabelName, LabelRV, LabelNode, LabelStorageClass},
+		rvrDeletingCountDesc: prometheus.NewDesc(
+			"sds_rvr_deleting_count",
+			"Current number of deleting ReplicatedVolumeReplica objects by node and storage class. Built from controller cache at scrape time.",
+			[]string{LabelNode, LabelStorageClass},
 			nil,
 		),
 		datameshActiveDesc: prometheus.NewDesc(
 			"sds_rv_datamesh_active_transitions",
-			"Number of currently active datamesh transitions per RV. Built from controller cache at scrape time.",
-			[]string{LabelRV, LabelType},
-			nil,
-		),
-		datameshActiveStartDesc: prometheus.NewDesc(
-			"sds_rv_datamesh_active_transition_start_timestamp_seconds",
-			"Unix timestamp of the oldest currently active datamesh transition for an RV and transition type. Built from controller cache at scrape time.",
-			[]string{LabelRV, LabelType},
+			"Current number of active datamesh transitions by storage class, node, and transition type. Global transitions use node=\"global\". Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelNode, LabelType},
 			nil,
 		),
 	}
@@ -120,10 +115,9 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvrCountDesc
 	ch <- c.rvaCountDesc
 	ch <- c.rvrUnhealthyCountDesc
-	ch <- c.rvDeletionStartDesc
-	ch <- c.rvrDeletionStartDesc
+	ch <- c.rvDeletingCountDesc
+	ch <- c.rvrDeletingCountDesc
 	ch <- c.datameshActiveDesc
-	ch <- c.datameshActiveStartDesc
 }
 
 func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -170,9 +164,9 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
 	collectRVRCounts(ch, c.rvrCountDesc, c.rvrUnhealthyCountDesc, nodes, storageClasses, rvrList.Items)
 	collectRVACounts(ch, c.rvaCountDesc, nodes, rvaList.Items)
-	collectRVDeletionStarts(ch, c.rvDeletionStartDesc, rvList.Items)
-	collectRVRDeletionStarts(ch, c.rvrDeletionStartDesc, rvrList.Items)
-	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, c.datameshActiveStartDesc, rvList.Items)
+	collectRVDeletingCounts(ch, c.rvDeletingCountDesc, storageClasses, rvList.Items)
+	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, nodes, storageClasses, rvrList.Items)
+	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, nodes, storageClasses, rvList.Items, rvrList.Items)
 
 	CurrentMetricsObjects.WithLabelValues("node").Set(float64(len(nodeList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rsc").Set(float64(len(rscList.Items)))
@@ -380,83 +374,106 @@ func collectRVACounts(
 	}
 }
 
-func collectRVDeletionStarts(
+func collectRVDeletingCounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
+	storageClasses []string,
 	rvs []v1alpha1.ReplicatedVolume,
 ) {
+	counts := make(map[string]float64, len(storageClasses))
+	for _, sc := range storageClasses {
+		counts[sc] = 0
+	}
+
 	for i := range rvs {
 		rv := &rvs[i]
 		if rv.DeletionTimestamp == nil {
 			continue
 		}
-		ch <- prometheus.MustNewConstMetric(
-			desc,
-			prometheus.GaugeValue,
-			float64(rv.DeletionTimestamp.Unix()),
-			rv.Name,
-			rv.Spec.ReplicatedStorageClassName,
-		)
+		counts[rv.Spec.ReplicatedStorageClassName]++
+	}
+
+	for _, sc := range storageClasses {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[sc], sc)
 	}
 }
 
-func collectRVRDeletionStarts(
+func collectRVRDeletingCounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
+	nodes []string,
+	storageClasses []string,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
+	counts := make(map[string]float64, len(nodes)*len(storageClasses))
+	for _, node := range nodes {
+		for _, sc := range storageClasses {
+			counts[metricKey(node, sc)] = 0
+		}
+	}
+
 	for i := range rvrs {
 		rvr := &rvrs[i]
 		if rvr.DeletionTimestamp == nil {
 			continue
 		}
-		ch <- prometheus.MustNewConstMetric(
-			desc,
-			prometheus.GaugeValue,
-			float64(rvr.DeletionTimestamp.Unix()),
-			rvr.Name,
-			rvr.Spec.ReplicatedVolumeName,
-			rvr.Spec.NodeName,
-			rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey],
-		)
+		node := rvr.Spec.NodeName
+		sc := rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey]
+		counts[metricKey(node, sc)]++
+	}
+
+	for _, node := range nodes {
+		for _, sc := range storageClasses {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, sc)], node, sc)
+		}
 	}
 }
 
 func collectDatameshActiveTransitions(
 	ch chan<- prometheus.Metric,
 	activeDesc *prometheus.Desc,
-	activeStartDesc *prometheus.Desc,
+	nodes []string,
+	storageClasses []string,
 	rvs []v1alpha1.ReplicatedVolume,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
+	nodes = append([]string{currentMetricsNodeGlobal, currentMetricsNodeUnknown}, nodes...)
+	types := datameshTransitionTypes()
+	typeCounts := make(map[string]float64, len(storageClasses)*len(nodes)*len(types))
+	for _, sc := range storageClasses {
+		for _, node := range nodes {
+			for _, typ := range types {
+				typeCounts[metricKey(sc, node, typ)] = 0
+			}
+		}
+	}
+
+	replicaNodes := make(map[string]string, len(rvrs))
+	for i := range rvrs {
+		replicaNodes[rvrs[i].Name] = rvrs[i].Spec.NodeName
+	}
+
 	for i := range rvs {
 		rv := &rvs[i]
-		typeCounts := make(map[string]float64, len(rv.Status.DatameshTransitions))
-		oldestStartedAtByType := make(map[string]time.Time, len(rv.Status.DatameshTransitions))
-
+		sc := rv.Spec.ReplicatedStorageClassName
 		for j := range rv.Status.DatameshTransitions {
 			transition := &rv.Status.DatameshTransitions[j]
 			typ := string(transition.Type)
-			typeCounts[typ]++
-
-			startedAt := transition.StartedAt()
-			if startedAt.IsZero() {
-				continue
+			node := currentMetricsNodeGlobal
+			if transition.ReplicaName != "" {
+				node = replicaNodes[transition.ReplicaName]
+				if node == "" {
+					node = currentMetricsNodeUnknown
+				}
 			}
-			if prev, exists := oldestStartedAtByType[typ]; !exists || startedAt.Time.Before(prev) {
-				oldestStartedAtByType[typ] = startedAt.Time
-			}
+			typeCounts[metricKey(sc, node, typ)]++
 		}
+	}
 
-		for typ, count := range typeCounts {
-			ch <- prometheus.MustNewConstMetric(activeDesc, prometheus.GaugeValue, count, rv.Name, typ)
-			if startedAt, exists := oldestStartedAtByType[typ]; exists {
-				ch <- prometheus.MustNewConstMetric(
-					activeStartDesc,
-					prometheus.GaugeValue,
-					float64(startedAt.Unix()),
-					rv.Name,
-					typ,
-				)
+	for _, sc := range storageClasses {
+		for _, node := range nodes {
+			for _, typ := range types {
+				ch <- prometheus.MustNewConstMetric(activeDesc, prometheus.GaugeValue, typeCounts[metricKey(sc, node, typ)], sc, node, typ)
 			}
 		}
 	}
@@ -488,6 +505,25 @@ func rvaMetricPhases() []string {
 		string(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached),
 		string(v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching),
 		string(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating),
+	}
+}
+
+func datameshTransitionTypes() []string {
+	return []string{
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses),
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume),
 	}
 }
 
