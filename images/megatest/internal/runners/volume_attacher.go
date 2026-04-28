@@ -282,31 +282,55 @@ func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Restore MaxAttachments to 1 (idempotent — patchMaxAttachments checks current value).
-	if err := v.patchMaxAttachments(cleanupCtx, 1); err != nil {
-		log.Error("migration cleanup: failed to restore MaxAttachments to 1", "error", err)
-	}
-
-	// Delete excess RVAs: when maxAttachments=1, only one RVA should exist.
+	// Delete excess RVAs before lowering maxAttachments back to 1.
 	// Use direct API call for accurate snapshot before deletion.
 	rvas, err := v.client.ListRVAsByRVNameDirect(cleanupCtx, v.rvName)
 	if err != nil {
 		log.Error("migration cleanup: failed to list RVAs", "error", err)
-		return
-	}
-	if len(rvas) <= 1 {
-		return
+	} else if len(rvas) > 1 {
+		keep := chooseRVAForSingleAttachment(rvas)
+		for _, rva := range rvas {
+			if rva.Name == keep.Name || rva.Spec.NodeName == "" {
+				continue
+			}
+			if err := v.client.DeleteRVA(cleanupCtx, v.rvName, rva.Spec.NodeName); err != nil {
+				log.Error("migration cleanup: failed to delete excess RVA", "rva", rva.Name, "error", err)
+			} else {
+				log.Info("migration cleanup: deleted excess RVA", "rva", rva.Name)
+			}
+		}
+		if err := v.waitForSingleRVA(cleanupCtx, keep.Name); err != nil {
+			log.Error("migration cleanup: failed waiting for excess RVAs deletion", "error", err)
+		}
 	}
 
-	keep := chooseRVAForSingleAttachment(rvas)
-	for _, rva := range rvas {
-		if rva.Name == keep.Name || rva.Spec.NodeName == "" {
-			continue
+	// Restore MaxAttachments to 1 only after excess attachment intents are gone.
+	// Otherwise the controller correctly blocks the second RVA as 1/1 occupied.
+	if err := v.patchMaxAttachments(cleanupCtx, 1); err != nil {
+		log.Error("migration cleanup: failed to restore MaxAttachments to 1", "error", err)
+	}
+}
+
+func (v *VolumeAttacher) waitForSingleRVA(ctx context.Context, keepName string) error {
+	for {
+		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+		if err != nil {
+			return err
 		}
-		if err := v.client.DeleteRVA(cleanupCtx, v.rvName, rva.Spec.NodeName); err != nil {
-			log.Error("migration cleanup: failed to delete excess RVA", "rva", rva.Name, "error", err)
-		} else {
-			log.Info("migration cleanup: deleted excess RVA", "rva", rva.Name)
+
+		hasExcess := false
+		for _, rva := range rvas {
+			if rva.Name != keepName && rva.Spec.NodeName != "" {
+				hasExcess = true
+				break
+			}
+		}
+		if !hasExcess {
+			return nil
+		}
+
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
 		}
 	}
 }
