@@ -1,0 +1,273 @@
+[root@astef-sds-rv-redos-0 ~]# drbdmeta 1001 v09 /dev/vg-0/r2-test internal dump-md --force
+open(/dev/vg-0/r2-test) failed: Device or resource busy
+
+Exclusive open failed. Do it anyways?
+*** confirmation forced via --force option ***
+Found meta data is "unclean", please apply-al first
+# DRBD meta data dump
+# 2026-01-20 18:34:05 +0300 [1768923245]
+# astef-sds-rv-redos-0> drbdmeta --force 1001 v09 /dev/vg-0/r2-test internal dump-md
+#
+
+version "v09";
+
+This_is_an_unclean_meta_data_dump._Don't_trust_the_bitmap.
+# You should "apply-al" first, if you plan to restore this.
+
+max-peers 7;
+# md_size_sect 120
+# md_offset 104853504
+# al_offset 104820736
+# bm_offset 104796160
+
+node-id 0;
+current-uuid 0xD420FE1E4AE94B4D;
+flags 0x00000453;
+members 0x000000000000000F;
+peer[0] {
+    bitmap-index -1;
+    bitmap-uuid 0x0000000000000000;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00010000; # exists
+}
+peer[1] {
+    bitmap-index 0;
+    bitmap-uuid 0x0000000000000000;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000011; # connected | seen
+}
+peer[2] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00010000; # exists
+}
+peer[3] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00010000; # exists
+}
+peer[4] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[5] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[6] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[7] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[8] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[9] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[10] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[11] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[12] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[13] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[14] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[15] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[16] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[17] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[18] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[19] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[20] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[21] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[22] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[23] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[24] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[25] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[26] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[27] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[28] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[29] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[30] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+peer[31] {
+    bitmap-index -1;
+    bitmap-uuid 0xBC95E66C6AB69E5A;
+    bitmap-dagtag 0x0000000000000000;
+    flags 0x00000000;
+}
+history-uuids {
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+        0x0000000000000000; 0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+# al-extents 1237;
+la-size-sect 204680;
+bm-byte-per-bit 4096;
+device-uuid 0x8F42904D9047D5A9;
+la-peer-max-bio-size 1048576;
+al-stripes 1;
+al-stripe-size-4k 8;
+# bm-bytes 24576;
+bitmap[0] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+bitmap[1] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+bitmap[2] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+bitmap[3] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+bitmap[4] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000; 0x0000000000000000;
+}
+bitmap[5] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000;
+}
+bitmap[6] {
+   # at 0kB
+    436 times 0x0000000000000000;
+    0x0000000000000000; 0x0000000000000000;
+}
+# bits-set 0;
+# Output might be stale, since minor 1001 is attached

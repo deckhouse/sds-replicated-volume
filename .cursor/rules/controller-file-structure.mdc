@@ -1,0 +1,65 @@
+---
+description: Rules for controller package file structure (controller.go/predicates.go/reconciler.go/tests) and what belongs in each file. Apply when creating or editing controller packages under images/controller/internal/controllers/, and when deciding where to place controller logic. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/**/*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+- **controller package** structure (MUST):
+  - Each **controller package** MUST have these files:
+    - **`controller.go`**
+    - **`predicates.go`** (required only when the controller uses controller-runtime **predicate**/**filter**s)
+    - **`reconciler.go`**
+    - **`reconciler_test.go`**
+
+- **`controller.go`** (MUST): **Wiring-only** **Entrypoint** (**builder chain**/**options**/**predicates**/**runnables**), no **Reconciliation business logic**.
+  - See: `controller-controller.mdc`.
+
+- **`reconciler.go`** (MUST): all **Reconciliation business logic** for this controller.
+  - This includes the Controller POV pipeline: compute **intended**, observe **actual**, decide/enforce **target**, and compute/publish **report** (including persisting **controller-owned state** and **report** into Kubernetes POV **observed state** (`.status`) via the appropriate **patch domain**).
+  - Detailed rules for **phase** usage, **I/O** boundaries, **patch domains** and patterns: `controller-reconciliation.mdc`.
+  - **`reconciler.go`** MUST contain these categories of code:
+    - 1. **Reconcile method** functions/methods.
+      - MUST comply with: `controller-reconcile.mdc`.
+      - Definition (MUST):
+        - the controller-runtime `Reconcile(...)` method, and
+        - any other function/method whose name starts with `reconcile*` / `Reconcile*`.
+    - 2. **ReconcileHelper** functions/methods: helpers used by **Reconcile method** functions/methods.
+      - MUST comply with: `controller-reconcile-helper.mdc`.
+      - Definition (MUST): any function/method whose name matches one of these helper naming categories/patterns:
+        - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`)
+          - Common sub-families: `computeIntended*`, `computeActual*`, `computeTarget*`, `compute*Report`.
+        - **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`)
+        - **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`)
+        - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`)
+        - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`)
+        - **GetReconcileHelper**: `get*` / `Get*` (see `controller-reconcile-helper-get.mdc`)
+        - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`)
+        - **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`)
+        - **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`)
+    - 3. **Other supporting code**: auxiliary functions/methods/types that do not fit either category above.
+      - SHOULD be rare; if a helper matches the **ReconcileHelper** naming or contracts, prefer making it a **ReconcileHelper**.
+
+- **`reconciler_test.go`** (MUST): tests for reconciliation behavior and edge cases.
+
+- Additional **Wiring-only** / infra components (MAY): **manager** **runnables**/**sources** (not reconcilers, not pure helpers).
+  - Allowed example:
+    - `manager.Runnable`/`manager.LeaderElectionRunnable` initializers/sources that prepare or maintain in-memory state and expose it via a small interface (blocking + non-blocking access).
+  - Notes:
+    - These components MAY perform **Kubernetes API I/O** as part of initialization/maintenance.
+    - Their registration/wiring belongs to **`controller.go`** (`mgr.Add(...)`, indexes, sources, etc.); **Reconciliation business logic** still belongs to **`reconciler.go`**.
+
+- **`controlleroptions`** sibling package (MUST):
+  - Each application that has controllers (e.g., `images/controller`, `images/agent`) MUST have a shared `controlleroptions` package at `<app>/internal/controllers/controlleroptions/options.go`.
+  - This package provides the `DefaultRateLimiter[T comparable]()` factory used by all controllers in that application.
+  - Individual controller packages MUST NOT define their own rate limiter; they MUST import and call `controlleroptions.DefaultRateLimiter[T]()`.
+
+- Additional components (MAY): extracted helpers for heavy computations or caching.
+  - Allowed examples:
+    - “world view” / “planner” / “topology scorer” components that build an in-memory model for convenient calculations (often used to shape **actual**, decide **target**, and produce **report** artifacts).
+    - stateful allocators / ID pools (e.g., device minor / ordinal allocation) used for deterministic assignments (often producing **controller-owned state** that is persisted across reconciliations).
+    - caching components to avoid repeated expensive computation (explicitly owned by the reconciler and easy to invalidate).
+  - Constraints (MUST):
+    - computation components MUST be pure: no **Kubernetes API I/O**, no patches, no **DeepCopy**, no time/random/env **I/O**.
+    - caching components MUST NOT hide **Kubernetes API I/O** inside themselves; **I/O** stays in **`reconciler.go`** or other **runnables**/**sources**.

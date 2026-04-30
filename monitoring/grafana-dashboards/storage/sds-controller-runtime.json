@@ -1,0 +1,493 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Reconcile RPS & Results",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Reconcile RPS by Controller",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(controller_runtime_reconcile_total{job=~\"$job\", controller=~\"$controller\"}[$__rate_interval])) by (controller, job)",
+          "legendFormat": "{{job}} / {{controller}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "stacking": { "mode": "none" }, "showPoints": "never" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Reconcile Results (success / requeue / error)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(controller_runtime_reconcile_total{job=~\"$job\", controller=~\"$controller\", result=\"success\"}[$__rate_interval])) by (controller)",
+          "legendFormat": "{{controller}} success",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(controller_runtime_reconcile_total{job=~\"$job\", controller=~\"$controller\", result=~\"requeue|requeue_after\"}[$__rate_interval])) by (controller)",
+          "legendFormat": "{{controller}} requeue",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(controller_runtime_reconcile_total{job=~\"$job\", controller=~\"$controller\", result=\"error\"}[$__rate_interval])) by (controller)",
+          "legendFormat": "{{controller}} error",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 1, "stacking": { "mode": "normal" }, "showPoints": "never" },
+          "unit": "ops"
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*error.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*requeue.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "row",
+      "title": "Reconcile Duration",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "collapsed": false
+    },
+    {
+      "type": "heatmap",
+      "title": "Reconcile Duration Heatmap",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(controller_runtime_reconcile_time_seconds_bucket{job=~\"$job\", controller=~\"$controller\"}[$__rate_interval])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s" },
+        "color": { "scheme": "Oranges", "mode": "scheme" },
+        "cellGap": 1,
+        "tooltip": { "show": true, "yHistogram": true }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Queue Metrics",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Depth (current items in queue)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(workqueue_depth{job=~\"$job\", name=~\"$controller\"}) by (name, job)",
+          "legendFormat": "{{job}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Add Rate vs Retry Rate (conflicts)",
+      "description": "High retry rate relative to add rate indicates conflicts / contention",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(workqueue_adds_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name)",
+          "legendFormat": "{{name}} adds/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(workqueue_retries_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name)",
+          "legendFormat": "{{name}} retries/s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "ops"
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*retries.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }, { "id": "custom.drawStyle", "value": "bars" }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requeue Ratio (retries / adds)",
+      "description": "Values close to 1.0 mean almost every reconcile is a retry",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(workqueue_retries_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name) / sum(rate(workqueue_adds_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name)",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 0.8 }] },
+          "color": { "mode": "continuous-GrYlRd" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "row",
+      "title": "Timing & Latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg Reconcile Time by Controller",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(controller_runtime_reconcile_time_seconds_sum{job=~\"$job\", controller=~\"$controller\"}[$__rate_interval])) by (controller) / sum(rate(controller_runtime_reconcile_time_seconds_count{job=~\"$job\", controller=~\"$controller\"}[$__rate_interval])) by (controller)",
+          "legendFormat": "{{controller}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Wait Time (P50 / P95 / P99)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(workqueue_queue_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(workqueue_queue_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(workqueue_queue_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Work Duration (P50 / P95 / P99)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(workqueue_work_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(workqueue_work_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(workqueue_work_duration_seconds_bucket{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name, le))",
+          "legendFormat": "{{name}} p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "row",
+      "title": "Unique Reconciles & Concurrency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Reconciles without Retries (unique work items)",
+      "description": "adds - retries = unique items entering the queue",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(workqueue_adds_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name) - sum(rate(workqueue_retries_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name)",
+          "legendFormat": "{{name}} unique/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(workqueue_retries_total{job=~\"$job\", name=~\"$controller\"}[$__rate_interval])) by (name)",
+          "legendFormat": "{{name}} retries/s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 1, "stacking": { "mode": "normal" }, "showPoints": "never" },
+          "unit": "ops"
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*retries.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Active Workers / Max Concurrent Reconciles",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(controller_runtime_active_workers{job=~\"$job\", controller=~\"$controller\"}) by (controller)",
+          "legendFormat": "{{controller}} active",
+          "refId": "A"
+        },
+        {
+          "expr": "max(controller_runtime_max_concurrent_reconciles{job=~\"$job\", controller=~\"$controller\"}) by (controller)",
+          "legendFormat": "{{controller}} max",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*max.*" }, "properties": [{ "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }, { "id": "custom.fillOpacity", "value": 0 }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Longest Running Processor / Unfinished Work",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "max(workqueue_longest_running_processor_seconds{job=~\"$job\", name=~\"$controller\"}) by (name)",
+          "legendFormat": "{{name}} longest processor",
+          "refId": "A"
+        },
+        {
+          "expr": "max(workqueue_unfinished_work_seconds{job=~\"$job\", name=~\"$controller\"}) by (name)",
+          "legendFormat": "{{name}} unfinished work",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "row",
+      "title": "CPU & Memory",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU Usage by Pod",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"d8-sds-replicated-volume\", container=~\"controller|agent\", pod=~\"$pod\"}[$__rate_interval])) by (pod, container)",
+          "legendFormat": "{{pod}} ({{container}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory Usage by Pod",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+      "targets": [
+        {
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"d8-sds-replicated-volume\", container=~\"controller|agent\", pod=~\"$pod\"}) by (pod, container)",
+          "legendFormat": "{{pod}} ({{container}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["sds", "controller-runtime", "sds-replicated-volume"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "default", "value": "default" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "ds_prometheus",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "job",
+        "label": "Job",
+        "options": [],
+        "query": { "query": "label_values(controller_runtime_reconcile_total{job=~\"sds-replicated.*\"}, job)", "refId": "Prometheus-job-Variable-Query" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "controller",
+        "label": "Controller",
+        "options": [],
+        "query": { "query": "label_values(controller_runtime_reconcile_total{job=~\"$job\"}, controller)", "refId": "Prometheus-controller-Variable-Query" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "$ds_prometheus" },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "pod",
+        "label": "Pod",
+        "options": [],
+        "query": { "query": "label_values(container_cpu_usage_seconds_total{namespace=\"d8-sds-replicated-volume\", container=~\"controller|agent\"}, pod)", "refId": "Prometheus-pod-Variable-Query" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "SDS Replicated Volume - Controller Runtime",
+  "uid": "sds-rv-controller-runtime",
+  "version": 1
+}
