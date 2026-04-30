@@ -83,6 +83,8 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			// Copy attachment fields from RVR if available, clear otherwise.
 			applyRVAAttachmentFields(rva, dmrctx.RVR())
 
+			observeRVAPhaseChange(rva, base.Status.Phase, phase)
+
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
 			}
@@ -355,6 +357,8 @@ func (r *Reconciler) reconcileRVAMetadata(
 			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
 			}
+			observeRVADetach(rva)
+			cleanupRVAMetrics(rva)
 		}
 	}
 

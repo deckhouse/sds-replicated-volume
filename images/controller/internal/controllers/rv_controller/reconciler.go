@@ -115,11 +115,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		//    Kubernetes finalization = object deletion). Must run after reconcileDeletion,
 		//    otherwise reconcileDeletion would try to patch conditions on an already-deleted RVA.
 		// 3. reconcileMetadata: remove RV finalizer if no children remain.
-		return flow.MergeReconciles(
+		result := flow.MergeReconciles(
 			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
 			r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
-		).ToCtrl()
+		)
+		if !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
+			observeRVDeletion(rv)
+		}
+		return result.ToCtrl()
 	}
 
 	// Reconcile the RV metadata (finalizers and labels).
@@ -187,6 +191,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
+
+	// Observe datamesh metrics (compare transitions before/after processing).
+	observeDatameshMetrics(rv, base.Status.DatameshTransitions, rvrs)
+	observeRVInitialFormation(base, rv)
 
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {

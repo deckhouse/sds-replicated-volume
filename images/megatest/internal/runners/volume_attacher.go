@@ -24,6 +24,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -60,8 +61,12 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 
 	// Helper function to check context and cleanup before return
 	checkAndCleanup := func(err error) error {
-		if ctx.Err() != nil {
-			v.cleanup(ctx, ctx.Err())
+		reason := err
+		if reason == nil {
+			reason = ctx.Err()
+		}
+		if reason != nil {
+			v.cleanup(ctx, reason)
 		}
 		return err
 	}
@@ -72,7 +77,7 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 		}
 
 		// Determine current desired attachments from RVA set (max 2 active attachments supported).
-		rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+		rvas, err := v.client.ListRVAsByRVName(v.rvName)
 		if err != nil {
 			v.log.Error("failed to list RVAs", "error", err)
 			return checkAndCleanup(err)
@@ -86,7 +91,7 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 		}
 
 		// get a random node
-		nodes, err := v.client.GetRandomNodes(ctx, 1)
+		nodes, err := v.client.GetRandomNodes(1)
 		if err != nil {
 			v.log.Error("failed to get random node", "error", err)
 			return checkAndCleanup(err)
@@ -209,21 +214,32 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 		return fmt.Errorf("other node name equals selected node name: %s", nodeName)
 	}
 
+	// Step 0: Patch MaxAttachments to 2 to allow dual-attach during migration.
+	if err := v.patchMaxAttachments(ctx, 2); err != nil {
+		return fmt.Errorf("failed to patch MaxAttachments to 2 before migration: %w", err)
+	}
+
+	// Ensure MaxAttachments is restored and excess RVAs are cleaned up on any exit path.
+	// Uses background context so cleanup runs even when the parent context is cancelled
+	// (e.g. lifetime expired mid-migration).
+	defer v.migrationCleanup(log)
+
 	// Step 1: Attach the selected node and wait for it
 	if err := v.attachCycle(ctx, nodeName); err != nil {
 		return err
 	}
 
-	// Verify both nodes are now attached
+	// Verify both attachment intents exist in API.
+	// Do not rely on rv.status.actuallyAttachedTo: this field is legacy.
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		attachedNodes, err := v.listAttachedNodesDirect(ctx)
 		if err != nil {
 			return err
 		}
 
-		if len(rv.Status.ActuallyAttachedTo) == 2 {
+		if slices.Contains(attachedNodes, nodeName) && slices.Contains(attachedNodes, otherNodeName) {
 			break
 		}
 
@@ -244,15 +260,94 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 		return err
 	}
 
-	// Step 4: Random delay
+	// Step 4: Patch MaxAttachments back to 1 after migration is complete.
+	if err := v.patchMaxAttachments(ctx, 1); err != nil {
+		return fmt.Errorf("failed to patch MaxAttachments to 1 after migration: %w", err)
+	}
+
+	// Step 5: Random delay
 	randomDelay2 := randomDuration(v.cfg.Period)
 	log.Debug("waiting random delay before detaching selected node", "duration", randomDelay2.String())
 	if err := waitWithContext(ctx, randomDelay2); err != nil {
 		return err
 	}
 
-	// Step 5: Get fresh RV and detach the selected node
+	// Step 6: Get fresh RV and detach the selected node
 	return v.detachCycle(ctx, nodeName)
+}
+
+// migrationCleanup restores maxAttachments to 1 and deletes excess RVAs that were
+// left behind when migrationCycle was interrupted (context cancellation, error, etc.).
+func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Delete excess RVAs before lowering maxAttachments back to 1.
+	// Use direct API call for accurate snapshot before deletion.
+	rvas, err := v.client.ListRVAsByRVNameDirect(cleanupCtx, v.rvName)
+	if err != nil {
+		log.Error("migration cleanup: failed to list RVAs", "error", err)
+	} else if len(rvas) > 1 {
+		keep := chooseRVAForSingleAttachment(rvas)
+		for _, rva := range rvas {
+			if rva.Name == keep.Name || rva.Spec.NodeName == "" {
+				continue
+			}
+			if err := v.client.DeleteRVA(cleanupCtx, v.rvName, rva.Spec.NodeName); err != nil {
+				log.Error("migration cleanup: failed to delete excess RVA", "rva", rva.Name, "error", err)
+			} else {
+				log.Info("migration cleanup: deleted excess RVA", "rva", rva.Name)
+			}
+		}
+		if err := v.waitForSingleRVA(cleanupCtx, keep.Name); err != nil {
+			log.Error("migration cleanup: failed waiting for excess RVAs deletion", "error", err)
+		}
+	}
+
+	// Restore MaxAttachments to 1 only after excess attachment intents are gone.
+	// Otherwise the controller correctly blocks the second RVA as 1/1 occupied.
+	if err := v.patchMaxAttachments(cleanupCtx, 1); err != nil {
+		log.Error("migration cleanup: failed to restore MaxAttachments to 1", "error", err)
+	}
+}
+
+func (v *VolumeAttacher) waitForSingleRVA(ctx context.Context, keepName string) error {
+	for {
+		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		hasExcess := false
+		for _, rva := range rvas {
+			if rva.Name != keepName && rva.Spec.NodeName != "" {
+				hasExcess = true
+				break
+			}
+		}
+		if !hasExcess {
+			return nil
+		}
+
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+// patchMaxAttachments patches RV spec.maxAttachments to the given value.
+// Uses fresh API read to get current resourceVersion for the patch.
+func (v *VolumeAttacher) patchMaxAttachments(ctx context.Context, maxAttachments byte) error {
+	rv, err := v.client.GetRV(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+	if rv.Spec.MaxAttachments != nil && *rv.Spec.MaxAttachments == maxAttachments {
+		return nil
+	}
+	original := rv.DeepCopy()
+	rv.Spec.MaxAttachments = &maxAttachments
+	return v.client.PatchRV(ctx, original, rv)
 }
 
 func (v *VolumeAttacher) doAttach(ctx context.Context, nodeName string) error {
@@ -283,19 +378,17 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		attachedNodes, err := v.listAttachedNodesDirect(ctx)
 		if err != nil {
 			return err
 		}
 
 		if nodeName == "" {
-			// Check if all nodes are detached
-			if len(rv.Status.ActuallyAttachedTo) == 0 {
+			if len(attachedNodes) == 0 {
 				return nil
 			}
 		} else {
-			// Check if specific node is detached
-			if !slices.Contains(rv.Status.ActuallyAttachedTo, nodeName) {
+			if !slices.Contains(attachedNodes, nodeName) {
 				return nil
 			}
 		}
@@ -309,17 +402,21 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error {
 	if nodeName == "" {
 		// Detach from all nodes - delete all RVAs for this RV.
-		rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
 		if err != nil {
 			return err
 		}
+		var lastErr error
 		for _, rva := range rvas {
 			if rva.Spec.NodeName == "" {
 				continue
 			}
-			_ = v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName)
+			if err := v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName); err != nil {
+				v.log.Error("failed to delete RVA during detach-all", "rva", rva.Name, "error", err)
+				lastErr = err
+			}
 		}
-		return nil
+		return lastErr
 	}
 
 	// Detach from a specific node
@@ -327,6 +424,32 @@ func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error 
 		return err
 	}
 	return nil
+}
+
+func chooseRVAForSingleAttachment(rvas []v1alpha1.ReplicatedVolumeAttachment) v1alpha1.ReplicatedVolumeAttachment {
+	for _, rva := range rvas {
+		if rva.Status.Phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
+			return rva
+		}
+	}
+	return rvas[0]
+}
+
+func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string, error) {
+	rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]string, 0, len(rvas))
+	for _, rva := range rvas {
+		if rva.Spec.NodeName == "" {
+			continue
+		}
+		nodes = append(nodes, rva.Spec.NodeName)
+	}
+
+	return nodes, nil
 }
 
 func (v *VolumeAttacher) isAttachCycle() bool {

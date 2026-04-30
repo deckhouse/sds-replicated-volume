@@ -29,16 +29,18 @@ import (
 )
 
 type Opt struct {
-	StorageClasses  []string
-	Kubeconfig      string
-	MaxVolumes      int
-	VolumeStepMin   int
-	VolumeStepMax   int
-	StepPeriodMin   time.Duration
-	StepPeriodMax   time.Duration
-	VolumePeriodMin time.Duration
-	VolumePeriodMax time.Duration
-	LogLevel        string
+	StorageClasses    []string
+	Kubeconfig        string
+	MaxVolumes        int
+	VolumeStepMin     int
+	VolumeStepMax     int
+	StepPeriodMin     time.Duration
+	StepPeriodMax     time.Duration
+	VolumePeriodMin   time.Duration
+	VolumePeriodMax   time.Duration
+	AttacherPeriodMin time.Duration
+	AttacherPeriodMax time.Duration
+	LogLevel          string
 
 	// Enable flags for goroutines
 	EnablePodDestroyer           bool
@@ -80,6 +82,8 @@ func printGroupedFlags(cmd *cobra.Command) {
 			"step-period-max",
 			"volume-period-min",
 			"volume-period-max",
+			"attacher-period-min",
+			"attacher-period-max",
 			"enable-pod-destroyer",
 			"enable-volume-resizer",
 			"enable-volume-replica-destroyer",
@@ -316,6 +320,8 @@ Interrupting Cleanup:
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between ReplicatedVolume creation steps")
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMin, "volume-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMax, "volume-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
+	rootCmd.Flags().DurationVarP(&o.AttacherPeriodMin, "attacher-period-min", "", 0, "Minimum wait between attach/detach cycles (0 = volume-period-min, floor 60s)")
+	rootCmd.Flags().DurationVarP(&o.AttacherPeriodMax, "attacher-period-max", "", 0, "Maximum wait between attach/detach cycles (0 = volume-period-max/2, floor 120s)")
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
 
 	// Enable flags for goroutines

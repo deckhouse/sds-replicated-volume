@@ -1,0 +1,2070 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview / Current State",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "RVs",
+      "description": "Current matching RVs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "RVRs",
+      "description": "Current matching RVRs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "RVAs",
+      "description": "Current matching RVAs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Unhealthy RVRs",
+      "description": "Current RVRs in degraded-like phases.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_unhealthy_count{node=~\"$node\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Deleting RVs",
+      "description": "Scrape-time count of RVs with deletionTimestamp. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rv_deleting_count{storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Deleting RVRs",
+      "description": "Scrape-time count of RVRs with deletionTimestamp. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 51,
+      "type": "row",
+      "title": "Overview / Counts by Storage Class",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "RVR / RVA Count by Node: $storage_class",
+      "description": "Current RVR and RVA counts by node for one storage class. Repeated automatically for selected storage classes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "repeat": "storage_class",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "targets": [
+        {
+          "expr": "sum by (node) (sds_rvr_count{node=~\"$node\",storage_class=\"$storage_class\"})",
+          "legendFormat": "RVR {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (sds_rva_count{node=~\"$node\",storage_class=\"$storage_class\"})",
+          "legendFormat": "RVA {{node}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Overview Details / RVR",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "RVR Count by Phase: $node",
+      "description": "Current RVR count for one node, split by phase and storage class. Zero values are shown to make missing problems explicit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "repeat": "node",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "targets": [
+        {
+          "expr": "sds_rvr_count{node=\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{storage_class}} / {{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 42,
+      "type": "row",
+      "title": "Overview Details / RVA",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "RVA Count by Phase: $node",
+      "description": "Current RVA count for one node, split by storage class and phase. Zero values are shown to make missing problems explicit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "repeat": "node",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "targets": [
+        {
+          "expr": "sds_rva_count{node=\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{storage_class}} / {{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Performance / RVR per Node",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "RVR Transition To Ready Duration P10",
+      "description": "P10 duration of RVR Ready condition transitions from non-True to True. This highlights the fastest successful transitions and can help spot very fast recovery/flap patterns. Deleting RVRs are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.10, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "RVR Transition To Ready Duration Avg",
+      "description": "Average duration of RVR Ready condition transitions from non-True to True. Use together with P10/P90 to understand whether slow transitions are isolated or common.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 31
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (node) / sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (node)",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "RVR Transition To Ready Duration P90",
+      "description": "P90 duration of RVR Ready condition transitions from non-True to True. This highlights slow starts or recoveries. Deleting RVRs are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 31
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Rate by Node",
+      "description": "Ready transition rate by node. High rate with low duration usually points to flapping.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (node)",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Backing Volume / LVM Proxy P90 by Node",
+      "description": "P90 time from RVR creation to BackingVolumeReady, used as LLV/LVM provisioning proxy. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 39
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "type": "timeseries",
+      "title": "Backing Volume / LVM Proxy Completed Count",
+      "description": "Completed BackingVolumeReady observations in each dashboard rate interval. Compare with RVR phases to see whether provisioning is moving.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 39
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "Performance / RVA and Deletion",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "RVA Ready / Detach P90 by Node",
+      "description": "RVA attach and detach duration by node. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "ready {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_detach_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "detach {{node}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 49,
+      "type": "timeseries",
+      "title": "RVA Ready / Detach Completed Count by Node",
+      "description": "Completed RVA attach and detach operations in each dashboard rate interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "ready {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (increase(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "detach {{node}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "RV/RVR Deletion Duration P90",
+      "description": "Deletion duration percentiles. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "RV deletion",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "RVR deletion {{node}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "DRBD / DRBDR",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "DRBDR Configure / Delete P90",
+      "description": "SDS-specific DRBDResource lifecycle duration from agent metrics. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
+          "legendFormat": "configure {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
+          "legendFormat": "delete {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "DRBDR Configure / Delete Completed Count",
+      "description": "Completed DRBDResource configure and delete operations in each dashboard rate interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "targets": [
+        {
+          "expr": "sum by (instance) (increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "configure {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "delete {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "DRBD Runtime Problems by Node",
+      "description": "Current DRBD runtime problem counts by node. Zero means no matching problem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (drbd_connection_state{node=~\"$node\",drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\"} == 1) or on(node) (0 * sum by (node) (drbd_connection_state{node=~\"$node\"}))",
+          "legendFormat": "bad connection {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (drbd_device_quorum{node=~\"$node\"} == 0) or on(node) (0 * sum by (node) (drbd_device_quorum{node=~\"$node\"}))",
+          "legendFormat": "no quorum {{node}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1) or on(node) (0 * sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"}))",
+          "legendFormat": "diskless {{node}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "DRBD Out-of-Sync Bytes by Node",
+      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 65
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (drbd_peerdevice_outofsync_bytes{node=~\"$node\"})",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Datamesh",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Datamesh Completed Transition Count by Node",
+      "description": "Completed datamesh transitions in each dashboard rate interval by storage class, node, and type.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class, node, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}} / {{node}} / {{type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Datamesh Transition / Step P90",
+      "description": "Datamesh transition and step duration. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type))",
+          "legendFormat": "transition {{storage_class}} / {{node}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type, step))",
+          "legendFormat": "step {{storage_class}} / {{node}} / {{type}} / {{step}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "row",
+      "title": "Investigation",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 82
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Deleting RV Current Count by Storage Class",
+      "description": "Scrape-time count of RVs with deletionTimestamp by storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 83
+      },
+      "targets": [
+        {
+          "expr": "sds_rv_deleting_count{storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "RV Deletion Completed Count by Storage Class",
+      "description": "Completed RV deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 83
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Deleting RVR Current Count by Node and Storage Class",
+      "description": "Scrape-time count of RVRs with deletionTimestamp by node and storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 91
+      },
+      "targets": [
+        {
+          "expr": "sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 47,
+      "type": "timeseries",
+      "title": "RVR Deletion Completed Count by Node and Storage Class",
+      "description": "Completed RVR deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 91
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "Active Datamesh Metrics",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 99
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Datamesh Global Transitions",
+      "description": "Active global transitions and completed global transition count per dashboard rate interval. Global transitions are not tied to a specific node.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 100
+      },
+      "targets": [
+        {
+          "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=\"global\",type=~\"$transition_type\"}",
+          "legendFormat": "active {{storage_class}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (storage_class, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=\"global\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "completed {{storage_class}} / {{type}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^completed "
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Datamesh Node Transitions: $datamesh_node",
+      "description": "Active transitions and completed transition count per dashboard rate interval for one node. Repeated automatically for every node reported by the metric.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 108
+      },
+      "repeat": "datamesh_node",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "targets": [
+        {
+          "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=\"$datamesh_node\",type=~\"$transition_type\"}",
+          "legendFormat": "active {{storage_class}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (storage_class, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=\"$datamesh_node\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "completed {{storage_class}} / {{type}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^completed "
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 53,
+      "type": "row",
+      "title": "Performance / RV Initial Formation",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 116
+      }
+    },
+    {
+      "id": 54,
+      "type": "timeseries",
+      "title": "RV Initial Formation Duration P90",
+      "description": "P90 time from RV creation to first completed initial datamesh formation. Completion is detected like CSI readiness: datameshRevision > 0 and no active Formation transition. This is not RV IOReady.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 117
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, storage_class))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 55,
+      "type": "timeseries",
+      "title": "RV Initial Formation Completed Count",
+      "description": "Completed initial formation observations in each dashboard rate interval. Use this to see how many RV create operations reached the first formed datamesh state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 117
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (increase(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Debug / Metrics Collector",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 125
+      },
+      "panels": [
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "Metrics Collector Duration",
+          "description": "Duration of SDS current metrics collector runs. Use this together with Prometheus scrape duration if the /metrics target becomes slow.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 126
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p90",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 32,
+          "type": "timeseries",
+          "title": "Metrics Collector Objects",
+          "description": "Number of objects processed by the current metrics collector by kind.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 126
+          },
+          "targets": [
+            {
+              "expr": "sds_metrics_collector_objects",
+              "legendFormat": "{{kind}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 33,
+          "type": "timeseries",
+          "title": "Metrics Collector Errors",
+          "description": "Collector errors over the selected range.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 134
+          },
+          "targets": [
+            {
+              "expr": "increase(sds_metrics_collector_collect_errors_total[$__range])",
+              "legendFormat": "errors",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 34,
+          "type": "timeseries",
+          "title": "Prometheus Scrape Duration",
+          "description": "Prometheus-side scrape duration for likely SDS/controller targets. This includes the whole /metrics endpoint, not only the current metrics collector.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 134
+          },
+          "targets": [
+            {
+              "expr": "scrape_duration_seconds{job=~\".*sds.*|.*controller.*\"}",
+              "legendFormat": "{{job}} / {{instance}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "sds",
+    "replicated-volume"
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "datasource",
+        "name": "ds_prometheus",
+        "label": "Prometheus",
+        "query": "prometheus",
+        "refresh": 1,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "default",
+          "value": "default",
+          "selected": false
+        },
+        "options": [],
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
+        "type": "query",
+        "name": "node",
+        "label": "Node",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rvr_count, node)",
+          "refId": "Prometheus-node-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "storage_class",
+        "label": "Storage Class",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rv_count, storage_class)",
+          "refId": "Prometheus-storage-class-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "datamesh_node",
+        "label": "Datamesh Node",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rv_datamesh_active_transitions{node!=\"global\"}, node)",
+          "refId": "Prometheus-datamesh-node-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 2,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "transition_type",
+        "label": "Transition Type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rv_datamesh_active_transitions, type)",
+          "refId": "Prometheus-transition-type-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "SDS Replicated Volume",
+  "uid": "sds-replicated-volume",
+  "version": 1
+}

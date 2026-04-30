@@ -27,6 +27,7 @@ import (
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 )
 
 // BuildAll builds all controllers.
@@ -44,6 +45,7 @@ func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL str
 	if err := RegisterIndexes(mgr); err != nil {
 		return fmt.Errorf("building indexes: %w", err)
 	}
+	metrics.RegisterCurrentMetricsCollector(mgr.GetCache(), mgr.GetLogger())
 
 	type builder struct {
 		name  string

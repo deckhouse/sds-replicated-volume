@@ -1,0 +1,35 @@
+# Recording rules for sds-replicated-volume custom metrics.
+# Used by the "SDS Replicated Volume" Grafana dashboard.
+- name: sds.replicated.volume.recording
+  rules:
+    # Count of RVRs in degraded-like phases (cluster-wide current snapshot).
+    - record: sds:rvr_degraded_count
+      expr: sum(sds_rvr_unhealthy_count) or vector(0)
+
+# Inactive alert rules for sds-replicated-volume.
+# severity_level "9" = informational, does not trigger notifications in Deckhouse.
+# Activate by lowering severity_level (e.g. "6" for warning, "4" for critical).
+- name: sds.replicated.volume.alerts
+  rules:
+    - alert: D8SdsDRBDRNotConfigured
+      expr: sds_drbdr_condition{type="Configured"} == 0
+      for: 10m
+      labels:
+        severity_level: "9"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_rv_health: "D8SdsReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: "DRBDResource {{ $labels.name }} is not configured"
+        description: |
+          DRBDResource {{ $labels.name }} (RV: {{ $labels.rv }}) has Configured=False for more than 10 minutes.
+
+          Check the DRBDR status:
+
+          ```
+          kubectl get drbdr {{ $labels.name }} -o yaml
+          ```
+
+          **Note:** This alert is currently inactive (severity_level=9). Lower severity_level to activate.
