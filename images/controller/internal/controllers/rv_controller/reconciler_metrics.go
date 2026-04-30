@@ -32,6 +32,20 @@ func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
 	metrics.RVDeletionDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
 }
 
+// observeRVInitialFormation records the first point when RV initial formation is ready.
+// This mirrors CSI readiness logic: DatameshRevision > 0 and no active Formation transition.
+func observeRVInitialFormation(base, rv *v1alpha1.ReplicatedVolume) {
+	if rv == nil || rv.DeletionTimestamp != nil {
+		return
+	}
+	if rvInitialFormationReady(base) || !rvInitialFormationReady(rv) {
+		return
+	}
+
+	dur := time.Since(rv.CreationTimestamp.Time).Seconds()
+	metrics.RVInitialFormationDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
+}
+
 // observeRVAPhaseChange records RVA metrics when phase changes.
 // Called from reconcileRVAConditionsFromDatameshReplicaContext before the status patch.
 func observeRVAPhaseChange(
@@ -186,4 +200,18 @@ func datameshMetricLabels(
 	}
 
 	return storageClass, node, typ
+}
+
+func rvInitialFormationReady(rv *v1alpha1.ReplicatedVolume) bool {
+	if rv == nil || rv.Status.DatameshRevision == 0 {
+		return false
+	}
+
+	for i := range rv.Status.DatameshTransitions {
+		if rv.Status.DatameshTransitions[i].Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation {
+			return false
+		}
+	}
+
+	return true
 }

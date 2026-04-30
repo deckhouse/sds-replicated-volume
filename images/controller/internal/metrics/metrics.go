@@ -48,6 +48,7 @@ var (
 	bucketsRVAAttach     = []float64{1, 2, 5, 10, 30, 60}
 	bucketsDeletion      = []float64{1, 5, 10, 15, 30, 60, 120}
 	bucketsDatamesh      = []float64{0.5, 1, 5, 10, 30, 60, 120, 300}
+	bucketsRVFormation   = []float64{1, 5, 10, 30, 60, 120, 300, 600}
 	bucketsBackingVolume = []float64{0.5, 1, 2, 5, 10, 30}
 	bucketsCollect       = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}
 )
@@ -57,6 +58,12 @@ var (
 //
 
 var (
+	RVInitialFormationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "sds_rv_initial_formation_duration_seconds",
+		Help:    "Time from RV creation to first completed initial datamesh formation (datameshRevision > 0 and no active Formation transition). This is not RV IOReady.",
+		Buckets: bucketsRVFormation,
+	}, []string{LabelStorageClass})
+
 	RVAReadyDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rva_ready_duration_seconds",
 		Help:    "Time from RVA creation to Attached phase.",
@@ -143,6 +150,7 @@ var (
 func init() {
 	crmetrics.Registry.MustRegister(
 		// Lifecycle histograms
+		RVInitialFormationDuration,
 		RVAReadyDuration,
 		RVRReadyDuration,
 		RVRBackingVolumeDuration,
