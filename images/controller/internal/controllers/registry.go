@@ -27,18 +27,20 @@ import (
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
 
 // BuildAll builds all controllers.
-// podNamespace is the namespace where the controller pod runs, used by controllers
-// that need to access other pods in this namespace (e.g., agent pods).
-// schedulerExtenderURL is the URL of the scheduler extender service, used by the
-// rvr-scheduling-controller to query LVG scores.
-// isEnabled is a filter function: if it returns false for a controller name,
-// that controller is skipped. When ENABLED_CONTROLLERS env is not set,
-// isEnabled returns true for all names (all controllers are started).
-func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL string, isEnabled func(string) bool) error {
+// Controllers consult env.GetConfig() (cached) for any configuration they need.
+// When ENABLED_CONTROLLERS env is not set, all controllers are started; otherwise
+// only the listed controllers are built.
+func BuildAll(mgr manager.Manager) error {
 	log := mgr.GetLogger().WithName("controller-registry")
+
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
 
 	// Must be first: controllers rely on MatchingFields against these indexes.
 	if err := RegisterIndexes(mgr); err != nil {
@@ -51,21 +53,15 @@ func BuildAll(mgr manager.Manager, podNamespace string, schedulerExtenderURL str
 	}
 	builders := []builder{
 		{name: rvcontroller.RVControllerName, build: rvcontroller.BuildController},
-		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: func(mgr manager.Manager) error {
-			return rvrschedulingcontroller.BuildController(mgr, schedulerExtenderURL)
-		}},
+		{name: rvrschedulingcontroller.RVRSchedulingControllerName, build: rvrschedulingcontroller.BuildController},
 		{name: rsccontroller.RSCControllerName, build: rsccontroller.BuildController},
 		{name: nodecontroller.NodeControllerName, build: nodecontroller.BuildController},
-		{name: rspcontroller.RSPControllerName, build: func(mgr manager.Manager) error {
-			return rspcontroller.BuildController(mgr, podNamespace)
-		}},
-		{name: rvrcontroller.RVRControllerName, build: func(mgr manager.Manager) error {
-			return rvrcontroller.BuildController(mgr, podNamespace)
-		}},
+		{name: rspcontroller.RSPControllerName, build: rspcontroller.BuildController},
+		{name: rvrcontroller.RVRControllerName, build: rvrcontroller.BuildController},
 	}
 
 	for _, b := range builders {
-		if !isEnabled(b.name) {
+		if !cfg.IsControllerEnabled(b.name) {
 			log.Info("controller disabled, skipping", "controller", b.name)
 			continue
 		}

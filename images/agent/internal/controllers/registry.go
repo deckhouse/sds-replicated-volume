@@ -24,14 +24,20 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdrop"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 // BuildAll builds all controllers.
-// isEnabled is a filter function: if it returns false for a controller name,
-// that controller is skipped. When ENABLED_CONTROLLERS env is not set,
-// isEnabled returns true for all names (all controllers are started).
-func BuildAll(mgr manager.Manager, isEnabled func(string) bool) error {
+// Controllers consult env.GetConfig() (cached) for any configuration they need.
+// When ENABLED_CONTROLLERS env is not set, all controllers are started; otherwise
+// only the listed controllers are built.
+func BuildAll(mgr manager.Manager) error {
 	log := mgr.GetLogger().WithName("controller-registry")
+
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
 
 	type builder struct {
 		name  string
@@ -44,7 +50,7 @@ func BuildAll(mgr manager.Manager, isEnabled func(string) bool) error {
 	}
 
 	for _, b := range builders {
-		if !isEnabled(b.name) {
+		if !cfg.IsControllerEnabled(b.name) {
 			log.Info("controller disabled, skipping", "controller", b.name)
 			continue
 		}
