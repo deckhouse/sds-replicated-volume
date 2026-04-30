@@ -36,6 +36,7 @@ const (
 	currentMetricsRVPhaseDeleting = "Deleting"
 	currentMetricsNodeGlobal      = "global"
 	currentMetricsNodeUnknown     = "unknown"
+	currentMetricsSCUnknown       = "unknown"
 )
 
 var registerCurrentMetricsCollectorOnce sync.Once
@@ -79,8 +80,8 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 		),
 		rvaCountDesc: prometheus.NewDesc(
 			"sds_rva_count",
-			"Current number of ReplicatedVolumeAttachment objects by node and phase. Built from controller cache at scrape time.",
-			[]string{LabelNode, LabelPhase},
+			"Current number of ReplicatedVolumeAttachment objects by node, storage class, and phase. Built from controller cache at scrape time.",
+			[]string{LabelNode, LabelStorageClass, LabelPhase},
 			nil,
 		),
 		rvrUnhealthyCountDesc: prometheus.NewDesc(
@@ -159,11 +160,11 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	nodes := collectNodeNames(nodeList.Items, rvrList.Items, rvaList.Items)
-	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items)
+	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
 	collectRVRCounts(ch, c.rvrCountDesc, c.rvrUnhealthyCountDesc, nodes, storageClasses, rvrList.Items)
-	collectRVACounts(ch, c.rvaCountDesc, nodes, rvaList.Items)
+	collectRVACounts(ch, c.rvaCountDesc, nodes, storageClasses, rvList.Items, rvaList.Items)
 	collectRVDeletingCounts(ch, c.rvDeletingCountDesc, storageClasses, rvList.Items)
 	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, nodes, storageClasses, rvrList.Items)
 	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, nodes, storageClasses, rvList.Items, rvrList.Items)
@@ -228,8 +229,9 @@ func collectStorageClassNames(
 	rscs []v1alpha1.ReplicatedStorageClass,
 	rvs []v1alpha1.ReplicatedVolume,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
+	rvas []v1alpha1.ReplicatedVolumeAttachment,
 ) []string {
-	seen := make(map[string]struct{}, len(rscs)+len(rvs)+len(rvrs))
+	seen := make(map[string]struct{}, len(rscs)+len(rvs)+len(rvrs)+len(rvas))
 	for i := range rscs {
 		seen[rscs[i].Name] = struct{}{}
 	}
@@ -239,6 +241,13 @@ func collectStorageClassNames(
 	for i := range rvrs {
 		if sc := rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
 			seen[sc] = struct{}{}
+		}
+	}
+	for i := range rvas {
+		if sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
+			seen[sc] = struct{}{}
+		} else {
+			seen[currentMetricsSCUnknown] = struct{}{}
 		}
 	}
 
@@ -348,28 +357,46 @@ func collectRVACounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
 	nodes []string,
+	storageClasses []string,
+	rvs []v1alpha1.ReplicatedVolume,
 	rvas []v1alpha1.ReplicatedVolumeAttachment,
 ) {
 	phases := rvaMetricPhases()
-	counts := make(map[string]float64, len(nodes)*len(phases))
+	counts := make(map[string]float64, len(nodes)*len(storageClasses)*len(phases))
 	for _, node := range nodes {
-		for _, phase := range phases {
-			counts[metricKey(node, phase)] = 0
+		for _, sc := range storageClasses {
+			for _, phase := range phases {
+				counts[metricKey(node, sc, phase)] = 0
+			}
 		}
+	}
+
+	rvStorageClasses := make(map[string]string, len(rvs))
+	for i := range rvs {
+		rvStorageClasses[rvs[i].Name] = rvs[i].Spec.ReplicatedStorageClassName
 	}
 
 	for i := range rvas {
 		node := rvas[i].Spec.NodeName
+		sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]
+		if sc == "" {
+			sc = rvStorageClasses[rvas[i].Spec.ReplicatedVolumeName]
+		}
+		if sc == "" {
+			sc = currentMetricsSCUnknown
+		}
 		phase := string(rvas[i].Status.Phase)
 		if phase == "" {
 			phase = "Unknown"
 		}
-		counts[metricKey(node, phase)]++
+		counts[metricKey(node, sc, phase)]++
 	}
 
 	for _, node := range nodes {
-		for _, phase := range phases {
-			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, phase)], node, phase)
+		for _, sc := range storageClasses {
+			for _, phase := range phases {
+				ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, sc, phase)], node, sc, phase)
+			}
 		}
 	}
 }
