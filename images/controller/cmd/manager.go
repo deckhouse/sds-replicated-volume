@@ -41,7 +41,6 @@ type managerConfig interface {
 	SchedulerExtenderURL() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
-	IsControllerEnabled(name string) bool
 }
 
 func newManager(
@@ -99,7 +98,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr, envConfig.PodNamespace(), envConfig.SchedulerExtenderURL(), envConfig.IsControllerEnabled); err != nil {
+	if err := controllers.BuildAll(mgr); err != nil {
 		return nil, err
 	}
 
