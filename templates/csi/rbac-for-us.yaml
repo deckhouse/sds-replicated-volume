@@ -49,8 +49,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -126,5 +125,4 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager
   apiGroup: rbac.authorization.k8s.io
-{{- end }}
 {{- end }}

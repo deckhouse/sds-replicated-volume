@@ -15,6 +15,9 @@ spec:
     spec:
       serviceAccountName: control-plane-migrator
       restartPolicy: Never
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node") | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
@@ -24,5 +27,13 @@ spec:
         args:
           - --log-level
           - debug
+        volumeMounts:
+          - name: deckhouse-tmp
+            mountPath: /opt/deckhouse/tmp
+      volumes:
+        - name: deckhouse-tmp
+          hostPath:
+            path: /opt/deckhouse/tmp
+            type: Directory
 {{- end }}
 {{- end }}

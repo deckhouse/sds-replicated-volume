@@ -23,6 +23,17 @@ const (
 	// ModuleName is the name of the Deckhouse module.
 	ModuleName = "sds-replicated-volume"
 
+	// MigratorHostDir is the directory on the node for linstor-migrator under /opt/deckhouse/tmp (the Job mounts
+	// /opt/deckhouse/tmp; the binary creates MigratorHostDir so it is owned by the migrator user).
+	// Logs and other host-local migrator data live here.
+	MigratorHostDir = "/opt/deckhouse/tmp/linstor-migrator"
+
+	// MigratorLogFileName is the log file name inside MigratorHostDir (opened with O_APPEND).
+	MigratorLogFileName = "linstor-migrator.log"
+
+	// MigratorLinstorBackupDirName is the subdirectory under MigratorHostDir for LINSTOR CR YAML backup (crds.gz, readme.txt).
+	MigratorLinstorBackupDirName = "linstor-backup-db"
+
 	// MigrationConfigMapName is the name of the ConfigMap used to track migration state.
 	MigrationConfigMapName = "control-plane-migration"
 
@@ -48,6 +59,10 @@ const (
 	// AutoReplicatedStoragePoolNamePrefix is the name prefix for ReplicatedStoragePool objects
 	// created automatically by the migrator from LINSTOR data.
 	AutoReplicatedStoragePoolNamePrefix = "linstor-auto-"
+
+	// AutoReplicatedStoragePoolRSCNamePrefix is the name prefix for ReplicatedStoragePool objects
+	// created by the RSC controller (computeTargetStoragePool in images/controller/internal/controllers/rsc_controller/reconciler.go).
+	AutoReplicatedStoragePoolRSCNamePrefix = "auto-rsp-"
 )
 
 // Migration state values written to ConfigMap.data.state.
@@ -56,7 +71,5 @@ const (
 	StateStage1Started   = "stage1_started"
 	StateStage1Completed = "stage1_completed"
 	StateStage2Started   = "stage2_started"
-	StateStage2Completed = "stage2_completed"
-	StateStage3Started   = "stage3_started"
 	StateAllCompleted    = "all_completed"
 )

@@ -17,8 +17,7 @@ spec:
 {{- end }}
 
 
-{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
 ---
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -34,5 +33,4 @@ spec:
   storageCapacity: false
   volumeLifecycleModes:
     - Persistent
-{{- end }}
 {{- end }}
