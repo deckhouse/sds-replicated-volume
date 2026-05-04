@@ -1,0 +1,108 @@
+---
+description: Kubebuilder marker hygiene rules for CEL expressions, gofmt smart quote avoidance, and typographic character detection. Apply when writing or editing kubebuilder markers (especially XValidation with CEL), when reviewing API types under api/v*/, and when debugging unexpected character transformations in comments. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/*.go
+alwaysApply: true
+---
+
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
+# Kubebuilder markers and gofmt smart quote issue
+
+## Background
+
+Since Go 1.19, `gofmt` reformats doc comments (comments immediately preceding `type`, `func`, `var`, `const` declarations) for improved documentation rendering. One side effect is that `gofmt` converts two consecutive single quotes (`''`) into a typographic RIGHT DOUBLE QUOTATION MARK (`"`, U+201D) in doc comments.
+
+This behavior breaks kubebuilder `XValidation` markers that contain CEL expressions, because CEL uses single quotes for string literals (`'hello'`), and an empty string in CEL is `''`.
+
+**References:**
+- Stack Overflow: https://stackoverflow.com/questions/79734115/why-does-gofmt-replace-two-single-quotes-with-a-single-double-quote-in-my-go-com
+- Go 1.19 release notes (comment formatting): https://go.dev/doc/go1.19#go-doc
+
+## Empty string comparison in CEL (MUST)
+
+When writing CEL expressions in `// +kubebuilder:validation:XValidation` markers, you MUST NOT use `''` (two single quotes) for empty string comparison.
+
+**Bad (will be corrupted by gofmt):**
+```go
+// +kubebuilder:validation:XValidation:rule="self.field != ''",message="field must not be empty"
+```
+
+**After gofmt, this becomes (broken):**
+```go
+// +kubebuilder:validation:XValidation:rule="self.field != "",message="field must not be empty"
+```
+
+### Solution 1: Use `size()` function (RECOMMENDED)
+
+Use the CEL `size()` function instead of comparing to an empty string:
+
+| Instead of | Use |
+|------------|-----|
+| `field != ''` | `size(field) > 0` |
+| `field == ''` | `size(field) == 0` |
+
+**Good:**
+```go
+// +kubebuilder:validation:XValidation:rule="size(self.field) > 0",message="field must not be empty"
+```
+
+### Solution 2: Tab indentation (alternative)
+
+Adding a tab character before the `+` in the marker causes `gofmt` to treat the line as a preformatted code block, which disables smart quote conversion:
+
+```go
+//	+kubebuilder:validation:XValidation:rule="self.field != ''",message="field must not be empty"
+```
+
+Note: The tab character is between `//` and `+`. This approach is less preferred because it is subtle and easy to lose during edits.
+
+## Detecting typographic characters (MUST)
+
+When reviewing or debugging kubebuilder markers, you MUST check for typographic/Unicode characters that should not be present in code:
+
+| Bad character | Unicode | Hex bytes (UTF-8) | Should be |
+|---------------|---------|-------------------|-----------|
+| `"` (left double) | U+201C | `e2 80 9c` | `"` (0x22) |
+| `"` (right double) | U+201D | `e2 80 9d` | `"` (0x22) |
+| `'` (left single) | U+2018 | `e2 80 98` | `'` (0x27) |
+| `'` (right single) | U+2019 | `e2 80 99` | `'` (0x27) |
+| `–` (en dash) | U+2013 | `e2 80 93` | `-` (0x2d) |
+| `—` (em dash) | U+2014 | `e2 80 94` | `--` or `-` |
+
+### How to detect
+
+Use `xxd` or `hexdump` to inspect suspicious lines:
+
+```bash
+sed -n '<line>p' <file> | xxd | grep -E "e2 80"
+```
+
+If you see `e2 80 9c`, `e2 80 9d`, `e2 80 98`, or `e2 80 99` in the output, the file contains typographic quotes that will cause problems.
+
+### How to fix
+
+Replace typographic characters with their ASCII equivalents. For CEL empty string comparisons, use `size()` as described above.
+
+## Sources of typographic characters
+
+Typographic quotes are often introduced when:
+
+1. **Copying from documents** (Word, Google Docs, PDF, Notion)
+2. **Copying from web pages** with "smart quotes" enabled
+3. **macOS keyboard** with "Use smart quotes and dashes" enabled
+4. **AI assistants** (ChatGPT, Claude, etc.) that sometimes generate typographic quotes
+5. **Running gofmt** on code that contains `''` in doc comments
+
+## Validation timing
+
+CEL expression syntax is NOT validated by:
+- Go compiler (`go build`)
+- `gofmt` / `gopls`
+- `controller-gen`
+- `golangci-lint`
+
+CEL syntax errors are only detected at runtime when:
+1. The CRD is applied to a Kubernetes cluster
+2. A resource is created/updated and Kubernetes validates it against the CEL rule
+
+Therefore, you SHOULD manually verify CEL expressions before committing.

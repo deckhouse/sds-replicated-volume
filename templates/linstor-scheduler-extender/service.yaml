@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 ---
 apiVersion: v1
 kind: Service
@@ -14,3 +15,4 @@ spec:
       name: http
   selector:
     app: linstor-scheduler-extender
+{{- end }}

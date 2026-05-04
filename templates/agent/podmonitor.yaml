@@ -1,0 +1,61 @@
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started")) }}
+{{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: sds-replicated-volume-agent
+  namespace: d8-monitoring
+  {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
+spec:
+  podMetricsEndpoints:
+  - port: prometheus
+    scheme: https
+    path: /metrics
+    bearerTokenSecret:
+      name: "prometheus-token"
+      key: "token"
+    tlsConfig:
+      insecureSkipVerify: true
+    relabelings:
+    - regex: endpoint|namespace|pod|container
+      action: labeldrop
+    - targetLabel: job
+      replacement: sds-replicated-volume-agent
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - targetLabel: tier
+      replacement: cluster
+    - sourceLabels: [__meta_kubernetes_pod_ready]
+      regex: "true"
+      action: keep
+  - port: drbd-metrics
+    scheme: https
+    path: /
+    bearerTokenSecret:
+      name: "prometheus-token"
+      key: "token"
+    tlsConfig:
+      insecureSkipVerify: true
+    relabelings:
+    - regex: endpoint|namespace|pod|container
+      action: labeldrop
+    - targetLabel: job
+      replacement: sds-replicated-volume-drbd
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - targetLabel: tier
+      replacement: cluster
+    - sourceLabels: [__meta_kubernetes_pod_ready]
+      regex: "true"
+      action: keep
+  selector:
+    matchLabels:
+      app: agent
+  namespaceSelector:
+    matchNames:
+    - d8-{{ .Chart.Name }}
+{{- end }}
+{{- end }}
+{{- end }}

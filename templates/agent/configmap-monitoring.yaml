@@ -1,0 +1,15 @@
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-monitoring
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+data:
+  prometheus.toml: |2
+
+    [[prometheus]]
+    address = "127.0.0.1:4274"
+    enums = true
+{{- end }}
