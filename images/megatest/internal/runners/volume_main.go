@@ -264,6 +264,11 @@ func (v *VolumeMain) getPublishNodes(count int) ([]string, error) {
 
 // createRV creates a ReplicatedVolume and RVAs for the given nodes.
 func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
+	maxAttachments := byte(1)
+	if len(attachNodes) > 1 {
+		maxAttachments = byte(len(attachNodes))
+	}
+
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -271,7 +276,7 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
-			MaxAttachments:             ptr.To(byte(1)),
+			MaxAttachments:             ptr.To(maxAttachments),
 		},
 	}
 
