@@ -72,8 +72,9 @@ func newManager(
 		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha1.DRBDResource{}: {Field: nodeNameSelector},
-				&v1alpha1.DRBDMapper{}:   {Field: nodeNameSelector},
+				&v1alpha1.DRBDResource{}:          {Field: nodeNameSelector},
+				&v1alpha1.DRBDMapper{}:            {Field: nodeNameSelector},
+				&v1alpha1.DRBDResourceOperation{}: {Field: nodeNameSelector},
 				&corev1.Node{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.name": nodeName}),
 				},

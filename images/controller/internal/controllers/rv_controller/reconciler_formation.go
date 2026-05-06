@@ -694,9 +694,26 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 	// If it already exists, verify that its parameters match the expected ones;
 	// if not, the configuration has changed and formation must restart.
 	if drbdrOp == nil {
-		drbdResourceName := v1alpha1.FormatReplicatedVolumeReplicaName(rv.Name, dmDiskful.Min())
+		// The source RVR is guaranteed to exist here: the previous formation steps
+		// require every diskful RVR to have DRBDConfigured=True, which the rvr_controller
+		// only sets after it has created the DRBDResource on rvr.Spec.NodeName.
+		// rvr_controller propagates rvr.Spec.NodeName to drbdr.Spec.NodeName (single source
+		// of truth for replica placement), so reading it from the RVR is equivalent to
+		// reading it from the DRBDResource — without needing to watch DRBDResource here.
+		sourceID := dmDiskful.Min()
+		var sourceRVR *v1alpha1.ReplicatedVolumeReplica
+		for _, rvr := range *rvrs {
+			if rvr.ID() == sourceID {
+				sourceRVR = rvr
+				break
+			}
+		}
+		if sourceRVR == nil {
+			return rf.Failf(fmt.Errorf("RVR for diskful member id=%d not found", sourceID), "resolving source replica for DRBDResourceOperation %s", drbdrOpName)
+		}
 		drbdrOpSpec := v1alpha1.DRBDResourceOperationSpec{
-			DRBDResourceName: drbdResourceName,
+			NodeName:         sourceRVR.Spec.NodeName,
+			DRBDResourceName: sourceRVR.Name,
 			Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
 			CreateNewUUID:    drbdrOpFormationParams,
 		}

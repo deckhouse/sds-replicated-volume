@@ -19,6 +19,9 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
     - jsonPath: .spec.drbdResourceName
       name: Resource
       type: string
@@ -78,6 +81,16 @@ spec:
                 x-kubernetes-validations:
                 - message: drbdResourceName is immutable
                   rule: self == oldSelf
+              nodeName:
+                description: |-
+                  NodeName scopes the operation to a single agent node: only the agent
+                  running on this node will reconcile the operation.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable
+                  rule: self == oldSelf
               type:
                 description: DRBDResourceOperationType represents the type of operation
                   to perform on a DRBD resource.
@@ -94,6 +107,7 @@ spec:
                   rule: self == oldSelf
             required:
             - drbdResourceName
+            - nodeName
             - type
             type: object
           status:
@@ -116,6 +130,7 @@ spec:
         - spec
         type: object
     selectableFields:
+    - jsonPath: .spec.nodeName
     - jsonPath: .spec.drbdResourceName
     - jsonPath: .status.phase
     served: true
