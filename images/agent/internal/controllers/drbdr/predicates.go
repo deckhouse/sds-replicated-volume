@@ -26,20 +26,22 @@ import (
 
 // drbdrPredicates returns predicates for DRBDResource filtering.
 // Only resources belonging to the specified node will trigger reconciliation.
+// Updates to non-spec fields are ignored too.
 func drbdrPredicates(nodeName string) []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
-				dr, ok := e.Object.(*v1alpha1.DRBDResource)
-				return ok && dr.Spec.NodeName == nodeName
+				dr := e.Object.(*v1alpha1.DRBDResource)
+				return dr.Spec.NodeName == nodeName
 			},
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				dr, ok := e.ObjectNew.(*v1alpha1.DRBDResource)
-				return ok && dr.Spec.NodeName == nodeName
+				drNew := e.ObjectNew.(*v1alpha1.DRBDResource)
+				drOld := e.ObjectOld.(*v1alpha1.DRBDResource)
+				return drNew.Spec.NodeName == nodeName && drNew.Generation != drOld.Generation
 			},
 			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
-				dr, ok := e.Object.(*v1alpha1.DRBDResource)
-				return ok && dr.Spec.NodeName == nodeName
+				dr := e.Object.(*v1alpha1.DRBDResource)
+				return dr.Spec.NodeName == nodeName
 			},
 			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool {
 				return false
