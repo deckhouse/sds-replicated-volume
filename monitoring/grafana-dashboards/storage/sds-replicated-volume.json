@@ -1429,6 +1429,216 @@
       }
     },
     {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Deleting RV Current Count by Storage Class",
+      "description": "Scrape-time count of RVs with deletionTimestamp by storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      },
+      "targets": [
+        {
+          "expr": "sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"}",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "RV Deletion Completed Count",
+      "description": "Completed RV deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Deleting RVR Current Count by Node and Storage Class",
+      "description": "Scrape-time count of RVRs with deletionTimestamp by node and storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 47,
+      "type": "timeseries",
+      "title": "RVR Deletion Completed Count",
+      "description": "Completed RVR deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
       "id": 17,
       "type": "row",
       "title": "DRBD / DRBDR",
@@ -1437,7 +1647,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 76
       }
     },
     {
@@ -1453,7 +1663,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 77
       },
       "targets": [
         {
@@ -1529,7 +1739,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 77
       },
       "targets": [
         {
@@ -1594,7 +1804,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 77
       },
       "targets": [
         {
@@ -1654,7 +1864,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 85
       },
       "targets": [
         {
@@ -1700,7 +1910,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 93
       }
     },
     {
@@ -1716,7 +1926,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 78
+        "y": 94
       },
       "targets": [
         {
@@ -1771,7 +1981,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 78
+        "y": 94
       },
       "targets": [
         {
@@ -1835,240 +2045,6 @@
       }
     },
     {
-      "id": 24,
-      "type": "row",
-      "title": "Investigation",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 86
-      }
-    },
-    {
-      "id": 26,
-      "type": "timeseries",
-      "title": "Deleting RV Current Count by Storage Class",
-      "description": "Scrape-time count of RVs with deletionTimestamp by storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ds_prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 87
-      },
-      "targets": [
-        {
-          "expr": "sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"}",
-          "legendFormat": "{{storage_class}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "spanNulls": false,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": [
-            "max",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 46,
-      "type": "timeseries",
-      "title": "RV Deletion Completed Count",
-      "description": "Completed RV deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ds_prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 87
-      },
-      "targets": [
-        {
-          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
-          "legendFormat": "{{storage_class}}",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
-          "legendFormat": "cluster total",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "bars",
-            "lineInterpolation": "linear",
-            "spanNulls": false,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": [
-            "max",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 38,
-      "type": "timeseries",
-      "title": "Deleting RVR Current Count by Node and Storage Class",
-      "description": "Scrape-time count of RVRs with deletionTimestamp by node and storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ds_prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 95
-      },
-      "targets": [
-        {
-          "expr": "sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}",
-          "legendFormat": "{{node}} / {{storage_class}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "spanNulls": false,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": [
-            "max",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 47,
-      "type": "timeseries",
-      "title": "RVR Deletion Completed Count",
-      "description": "Completed RVR deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ds_prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 95
-      },
-      "targets": [
-        {
-          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
-          "legendFormat": "{{node}} / {{storage_class}}",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
-          "legendFormat": "cluster total",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "bars",
-            "lineInterpolation": "linear",
-            "spanNulls": false,
-            "showPoints": "never"
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": [
-            "max",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 27,
-      "type": "row",
-      "title": "Active Datamesh Metrics",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 103
-      }
-    },
-    {
       "id": 28,
       "type": "timeseries",
       "title": "Datamesh Transitions",
@@ -2081,7 +2057,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 104
+        "y": 102
       },
       "targets": [
         {
@@ -2149,7 +2125,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 112
+        "y": 110
       },
       "panels": [
         {
@@ -2165,7 +2141,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 113
+            "y": 111
           },
           "targets": [
             {
@@ -2226,7 +2202,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 113
+            "y": 111
           },
           "targets": [
             {
@@ -2277,7 +2253,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 121
+            "y": 119
           },
           "targets": [
             {
@@ -2327,7 +2303,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 121
+            "y": 119
           },
           "targets": [
             {
