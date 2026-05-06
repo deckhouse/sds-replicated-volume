@@ -30,7 +30,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -44,7 +44,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -58,7 +62,7 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -74,8 +78,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
       "targets": [
@@ -88,7 +92,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -102,7 +110,7 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -118,8 +126,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
       "targets": [
@@ -132,7 +140,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -146,7 +158,7 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -162,8 +174,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
       "targets": [
@@ -176,7 +188,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -190,7 +206,7 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -206,8 +222,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 3,
+        "x": 12,
         "y": 1
       },
       "targets": [
@@ -220,7 +236,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -234,7 +254,7 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -250,8 +270,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 3,
+        "x": 15,
         "y": 1
       },
       "targets": [
@@ -264,7 +284,11 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
         },
         "overrides": []
       },
@@ -278,7 +302,199 @@
         },
         "orientation": "auto",
         "textMode": "auto",
-        "colorMode": "none",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 58,
+      "type": "stat",
+      "title": "RV Create Avg",
+      "description": "Average RV initial formation time over the selected dashboard range. Uses completed RV initial formation observations only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rv_initial_formation_duration_seconds_sum{storage_class=~\"$storage_class\"}[$__range])) / sum(increase(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 59,
+      "type": "stat",
+      "title": "RV Create P90",
+      "description": "P90 RV initial formation time over the selected dashboard range. Uses completed RV initial formation observations only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__range])) by (le))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 60,
+      "type": "stat",
+      "title": "Backing Volume P90",
+      "description": "P90 time from RVR creation to BackingVolumeReady over the selected dashboard range. Useful as LLV/LVM provisioning proxy; thresholds are intentionally conservative and may depend on volume size/backend.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) by (le))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto"
       }
@@ -298,28 +514,74 @@
     {
       "id": 52,
       "type": "timeseries",
-      "title": "RVR / RVA Count by Node",
-      "description": "Current RVR and RVA counts by node for selected storage classes. Use selectors to narrow nodes or storage classes.",
+      "title": "RVR Count by Node",
+      "description": "Current RVR counts by node and storage class. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 6
       },
       "targets": [
         {
-          "expr": "sum by (node, storage_class) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
-          "legendFormat": "RVR {{storage_class}} / {{node}}",
+          "expr": "sum by (node, storage_class) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}} / {{node}}",
           "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
         },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 57,
+      "type": "timeseries",
+      "title": "RVA Count by Node",
+      "description": "Current RVA counts by node and storage class. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
         {
-          "expr": "sum by (node, storage_class) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
-          "legendFormat": "RVA {{storage_class}} / {{node}}",
-          "refId": "B"
+          "expr": "sum by (node, storage_class) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}} / {{node}}",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
@@ -367,7 +629,7 @@
       "id": 41,
       "type": "timeseries",
       "title": "RVR Count by Node / Phase",
-      "description": "Current non-zero RVR count split by node, storage class, and phase. Use selectors to narrow noisy dimensions.",
+      "description": "Current non-zero RVR count split by node, storage class, and phase. Controlled by the RVR Phase selector. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -380,7 +642,7 @@
       },
       "targets": [
         {
-          "expr": "(sum by (node, storage_class, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"}) > 0)",
+          "expr": "(sum by (node, storage_class, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\",phase=~\"$rvr_phase\"}) > 0)",
           "legendFormat": "{{node}} / {{storage_class}} / {{phase}}",
           "refId": "A"
         }
@@ -418,7 +680,7 @@
       "id": 43,
       "type": "timeseries",
       "title": "RVA Count by Node / Phase",
-      "description": "Current non-zero RVA count split by node, storage class, and phase. Use selectors to narrow noisy dimensions.",
+      "description": "Current non-zero RVA count split by node, storage class, and phase. Controlled by the RVA Phase selector. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -431,7 +693,7 @@
       },
       "targets": [
         {
-          "expr": "(sum by (node, storage_class, phase) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"}) > 0)",
+          "expr": "(sum by (node, storage_class, phase) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\",phase=~\"$rva_phase\"}) > 0)",
           "legendFormat": "{{node}} / {{storage_class}} / {{phase}}",
           "refId": "A"
         }
@@ -2174,6 +2436,66 @@
         "query": {
           "query": "label_values(sds_rv_count, storage_class)",
           "refId": "Prometheus-storage-class-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "rvr_phase",
+        "label": "RVR Phase",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rvr_count, phase)",
+          "refId": "Prometheus-rvr-phase-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "rva_phase",
+        "label": "RVA Phase",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rva_count, phase)",
+          "refId": "Prometheus-rva-phase-Variable-Query"
         },
         "refresh": 2,
         "includeAll": true,
