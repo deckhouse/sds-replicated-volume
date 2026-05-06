@@ -66,7 +66,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 
 	envConfig, err := env.GetConfig()
 	if err != nil {
-		return fmt.Errorf("getting env config: %w", err)
+		return err
 	}
 
 	// MANAGER

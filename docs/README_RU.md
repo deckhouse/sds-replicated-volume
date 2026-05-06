@@ -41,7 +41,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Для работы со снимками требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
+Для работы модуля требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.

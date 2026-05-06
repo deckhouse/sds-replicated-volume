@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: kubernetes.linstor.obsolete_backups
   rules:
     - alert: D8ObsoleteLinstorBackupPresents
@@ -19,3 +20,4 @@
           
           You should remove it with command:
           `kubectl -n d8-sds-replicated-volume get secrets | grep -E "linstor-[0-9]+-backup" | awk '{ print "kubectl -n d8-sds-replicated-volume delete secret "$1 }' | bash`
+{{- end }}

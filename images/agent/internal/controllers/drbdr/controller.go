@@ -54,7 +54,7 @@ func BuildController(mgr manager.Manager) error {
 
 	cfg, err := env.GetConfig()
 	if err != nil {
-		return fmt.Errorf("getting config: %w", err)
+		return err
 	}
 
 	cl := mgr.GetClient()

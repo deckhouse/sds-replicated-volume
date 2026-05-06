@@ -34,6 +34,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
@@ -41,7 +42,13 @@ const RSPControllerName = "rsp-controller"
 
 // BuildController registers the RSP controller with the manager.
 // It sets up watches on ReplicatedStoragePool, Node, LVMVolumeGroup, and agent Pod resources.
-func BuildController(mgr manager.Manager, agentPodNamespace string) error {
+func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+	agentPodNamespace := cfg.PodNamespace()
+
 	cl := mgr.GetClient()
 
 	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace)

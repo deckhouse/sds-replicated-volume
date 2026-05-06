@@ -4,9 +4,9 @@ descriptions:
   en: "Manages replicated block storage based on DRBD."
   ru: "Управляет реплицируемым блочным хранилищем на базе DRBD."
 requirements:
-  deckhouse: ">= 1.71"
+  deckhouse: ">= 1.72"
   kubernetes: ">= 1.31"
   modules:
-    sds-node-configurator: ">= 0.5.14"
+    sds-node-configurator: ">= 0.6.1"
     snapshot-controller: ">= 0.0.0"
 namespace: "d8-sds-replicated-volume"
