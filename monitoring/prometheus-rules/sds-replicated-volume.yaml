@@ -4,7 +4,7 @@
   rules:
     # Count of RVRs in degraded-like phases (cluster-wide current snapshot).
     - record: sds:rvr_degraded_count
-      expr: sum(sds_rvr_unhealthy_count) or vector(0)
+      expr: sum(sds_rvr_count{phase=~"PartiallyDegraded|Degraded|Critical|AgentNotReady"}) or vector(0)
 
 # Inactive alert rules for sds-replicated-volume.
 # severity_level "9" = informational, does not trigger notifications in Deckhouse.

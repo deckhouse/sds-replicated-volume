@@ -53,13 +53,11 @@ type currentMetricsCollector struct {
 	reader client.Reader
 	log    logr.Logger
 
-	rvCountDesc           *prometheus.Desc
-	rvrCountDesc          *prometheus.Desc
-	rvaCountDesc          *prometheus.Desc
-	rvrUnhealthyCountDesc *prometheus.Desc
-	rvDeletingCountDesc   *prometheus.Desc
-	rvrDeletingCountDesc  *prometheus.Desc
-	datameshActiveDesc    *prometheus.Desc
+	rvCountDesc          *prometheus.Desc
+	rvrCountDesc         *prometheus.Desc
+	rvaCountDesc         *prometheus.Desc
+	rvrDeletingCountDesc *prometheus.Desc
+	datameshActiveDesc   *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -84,18 +82,6 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelNode, LabelStorageClass, LabelPhase},
 			nil,
 		),
-		rvrUnhealthyCountDesc: prometheus.NewDesc(
-			"sds_rvr_unhealthy_count",
-			"Current number of ReplicatedVolumeReplica objects in degraded-like phases by node and phase. Built from controller cache at scrape time.",
-			[]string{LabelNode, LabelPhase},
-			nil,
-		),
-		rvDeletingCountDesc: prometheus.NewDesc(
-			"sds_rv_deleting_count",
-			"Current number of deleting ReplicatedVolume objects by storage class. Built from controller cache at scrape time.",
-			[]string{LabelStorageClass},
-			nil,
-		),
 		rvrDeletingCountDesc: prometheus.NewDesc(
 			"sds_rvr_deleting_count",
 			"Current number of deleting ReplicatedVolumeReplica objects by node and storage class. Built from controller cache at scrape time.",
@@ -115,8 +101,6 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvCountDesc
 	ch <- c.rvrCountDesc
 	ch <- c.rvaCountDesc
-	ch <- c.rvrUnhealthyCountDesc
-	ch <- c.rvDeletingCountDesc
 	ch <- c.rvrDeletingCountDesc
 	ch <- c.datameshActiveDesc
 }
@@ -163,9 +147,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
-	collectRVRCounts(ch, c.rvrCountDesc, c.rvrUnhealthyCountDesc, nodes, storageClasses, rvrList.Items)
+	collectRVRCounts(ch, c.rvrCountDesc, nodes, storageClasses, rvrList.Items)
 	collectRVACounts(ch, c.rvaCountDesc, nodes, storageClasses, rvList.Items, rvaList.Items)
-	collectRVDeletingCounts(ch, c.rvDeletingCountDesc, storageClasses, rvList.Items)
 	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, nodes, storageClasses, rvrList.Items)
 	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, nodes, storageClasses, rvList.Items, rvrList.Items)
 
@@ -292,23 +275,16 @@ func collectRVCounts(
 func collectRVRCounts(
 	ch chan<- prometheus.Metric,
 	countDesc *prometheus.Desc,
-	unhealthyCountDesc *prometheus.Desc,
 	nodes []string,
 	storageClasses []string,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
 	phases := rvrMetricPhases()
 	counts := make(map[string]float64, len(nodes)*len(storageClasses)*len(phases))
-	unhealthyCounts := make(map[string]float64, len(nodes)*len(phases))
 	for _, node := range nodes {
 		for _, sc := range storageClasses {
 			for _, phase := range phases {
 				counts[metricKey(node, sc, phase)] = 0
-			}
-		}
-		for _, phase := range phases {
-			if isRVRUnhealthyPhase(phase) {
-				unhealthyCounts[metricKey(node, phase)] = 0
 			}
 		}
 	}
@@ -321,9 +297,6 @@ func collectRVRCounts(
 			phase = "Unknown"
 		}
 		counts[metricKey(node, sc, phase)]++
-		if isRVRUnhealthyPhase(phase) {
-			unhealthyCounts[metricKey(node, phase)]++
-		}
 	}
 
 	for _, node := range nodes {
@@ -332,24 +305,6 @@ func collectRVRCounts(
 				ch <- prometheus.MustNewConstMetric(countDesc, prometheus.GaugeValue, counts[metricKey(node, sc, phase)], node, sc, phase)
 			}
 		}
-		for _, phase := range phases {
-			if !isRVRUnhealthyPhase(phase) {
-				continue
-			}
-			ch <- prometheus.MustNewConstMetric(unhealthyCountDesc, prometheus.GaugeValue, unhealthyCounts[metricKey(node, phase)], node, phase)
-		}
-	}
-}
-
-func isRVRUnhealthyPhase(phase string) bool {
-	switch phase {
-	case string(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseCritical),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseAgentNotReady):
-		return true
-	default:
-		return false
 	}
 }
 
@@ -398,30 +353,6 @@ func collectRVACounts(
 				ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, sc, phase)], node, sc, phase)
 			}
 		}
-	}
-}
-
-func collectRVDeletingCounts(
-	ch chan<- prometheus.Metric,
-	desc *prometheus.Desc,
-	storageClasses []string,
-	rvs []v1alpha1.ReplicatedVolume,
-) {
-	counts := make(map[string]float64, len(storageClasses))
-	for _, sc := range storageClasses {
-		counts[sc] = 0
-	}
-
-	for i := range rvs {
-		rv := &rvs[i]
-		if rv.DeletionTimestamp == nil {
-			continue
-		}
-		counts[rv.Spec.ReplicatedStorageClassName]++
-	}
-
-	for _, sc := range storageClasses {
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[sc], sc)
 	}
 }
 
