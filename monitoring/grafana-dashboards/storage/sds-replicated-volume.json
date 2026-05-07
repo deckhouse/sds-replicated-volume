@@ -270,9 +270,9 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 5
+        "w": 4,
+        "x": 20,
+        "y": 1
       },
       "targets": [
         {
@@ -318,8 +318,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 8,
+        "x": 0,
         "y": 5
       },
       "targets": [
@@ -382,8 +382,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 5
       },
       "targets": [
@@ -446,8 +446,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 8,
+        "x": 16,
         "y": 5
       },
       "targets": [
@@ -512,6 +512,174 @@
       }
     },
     {
+      "id": 61,
+      "type": "timeseries",
+      "title": "RV Count by Storage Class",
+      "description": "Current RV count by storage class plus total. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "RVR Count by Storage Class",
+      "description": "Current RVR count by storage class plus total. Node selector still filters the scope, but the graph does not split series by node. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "RVA Count by Storage Class",
+      "description": "Current RVA count by storage class plus total. Node selector still filters the scope, but the graph does not split series by node. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
       "id": 52,
       "type": "timeseries",
       "title": "RVR Count by Node",
@@ -524,7 +692,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 18
       },
       "targets": [
         {
@@ -575,7 +743,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 18
       },
       "targets": [
         {
@@ -622,7 +790,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 18
+        "y": 26
       }
     },
     {
@@ -638,7 +806,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 19
+        "y": 27
       },
       "targets": [
         {
@@ -689,7 +857,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 19
+        "y": 27
       },
       "targets": [
         {
@@ -736,7 +904,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 34
       }
     },
     {
@@ -752,7 +920,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 35
       },
       "targets": [
         {
@@ -813,7 +981,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 35
       },
       "targets": [
         {
@@ -868,7 +1036,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 35
+        "y": 43
       },
       "targets": [
         {
@@ -929,7 +1097,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 35
+        "y": 43
       },
       "targets": [
         {
@@ -985,7 +1153,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 35
+        "y": 43
       },
       "targets": [
         {
@@ -1046,7 +1214,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "targets": [
         {
@@ -1101,7 +1269,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 43
+        "y": 51
       },
       "targets": [
         {
@@ -1162,7 +1330,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 43
+        "y": 51
       },
       "targets": [
         {
@@ -1213,7 +1381,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       }
     },
     {
@@ -1229,7 +1397,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "targets": [
         {
@@ -1305,7 +1473,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 60
       },
       "targets": [
         {
@@ -1370,7 +1538,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 60
       },
       "targets": [
         {
@@ -1441,7 +1609,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "targets": [
         {
@@ -1491,7 +1659,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 68
       },
       "targets": [
         {
@@ -1546,7 +1714,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "targets": [
         {
@@ -1596,7 +1764,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 76
       },
       "targets": [
         {
@@ -1647,7 +1815,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 84
       }
     },
     {
@@ -1663,7 +1831,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "targets": [
         {
@@ -1739,7 +1907,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 77
+        "y": 85
       },
       "targets": [
         {
@@ -1804,7 +1972,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 77
+        "y": 85
       },
       "targets": [
         {
@@ -1864,7 +2032,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 93
       },
       "targets": [
         {
@@ -1910,7 +2078,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 101
       }
     },
     {
@@ -1926,7 +2094,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 94
+        "y": 102
       },
       "targets": [
         {
@@ -1981,7 +2149,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 94
+        "y": 102
       },
       "targets": [
         {
@@ -2057,7 +2225,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 110
       },
       "targets": [
         {
@@ -2125,7 +2293,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 110
+        "y": 118
       },
       "panels": [
         {
@@ -2141,7 +2309,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 111
+            "y": 119
           },
           "targets": [
             {
@@ -2202,7 +2370,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 111
+            "y": 119
           },
           "targets": [
             {
@@ -2253,7 +2421,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 119
+            "y": 127
           },
           "targets": [
             {
@@ -2303,7 +2471,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 119
+            "y": 127
           },
           "targets": [
             {
