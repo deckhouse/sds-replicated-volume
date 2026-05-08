@@ -17,7 +17,7 @@ shell:
   setup:
     - cd /
     - mkdir -p /docs
-    - apt-get update
+    {{- include "alt packages proxy" . | nindent 4 }}
     - apt-get install -y python3 python3-module-pip
     - pip3 install PyYAML packaging
     - python3 /hack/generate_release_notes.py
