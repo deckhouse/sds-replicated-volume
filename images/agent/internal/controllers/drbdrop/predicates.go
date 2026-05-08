@@ -24,7 +24,9 @@ import (
 )
 
 // operationPredicates returns predicates for the DRBDResourceOperation controller.
-func operationPredicates() []predicate.Predicate {
+// Only operations whose Spec.NodeName matches nodeName trigger reconciliation;
+// the cache is also filtered by nodeName, this is defense-in-depth.
+func operationPredicates(nodeName string) []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
@@ -32,14 +34,14 @@ func operationPredicates() []predicate.Predicate {
 				if !ok {
 					return false
 				}
-				return !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				op, ok := e.ObjectNew.(*v1alpha1.DRBDResourceOperation)
 				if !ok {
 					return false
 				}
-				return !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
 			},
 			DeleteFunc: func(_ event.DeleteEvent) bool {
 				// No need to reconcile deleted operations
@@ -50,7 +52,7 @@ func operationPredicates() []predicate.Predicate {
 				if !ok {
 					return false
 				}
-				return !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
 			},
 		},
 	}
