@@ -49,7 +49,7 @@ func BuildController(mgr manager.Manager) error {
 		Named(ControllerName).
 		For(
 			&v1alpha1.DRBDResourceOperation{},
-			builder.WithPredicates(operationPredicates()...),
+			builder.WithPredicates(operationPredicates(nodeName)...),
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 5,

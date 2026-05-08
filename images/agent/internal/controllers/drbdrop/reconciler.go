@@ -94,6 +94,9 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		return rf.Fail(err)
 	}
 	if drbdr == nil {
+		if err := r.failOperationAndPatch(ctx, op, fmt.Sprintf("DRBDResource %q not found on node %q", op.Spec.DRBDResourceName, r.nodeName)); err != nil {
+			return rf.Fail(err)
+		}
 		return rf.Done()
 	}
 
@@ -152,8 +155,11 @@ func (r *OperationReconciler) getOperation(ctx context.Context, key client.Objec
 	return op, nil
 }
 
-// getDRBDResourceForOperation finds the target DRBDResource and validates it belongs to this node.
-// Returns (nil, nil) if the resource exists but belongs to a different node. Returns (nil, err) if not found or get failed.
+// getDRBDResourceForOperation finds the target DRBDResource for this operation.
+// Returns (nil, nil) when the DRBDResource is missing on this node, either because it
+// does not exist or because it belongs to a different node. The caller is expected to
+// mark the operation as Failed in that case (the operation must not be re-queued
+// indefinitely waiting for a resource that is not ours to manage).
 func (r *OperationReconciler) getDRBDResourceForOperation(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
@@ -163,7 +169,7 @@ func (r *OperationReconciler) getDRBDResourceForOperation(
 		return nil, err
 	}
 	if drbdr == nil {
-		return nil, fmt.Errorf("DRBDResource not found")
+		return nil, nil
 	}
 	if drbdr.Spec.NodeName != r.nodeName {
 		return nil, nil

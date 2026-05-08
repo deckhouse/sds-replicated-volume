@@ -25,7 +25,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"golang.org/x/sync/errgroup"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -269,17 +271,37 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 	// --- Force-delete attached DRBDRs ---
 	// Attached DRBDRs (primary) block RV deletion because the datamesh engine
 	// refuses to remove a member whose DRBDR still exists. We delete them and
-	// strip finalizers so they disappear immediately. NotFound is ignored
-	// because the controller may have already cleaned them up.
-
+	// strip finalizers so they disappear immediately.
+	//
+	// We re-Get the object inside a retry-on-conflict loop because the agent
+	// may concurrently update status (e.g. observed DRBD state changes during
+	// teardown) and bump the resourceVersion between our Get and our Update.
+	// NotFound is treated as success (controller may have cleaned up first);
+	// any other error fails the test rather than silently leaving a stuck
+	// finalizer.
 	for _, m := range members {
 		if !m.attached {
 			continue
 		}
 		m.drbdr.Delete(ctx)
-		drbdrObj := m.drbdr.Object()
-		drbdrObj.SetFinalizers(nil)
-		_ = client.IgnoreNotFound(t.f.Client.Update(ctx, drbdrObj))
+
+		drbdrName := m.drbdr.Name()
+		err := retry.OnError(retry.DefaultRetry, apierrors.IsConflict, func() error {
+			latest := &v1alpha1.DRBDResource{}
+			if err := t.f.Client.Get(ctx, client.ObjectKey{Name: drbdrName}, latest); err != nil {
+				return err
+			}
+			latest.SetFinalizers(nil)
+			err := t.f.Client.Update(ctx, latest)
+			if apierrors.IsConflict(err) {
+				fmt.Fprintf(GinkgoWriter,
+					"[%s] [emulate] strip finalizers on DRBDR %s: conflict, retrying\n",
+					time.Now().Format("15:04:05.000"), drbdrName)
+			}
+			return err
+		})
+		Expect(client.IgnoreNotFound(err)).To(Succeed(),
+			"stripping finalizers on DRBDR %s", drbdrName)
 	}
 
 	// --- Delete all RVAs and RVRs ---
