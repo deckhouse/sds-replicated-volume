@@ -8,7 +8,7 @@ git:
     to: /
     includePaths:
       - CHANGELOG
-      - hack/generate_release_notes.py
+      - hack/generate_release_notes
     stageDependencies:
       setup:
         - "**/*"
@@ -17,11 +17,7 @@ shell:
   setup:
     - cd /
     - mkdir -p /docs
-    {{- include "alt packages proxy" . | nindent 4 }}
-    - apt-get install -y python3 python3-module-pip
-    {{- include "pypi proxy" . | nindent 4 }}
-    - pip3 install PyYAML packaging
-    - python3 /hack/generate_release_notes.py
+    - /hack/generate_release_notes
     - rm -rf CHANGELOG hack
     - cat /docs/RELEASE_NOTES.md
     - cat /docs/RELEASE_NOTES.ru.md
