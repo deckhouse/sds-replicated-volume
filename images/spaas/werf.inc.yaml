@@ -13,9 +13,15 @@ git:
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
+
 shell:
   setup:
     - cd /usr/local/go/{{ $.ImageName }}
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 ---

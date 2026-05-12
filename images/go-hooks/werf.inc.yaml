@@ -25,10 +25,14 @@ mount:
 - fromPath: ~/go-pkg-cache
   to: /go/pkg
 
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
+
 shell:
   install:
     - cd /usr/src/app/hooks/go
-    - go mod download
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
   beforeSetup:
     - |
       cd /usr/src/app/hooks/go;

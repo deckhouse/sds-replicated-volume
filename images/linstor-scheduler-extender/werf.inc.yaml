@@ -33,6 +33,11 @@ git:
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
+
 shell:
   beforeSetup:
     - apk add --no-cache git
@@ -44,7 +49,7 @@ shell:
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
-    - go mod tidy
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod tidy
     - cd cmd/linstor-scheduler-extender
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}"
     - mv {{ $.ImageName }} /
