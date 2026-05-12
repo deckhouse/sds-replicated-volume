@@ -15,3 +15,15 @@
   {{- end }}
 - apk update
 {{- end }}
+
+{{- define "pypi proxy" }}
+  {{- if $.DistroPackagesProxy }}
+- |
+  cat <<"EOD" > /etc/pip.conf
+  [global]
+  index = http://{{ $.DistroPackagesProxy }}/repository/pypi-proxy/pypi
+  index-url = http://{{ $.DistroPackagesProxy }}/repository/pypi-proxy/simple
+  trusted-host = {{ $.DistroPackagesProxy }}
+  EOD
+  {{- end }}
+{{- end }}
