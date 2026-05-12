@@ -1809,7 +1809,7 @@
     {
       "id": 17,
       "type": "row",
-      "title": "DRBD / DRBDR",
+      "title": "DRBDResource CR Lifecycle",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1821,47 +1821,47 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "DRBDR Configure / Delete P90",
-      "description": "SDS-specific DRBDResource lifecycle duration from agent metrics. No data means there were no completed operations in the selected range.",
+      "title": "DRBDResource CR Configure/Delete Duration P90",
+      "description": "Time from DRBDResource CR creation to Configured=True, and from DRBDResource deletionTimestamp to agent finalizer removal. This measures SDS agent lifecycle handling, not raw DRBD runtime state.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 85
       },
       "targets": [
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
-          "legendFormat": "configure {{instance}}",
+          "legendFormat": "configured CR {{instance}}",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
-          "legendFormat": "delete {{instance}}",
+          "legendFormat": "deleted CR {{instance}}",
           "refId": "B"
         },
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le))",
-          "legendFormat": "configured cluster p90",
+          "legendFormat": "configured CR cluster p90",
           "refId": "C"
         },
         {
           "expr": "sum(rate(sds_drbdr_configured_duration_seconds_sum[$__rate_interval])) / sum(rate(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "configured cluster avg",
+          "legendFormat": "configured CR cluster avg",
           "refId": "D"
         },
         {
           "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le))",
-          "legendFormat": "delete cluster p90",
+          "legendFormat": "deleted CR cluster p90",
           "refId": "E"
         },
         {
           "expr": "sum(rate(sds_drbdr_deletion_duration_seconds_sum[$__rate_interval])) / sum(rate(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "delete cluster avg",
+          "legendFormat": "deleted CR cluster avg",
           "refId": "F"
         }
       ],
@@ -1897,37 +1897,37 @@
     {
       "id": 50,
       "type": "timeseries",
-      "title": "DRBDR Configure / Delete Completed Count",
-      "description": "Completed DRBDResource configure and delete operations in each dashboard rate interval.",
+      "title": "DRBDResource CR Configure/Delete Completed Count",
+      "description": "Completed DRBDResource CR configure/delete lifecycle events in each dashboard rate interval.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 85
       },
       "targets": [
         {
           "expr": "sum by (instance) (increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "configure {{instance}}",
+          "legendFormat": "configured CR {{instance}}",
           "refId": "A"
         },
         {
           "expr": "sum by (instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "delete {{instance}}",
+          "legendFormat": "deleted CR {{instance}}",
           "refId": "B"
         },
         {
           "expr": "sum(increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "configured cluster total",
+          "legendFormat": "configured CR cluster total",
           "refId": "C"
         },
         {
           "expr": "sum(increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "delete cluster total",
+          "legendFormat": "deleted CR cluster total",
           "refId": "D"
         }
       ],
@@ -1960,19 +1960,31 @@
       }
     },
     {
+      "id": 64,
+      "type": "row",
+      "title": "DRBD Runtime State",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      }
+    },
+    {
       "id": 19,
       "type": "timeseries",
-      "title": "DRBD Runtime Problems",
-      "description": "Current DRBD runtime problem counts by node. Zero means no matching problem.",
+      "title": "DRBD Runtime Problem Count",
+      "description": "Current DRBD runtime problems from DRBD exporter: bad connection state, missing quorum, and unintentionally diskless devices. This is runtime state, not DRBDResource CR lifecycle.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 85
+        "w": 12,
+        "x": 0,
+        "y": 94
       },
       "targets": [
         {
@@ -1987,7 +1999,7 @@
         },
         {
           "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1) or on(node) (0 * sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"}))",
-          "legendFormat": "diskless {{node}}",
+          "legendFormat": "unexpected diskless {{node}}",
           "refId": "C"
         }
       ],
@@ -2022,17 +2034,17 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "DRBD Out-of-Sync Bytes",
-      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag.",
+      "title": "DRBD Runtime Out-of-Sync Bytes",
+      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag. This is runtime state, not DRBDResource CR lifecycle.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 93
+        "w": 12,
+        "x": 12,
+        "y": 94
       },
       "targets": [
         {
@@ -2078,7 +2090,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 102
       }
     },
     {
@@ -2094,7 +2106,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 102
+        "y": 103
       },
       "targets": [
         {
@@ -2149,7 +2161,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 102
+        "y": 103
       },
       "targets": [
         {
@@ -2225,7 +2237,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 110
+        "y": 111
       },
       "targets": [
         {
@@ -2293,7 +2305,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 118
+        "y": 119
       },
       "panels": [
         {
@@ -2309,7 +2321,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 119
+            "y": 120
           },
           "targets": [
             {
@@ -2370,7 +2382,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 119
+            "y": 120
           },
           "targets": [
             {
@@ -2421,7 +2433,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 127
+            "y": 128
           },
           "targets": [
             {
@@ -2471,7 +2483,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 127
+            "y": 128
           },
           "targets": [
             {
