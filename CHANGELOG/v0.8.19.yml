@@ -1,0 +1,3 @@
+Изменения:
+- Update base images, Go 1.25.10 and lib-helm 1.71.11
+- Internal changes to the module assembly
