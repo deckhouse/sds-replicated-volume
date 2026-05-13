@@ -1,0 +1,3 @@
+Changes:
+- Update DRBD version to 9.2.16. Important: nodes will need to be rebooted
+- Internal changes in the module
