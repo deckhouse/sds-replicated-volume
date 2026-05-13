@@ -306,10 +306,40 @@ type DRBDResourceStatus struct {
 	// +optional
 	DeviceUUID string `json:"deviceUUID,omitempty"`
 
+	// AdminLock reflects the cluster-wide DRBD administrative lock state on
+	// this node, parsed from `drbdsetup status --json`. Nil when the agent
+	// has not yet reported a status (resource Down) or the running kernel
+	// module does not support DRBD_FF_ADMIN_LOCK.
+	// +optional
+	AdminLock *DRBDResourceAdminLockStatus `json:"adminLock,omitempty"`
+
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+type DRBDResourceAdminLockStatus struct {
+	// Held is true while the cluster-wide DRBD admin lock is acquired on
+	// this node. While held, all admin commands except a small IO-orchestration
+	// whitelist (suspend-io, resume-io, new-current-uuid, track-bitmap,
+	// flush-bitmap, lock/unlock/force-unlock) are rejected by the kernel.
+	// +kubebuilder:validation:Required
+	Held bool `json:"held"`
+
+	// HolderNodeID is the DRBD node id that currently owns the admin lock.
+	// -1 means "no holder" (Held is false). Range matches drbd peer ids.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=-1
+	// +kubebuilder:validation:Maximum=31
+	HolderNodeID int8 `json:"holderNodeID"`
+
+	// Generation is the kernel-side transaction id (TWOPC tid) of the
+	// current acquisition. Useful for diagnostics and as a tiebreaker when
+	// reconciling diverging views across peers. 0 when not held.
+	// +kubebuilder:validation:Required
+	Generation uint32 `json:"generation"`
 }
 
 // +kubebuilder:object:generate=true

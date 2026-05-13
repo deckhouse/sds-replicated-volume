@@ -355,6 +355,39 @@ spec:
                 x-kubernetes-validations:
                 - message: addresses[].systemNetworkName must be unique
                   rule: self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))
+              adminLock:
+                description: |-
+                  AdminLock reflects the cluster-wide DRBD administrative lock state on
+                  this node, parsed from `drbdsetup status --json`. Nil when the agent
+                  has not yet reported a status (resource Down) or the running kernel
+                  module does not support DRBD_FF_ADMIN_LOCK.
+                properties:
+                  generation:
+                    description: |-
+                      Generation is the kernel-side transaction id (TWOPC tid) of the
+                      current acquisition. Useful for diagnostics and as a tiebreaker when
+                      reconciling diverging views across peers. 0 when not held.
+                    format: int32
+                    type: integer
+                  held:
+                    description: |-
+                      Held is true while the cluster-wide DRBD admin lock is acquired on
+                      this node. While held, all admin commands except a small IO-orchestration
+                      whitelist (suspend-io, resume-io, new-current-uuid, track-bitmap,
+                      flush-bitmap, lock/unlock/force-unlock) are rejected by the kernel.
+                    type: boolean
+                  holderNodeID:
+                    description: |-
+                      HolderNodeID is the DRBD node id that currently owns the admin lock.
+                      -1 means "no holder" (Held is false). Range matches drbd peer ids.
+                    maximum: 31
+                    minimum: -1
+                    type: integer
+                required:
+                - generation
+                - held
+                - holderNodeID
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

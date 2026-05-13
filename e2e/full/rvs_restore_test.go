@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -65,4 +66,62 @@ var _ = Describe("RVS restore", func() {
 			Label(fw.LabelSlow), SpecTimeout(6*time.Minute), require.MinNodes(3),
 			fw.TestLayout{FTT: 1, GMDR: 1}),
 	)
+})
+
+var _ = Describe("RVS restore rejected", func() {
+	It("does not reach Formation when source RVS does not exist",
+		Label(fw.LabelSlow), SpecTimeout(2*time.Minute), require.MinNodes(1),
+		func(ctx SpecContext) {
+			restored := f.TestRV().
+				FTT(0).
+				GMDR(0).
+				DataSourceRVS("e2e-nonexistent-rvs-12345")
+			restored.Create(ctx)
+
+			Consistently(ctx, func() bool {
+				rv := restored.Object()
+				if rv == nil {
+					return false
+				}
+				for i := range rv.Status.DatameshTransitions {
+					t := &rv.Status.DatameshTransitions[i]
+					if t.Type == v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation && t.IsCompleted() {
+						return true
+					}
+				}
+				return false
+			}, "30s", "2s").Should(BeFalse(),
+				"restored RV must not reach FormationComplete when source RVS is missing")
+		})
+})
+
+var _ = Describe("RVS restore parallel from same snapshot", func() {
+	It("two RVs restored in parallel from one snapshot",
+		Label(fw.LabelSlow), SpecTimeout(7*time.Minute), require.MinNodes(1),
+		func(ctx SpecContext) {
+			srcRV := f.SetupLayout(ctx, fw.TestLayout{FTT: 0, GMDR: 0})
+			srcRVS := f.SetupRVS(ctx, srcRV)
+
+			restoredA := f.TestRV().
+				FTT(0).
+				GMDR(0).
+				DataSourceRVS(srcRVS.Name())
+			restoredB := f.TestRV().
+				FTT(0).
+				GMDR(0).
+				DataSourceRVS(srcRVS.Name())
+
+			restoredA.Create(ctx)
+			restoredB.Create(ctx)
+
+			restoredA.Await(ctx, match.RV.FormationComplete())
+			restoredB.Await(ctx, match.RV.FormationComplete())
+
+			for _, trvr := range restoredA.TestRVRs() {
+				trvr.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+			}
+			for _, trvr := range restoredB.TestRVRs() {
+				trvr.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+			}
+		})
 })

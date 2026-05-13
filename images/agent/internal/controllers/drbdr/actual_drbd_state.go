@@ -91,6 +91,20 @@ type ActualDRBDState interface {
 	// Peers returns the list of peer connections for this resource.
 	Peers() []ActualPeer
 
+	// AdminLockHeld reports whether the cluster-wide DRBD admin lock is
+	// currently held on this node. False when drbdsetup status data is
+	// missing or DRBD_FF_ADMIN_LOCK is not negotiated.
+	AdminLockHeld() bool
+
+	// AdminLockHolderNodeID returns the DRBD node id that currently holds
+	// the cluster-wide admin lock. -1 indicates "no holder" (or the field
+	// is unavailable for any reason).
+	AdminLockHolderNodeID() int8
+
+	// AdminLockGeneration returns the monotonic sequence-number-like
+	// generation of the current admin lock acquisition. 0 when not held.
+	AdminLockGeneration() uint32
+
 	// Report fills the status fields from the actual state.
 	// Returns error if reporting invariants are violated (e.g., multiple volumes).
 	// Even on error, it attempts to report the rest of the fields.
@@ -313,6 +327,27 @@ func (aState *actualState) Volumes() []ActualVolume {
 	return volumes
 }
 
+func (aState *actualState) AdminLockHeld() bool {
+	if aState.status == nil {
+		return false
+	}
+	return aState.status.AdminLock.Held
+}
+
+func (aState *actualState) AdminLockHolderNodeID() int8 {
+	if aState.status == nil || !aState.status.AdminLock.Held {
+		return -1
+	}
+	return aState.status.AdminLock.HolderNodeID
+}
+
+func (aState *actualState) AdminLockGeneration() uint32 {
+	if aState.status == nil {
+		return 0
+	}
+	return aState.status.AdminLock.Generation
+}
+
 func (aState *actualState) Peers() []ActualPeer {
 	if aState.status == nil {
 		return nil
@@ -355,6 +390,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.Peers = nil
 		status.DeviceOpen = nil
 		status.DeviceIOSuspended = nil
+		status.AdminLock = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -421,6 +457,14 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 
 	if aState.metadataNodeID != nil {
 		status.MetadataNodeID = aState.metadataNodeID
+	}
+
+	if aState.status != nil {
+		status.AdminLock = &v1alpha1.DRBDResourceAdminLockStatus{
+			Held:         aState.status.AdminLock.Held,
+			HolderNodeID: aState.status.AdminLock.HolderNodeID,
+			Generation:   aState.status.AdminLock.Generation,
+		}
 	}
 
 	return err

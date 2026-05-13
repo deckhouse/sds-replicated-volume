@@ -52,7 +52,7 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;TrackBitmap;UntrackBitmap;FlushBitmap;SuspendIO;ResumeIO;ForcePrimary;Invalidate;Outdate;Verify
+	// +kubebuilder:validation:Enum=CreateNewUUID;TrackBitmap;UntrackBitmap;FlushBitmap;SuspendIO;ResumeIO;ForcePrimary;Invalidate;Outdate;Verify;LockAdmin;ForceUnlockAdmin
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
 
@@ -60,7 +60,7 @@ type DRBDResourceOperationSpec struct {
 	// When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
 	// in the target DRBDResource's spec.peers.
 	// Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
-	// ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
+	// ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID, LockAdmin, ForceUnlockAdmin).
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peerNodeID is immutable"
@@ -148,4 +148,25 @@ const (
 	DRBDResourceOperationOutdate DRBDResourceOperationType = "Outdate"
 	// DRBDResourceOperationVerify verifies data consistency with peers.
 	DRBDResourceOperationVerify DRBDResourceOperationType = "Verify"
+	// DRBDResourceOperationLockAdmin acquires the cluster-wide DRBD admin lock
+	// on the resource and HOLDS IT for the lifetime of the DRBDResourceOperation
+	// object. The agent reconciler enters .status.phase=Running once the kernel
+	// has confirmed lock acquisition (TWOPC_ADMIN_LOCK committed across peers)
+	// and STAYS in Running indefinitely. The lock is released only when the
+	// DRBDResourceOperation is deleted - the on-delete finalizer issues
+	// `drbdsetup unlock`. This makes ownerReferences (e.g. from
+	// ReplicatedVolumeSnapshot) the natural lifetime owner of the lock, and
+	// guarantees no leaked locks when the orchestrator object is removed.
+	//
+	// Recovery semantics: if the agent pod restarts while the lock is held,
+	// re-issuing `drbdsetup lock` is a no-op for the same holder/generation
+	// (kernel returns NO_ERROR), so reconcile is idempotent.
+	DRBDResourceOperationLockAdmin DRBDResourceOperationType = "LockAdmin"
+	// DRBDResourceOperationForceUnlockAdmin is the operator/recovery escape
+	// hatch: it locally clears admin_lock state and best-effort broadcasts the
+	// release to connected peers WITHOUT going through TWOPC. One-shot:
+	// reconciler runs `drbdsetup force-unlock` once, then transitions to
+	// Succeeded. USE ONLY when the previous holder is known to be permanently
+	// gone and the normal LockAdmin/unlock path is unavailable.
+	DRBDResourceOperationForceUnlockAdmin DRBDResourceOperationType = "ForceUnlockAdmin"
 )

@@ -84,7 +84,7 @@ spec:
                   When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
                   in the target DRBDResource's spec.peers.
                   Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
-                  ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID).
+                  ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID, LockAdmin, ForceUnlockAdmin).
                 maximum: 31
                 minimum: 0
                 type: integer
@@ -105,6 +105,8 @@ spec:
                 - Invalidate
                 - Outdate
                 - Verify
+                - LockAdmin
+                - ForceUnlockAdmin
                 type: string
                 x-kubernetes-validations:
                 - message: type is immutable

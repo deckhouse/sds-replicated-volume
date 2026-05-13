@@ -28,8 +28,8 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvs_controller/snapmesh"
-	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func mkRVR(name, nodeName string, rType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplica {
@@ -335,10 +335,25 @@ func TestReconcileNormalRoutesSnapshotCreationThroughPrepare(t *testing.T) {
 		},
 	}
 
+	holderDRBDR := &v1alpha1.DRBDResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "rvr-0"},
+		Spec:       v1alpha1.DRBDResourceSpec{State: v1alpha1.DRBDResourceStateUp},
+	}
+	adminLockOp := &v1alpha1.DRBDResourceOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1-admin-lock"},
+		Spec: v1alpha1.DRBDResourceOperationSpec{
+			DRBDResourceName: "rvr-0",
+			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
+		},
+		Status: v1alpha1.DRBDResourceOperationStatus{
+			Phase: v1alpha1.DRBDOperationPhaseRunning,
+		},
+	}
+
 	builder := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolumeSnapshot{}).
-		WithObjects(rvs, rv, primary, secondary)
+		WithObjects(rvs, rv, primary, secondary, holderDRBDR, adminLockOp)
 	builder = indextest.WithRVRByReplicatedVolumeNameIndex(builder)
 	builder = builder.WithIndex(&v1alpha1.ReplicatedVolumeReplicaSnapshot{}, indexes.IndexFieldRVRSBySnapshotName, func(obj client.Object) []string {
 		rvrs, ok := obj.(*v1alpha1.ReplicatedVolumeReplicaSnapshot)
@@ -390,8 +405,8 @@ func TestReconcileAggregateStatusDefersFailureWhilePrepareActive(t *testing.T) {
 		Status: v1alpha1.ReplicatedVolumeSnapshotStatus{
 			PrepareTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
 				{
-					Type:  v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot"),
-					Group: v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync,
+					Type:   v1alpha1.ReplicatedVolumeDatameshTransitionType("PrepareSnapshot"),
+					Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupSync,
 					PlanID: "prepare-snapshot/v1",
 					Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
 						{

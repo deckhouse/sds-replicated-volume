@@ -119,8 +119,20 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return outcome
 	}
 
+	if rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady ||
+		rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseFailed {
+		if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
+			return releaseOutcome
+		}
+	}
+
 	if rvs.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseFailed &&
 		rvs.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting {
+		if prepareNeedsRun(rvs) || syncNeedsRun(rvs) {
+			if acquireOutcome := r.reconcileAcquireAdminLock(rf.Ctx(), rvs, rv, rvrs); acquireOutcome.ShouldReturn() {
+				return acquireOutcome
+			}
+		}
 		if prepareNeedsRun(rvs) {
 			return r.reconcilePrepareMesh(rf.Ctx(), rvs, rv, rvrs, childRVRSs)
 		}
@@ -419,6 +431,10 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 
 	if !obju.HasFinalizer(rvs, v1alpha1.RVSControllerFinalizer) {
 		return rf.Done()
+	}
+
+	if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
+		return releaseOutcome
 	}
 
 	ownedDRBDRs, err := r.getOwnedDRBDResources(rf.Ctx(), rvs)

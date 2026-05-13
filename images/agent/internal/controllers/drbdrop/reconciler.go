@@ -65,6 +65,13 @@ func (r *OperationReconciler) Reconcile(
 
 	switch op.Status.Phase {
 	case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
+		// LockAdmin keeps a finalizer; even in a terminal phase we must
+		// run the deletion path to release the lock and clear the finalizer.
+		if op.Spec.Type == v1alpha1.DRBDResourceOperationLockAdmin &&
+			op.DeletionTimestamp != nil &&
+			hasFinalizer(op, AdminLockFinalizer) {
+			break
+		}
 		rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
 		return rf.Done().ToCtrl()
 	}
@@ -82,6 +89,10 @@ func (r *OperationReconciler) Reconcile(
 		return r.reconcileOperationWithResource(rf.Ctx(), op, "SuspendIO", r.executeSuspendIO).ToCtrl()
 	case v1alpha1.DRBDResourceOperationResumeIO:
 		return r.reconcileOperationWithResource(rf.Ctx(), op, "ResumeIO", r.executeResumeIO).ToCtrl()
+	case v1alpha1.DRBDResourceOperationLockAdmin:
+		return r.reconcileLockAdmin(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationForceUnlockAdmin:
+		return r.reconcileForceUnlockAdmin(rf.Ctx(), op).ToCtrl()
 	default:
 		return r.reconcileUnsupported(rf.Ctx(), op, op.Spec.Type).ToCtrl()
 	}
