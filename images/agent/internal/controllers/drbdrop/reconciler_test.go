@@ -71,6 +71,7 @@ func TestReconcileCreateNewUUID_MaintenanceMode(t *testing.T) {
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         testNodeName,
 			DRBDResourceName: testDRBDRName,
 			Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
 		},
@@ -105,6 +106,55 @@ func TestReconcileCreateNewUUID_MaintenanceMode(t *testing.T) {
 	}
 }
 
+// TestReconcileCreateNewUUID_DRBDResourceMissing verifies that when the operation's
+// spec.nodeName matches the local node but the referenced DRBDResource does not exist,
+// the operation is failed (not re-queued indefinitely).
+func TestReconcileCreateNewUUID_DRBDResourceMissing(t *testing.T) {
+	sch, err := scheme.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	op := &v1alpha1.DRBDResourceOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
+		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         testNodeName,
+			DRBDResourceName: testDRBDRName,
+			Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
+		},
+	}
+
+	cl := crfake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(op).
+		WithStatusSubresource(&v1alpha1.DRBDResourceOperation{}).
+		Build()
+
+	rec := drbdrop.NewOperationReconciler(cl, testNodeName)
+
+	res, err := rec.Reconcile(t.Context(), reconcile.Request{
+		NamespacedName: client.ObjectKeyFromObject(op),
+	})
+	if err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Errorf("expected no requeue when DRBDResource is missing, got %+v", res)
+	}
+
+	updated := &v1alpha1.DRBDResourceOperation{}
+	if err := cl.Get(t.Context(), client.ObjectKeyFromObject(op), updated); err != nil {
+		t.Fatalf("failed to get operation: %v", err)
+	}
+
+	if updated.Status.Phase != v1alpha1.DRBDOperationPhaseFailed {
+		t.Errorf("expected phase %q, got %q", v1alpha1.DRBDOperationPhaseFailed, updated.Status.Phase)
+	}
+	if updated.Status.Message == "" {
+		t.Errorf("expected non-empty failure message")
+	}
+}
+
 func runBitmapOpTest(
 	t *testing.T,
 	opType v1alpha1.DRBDResourceOperationType,
@@ -131,6 +181,7 @@ func runBitmapOpTest(
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         testNodeName,
 			DRBDResourceName: testDRBDRName,
 			Type:             opType,
 			PeerNodeID:       peerNodeID,

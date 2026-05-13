@@ -342,6 +342,7 @@ func TestReconcileNormalRoutesSnapshotCreationThroughPrepare(t *testing.T) {
 	adminLockOp := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: "snap-1-admin-lock"},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},

@@ -30,6 +30,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
 )
@@ -37,7 +38,13 @@ import (
 // RVRSchedulingControllerName is the controller name for rvr-scheduling-controller.
 const RVRSchedulingControllerName = "rvr-scheduling-controller"
 
-func BuildController(mgr manager.Manager, schedulerExtenderURL string) error {
+func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+	schedulerExtenderURL := cfg.SchedulerExtenderURL()
+
 	cl := mgr.GetClient()
 
 	if schedulerExtenderURL == "" {

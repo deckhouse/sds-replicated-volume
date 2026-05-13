@@ -25,8 +25,10 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=drbdrop
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.drbdResourceName
 // +kubebuilder:selectablefield:JSONPath=.status.phase
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Resource",type=string,JSONPath=".spec.drbdResourceName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
@@ -44,6 +46,14 @@ func (o *DRBDResourceOperation) GetStatusPhase() string { return string(o.Status
 
 // +kubebuilder:object:generate=true
 type DRBDResourceOperationSpec struct {
+	// NodeName scopes the operation to a single agent node: only the agent
+	// running on this node will reconcile the operation.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
+	NodeName string `json:"nodeName"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253

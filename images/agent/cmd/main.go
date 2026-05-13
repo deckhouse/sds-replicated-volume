@@ -81,7 +81,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 
 	envConfig, err := env.GetConfig()
 	if err != nil {
-		return u.LogError(log, fmt.Errorf("getting env config: %w", err))
+		return u.LogError(log, err)
 	}
 	log = log.With("nodeName", envConfig.NodeName())
 

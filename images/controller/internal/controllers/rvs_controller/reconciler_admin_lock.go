@@ -316,6 +316,7 @@ func (r *Reconciler) createAdminLockOp(
 			Name: adminLockOpName(rvs),
 		},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         holder.Spec.NodeName,
 			DRBDResourceName: holder.Name,
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},

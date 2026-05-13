@@ -17,11 +17,12 @@ limitations under the License.
 package env
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
+	"sync"
+
+	commonenv "github.com/deckhouse/sds-replicated-volume/lib/go/common/env"
 )
 
 const (
@@ -30,32 +31,16 @@ const (
 	DRBDMinPortEnvVar = "DRBD_MIN_PORT"
 	DRBDMaxPortEnvVar = "DRBD_MAX_PORT"
 
-	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
-	MetricsPortEnvVar            = "METRICS_BIND_ADDRESS"
-	EnabledControllersEnvVar     = "ENABLED_CONTROLLERS"
-
 	// defaults are different for each app, do not merge them
 	DefaultHealthProbeBindAddress = ":4269"
 	DefaultMetricsBindAddress     = ":4270"
 )
 
-var ErrInvalidConfig = errors.New("invalid config")
-
 type config struct {
-	nodeName               string
-	drbdMinPort            uint
-	drbdMaxPort            uint
-	healthProbeBindAddress string
-	metricsBindAddress     string
-	enabledControllers     map[string]struct{} // nil means all enabled
-}
-
-func (c *config) HealthProbeBindAddress() string {
-	return c.healthProbeBindAddress
-}
-
-func (c *config) MetricsBindAddress() string {
-	return c.metricsBindAddress
+	commonenv.CommonConfig
+	nodeName    string
+	drbdMinPort uint
+	drbdMaxPort uint
 }
 
 func (c *config) DRBDMaxPort() uint {
@@ -70,17 +55,6 @@ func (c *config) NodeName() string {
 	return c.nodeName
 }
 
-// IsControllerEnabled reports whether the named controller should be started.
-// When ENABLED_CONTROLLERS is not set (or empty), all controllers are enabled.
-// When set, only the listed controllers (comma-separated) are enabled.
-func (c *config) IsControllerEnabled(name string) bool {
-	if c.enabledControllers == nil {
-		return true // not set → all enabled
-	}
-	_, ok := c.enabledControllers[name]
-	return ok
-}
-
 type Config interface {
 	NodeName() string
 	DRBDMinPort() uint
@@ -92,10 +66,23 @@ type Config interface {
 
 var _ Config = &config{}
 
+var getConfigOnce = sync.OnceValues(loadConfig)
+
+// GetConfig returns the process-wide environment configuration.
+// The first call parses environment variables; subsequent calls return the
+// cached result (and error, if any) wrapped with "getting env config".
+// The returned Config is immutable.
 func GetConfig() (Config, error) {
+	cfg, err := getConfigOnce()
+	if err != nil {
+		return nil, fmt.Errorf("getting env config: %w", err)
+	}
+	return cfg, nil
+}
+
+func loadConfig() (Config, error) {
 	cfg := &config{}
 
-	//
 	cfg.nodeName = os.Getenv(NodeNameEnvVar)
 	if cfg.nodeName == "" {
 		hostName, err := os.Hostname()
@@ -107,52 +94,29 @@ func GetConfig() (Config, error) {
 
 	minPortStr := os.Getenv(DRBDMinPortEnvVar)
 	if minPortStr == "" {
-		return cfg, fmt.Errorf("%w: %s is required", ErrInvalidConfig, DRBDMinPortEnvVar)
+		return nil, fmt.Errorf("%w: %s is required", commonenv.ErrInvalidConfig, DRBDMinPortEnvVar)
 	}
-	if minPort, err := strconv.ParseUint(minPortStr, 10, 32); err != nil {
-		return cfg, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
-	} else {
-		cfg.drbdMinPort = uint(minPort)
+	minPort, err := strconv.ParseUint(minPortStr, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
 	}
+	cfg.drbdMinPort = uint(minPort)
 
 	maxPortStr := os.Getenv(DRBDMaxPortEnvVar)
 	if maxPortStr == "" {
-		return cfg, fmt.Errorf("%w: %s is required", ErrInvalidConfig, DRBDMaxPortEnvVar)
+		return nil, fmt.Errorf("%w: %s is required", commonenv.ErrInvalidConfig, DRBDMaxPortEnvVar)
 	}
-	if maxPort, err := strconv.ParseUint(maxPortStr, 10, 32); err != nil {
-		return cfg, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
-	} else {
-		cfg.drbdMaxPort = uint(maxPort)
+	maxPort, err := strconv.ParseUint(maxPortStr, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
 	}
+	cfg.drbdMaxPort = uint(maxPort)
 
-	//
 	if cfg.drbdMaxPort < cfg.drbdMinPort {
-		return cfg, fmt.Errorf("%w: invalid port range %d-%d", ErrInvalidConfig, cfg.drbdMinPort, cfg.drbdMaxPort)
+		return nil, fmt.Errorf("%w: invalid port range %d-%d", commonenv.ErrInvalidConfig, cfg.drbdMinPort, cfg.drbdMaxPort)
 	}
 
-	//
-	cfg.healthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)
-	if cfg.healthProbeBindAddress == "" {
-		cfg.healthProbeBindAddress = DefaultHealthProbeBindAddress
-	}
-
-	//
-	cfg.metricsBindAddress = os.Getenv(MetricsPortEnvVar)
-	if cfg.metricsBindAddress == "" {
-		cfg.metricsBindAddress = DefaultMetricsBindAddress
-	}
-
-	// Enabled controllers (optional): comma-separated list of controller names.
-	// When not set or empty, all controllers are enabled.
-	if raw := os.Getenv(EnabledControllersEnvVar); raw != "" {
-		cfg.enabledControllers = make(map[string]struct{})
-		for _, name := range strings.Split(raw, ",") {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				cfg.enabledControllers[name] = struct{}{}
-			}
-		}
-	}
+	cfg.Load(DefaultHealthProbeBindAddress, DefaultMetricsBindAddress)
 
 	return cfg, nil
 }

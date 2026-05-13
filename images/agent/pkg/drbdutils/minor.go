@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -32,6 +34,9 @@ var (
 	ErrNewMinorResourceNotFound = errors.New("resource not found")
 	ErrNewMinorNoFreeMinor      = errors.New("no free device minor available")
 )
+
+// SysBlockPath is the path to /sys/block. Overridable in tests.
+var SysBlockPath = "/sys/block"
 
 var (
 	nextDeviceMinor   uint
@@ -88,12 +93,12 @@ func ExecuteNewAutoMinor(ctx context.Context, resource string, volume uint, disk
 			return 0, err
 		}
 
-		resources, err := ExecuteShow(ctx, "", false)
+		usedMinors, err := readUsedMinors()
 		if err != nil {
-			return 0, fmt.Errorf("querying show to find used minors: %w", err)
+			return 0, fmt.Errorf("reading used minors from sysfs: %w", err)
 		}
 
-		if err := advanceMinorPastUsed(resources); err != nil {
+		if err := advanceMinorPastUsed(usedMinors); err != nil {
 			return 0, err
 		}
 	}
@@ -112,41 +117,54 @@ func grabNextMinor() uint {
 	return minor
 }
 
-// advanceMinorPastUsed scans used minors from drbdsetup show output and
-// advances nextDeviceMinor past all of them. Called on minor collision.
-func advanceMinorPastUsed(resources []ShowResource) error {
+// readUsedMinors enumerates active DRBD minors by scanning /sys/block/drbd*.
+// Returns a sorted slice of minor numbers.
+func readUsedMinors() ([]uint, error) {
+	entries, err := os.ReadDir(SysBlockPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", SysBlockPath, err)
+	}
+
+	var minors []uint
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "drbd") {
+			continue
+		}
+		n, err := strconv.ParseUint(name[len("drbd"):], 10, 64)
+		if err != nil {
+			continue
+		}
+		minors = append(minors, uint(n))
+	}
+
+	slices.Sort(minors)
+	return minors, nil
+}
+
+// advanceMinorPastUsed advances nextDeviceMinor past all used minors.
+// usedMinors must be sorted in ascending order. Called on minor collision.
+func advanceMinorPastUsed(usedMinors []uint) error {
 	nextDeviceMinorMu.Lock()
 	defer nextDeviceMinorMu.Unlock()
 
-	var totalUsedMinors int
-	for _, res := range resources {
-		for _, vol := range res.ThisHost.Volumes {
-			totalUsedMinors++
-			nextDeviceMinor = max(nextDeviceMinor, uint(vol.DeviceMinor)+1)
-		}
-	}
-
-	if totalUsedMinors > MaxDeviceMinor {
+	if len(usedMinors) > MaxDeviceMinor {
 		return ErrNewMinorNoFreeMinor
 	}
 
+	if len(usedMinors) > 0 {
+		nextDeviceMinor = max(nextDeviceMinor, usedMinors[len(usedMinors)-1]+1)
+	}
+
 	if nextDeviceMinor > MaxDeviceMinor {
+		// Wrapped past the maximum — scan from 0 to find the first gap.
 		nextDeviceMinor = 0
 
-		if len(resources) > 0 {
-			usedMinors := make([]uint, 0, totalUsedMinors)
-			for _, res := range resources {
-				for _, vol := range res.ThisHost.Volumes {
-					usedMinors = append(usedMinors, uint(vol.DeviceMinor))
-				}
-			}
-			slices.Sort(usedMinors)
-			for _, m := range usedMinors {
-				if m > nextDeviceMinor {
-					return nil
-				} else if m == nextDeviceMinor {
-					nextDeviceMinor++
-				}
+		for _, m := range usedMinors {
+			if m > nextDeviceMinor {
+				return nil
+			} else if m == nextDeviceMinor {
+				nextDeviceMinor++
 			}
 		}
 	}

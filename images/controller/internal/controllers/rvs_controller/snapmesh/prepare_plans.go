@@ -81,6 +81,7 @@ func confirmTrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 		gctx,
 		prepareTrackBitmapOperationName(gctx),
 		v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         primary.nodeName,
 			DRBDResourceName: primary.rvrName,
 			Type:             v1alpha1.DRBDResourceOperationTrackBitmap,
 		},
@@ -134,6 +135,7 @@ func confirmSuspendIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
 		gctx,
 		preparePrimaryOperationName(gctx, "suspend-io"),
 		v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         primary.nodeName,
 			DRBDResourceName: primary.rvrName,
 			Type:             v1alpha1.DRBDResourceOperationSuspendIO,
 		},
@@ -155,6 +157,7 @@ func confirmFlushBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 		gctx,
 		preparePrimaryOperationName(gctx, "flush-bitmap"),
 		v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         primary.nodeName,
 			DRBDResourceName: primary.rvrName,
 			Type:             v1alpha1.DRBDResourceOperationFlushBitmap,
 		},
@@ -201,6 +204,7 @@ func confirmResumeIO(gctx *globalContext, _ int64) dmte.ConfirmResult {
 		gctx,
 		preparePrimaryOperationName(gctx, "resume-io"),
 		v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         primary.nodeName,
 			DRBDResourceName: primary.rvrName,
 			Type:             v1alpha1.DRBDResourceOperationResumeIO,
 		},
@@ -222,6 +226,7 @@ func confirmUntrackBitmap(gctx *globalContext, _ int64) dmte.ConfirmResult {
 		gctx,
 		prepareUntrackBitmapOperationName(gctx),
 		v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         primary.nodeName,
 			DRBDResourceName: primary.rvrName,
 			Type:             v1alpha1.DRBDResourceOperationUntrackBitmap,
 		},

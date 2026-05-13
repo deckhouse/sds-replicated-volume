@@ -38,8 +38,8 @@ const (
 	testLockNodeID uint8 = 3
 )
 
-func lockArgs() []string         { return []string{"lock", testDRBDRNameOnNode} }
-func forceUnlockArgs() []string  { return []string{"force-unlock", testDRBDRNameOnNode} }
+func lockArgs() []string        { return []string{"lock", testDRBDRNameOnNode} }
+func forceUnlockArgs() []string { return []string{"force-unlock", testDRBDRNameOnNode} }
 func unlockArgsExpHolder() []string {
 	return []string{"unlock", testDRBDRNameOnNode, "--expected-holder-node-id=3"}
 }
@@ -59,6 +59,7 @@ func newLockOp() *v1alpha1.DRBDResourceOperation {
 	return &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         testNodeName,
 			DRBDResourceName: testDRBDRName,
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
@@ -69,6 +70,7 @@ func newForceUnlockOp() *v1alpha1.DRBDResourceOperation {
 	return &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: testDRBDROPName},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         testNodeName,
 			DRBDResourceName: testDRBDRName,
 			Type:             v1alpha1.DRBDResourceOperationForceUnlockAdmin,
 		},

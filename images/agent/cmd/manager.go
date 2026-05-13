@@ -41,7 +41,6 @@ type managerConfig interface {
 	NodeName() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
-	IsControllerEnabled(name string) bool
 }
 
 func newManager(
@@ -72,8 +71,9 @@ func newManager(
 		},
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha1.DRBDResource{}: {Field: nodeNameSelector},
-				&v1alpha1.DRBDMapper{}:   {Field: nodeNameSelector},
+				&v1alpha1.DRBDResource{}:          {Field: nodeNameSelector},
+				&v1alpha1.DRBDMapper{}:            {Field: nodeNameSelector},
+				&v1alpha1.DRBDResourceOperation{}: {Field: nodeNameSelector},
 				&corev1.Node{}: {
 					Field: fields.SelectorFromSet(fields.Set{"metadata.name": nodeName}),
 				},
@@ -94,7 +94,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr, cfg.IsControllerEnabled); err != nil {
+	if err := controllers.BuildAll(mgr); err != nil {
 		return nil, err
 	}
 

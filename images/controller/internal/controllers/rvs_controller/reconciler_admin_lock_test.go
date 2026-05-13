@@ -303,6 +303,7 @@ func TestReconcileAcquireAdminLockContinuesWhenRunning(t *testing.T) {
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: adminLockOpName(rvs)},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
@@ -343,6 +344,7 @@ func TestReconcileAcquireAdminLockRequeuesWhenPending(t *testing.T) {
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: adminLockOpName(rvs)},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
@@ -374,6 +376,7 @@ func TestReconcileAcquireAdminLockDeletesFailedOpForRetry(t *testing.T) {
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: adminLockOpName(rvs)},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
@@ -612,6 +615,7 @@ func TestReconcileReleaseAdminLockDeletesActiveOp(t *testing.T) {
 	op := &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{Name: adminLockOpName(rvs)},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
@@ -659,6 +663,7 @@ func TestReconcileReleaseAdminLockWhileDeleting(t *testing.T) {
 			Finalizers:        []string{"drbd.deckhouse.io/admin-lock"},
 		},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
 			DRBDResourceName: "rvr-0",
 			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
 		},
