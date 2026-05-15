@@ -31,8 +31,8 @@ const (
 // Histogram bucket configurations.
 // Agent runs one instance per node, so no node label is needed on histograms.
 var (
-	bucketsDRBDRConfigured = []float64{0.5, 1, 2, 5, 10, 30}
-	bucketsDeletion        = []float64{1, 5, 10, 15, 30, 60, 120}
+	bucketsDRBDRConfigured = []float64{0.5, 1, 2, 4, 8, 10, 30}
+	bucketsDeletion        = []float64{1, 2, 5, 10, 20, 40, 120}
 )
 
 // ──────────────────────────────────────────────────────────────────────────────

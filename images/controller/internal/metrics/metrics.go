@@ -44,13 +44,14 @@ const (
 // Calibrated on a working cluster (5Gi, 3 replicas, replicated-r3, 3 test runs).
 // Prometheus automatically adds +Inf, so data is never lost even if values exceed the upper bound.
 var (
-	bucketsRVRReady      = []float64{1, 2, 5, 10, 15, 30, 60, 120}
-	bucketsRVAAttach     = []float64{1, 2, 5, 10, 30, 60}
-	bucketsDeletion      = []float64{1, 5, 10, 15, 30, 60, 120}
-	bucketsDatamesh      = []float64{0.5, 1, 5, 10, 30, 60, 120, 300}
-	bucketsRVFormation   = []float64{1, 5, 10, 30, 60, 120, 300, 600}
-	bucketsBackingVolume = []float64{0.5, 1, 2, 5, 10, 30}
-	bucketsCollect       = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}
+	bucketsRVRReady           = []float64{1, 2, 5, 10, 20, 30, 60, 120}
+	bucketsRVAAttach          = []float64{1, 2, 5, 10, 20, 40, 60}
+	bucketsDeletion           = []float64{1, 2, 5, 10, 20, 40, 120}
+	bucketsDatameshTransition = []float64{0.5, 1, 2, 5, 10, 20, 30, 40, 60, 120}
+	bucketsDatameshStep       = []float64{0.5, 1, 2, 5, 10, 20, 30}
+	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 40, 120, 300}
+	bucketsBackingVolume      = []float64{0.5, 1, 2, 5, 10, 20, 30}
+	bucketsCollect            = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ var (
 	DatameshTransitionDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_datamesh_transition_duration_seconds",
 		Help:    "Duration of completed datamesh transitions.",
-		Buckets: bucketsDatamesh,
+		Buckets: bucketsDatameshTransition,
 	}, []string{LabelStorageClass, LabelNode, LabelType})
 
 	DatameshTransitionsCompleted = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -121,7 +122,7 @@ var (
 	DatameshStepDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_datamesh_step_duration_seconds",
 		Help:    "Duration of individual datamesh transition steps.",
-		Buckets: bucketsDatamesh,
+		Buckets: bucketsDatameshStep,
 	}, []string{LabelStorageClass, LabelNode, LabelType, LabelStep})
 )
 
