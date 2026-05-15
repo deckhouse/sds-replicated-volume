@@ -1,5 +1,6 @@
 *.md
 CHANGELOG
+api
 crds
 docs
 enabled
@@ -14,5 +15,7 @@ openapi
 release.yaml
 scripts
 template_tests
+testing
+tools
 werf*.yaml
 e2e
