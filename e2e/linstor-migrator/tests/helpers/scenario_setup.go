@@ -18,14 +18,19 @@ package helpers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,14 +67,14 @@ type MigratorSetupConfig struct {
 // MigratorSetupResult contains all resources prepared for migration and
 // verification stages.
 type MigratorSetupResult struct {
-	RunID            string
-	AttachedDisks    []*attachedDiskResult
-	LVGResults       []*lvmVolumeGroupResult
-	RSPResults       []*RSPResult
-	RSCResults       []*rscResult
-	PodResults       []*PodPVCResult
-	AutoResources    []string
-	ManualResources  []string
+	RunID           string
+	AttachedDisks   []*attachedDiskResult
+	LVGResults      []*lvmVolumeGroupResult
+	RSPResults      []*RSPResult
+	RSCResults      []*rscResult
+	PodResults      []*PodPVCResult
+	AutoResources   []string
+	ManualResources []string
 
 	OldRSPs       []RSPBaseline
 	PodNames      []string
@@ -327,7 +332,7 @@ func PrepareOrRestoreMigratorScenario(
 		hasFilter := len(suiteConfig.FocusStrings) > 0 || len(suiteConfig.FocusFiles) > 0 || suiteConfig.LabelFilter != ""
 		if cfg.RequireFocused && !hasFilter {
 			return nil, fmt.Errorf(
-				"TEST_PREVIOUS_RUNID is incompatible with full suite run (no focus). Use -ginkgo.focus/-ginkgo.label-filter for post-checks-only execution",
+				"TEST_PREVIOUS_RUNID is incompatible with full suite run (no focus).",
 			)
 		}
 
@@ -364,4 +369,143 @@ func normalizeSetupConfig(cfg MigratorSetupConfig) MigratorSetupConfig {
 	}
 
 	return cfg
+}
+
+// SimulateLostPVs simulates a scenario where PVCs and PVs are lost
+// before migration. It scales linstor-controller to 0, deletes pods,
+// removes PVCs (clearing finalizers), and deletes PVs (clearing finalizers).
+func SimulateLostPVs(ctx context.Context, c client.Client, podNames []string) error {
+	slog.Info("========== Simulating Lost PVs ==========")
+
+	// a. Scale deployment/linstor-controller to 0 replicas.
+	slog.Info("Scaling linstor-controller to 0 replicas")
+	var controllerDeploy appsv1.Deployment
+	key := client.ObjectKey{Namespace: namespaceSRV, Name: linstorControllerDeployment}
+	if err := c.Get(ctx, key, &controllerDeploy); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get linstor-controller deployment: %w", err)
+		}
+		slog.Info("linstor-controller deployment not found, skipping scale-down")
+	} else {
+		var replicas int32 = 0
+		patchPayload := []map[string]interface{}{
+			{"op": "replace", "path": "/spec/replicas", "value": replicas},
+		}
+		patchBytes, err := json.Marshal(patchPayload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal patch for linstor-controller: %w", err)
+		}
+		if err := c.Patch(ctx, &controllerDeploy, client.RawPatch(types.JSONPatchType, patchBytes)); err != nil {
+			return fmt.Errorf("failed to scale linstor-controller to 0: %w", err)
+		}
+
+		slog.Info("Waiting for linstor-controller readyReplicas to reach 0")
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			var deploy appsv1.Deployment
+			if err := c.Get(ctx, key, &deploy); err != nil {
+				if apierrors.IsNotFound(err) {
+					break
+				}
+				return fmt.Errorf("failed to get linstor-controller: %w", err)
+			}
+			if deploy.Status.ReadyReplicas == 0 {
+				slog.Info("linstor-controller scaled to 0 ready replicas")
+				break
+			}
+			time.Sleep(pollingInterval)
+		}
+	}
+
+	// b. Delete the given pods.
+	for _, podName := range podNames {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: TestNamespace,
+			},
+		}
+		if err := c.Delete(ctx, pod); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete pod %s: %w", podName, err)
+			}
+		}
+		slog.Info("Deleted pod", "name", podName)
+	}
+
+	// Wait until all pods are fully removed before proceeding to PVC deletion.
+	slog.Info("Waiting for all pods to be fully deleted")
+	podDeadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(podDeadline) {
+		allGone := true
+		for _, podName := range podNames {
+			var pod corev1.Pod
+			err := c.Get(ctx, client.ObjectKey{Name: podName, Namespace: TestNamespace}, &pod)
+			if err == nil {
+				allGone = false
+				break
+			}
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to check pod %s deletion status: %w", podName, err)
+			}
+		}
+		if allGone {
+			slog.Info("All pods are fully deleted")
+			break
+		}
+		time.Sleep(pollingInterval)
+	}
+	if time.Now().After(podDeadline) {
+		return fmt.Errorf("timeout waiting for pods to be fully deleted after 3 minutes")
+	}
+
+	// c. List PVCs having the label migrator-e2e. For each: collect PV name,
+	//    delete the PVC, then clear finalizers.
+	var pvcList corev1.PersistentVolumeClaimList
+	if err := c.List(ctx, &pvcList, client.InNamespace(TestNamespace)); err != nil {
+		return fmt.Errorf("failed to list PVCs: %w", err)
+	}
+
+	pvNames := make(map[string]bool)
+	removeFinalizersPatch := []byte(`{"metadata":{"finalizers":null}}`)
+	for _, pvc := range pvcList.Items {
+		if _, ok := pvc.Labels["migrator-e2e"]; !ok {
+			continue
+		}
+
+		if pvc.Spec.VolumeName != "" {
+			pvNames[pvc.Spec.VolumeName] = true
+		}
+
+		// Delete first, then clear finalizers so the API server removes the
+		// finalizer entry from the deleted object immediately.
+		slog.Info("Deleting PVC and clearing finalizers", "pvc", pvc.Name)
+		_ = c.Delete(ctx, &pvc)
+		_ = c.Patch(ctx, &pvc, client.RawPatch(types.MergePatchType, removeFinalizersPatch))
+
+		slog.Info("Deleted PVC", "name", pvc.Name, "pv", pvc.Spec.VolumeName)
+	}
+
+	// d. Delete each bound PV. Delete first then clear finalizers.
+	removePVFinalizersPatch := []byte(`{"metadata":{"finalizers":null}}`)
+	for pvName := range pvNames {
+		var pv corev1.PersistentVolume
+		if err := c.Get(ctx, client.ObjectKey{Name: pvName}, &pv); err != nil {
+			if apierrors.IsNotFound(err) {
+				slog.Info("PV already deleted", "name", pvName)
+				continue
+			}
+			return fmt.Errorf("failed to get PV %s: %w", pvName, err)
+		}
+
+		// Delete first, then clear finalizers.
+		slog.Info("Deleting PV and clearing finalizers", "pv", pvName)
+		_ = c.Delete(ctx, &pv)
+		_ = c.Patch(ctx, &pv, client.RawPatch(types.MergePatchType, removePVFinalizersPatch))
+
+		slog.Info("Deleted PV", "name", pvName)
+	}
+
+	slog.Info("========== Lost PVs Simulation Complete ==========")
+	return nil
 }

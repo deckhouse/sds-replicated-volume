@@ -287,7 +287,7 @@ echo "Step 2: Deleting Kubernetes resources (order matters for dependencies)..."
 
 # Delete in reverse order of creation to handle dependencies
 #delete_cluster_resources "replicatedvolumeattachments.storage.deckhouse.io" "ReplicatedVolumeAttachments"
-#delete_cluster_resources "replicatedvolumes.storage.deckhouse.io" "ReplicatedVolumes"
+delete_cluster_resources "replicatedvolumes.storage.deckhouse.io" "ReplicatedVolumes"
 #delete_cluster_resources "replicatedvolumereplicas.storage.deckhouse.io" "ReplicatedVolumeReplicas"
 #delete_cluster_resources "drbdresources.storage.deckhouse.io" "DRBDResources"
 #delete_cluster_resources "lvmlogicalvolumes.storage.deckhouse.io" "LVMLogicalVolumes"
