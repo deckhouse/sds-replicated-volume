@@ -1,108 +1,109 @@
-# E2E Тестирование Мигратора Linstor (sds-replicated-volume)
+# Linstor Migrator E2E Testing (sds-replicated-volume)
 
-Данные тесты предназначены **исключительно для ручного запуска** и не интегрированы в CI.
-Из-за специфики миграции control plane (переключение старых компонентов на новые), каждый сценарий требует чистого состояния кластера.
+These tests are intended **exclusively for manual execution** and are not integrated into CI.
+Due to the specifics of the control plane migration (switching old components to new ones), each scenario requires a clean cluster state.
 
-## Подход к тестированию
+## Testing Approach
 
-Тесты разделены на независимые сценарии. **ВАЖНО:** Нельзя запускать все тесты разом! Верхнеуровневые блоки `Describe` в Ginkgo выполняются последовательно на одном и том же кластере. Если первая миграция уже прошла, вторая упадет, так как кластер уже будет находиться на новом control plane.
+Tests are divided into independent scenarios. **IMPORTANT:** Do not run all tests at once! Top-level `Describe` blocks in Ginkgo are executed sequentially on the same cluster. If the first migration has already passed, the second one will fail because the cluster will already be on the new control plane.
 
-Жизненный цикл тестирования выглядит так:
-1. Запуск **одного** конкретного сценария через `make test-scenario` (нужен `LABEL`, см. ниже).
-2. Ручной запуск скрипта очистки (`scripts/cleanup.sh`) **непосредственно на мастер-узле тестового кластера**. (Этот скрипт не поддерживает запуск локально с машины разработчика).
-3. Запуск следующего сценария на очищенном кластере.
+The testing lifecycle looks like this:
+1. Run **one** specific scenario via `make test-scenario` (requires a `LABEL`, see below).
+2. Manually run the cleanup script (`scripts/cleanup.sh`) **directly on the master node of the test cluster**. (This script does not support local execution from a developer's machine).
+3. Run the next scenario on the cleaned cluster.
 
-### Реализуемые сценарии (Describe блоки):
-* **`All RVs are created with ConfigurationMode: Auto`** (Label: `"Auto"`): Базовый флоу, когда все ресурсы Linstor имеют связанные RSC до начала миграции.
-* **`All RVs are created with ConfigurationMode: Manual`** (Label: `"Manual"`): Эмуляция ситуации, когда все RSC были удалены до начала миграции.
-* **`RVs are created with mixed ConfigurationMode (Auto and Manual)`** (Label: `"Mixed"`): Гибридный сценарий, где часть ресурсов имеет RSC, а часть — нет.
+### Implemented Scenarios (Describe blocks):
+* **`All RVs are created with ConfigurationMode: Auto`** (Label: `"Auto"`): The base flow where all Linstor resources have associated RSCs before migration starts.
+* **`All RVs are created with ConfigurationMode: Manual`** (Label: `"Manual"`): Emulates a situation where all RSCs were deleted before migration starts.
+* **`RVs are created with mixed ConfigurationMode (Auto and Manual)`** (Label: `"Mixed"`): A hybrid scenario where some resources have RSCs and some do not.
+* **`Linstor resources without PV`** (Label: `"WithoutPV"`): Emulates a situation where PVCs and PVs are lost before migration to verify correct handling of orphaned ReplicatedVolumes (setting the `no-persistent-volume` label and resolving `replicatedStorageClassName`).
 
-## Настройка окружения (Переменные)
+## Environment Setup (Variables)
 
-Для запуска тестов необходимо подготовить файл с экспортами переменных окружения (например, `test_exports.sh`).
+To run the tests, you need to prepare a file exporting environment variables (e.g., `test_exports.sh`).
 
-### Шаг 1: Создание нового тестового кластера (Первый запуск)
-Для запуска первого сценария кластер необходимо создать с нуля.
+### Step 1: Create a new test cluster (First run)
+To run the first scenario, the cluster must be created from scratch.
 
 ```bash
-# --- Постоянные переменные
+# --- Persistent variables
 export TEST_CLUSTER_NAMESPACE='e2e-linstor-migrator'
 export TEST_CLUSTER_STORAGE_CLASS='huawei-storage-stable'
 export KUBE_CONFIG_PATH=$HOME/.kube/config-san
 
-# Если тест прерывается по ctrl+c, то следующий запуск должен увидеть эту переменную
+# If the test is interrupted by ctrl+c, the next run should see this variable
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 
-# PR, на который переключится новый control plane
+# The PR to which the new control plane will switch
 export TEST_MIGRATOR_MPO_IMAGE_TAG=pr631
 
-# Больше логов во время запуска тестов
+# More logs during test execution
 export TEST_DEBUG=1
 export TEST_CLUSTER_VIRTUAL_MACHINE_CLASS_NAME=e2e-host
 
 export DKP_LICENSE_KEY=xxxxxxx
 export REGISTRY_DOCKER_CFG=<base64>
 
-# --- Создание кластера
+# --- Cluster creation
 export TEST_CLUSTER_CREATE_MODE='alwaysCreateNew'
 export TEST_CLUSTER_CLEANUP='false'
 
-# Базовый кластер
+# Base cluster
 export SSH_HOST=172.17.1.67
 export SSH_USER=tfadm
 export SSH_PRIVATE_KEY=$HOME/.ssh/flant/id_rsa
 export SSH_PUBLIC_KEY=$HOME/.ssh/flant/id_rsa.pub
-# Задается только если ключ имеет пароль, иначе не задается
+# Set only if the key has a passphrase, otherwise unset
 export SSH_PASSPHRASE=xxxxxxx
 ```
 
-### Шаг 2: Использование существующего кластера (Последующие запуски)
-После того как первый тест отработал, **обязательно очистите тестовый кластер** (см. раздел "Очистка"). 
-Затем измените переменные для запуска следующего теста на уже существующем кластере:
+### Step 2: Use existing cluster (Subsequent runs)
+After the first test has completed, **you must clean up the test cluster** (see the "Cleanup" section).
+Then change the variables to run the next test on the already existing cluster:
 
 ```bash
-# ... (постоянные переменные остаются теми же) ...
+# ... (persistent variables remain the same) ...
 
-# --- Использование созданного ранее кластера
+# --- Use previously created cluster
 export TEST_CLUSTER_CREATE_MODE='alwaysUseExisting'
 
-# Базовый кластер (jump host)
+# Base cluster (jump host)
 export SSH_JUMP_HOST=172.17.1.67
 export SSH_JUMP_USER=tfadm
 
-# Тестовый (ранее созданный) кластер
+# Test (previously created) cluster
 export SSH_HOST=10.211.1.6
 export SSH_USER=cloud
 
-# ID ранее сохраненного состояния (только если вы хотите запустить пост-проверку без повторной миграции)
-# Например: make test-scenario-it LABEL="Auto" FOCUS="RV resource checks"
-# Не задавать, если не знаете, зачем это нужно!
+# ID of previously saved state (only if you want to run post-checks without re-migration)
+# Example: make test-scenario-it LABEL="Auto" FOCUS="RV resource checks"
+# Do not set if you don't know why it's needed!
 # export TEST_PREVIOUS_RUNID=5a6eaefb
 ```
 
-## Запуск тестов
+## Running Tests
 
-Из-за необходимости изолировать сценарии, обычная команда `make test` удалена.
-Используйте `make test-scenario` и `make test-scenario-it`:
+Due to the need to isolate scenarios, the standard `make test` command has been removed.
+Use `make test-scenario` and `make test-scenario-it`:
 
-- **`LABEL`** — Ginkgo-метка сценария (`Auto`, `Manual`, `Mixed`).
-- **`FOCUS`** — аргумент `-ginkgo.focus` (регулярное выражение по цепочке имён `Describe` / `It` в Ginkgo).
+- **`LABEL`** — Ginkgo label for the scenario (`Auto`, `Manual`, `Mixed`, `WithoutPV`).
+- **`FOCUS`** — argument for `-ginkgo.focus` (regular expression matching the `Describe` / `It` chain in Ginkgo).
 
-Запуск всего сценария по метке (миграция и все вложенные проверки):
+Run entire scenario by label (migration and all nested checks):
 ```bash
 make test-scenario LABEL="Auto"
 ```
 
-Запуск конкретной проверки внутри сценария:
+Run specific check inside a scenario:
 ```bash
 make test-scenario-it LABEL="Auto" FOCUS="RV resource checks"
 ```
 
-## Очистка
+## Cleanup
 
-После успешного или неудачного завершения сценария, перед запуском следующего теста необходимо полностью удалить тестовые ресурсы из кластера.
+After a scenario completes successfully or fails, the test resources must be completely removed from the cluster before running the next test.
 
-**Внимание:** Скрипт очистки нельзя запускать с машины разработчика!
-1. Скопируйте скрипт на мастер-узел тестового кластера: `scp scripts/cleanup.sh <USER>@<CLUSTER_IP>:/tmp/`
-2. Зайдите по SSH на тестовый кластер.
-3. Запустите скрипт: `bash /tmp/cleanup.sh`
+**Warning:** The cleanup script cannot be run from a developer's machine!
+1. Copy the script to the master node of the test cluster: `scp scripts/cleanup.sh <USER>@<CLUSTER_IP>:/tmp/`
+2. SSH into the test cluster.
+3. Run the script: `bash /tmp/cleanup.sh`

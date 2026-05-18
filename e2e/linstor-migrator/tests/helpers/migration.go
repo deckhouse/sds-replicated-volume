@@ -1158,6 +1158,74 @@ func CheckRVAdoptAnnotationsAbsentFromSnapshot(snapshot *RVSnapshot) []error {
 	return errors
 }
 
+// noPersistentVolumeLabelAffirmativeKey marks the presence (value "true") of the
+// no-persistent-volume label on RVs created without a corresponding PV.
+const noPersistentVolumeLabelAffirmativeKey = "sds-replicated-volume.deckhouse.io/no-persistent-volume"
+
+// CheckRVNoPersistentVolumeLabelFromSnapshot verifies that each RV has the
+// no-persistent-volume label set to "true".
+func CheckRVNoPersistentVolumeLabelFromSnapshot(snapshot *RVSnapshot) []error {
+	var errors []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		if rv.Labels == nil {
+			errors = append(errors, fmt.Errorf(
+				"RV %s has nil labels, expected label %q=%q",
+				resourceName, noPersistentVolumeLabelAffirmativeKey, "true",
+			))
+			continue
+		}
+		value, exists := rv.Labels[noPersistentVolumeLabelAffirmativeKey]
+		if !exists || value != "true" {
+			errors = append(errors, fmt.Errorf(
+				"RV %s has label %q=%q, expected %q",
+				resourceName, noPersistentVolumeLabelAffirmativeKey, value, "true",
+			))
+		}
+	}
+	return errors
+}
+
+// CheckRVReplicatedStorageClassWithoutPVSnapshot verifies RV replicatedStorageClassName
+// without relying on PV storageClassName (PVs may be absent).
+// For autoExpected resources, the migrator must have resolved a non-empty
+// replicatedStorageClassName from the pool name.
+// For manualExpected resources, replicatedStorageClassName must be empty.
+func CheckRVReplicatedStorageClassWithoutPVSnapshot(snapshot *RVSnapshot, autoExpected, manualExpected []string) []error {
+	var errors []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+
+		if stringInSlice(resourceName, autoExpected) {
+			if rv.Spec.ReplicatedStorageClassName == "" {
+				errors = append(errors, fmt.Errorf(
+					"RV %s has empty spec.replicatedStorageClassName (expected non-empty, migrator should resolve RSC by pool name)",
+					resourceName,
+				))
+			}
+		} else if stringInSlice(resourceName, manualExpected) {
+			if rv.Spec.ReplicatedStorageClassName != "" {
+				errors = append(errors, fmt.Errorf(
+					"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
+					resourceName, rv.Spec.ReplicatedStorageClassName,
+				))
+			}
+		} else {
+			errors = append(errors, fmt.Errorf(
+				"RV %s is not expected in auto or manual resource lists",
+				resourceName,
+			))
+		}
+	}
+	return errors
+}
+
 // CheckRVNoPersistentVolumeLabelAbsentFromSnapshot verifies no-persistent-volume label is absent for each RV.
 func CheckRVNoPersistentVolumeLabelAbsentFromSnapshot(snapshot *RVSnapshot) []error {
 	var errors []error
