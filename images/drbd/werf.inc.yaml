@@ -27,7 +27,7 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - 'echo "drbd-artifact cache bust: drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} rev 5"'
+    - 'echo "drbd-artifact cache bust: drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} rev 6"'
     - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/MrTomSawyer/3p-drbd.git  /drbd
     - cd /drbd
     - git submodule update --init --remote --recursive
