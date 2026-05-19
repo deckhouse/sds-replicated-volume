@@ -1,0 +1,3 @@
+Изменения:
+- Added x-config-version marker to the OpenAPI schema config-values ​​for versioning
+  module parameters
