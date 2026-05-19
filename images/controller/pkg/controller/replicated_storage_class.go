@@ -540,7 +540,6 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 			OwnerReferences: nil,
 			Finalizers:      []string{StorageClassFinalizerName},
 			ManagedFields:   nil,
-			Labels:          map[string]string{ManagedLabelKey: ManagedLabelValue},
 			Annotations:     map[string]string{RSCStorageClassVolumeSnapshotClassAnnotationKey: RSCStorageClassVolumeSnapshotClassAnnotationValue},
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
@@ -548,6 +547,13 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		Provisioner:          StorageClassProvisioner,
 		ReclaimPolicy:        &reclaimPolicy,
 		VolumeBindingMode:    &volumeBindingMode,
+	}
+
+	if replicatedSC.Labels != nil {
+		newStorageClass.Labels = replicatedSC.Labels
+		newStorageClass.Labels[ManagedLabelKey] = ManagedLabelValue
+	} else {
+		newStorageClass.Labels = map[string]string{ManagedLabelKey: ManagedLabelValue}
 	}
 
 	return newStorageClass
