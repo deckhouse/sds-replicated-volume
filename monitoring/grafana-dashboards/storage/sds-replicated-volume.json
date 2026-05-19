@@ -1681,12 +1681,12 @@
           "refId": "A"
         },
         {
-          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval]))), 0) or vector(0)",
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval])), 0) or vector(0)",
           "legendFormat": "{{node}} slow >2s <=8s",
           "refId": "B"
         },
         {
-          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval]))), 0) or vector(0)",
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval])), 0) or vector(0)",
           "legendFormat": "{{node}} too slow > 8s",
           "refId": "C"
         }
@@ -4427,12 +4427,12 @@
           "refId": "A"
         },
         {
-          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval])), 0) or vector(0)",
           "legendFormat": "{{node}} slow >5s <=20s",
           "refId": "B"
         },
         {
-          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval])), 0) or vector(0)",
           "legendFormat": "{{node}} too slow > 20s",
           "refId": "C"
         }
