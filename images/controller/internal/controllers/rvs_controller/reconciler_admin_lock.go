@@ -36,7 +36,7 @@ const (
 
 	adminLockAcquireRequeueAfter = 5 * time.Second
 
-	adminLockFailedRequeueAfter = 10 * time.Second
+	adminLockFailedRequeueAfter = 30 * time.Second
 )
 
 // reconcileAcquireAdminLock ensures the cluster-wide DRBD admin lock is held
@@ -88,6 +88,20 @@ func (r *Reconciler) reconcileAcquireAdminLock(
 			}
 			return rf.Continue()
 		case v1alpha1.DRBDOperationPhaseFailed:
+			if op.Status.CompletedAt != nil {
+				elapsed := time.Since(op.Status.CompletedAt.Time)
+				if elapsed < adminLockFailedRequeueAfter {
+					remaining := adminLockFailedRequeueAfter - elapsed
+					if condOutcome := r.reconcileAdminLockCondition(rf.Ctx(), rvs,
+						metav1.ConditionFalse,
+						v1alpha1.ReplicatedVolumeSnapshotCondAdminLockedReasonRetryingTransient,
+						fmt.Sprintf("Admin lock op failed (%q), backoff %s before retry", op.Status.Message, remaining.Round(time.Second)),
+					); condOutcome.ShouldReturn() {
+						return condOutcome
+					}
+					return rf.DoneAndRequeueAfter(remaining)
+				}
+			}
 			rf.Log().Info("admin-lock: op Failed, deleting to retry",
 				"op", op.Name, "message", op.Status.Message)
 			if err := r.deleteAdminLockOp(rf.Ctx(), op); err != nil && !apierrors.IsNotFound(err) {
