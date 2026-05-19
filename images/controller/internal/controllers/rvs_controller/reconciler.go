@@ -119,8 +119,9 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return outcome
 	}
 
-	if rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady ||
-		rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseFailed {
+	if (rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady ||
+		rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseFailed) &&
+		!prepareNeedsRun(rvs) && !syncNeedsRun(rvs) {
 		if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
 			return releaseOutcome
 		}
