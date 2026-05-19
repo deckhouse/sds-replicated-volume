@@ -1560,8 +1560,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
-          "legendFormat": "configured {{instance}}",
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le, node, instance))",
+          "legendFormat": "configured {{node}} / {{instance}}",
           "refId": "A"
         },
         {
@@ -1621,8 +1621,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "configured {{instance}}",
+          "expr": "sum by (node, instance) (increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "configured {{node}} / {{instance}}",
           "refId": "A"
         },
         {
@@ -1676,18 +1676,18 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval])) or vector(0)",
-          "legendFormat": "healthy <= 2s",
+          "expr": "sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{node}} healthy <= 2s",
           "refId": "A"
         },
         {
-          "expr": "clamp_min((sum(increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval])) - sum(increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval]))), 0) or vector(0)",
-          "legendFormat": "slow >2s <=8s",
+          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{node}} slow >2s <=8s",
           "refId": "B"
         },
         {
-          "expr": "clamp_min((sum(increase(sds_drbdr_configured_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval]))), 0) or vector(0)",
-          "legendFormat": "too slow > 8s",
+          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{node}} too slow > 8s",
           "refId": "C"
         }
       ],
@@ -4306,8 +4306,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, instance))",
-          "legendFormat": "deleted {{instance}}",
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, node, instance))",
+          "legendFormat": "deleted {{node}} / {{instance}}",
           "refId": "A"
         },
         {
@@ -4367,8 +4367,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
-          "legendFormat": "deleted {{instance}}",
+          "expr": "sum by (node, instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "deleted {{node}} / {{instance}}",
           "refId": "A"
         },
         {
@@ -4422,18 +4422,18 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval])) or vector(0)",
-          "legendFormat": "healthy <= 5s",
+          "expr": "sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{node}} healthy <= 5s",
           "refId": "A"
         },
         {
-          "expr": "clamp_min((sum(increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval])) - sum(increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
-          "legendFormat": "slow >5s <=20s",
+          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{node}} slow >5s <=20s",
           "refId": "B"
         },
         {
-          "expr": "clamp_min((sum(increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
-          "legendFormat": "too slow > 20s",
+          "expr": "clamp_min((sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval]))) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{node}} too slow > 20s",
           "refId": "C"
         }
       ],
