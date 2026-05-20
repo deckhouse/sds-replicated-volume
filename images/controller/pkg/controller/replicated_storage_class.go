@@ -153,7 +153,10 @@ func NewReplicatedStorageClass(
 			log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get UPDATE event for ReplicatedStorageClass %s. Check if it was changed.", e.ObjectNew.GetName()))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Old ReplicatedStorageClass: %+v", e.ObjectOld))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] New ReplicatedStorageClass: %+v", e.ObjectNew))
-			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) || !reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil ||
+				!reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) ||
+				!reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) ||
+				!reflect.DeepEqual(e.ObjectNew.Labels, e.ObjectOld.Labels) {
 				log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass %s was changed. Add it to queue.", e.ObjectNew.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				q.Add(request)
