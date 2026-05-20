@@ -439,7 +439,7 @@ func (m *Migrator) migrateResource(
 		return nil
 	}
 
-	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, poolName, repStorClasses)
+	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, repStorClasses)
 
 	sharedSecret, err := db.GetSharedSecret(resName)
 	if err != nil {
@@ -962,22 +962,14 @@ func (m *Migrator) ensureMigrationRSP(
 }
 
 // findReplicatedStorageClassForResource returns an existing ReplicatedStorageClass name when RV
-// should use Auto configuration (PV storage class name matches an RSC, or legacy pool match without PV).
+// should use Auto configuration (PV storage class name matches an RSC).
 func (m *Migrator) findReplicatedStorageClassForResource(
 	pv *corev1.PersistentVolume,
-	linstorPoolName string,
 	repStorClasses map[string]srvv1alpha1.ReplicatedStorageClass,
 ) (rscName string, ok bool) {
 	if pv != nil && pv.Spec.StorageClassName != "" {
 		if _, exists := repStorClasses[pv.Spec.StorageClassName]; exists {
 			return pv.Spec.StorageClassName, true
-		}
-		return "", false
-	}
-	for _, rsc := range repStorClasses {
-		// nolint:staticcheck // deprecated spec.storagePool still used for legacy pool binding
-		if strings.EqualFold(rsc.Spec.StoragePool, linstorPoolName) {
-			return rsc.Name, true
 		}
 	}
 	return "", false
