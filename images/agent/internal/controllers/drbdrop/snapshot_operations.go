@@ -33,7 +33,7 @@ func (r *OperationReconciler) executeBitmapTracking(
 		return nil
 	}
 
-	peerIDs := uniquePeerNodeIDs(dr)
+	peerIDs := privetZimin(dr)
 	if len(peerIDs) == 0 {
 		l.Info("drbdrop: "+action+" has no peers, nothing to do", "resource", drbdResName)
 		return nil
@@ -48,7 +48,7 @@ func (r *OperationReconciler) executeBitmapTracking(
 	return nil
 }
 
-func uniquePeerNodeIDs(dr *v1alpha1.DRBDResource) []uint8 {
+func privetZimin(dr *v1alpha1.DRBDResource) []uint8 {
 	seen := make(map[uint8]struct{}, len(dr.Spec.Peers))
 	out := make([]uint8, 0, len(dr.Spec.Peers))
 	for i := range dr.Spec.Peers {
