@@ -22,11 +22,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/md5"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -116,9 +120,12 @@ func WriteGroupBackup(ctx context.Context, kClient client.Client, dyn dynamic.In
 		crdYamlBuf.Write(b)
 		log.Debug("backed up LINSTOR CRD definition", "crd", crd.Name)
 	}
-	crdGzPath := filepath.Join(dir, backupCRDsGzFile)
+	crdGzPath := getNextFilePath(filepath.Join(dir, backupCRDsGzFile))
 	if err := writeGzipFile(crdGzPath, crdYamlBuf.Bytes()); err != nil {
 		return err
+	}
+	if err := deduplicateBackups(log, dir, backupCRDsGzFile); err != nil {
+		return fmt.Errorf("deduplicate CRD backups: %w", err)
 	}
 
 	// List and serialize every custom resource instance per LINSTOR CRD into the multi-doc YAML for crs.gz.
@@ -162,9 +169,12 @@ func WriteGroupBackup(ctx context.Context, kClient client.Client, dyn dynamic.In
 		}
 		log.Debug("backed up LINSTOR custom resources", "crd", crd.Name, "count", len(list.Items))
 	}
-	crsGzPath := filepath.Join(dir, backupCRsGzFile)
+	crsGzPath := getNextFilePath(filepath.Join(dir, backupCRsGzFile))
 	if err := writeGzipFile(crsGzPath, crsYamlBuf.Bytes()); err != nil {
 		return err
+	}
+	if err := deduplicateBackups(log, dir, backupCRsGzFile); err != nil {
+		return fmt.Errorf("deduplicate CR backups: %w", err)
 	}
 
 	readmePath := filepath.Join(dir, backupReadme)
@@ -234,4 +244,71 @@ func storageVersionName(crd *apiextensionsv1.CustomResourceDefinition) (string, 
 		return crd.Spec.Versions[0].Name, nil
 	}
 	return "", fmt.Errorf("no versions")
+}
+
+func getNextFilePath(basePath string) string {
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return basePath
+	}
+	for i := 1; ; i++ {
+		path := fmt.Sprintf("%s.%d", basePath, i)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return path
+		}
+	}
+}
+
+func deduplicateBackups(log *slog.Logger, dir, baseFilename string) error {
+	matches, err := filepath.Glob(filepath.Join(dir, baseFilename+"*"))
+	if err != nil {
+		return err
+	}
+
+	var filePaths []string
+	for _, match := range matches {
+		if filepath.Base(match) == baseFilename || strings.HasPrefix(filepath.Base(match), baseFilename+".") {
+			filePaths = append(filePaths, match)
+		}
+	}
+
+	sort.Slice(filePaths, func(i, j int) bool {
+		s1 := strings.TrimPrefix(filepath.Base(filePaths[i]), baseFilename)
+		s2 := strings.TrimPrefix(filepath.Base(filePaths[j]), baseFilename)
+
+		if s1 == "" {
+			return true
+		}
+		if s2 == "" {
+			return false
+		}
+
+		n1, _ := strconv.Atoi(strings.TrimPrefix(s1, "."))
+		n2, _ := strconv.Atoi(strings.TrimPrefix(s2, "."))
+		return n1 < n2
+	})
+
+	seen := make(map[string]struct{})
+	for _, match := range filePaths {
+		f, err := os.Open(match)
+		if err != nil {
+			return fmt.Errorf("open for md5: %w", err)
+		}
+		h := md5.New()
+		if _, err := io.Copy(h, f); err != nil {
+			f.Close()
+			return fmt.Errorf("read for md5: %w", err)
+		}
+		f.Close()
+
+		hash := fmt.Sprintf("%x", h.Sum(nil))
+		if _, exists := seen[hash]; exists {
+			log.Debug("removed duplicate backup file", "file", match)
+			if err := os.Remove(match); err != nil {
+				return fmt.Errorf("remove duplicate: %w", err)
+			}
+		} else {
+			seen[hash] = struct{}{}
+		}
+	}
+	return nil
 }
