@@ -153,7 +153,10 @@ func NewReplicatedStorageClass(
 			log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get UPDATE event for ReplicatedStorageClass %s. Check if it was changed.", e.ObjectNew.GetName()))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Old ReplicatedStorageClass: %+v", e.ObjectOld))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] New ReplicatedStorageClass: %+v", e.ObjectNew))
-			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) || !reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil ||
+				!reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) ||
+				!reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) ||
+				!reflect.DeepEqual(e.ObjectNew.Labels, e.ObjectOld.Labels) {
 				log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass %s was changed. Add it to queue.", e.ObjectNew.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				q.Add(request)
@@ -540,7 +543,6 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 			OwnerReferences: nil,
 			Finalizers:      []string{StorageClassFinalizerName},
 			ManagedFields:   nil,
-			Labels:          map[string]string{ManagedLabelKey: ManagedLabelValue},
 			Annotations:     map[string]string{RSCStorageClassVolumeSnapshotClassAnnotationKey: RSCStorageClassVolumeSnapshotClassAnnotationValue},
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
@@ -548,6 +550,13 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		Provisioner:          StorageClassProvisioner,
 		ReclaimPolicy:        &reclaimPolicy,
 		VolumeBindingMode:    &volumeBindingMode,
+	}
+
+	if replicatedSC.Labels != nil {
+		newStorageClass.Labels = replicatedSC.Labels
+		newStorageClass.Labels[ManagedLabelKey] = ManagedLabelValue
+	} else {
+		newStorageClass.Labels = map[string]string{ManagedLabelKey: ManagedLabelValue}
 	}
 
 	return newStorageClass
