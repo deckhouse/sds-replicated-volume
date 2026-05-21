@@ -23,6 +23,19 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 )
 
+type rvMetricObservation func()
+
+type rvMetricObservations []rvMetricObservation
+
+// observe records lifecycle/object-state events into the in-process Prometheus registry.
+// Call it only after the Kubernetes state described by the observations has been
+// successfully committed.
+func (observations rvMetricObservations) observe() {
+	for _, observe := range observations {
+		observe()
+	}
+}
+
 // observeRVDeletion records the deletion duration when an RV finalizer is removed.
 func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
 	if rv == nil || rv.DeletionTimestamp == nil {
@@ -32,29 +45,34 @@ func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
 	metrics.RVDeletionDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
 }
 
-// observeRVInitialFormation records the first point when RV initial formation is ready.
+// computeRVInitialFormationMetricObservations returns the first point when RV initial formation is ready.
 // This mirrors CSI readiness logic: DatameshRevision > 0 and no active Formation transition.
-func observeRVInitialFormation(base, rv *v1alpha1.ReplicatedVolume) {
+func computeRVInitialFormationMetricObservations(now time.Time, base, rv *v1alpha1.ReplicatedVolume) rvMetricObservations {
 	if rv == nil || rv.DeletionTimestamp != nil {
-		return
+		return nil
 	}
 	if rvInitialFormationReady(base) || !rvInitialFormationReady(rv) {
-		return
+		return nil
 	}
 
-	dur := time.Since(rv.CreationTimestamp.Time).Seconds()
-	metrics.RVInitialFormationDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
+	dur := now.Sub(rv.CreationTimestamp.Time).Seconds()
+	storageClass := rv.Spec.ReplicatedStorageClassName
+	return rvMetricObservations{
+		func() {
+			metrics.RVInitialFormationDuration.WithLabelValues(storageClass).Observe(dur)
+		},
+	}
 }
 
-// observeRVAPhaseChange records RVA metrics when phase changes.
-// Called from reconcileRVAConditionsFromDatameshReplicaContext before the status patch.
-func observeRVAPhaseChange(
+// computeRVAPhaseChangeMetricObservations records RVA metrics when phase changes.
+func computeRVAPhaseChangeMetricObservations(
+	now time.Time,
 	rva *v1alpha1.ReplicatedVolumeAttachment,
 	oldPhase v1alpha1.ReplicatedVolumeAttachmentPhase,
 	newPhase v1alpha1.ReplicatedVolumeAttachmentPhase,
-) {
+) rvMetricObservations {
 	if rva == nil {
-		return
+		return nil
 	}
 
 	node := rva.Spec.NodeName
@@ -63,10 +81,16 @@ func observeRVAPhaseChange(
 		// First time reaching Attached: observe ready/creation duration.
 		if oldPhase != v1alpha1.ReplicatedVolumeAttachmentPhaseAttached &&
 			newPhase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
-			dur := time.Since(rva.CreationTimestamp.Time).Seconds()
-			metrics.RVAReadyDuration.WithLabelValues(node).Observe(dur)
+			dur := now.Sub(rva.CreationTimestamp.Time).Seconds()
+			return rvMetricObservations{
+				func() {
+					metrics.RVAReadyDuration.WithLabelValues(node).Observe(dur)
+				},
+			}
 		}
 	}
+
+	return nil
 }
 
 // observeRVADetach records the detach duration when an RVA finalizer is removed.
@@ -85,19 +109,20 @@ func cleanupRVAMetrics(rva *v1alpha1.ReplicatedVolumeAttachment) {
 	}
 }
 
-// observeDatameshMetrics compares datamesh transitions before and after ProcessTransitions.
+// computeDatameshMetricObservations compares datamesh transitions before and after ProcessTransitions.
 // Transitions that were in oldTransitions but are absent in rv.Status.DatameshTransitions
 // were completed during this reconcile cycle.
-func observeDatameshMetrics(
+func computeDatameshMetricObservations(
+	now time.Time,
 	rv *v1alpha1.ReplicatedVolume,
 	oldTransitions []v1alpha1.ReplicatedVolumeDatameshTransition,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-) {
+) rvMetricObservations {
 	if rv == nil {
-		return
+		return nil
 	}
 
-	now := time.Now()
+	var observations rvMetricObservations
 	replicaNodes := datameshReplicaNodes(rvrs)
 
 	// Detect completed transitions: present in old but absent in new.
@@ -121,8 +146,10 @@ func observeDatameshMetrics(
 		startedAt := old.StartedAt()
 		if !startedAt.IsZero() {
 			dur := now.Sub(startedAt.Time).Seconds()
-			metrics.DatameshTransitionDuration.WithLabelValues(storageClass, node, typ).Observe(dur)
-			metrics.DatameshTransitionsCompleted.WithLabelValues(storageClass, node, typ).Inc()
+			observations = append(observations, func() {
+				metrics.DatameshTransitionDuration.WithLabelValues(storageClass, node, typ).Observe(dur)
+				metrics.DatameshTransitionsCompleted.WithLabelValues(storageClass, node, typ).Inc()
+			})
 		}
 
 		// Observe individual step durations from the old transition snapshot.
@@ -130,7 +157,10 @@ func observeDatameshMetrics(
 			step := &old.Steps[si]
 			if step.StartedAt != nil && step.CompletedAt != nil {
 				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, step.Name).Observe(stepDur)
+				stepName := step.Name
+				observations = append(observations, func() {
+					metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, stepName).Observe(stepDur)
+				})
 			}
 		}
 	}
@@ -164,10 +194,15 @@ func observeDatameshMetrics(
 
 			if !alreadyCompleted {
 				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, step.Name).Observe(stepDur)
+				stepName := step.Name
+				observations = append(observations, func() {
+					metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, stepName).Observe(stepDur)
+				})
 			}
 		}
 	}
+
+	return observations
 }
 
 func datameshReplicaNodes(rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]string {

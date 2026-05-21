@@ -26,34 +26,49 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 )
 
-// observeRVRMetrics compares the RVR state before (base) and after ensures,
-// and records appropriate metrics. Called after ensures, before status patch.
-func observeRVRMetrics(
+type rvrMetricObservation func()
+
+type rvrMetricObservations []rvrMetricObservation
+
+// observe records lifecycle/object-state events into the in-process Prometheus registry.
+// Call it only after the Kubernetes state described by the observations has been
+// successfully committed.
+func (observations rvrMetricObservations) observe() {
+	for _, observe := range observations {
+		observe()
+	}
+}
+
+// computeRVRMetricObservations compares the RVR state before (base) and after ensures.
+func computeRVRMetricObservations(
+	now time.Time,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 	rv *v1alpha1.ReplicatedVolume,
-) {
+) rvrMetricObservations {
 	if rvr == nil || base == nil {
-		return
+		return nil
 	}
 
 	node := rvr.Spec.NodeName
 	sc := rvrStorageClassLabel(rvr, rv)
 
-	observeRVRReadyTransition(rvr, base, node, sc)
+	var observations rvrMetricObservations
+	observations = append(observations, computeRVRReadyTransitionMetricObservations(rvr, base, node, sc)...)
 
 	// BackingVolumeReady transition: observe LLV provisioning time.
-	observeBackingVolumeReady(rvr, base, node, sc)
+	observations = append(observations, computeBackingVolumeReadyMetricObservations(now, rvr, base, node, sc)...)
+	return observations
 }
 
-// observeRVRReadyTransition records every Ready condition transition from non-True to True.
-func observeRVRReadyTransition(
+// computeRVRReadyTransitionMetricObservations records every Ready condition transition from non-True to True.
+func computeRVRReadyTransitionMetricObservations(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 	node, sc string,
-) {
+) rvrMetricObservations {
 	if rvr.DeletionTimestamp != nil {
-		return
+		return nil
 	}
 
 	oldCond := obju.GetStatusCondition(base, v1alpha1.ReplicatedVolumeReplicaCondReadyType)
@@ -62,7 +77,7 @@ func observeRVRReadyTransition(
 	wasTrue := oldCond != nil && oldCond.Status == metav1.ConditionTrue
 	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
 	if wasTrue || !isTrue {
-		return
+		return nil
 	}
 
 	startedAt := rvr.CreationTimestamp.Time
@@ -72,19 +87,24 @@ func observeRVRReadyTransition(
 
 	duration := newCond.LastTransitionTime.Sub(startedAt)
 	if duration <= 0 {
-		return
+		return nil
 	}
 
-	metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(duration.Seconds())
+	return rvrMetricObservations{
+		func() {
+			metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(duration.Seconds())
+		},
+	}
 }
 
-// observeBackingVolumeReady detects BackingVolumeReady condition transitioning to True
+// computeBackingVolumeReadyMetricObservations detects BackingVolumeReady condition transitioning to True
 // and records the LLV provisioning time.
-func observeBackingVolumeReady(
+func computeBackingVolumeReadyMetricObservations(
+	now time.Time,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 	node, sc string,
-) {
+) rvrMetricObservations {
 	oldCond := obju.GetStatusCondition(base, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
 	newCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
 
@@ -92,9 +112,14 @@ func observeBackingVolumeReady(
 	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
 
 	if !wasTrue && isTrue {
-		dur := time.Since(rvr.CreationTimestamp.Time).Seconds()
-		metrics.RVRBackingVolumeDuration.WithLabelValues(node, sc).Observe(dur)
+		dur := now.Sub(rvr.CreationTimestamp.Time).Seconds()
+		return rvrMetricObservations{
+			func() {
+				metrics.RVRBackingVolumeDuration.WithLabelValues(node, sc).Observe(dur)
+			},
+		}
 	}
+	return nil
 }
 
 // observeRVRDeletion records the deletion duration when an RVR finalizer is removed.

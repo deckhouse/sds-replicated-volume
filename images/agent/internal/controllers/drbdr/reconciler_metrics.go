@@ -26,17 +26,31 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/metrics"
 )
 
-// observeDRBDRMetrics compares the DRBDR state before and after reconciliation
-// and records appropriate metrics.
-func observeDRBDRMetrics(
+type drbdrMetricObservation func()
+
+type drbdrMetricObservations []drbdrMetricObservation
+
+// observe records lifecycle/object-state events into the in-process Prometheus registry.
+// Call it only after the Kubernetes state described by the observations has been
+// successfully committed, or when it already comes from committed status.
+func (observations drbdrMetricObservations) observe() {
+	for _, observe := range observations {
+		observe()
+	}
+}
+
+// computeDRBDRMetricObservations compares the DRBDR state before and after reconciliation.
+func computeDRBDRMetricObservations(
+	now time.Time,
 	drbdr *v1alpha1.DRBDResource,
 	statusBase *v1alpha1.DRBDResource,
-) {
+) drbdrMetricObservations {
 	if drbdr == nil || statusBase == nil {
-		return
+		return nil
 	}
 
 	rvLabel := drbdr.Labels[v1alpha1.ReplicatedVolumeLabelKey]
+	var observations drbdrMetricObservations
 
 	// Detect Configured condition transition to True.
 	oldCond := obju.GetStatusCondition(statusBase, v1alpha1.DRBDResourceCondConfiguredType)
@@ -46,8 +60,10 @@ func observeDRBDRMetrics(
 	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
 
 	if !wasTrue && isTrue {
-		dur := time.Since(drbdr.CreationTimestamp.Time).Seconds()
-		metrics.DRBDRConfiguredDuration.Observe(dur)
+		dur := now.Sub(drbdr.CreationTimestamp.Time).Seconds()
+		observations = append(observations, func() {
+			metrics.DRBDRConfiguredDuration.Observe(dur)
+		})
 	}
 
 	// Health gauge: report Configured condition value.
@@ -56,8 +72,13 @@ func observeDRBDRMetrics(
 		if newCond.Status == metav1.ConditionTrue {
 			val = 1
 		}
-		metrics.DRBDRCondition.WithLabelValues(drbdr.Name, rvLabel, v1alpha1.DRBDResourceCondConfiguredType).Set(val)
+		name := drbdr.Name
+		observations = append(observations, func() {
+			metrics.DRBDRCondition.WithLabelValues(name, rvLabel, v1alpha1.DRBDResourceCondConfiguredType).Set(val)
+		})
 	}
+
+	return observations
 }
 
 // observeDRBDRDeletion records the deletion duration when the agent finalizer is removed.

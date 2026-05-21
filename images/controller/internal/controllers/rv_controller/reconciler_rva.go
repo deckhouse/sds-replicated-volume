@@ -19,6 +19,7 @@ package rvcontroller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -83,11 +84,15 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			// Copy attachment fields from RVR if available, clear otherwise.
 			applyRVAAttachmentFields(rva, dmrctx.RVR())
 
-			observeRVAPhaseChange(rva, base.Status.Phase, phase)
+			metricObservations := computeRVAPhaseChangeMetricObservations(time.Now(), rva, base.Status.Phase, phase)
 
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
 			}
+			// patchRVAStatus ignores NotFound because RVA deletion is a normal race.
+			// In that rare case we still keep the attach duration observation: the
+			// reconciliation path reached Attached before the object disappeared.
+			metricObservations.observe()
 		}
 	}
 

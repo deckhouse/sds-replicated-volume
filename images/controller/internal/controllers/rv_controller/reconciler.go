@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -120,7 +121,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
 		)
-		if !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
+		if result.Error() == nil && !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
 			observeRVDeletion(rv)
 		}
 		return result.ToCtrl()
@@ -192,14 +193,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return outcome.ToCtrl()
 	}
 
-	// Observe datamesh metrics (compare transitions before/after processing).
-	observeDatameshMetrics(rv, base.Status.DatameshTransitions, rvrs)
-	observeRVInitialFormation(base, rv)
+	// Compute pending metric observations before patching, then observe them
+	// only after the status state they describe has been committed.
+	now := time.Now()
+	metricObservations := computeDatameshMetricObservations(now, rv, base.Status.DatameshTransitions, rvrs)
+	metricObservations = append(metricObservations, computeRVInitialFormationMetricObservations(now, base, rv)...)
 
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
+		metricObservations.observe()
 	}
 
 	return outcome.ToCtrl()

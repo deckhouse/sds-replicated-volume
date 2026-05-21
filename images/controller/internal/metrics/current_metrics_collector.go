@@ -143,6 +143,9 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	// Keep all Kubernetes nodes in the zero-filled node matrix intentionally.
+	// RVA is an attachment intent and can target any node, not only storage nodes.
+	// Pre-emitting zero series keeps Grafana panels continuous for node filters.
 	nodes := collectNodeNames(nodeList.Items, rvrList.Items, rvaList.Items)
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
@@ -183,10 +186,7 @@ func collectNodeNames(
 		values = append(values, name)
 	}
 	for i := range rvrs {
-		name := rvrs[i].Spec.NodeName
-		if name == "" {
-			continue
-		}
+		name := currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
 		if _, exists := seen[name]; exists {
 			continue
 		}
@@ -194,10 +194,7 @@ func collectNodeNames(
 		values = append(values, name)
 	}
 	for i := range rvas {
-		name := rvas[i].Spec.NodeName
-		if name == "" {
-			continue
-		}
+		name := currentMetricsNodeLabel(rvas[i].Spec.NodeName)
 		if _, exists := seen[name]; exists {
 			continue
 		}
@@ -216,22 +213,16 @@ func collectStorageClassNames(
 ) []string {
 	seen := make(map[string]struct{}, len(rscs)+len(rvs)+len(rvrs)+len(rvas))
 	for i := range rscs {
-		seen[rscs[i].Name] = struct{}{}
+		seen[currentMetricsStorageClassLabel(rscs[i].Name)] = struct{}{}
 	}
 	for i := range rvs {
-		seen[rvs[i].Spec.ReplicatedStorageClassName] = struct{}{}
+		seen[currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)] = struct{}{}
 	}
 	for i := range rvrs {
-		if sc := rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
-			seen[sc] = struct{}{}
-		}
+		seen[currentMetricsStorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
 	}
 	for i := range rvas {
-		if sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
-			seen[sc] = struct{}{}
-		} else {
-			seen[currentMetricsSCUnknown] = struct{}{}
-		}
+		seen[currentMetricsStorageClassLabel(rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
 	}
 
 	values := make([]string, 0, len(seen))
@@ -257,7 +248,7 @@ func collectRVCounts(
 	}
 
 	for i := range rvs {
-		sc := rvs[i].Spec.ReplicatedStorageClassName
+		sc := currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
 		phase := currentMetricsRVPhaseActive
 		if rvs[i].DeletionTimestamp != nil {
 			phase = currentMetricsRVPhaseDeleting
@@ -290,8 +281,8 @@ func collectRVRCounts(
 	}
 
 	for i := range rvrs {
-		node := rvrs[i].Spec.NodeName
-		sc := rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]
+		node := currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
+		sc := currentMetricsStorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])
 		phase := string(rvrs[i].Status.Phase)
 		if phase == "" {
 			phase = "Unknown"
@@ -328,18 +319,16 @@ func collectRVACounts(
 
 	rvStorageClasses := make(map[string]string, len(rvs))
 	for i := range rvs {
-		rvStorageClasses[rvs[i].Name] = rvs[i].Spec.ReplicatedStorageClassName
+		rvStorageClasses[rvs[i].Name] = currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
 	}
 
 	for i := range rvas {
-		node := rvas[i].Spec.NodeName
+		node := currentMetricsNodeLabel(rvas[i].Spec.NodeName)
 		sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]
 		if sc == "" {
 			sc = rvStorageClasses[rvas[i].Spec.ReplicatedVolumeName]
 		}
-		if sc == "" {
-			sc = currentMetricsSCUnknown
-		}
+		sc = currentMetricsStorageClassLabel(sc)
 		phase := string(rvas[i].Status.Phase)
 		if phase == "" {
 			phase = "Unknown"
@@ -375,8 +364,8 @@ func collectRVRDeletingCounts(
 		if rvr.DeletionTimestamp == nil {
 			continue
 		}
-		node := rvr.Spec.NodeName
-		sc := rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey]
+		node := currentMetricsNodeLabel(rvr.Spec.NodeName)
+		sc := currentMetricsStorageClassLabel(rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey])
 		counts[metricKey(node, sc)]++
 	}
 
@@ -395,7 +384,7 @@ func collectDatameshActiveTransitions(
 	rvs []v1alpha1.ReplicatedVolume,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
-	nodes = append([]string{currentMetricsNodeGlobal, currentMetricsNodeUnknown}, nodes...)
+	nodes = prependMissingCurrentMetricsNodes(nodes, currentMetricsNodeGlobal, currentMetricsNodeUnknown)
 	types := datameshTransitionTypes()
 	typeCounts := make(map[string]float64, len(storageClasses)*len(nodes)*len(types))
 	for _, sc := range storageClasses {
@@ -408,12 +397,12 @@ func collectDatameshActiveTransitions(
 
 	replicaNodes := make(map[string]string, len(rvrs))
 	for i := range rvrs {
-		replicaNodes[rvrs[i].Name] = rvrs[i].Spec.NodeName
+		replicaNodes[rvrs[i].Name] = currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
 	}
 
 	for i := range rvs {
 		rv := &rvs[i]
-		sc := rv.Spec.ReplicatedStorageClassName
+		sc := currentMetricsStorageClassLabel(rv.Spec.ReplicatedStorageClassName)
 		for j := range rv.Status.DatameshTransitions {
 			transition := &rv.Status.DatameshTransitions[j]
 			typ := string(transition.Type)
@@ -483,6 +472,37 @@ func datameshTransitionTypes() []string {
 		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses),
 		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume),
 	}
+}
+
+func currentMetricsNodeLabel(node string) string {
+	if node == "" {
+		return currentMetricsNodeUnknown
+	}
+	return node
+}
+
+func currentMetricsStorageClassLabel(storageClass string) string {
+	if storageClass == "" {
+		return currentMetricsSCUnknown
+	}
+	return storageClass
+}
+
+func prependMissingCurrentMetricsNodes(nodes []string, prefixes ...string) []string {
+	seen := make(map[string]struct{}, len(nodes)+len(prefixes))
+	for _, node := range nodes {
+		seen[node] = struct{}{}
+	}
+
+	result := make([]string, 0, len(nodes)+len(prefixes))
+	for _, node := range prefixes {
+		if _, exists := seen[node]; exists {
+			continue
+		}
+		seen[node] = struct{}{}
+		result = append(result, node)
+	}
+	return append(result, nodes...)
 }
 
 func metricKey(values ...string) string {
