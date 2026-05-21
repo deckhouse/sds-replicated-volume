@@ -89,9 +89,14 @@ type Client struct {
 	informerReady bool
 
 	// Dispatcher: routes RV events to registered checkers by name.
-	// Key: RV name, Value: channel to send updates.
+	// Key: RV name, Value: checker registration.
 	rvCheckersMu sync.RWMutex
-	rvCheckers   map[string]chan *v1alpha1.ReplicatedVolume
+	rvCheckers   map[string]rvCheckerRegistration
+}
+
+type rvCheckerRegistration struct {
+	ch   chan *v1alpha1.ReplicatedVolume
+	done <-chan struct{}
 }
 
 // NewClient creates a new Kubernetes client
@@ -143,7 +148,7 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 		cfg:          cfg,
 		scheme:       scheme,
 		informerStop: make(chan struct{}),
-		rvCheckers:   make(map[string]chan *v1alpha1.ReplicatedVolume),
+		rvCheckers:   make(map[string]rvCheckerRegistration),
 	}
 
 	// Initialize shared informers (RV, RVA)
@@ -292,21 +297,21 @@ func (c *Client) initInformers() error {
 // listObj is used as the target for list decoding (e.g., &v1alpha1.ReplicatedVolumeList{}).
 func crdListWatch(restClient rest.Interface, resource string, listObj runtime.Object) *cache.ListWatch {
 	return &cache.ListWatch{
-		ListWithContextFunc: func(_ context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			result := listObj.DeepCopyObject()
 			err := restClient.Get().
 				Resource(resource).
 				VersionedParams(&options, metav1.ParameterCodec).
-				Do(context.Background()).
+				Do(ctx).
 				Into(result)
 			return result, err
 		},
-		WatchFuncWithContext: func(_ context.Context, options metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			options.Watch = true
 			return restClient.Get().
 				Resource(resource).
 				VersionedParams(&options, metav1.ParameterCodec).
-				Watch(context.Background())
+				Watch(ctx)
 		},
 	}
 }
@@ -320,14 +325,18 @@ func (c *Client) dispatchRVEvent(obj interface{}) {
 	}
 
 	c.rvCheckersMu.RLock()
-	ch, exists := c.rvCheckers[rv.Name]
+	reg, exists := c.rvCheckers[rv.Name]
 	c.rvCheckersMu.RUnlock()
 
 	if exists {
+		// Blocking backpressure is intentional while the checker is alive:
+		// VolumeChecker reports transition counters, so dropping RV events would
+		// make short health flaps invisible. Per-checker done and informerStop
+		// keep shutdown paths from hanging the shared informer handler.
 		select {
-		case ch <- rv:
-		default:
-			// Channel full, skip event (checker will get next one or resync)
+		case reg.ch <- rv:
+		case <-reg.done:
+		case <-c.informerStop:
 		}
 	}
 }
@@ -347,7 +356,7 @@ func (c *Client) StopInformers() {
 // RegisterRVChecker registers a VolumeChecker to receive events for specific RV.
 // Returns channel where RV updates will be sent. Caller must call UnregisterRVChecker on shutdown.
 // Uses dispatcher pattern: one informer handler routes to many checkers via map lookup.
-func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha1.ReplicatedVolume) error {
+func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha1.ReplicatedVolume, done <-chan struct{}) error {
 	c.informerMu.RLock()
 	ready := c.informerReady
 	c.informerMu.RUnlock()
@@ -357,7 +366,10 @@ func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha1.ReplicatedVo
 	}
 
 	c.rvCheckersMu.Lock()
-	c.rvCheckers[rvName] = ch
+	c.rvCheckers[rvName] = rvCheckerRegistration{
+		ch:   ch,
+		done: done,
+	}
 	c.rvCheckersMu.Unlock()
 
 	return nil
@@ -610,15 +622,29 @@ func (c *Client) ListRVAsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeAtt
 // ListRVAsByRVNameDirect lists non-deleting RVAs for a given RV directly from the API server.
 // Use only when fresh data is required (e.g., before deletion for accurate timing).
 func (c *Client) ListRVAsByRVNameDirect(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
+	items, err := c.ListAllRVAsByRVNameDirect(ctx, rvName)
+	if err != nil {
+		return nil, err
+	}
+	var out []v1alpha1.ReplicatedVolumeAttachment
+	for _, item := range items {
+		if !item.DeletionTimestamp.IsZero() {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListAllRVAsByRVNameDirect lists all RVAs for a given RV directly from the API server,
+// including objects that are already marked for deletion but still have finalizers.
+func (c *Client) ListAllRVAsByRVNameDirect(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
 	list := &v1alpha1.ReplicatedVolumeAttachmentList{}
 	if err := c.cl.List(ctx, list); err != nil {
 		return nil, err
 	}
 	var out []v1alpha1.ReplicatedVolumeAttachment
 	for _, item := range list.Items {
-		if !item.DeletionTimestamp.IsZero() {
-			continue
-		}
 		if item.Spec.ReplicatedVolumeName != rvName {
 			continue
 		}

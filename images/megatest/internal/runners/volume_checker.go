@@ -41,18 +41,43 @@ const (
 
 // CheckerStats holds statistics about EffectiveLayout health transitions for a ReplicatedVolume.
 // FTT (FailuresToTolerate) reflects quorum health; GMDR (GuaranteedMinimumDataRedundancy) reflects IO/data health.
-// Even number of transitions means the metric recovered; odd means it ended in unhealthy state.
-// Ideal: all counters at zero.
+// Transition counters count health changes between known healthy/unhealthy states.
+// Final health is reported separately via LastFTTStatus and LastGMDRStatus.
 type CheckerStats struct {
 	RVName          string
 	FTTTransitions  atomic.Int64
 	GMDRTransitions atomic.Int64
+	LastFTTStatus   atomic.Int32
+	LastGMDRStatus  atomic.Int32
 }
 
 // healthState tracks the current EffectiveLayout-derived health (FTT and GMDR).
 type healthState struct {
-	fttHealthy  bool // FailuresToTolerate != nil && *FailuresToTolerate >= 0
-	gmdrHealthy bool // GuaranteedMinimumDataRedundancy != nil && *GuaranteedMinimumDataRedundancy >= 0
+	ftt  healthStatus
+	gmdr healthStatus
+}
+
+type healthStatus int32
+
+const (
+	healthStatusUnknown healthStatus = iota
+	healthStatusHealthy
+	healthStatusUnhealthy
+)
+
+func (s healthStatus) String() string {
+	switch s {
+	case healthStatusHealthy:
+		return "healthy"
+	case healthStatusUnhealthy:
+		return "unhealthy"
+	default:
+		return "unknown"
+	}
+}
+
+func HealthStatusString(value int32) string {
+	return healthStatus(value).String()
 }
 
 // VolumeChecker watches a ReplicatedVolume and logs state changes.
@@ -78,14 +103,17 @@ type VolumeChecker struct {
 
 // NewVolumeChecker creates a new VolumeChecker for the given RV
 func NewVolumeChecker(rvName string, client *kubeutils.Client, stats *CheckerStats) *VolumeChecker {
+	stats.LastFTTStatus.Store(int32(healthStatusHealthy))
+	stats.LastGMDRStatus.Store(int32(healthStatusHealthy))
+
 	return &VolumeChecker{
 		rvName: rvName,
 		client: client,
 		log:    slog.Default().With("runner", "volume-checker", "rv_name", rvName),
 		stats:  stats,
 		state: healthState{
-			fttHealthy:  true,
-			gmdrHealthy: true,
+			ftt:  healthStatusHealthy,
+			gmdr: healthStatusHealthy,
 		},
 		updateCh: make(chan *v1alpha1.ReplicatedVolume, updateChBufferSize),
 	}
@@ -96,8 +124,9 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 	v.log.Info("started")
 	defer v.log.Info("finished")
 
-	// Registration always succeeds if app started (informer is ready after NewClient)
-	v.register()
+	if err := v.register(ctx); err != nil {
+		return err
+	}
 	defer v.unregister()
 
 	// Check initial state
@@ -118,9 +147,17 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 
 // register adds this checker to the dispatcher.
 // Dispatcher will route RV events matching our name to updateCh.
-func (v *VolumeChecker) register() {
-	// Error only possible if informer not ready, but it's always ready after NewClient()
-	_ = v.client.RegisterRVChecker(v.rvName, v.updateCh)
+func (v *VolumeChecker) register(ctx context.Context) error {
+	for {
+		if err := v.client.RegisterRVChecker(v.rvName, v.updateCh, ctx.Done()); err != nil {
+			v.log.Warn("failed to register RV checker, retrying", "error", err)
+			if waitErr := waitWithContext(ctx, 500*time.Millisecond); waitErr != nil {
+				return waitErr
+			}
+			continue
+		}
+		return nil
+	}
 }
 
 // unregister removes this checker from the dispatcher.
@@ -170,55 +207,56 @@ func (v *VolumeChecker) processRVUpdate(rv *v1alpha1.ReplicatedVolume) {
 
 	el := rv.Status.EffectiveLayout
 
-	newFTTHealthy := el.FailuresToTolerate != nil && *el.FailuresToTolerate >= 0
-	newGMDRHealthy := el.GuaranteedMinimumDataRedundancy != nil && *el.GuaranteedMinimumDataRedundancy >= 0
+	newFTT := healthStatusFromPointer(el.FailuresToTolerate)
+	newGMDR := healthStatusFromPointer(el.GuaranteedMinimumDataRedundancy)
 
-	// FTT transition (quorum health)
-	if newFTTHealthy != v.state.fttHealthy {
-		oldHealthy := v.state.fttHealthy
-		v.stats.FTTTransitions.Add(1)
-		v.state.fttHealthy = newFTTHealthy
+	v.processHealthStatus("FTT", newFTT, &v.state.ftt, &v.stats.FTTTransitions, &v.stats.LastFTTStatus, el.FailuresToTolerate, el)
+	v.processHealthStatus("GMDR", newGMDR, &v.state.gmdr, &v.stats.GMDRTransitions, &v.stats.LastGMDRStatus, el.GuaranteedMinimumDataRedundancy, el)
+}
 
-		fttVal := "nil"
-		if el.FailuresToTolerate != nil {
-			fttVal = fmt.Sprintf("%d", *el.FailuresToTolerate)
-		}
-		v.log.Warn("FTT health changed",
-			"transition", fmtBool(oldHealthy)+"->"+fmtBool(newFTTHealthy),
-			"ftt", fttVal,
-			"message", el.Message)
-
-		if !newFTTHealthy {
-			v.logHealthDetails("FTT", el)
-		}
+func (v *VolumeChecker) processHealthStatus(
+	metric string,
+	newStatus healthStatus,
+	current *healthStatus,
+	transitions *atomic.Int64,
+	lastStatus *atomic.Int32,
+	value *int8,
+	el v1alpha1.ReplicatedVolumeEffectiveLayout,
+) {
+	if newStatus == *current {
+		return
 	}
 
-	// GMDR transition (IO/data health)
-	if newGMDRHealthy != v.state.gmdrHealthy {
-		oldHealthy := v.state.gmdrHealthy
-		v.stats.GMDRTransitions.Add(1)
-		v.state.gmdrHealthy = newGMDRHealthy
+	oldStatus := *current
+	*current = newStatus
+	lastStatus.Store(int32(newStatus))
 
-		gmdrVal := "nil"
-		if el.GuaranteedMinimumDataRedundancy != nil {
-			gmdrVal = fmt.Sprintf("%d", *el.GuaranteedMinimumDataRedundancy)
-		}
-		v.log.Warn("GMDR health changed",
-			"transition", fmtBool(oldHealthy)+"->"+fmtBool(newGMDRHealthy),
-			"gmdr", gmdrVal,
-			"message", el.Message)
+	valueText := "nil"
+	if value != nil {
+		valueText = fmt.Sprintf("%d", *value)
+	}
 
-		if !newGMDRHealthy {
-			v.logHealthDetails("GMDR", el)
-		}
+	v.log.Warn(metric+" health changed",
+		"transition", oldStatus.String()+"->"+newStatus.String(),
+		"value", valueText,
+		"message", el.Message)
+
+	if oldStatus != healthStatusUnknown && newStatus != healthStatusUnknown {
+		transitions.Add(1)
+	}
+	if newStatus == healthStatusUnhealthy {
+		v.logHealthDetails(metric, el)
 	}
 }
 
-func fmtBool(b bool) string {
-	if b {
-		return "healthy"
+func healthStatusFromPointer(value *int8) healthStatus {
+	if value == nil {
+		return healthStatusUnknown
 	}
-	return "unhealthy"
+	if *value >= 0 {
+		return healthStatusHealthy
+	}
+	return healthStatusUnhealthy
 }
 
 // logHealthDetails logs EffectiveLayout summary and failed RVRs when health is unhealthy.

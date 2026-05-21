@@ -96,6 +96,11 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 			v.log.Error("failed to get random node", "error", err)
 			return checkAndCleanup(err)
 		}
+		if len(nodes) == 0 {
+			err := fmt.Errorf("no storage nodes found")
+			v.log.Error("failed to get random node", "error", err)
+			return checkAndCleanup(err)
+		}
 		nodeName := nodes[0].Name
 		log := v.log.With("node_name", nodeName)
 
@@ -284,23 +289,31 @@ func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
 
 	// Delete excess RVAs before lowering maxAttachments back to 1.
 	// Use direct API call for accurate snapshot before deletion.
-	rvas, err := v.client.ListRVAsByRVNameDirect(cleanupCtx, v.rvName)
+	rvas, err := v.client.ListAllRVAsByRVNameDirect(cleanupCtx, v.rvName)
 	if err != nil {
 		log.Error("migration cleanup: failed to list RVAs", "error", err)
+		return
 	} else if len(rvas) > 1 {
 		keep := chooseRVAForSingleAttachment(rvas)
+		cleanupFailed := false
 		for _, rva := range rvas {
 			if rva.Name == keep.Name || rva.Spec.NodeName == "" {
 				continue
 			}
 			if err := v.client.DeleteRVA(cleanupCtx, v.rvName, rva.Spec.NodeName); err != nil {
 				log.Error("migration cleanup: failed to delete excess RVA", "rva", rva.Name, "error", err)
+				cleanupFailed = true
 			} else {
 				log.Info("migration cleanup: deleted excess RVA", "rva", rva.Name)
 			}
 		}
+		if cleanupFailed {
+			log.Error("migration cleanup: leaving MaxAttachments unchanged because excess RVA deletion failed", "keep_rva", keep.Name)
+			return
+		}
 		if err := v.waitForSingleRVA(cleanupCtx, keep.Name); err != nil {
 			log.Error("migration cleanup: failed waiting for excess RVAs deletion", "error", err)
+			return
 		}
 	}
 
@@ -313,7 +326,7 @@ func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
 
 func (v *VolumeAttacher) waitForSingleRVA(ctx context.Context, keepName string) error {
 	for {
-		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+		rvas, err := v.client.ListAllRVAsByRVNameDirect(ctx, v.rvName)
 		if err != nil {
 			return err
 		}
@@ -370,7 +383,8 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 		return err
 	}
 
-	// Wait for node(s) to be detached
+	// Wait for RVA object(s) to disappear. RVA finalization is the controller's
+	// signal that detach is safe: there is no attached member and no detach transition left.
 	for {
 		if nodeName == "" {
 			log.Debug("waiting for all nodes to be detached")
@@ -378,7 +392,7 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		attachedNodes, err := v.listAttachedNodesDirect(ctx)
+		attachedNodes, err := v.listAttachmentIntentNodesDirect(ctx)
 		if err != nil {
 			return err
 		}
@@ -428,7 +442,15 @@ func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error 
 
 func chooseRVAForSingleAttachment(rvas []v1alpha1.ReplicatedVolumeAttachment) v1alpha1.ReplicatedVolumeAttachment {
 	for _, rva := range rvas {
+		if !rva.DeletionTimestamp.IsZero() {
+			continue
+		}
 		if rva.Status.Phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
+			return rva
+		}
+	}
+	for _, rva := range rvas {
+		if rva.DeletionTimestamp.IsZero() {
 			return rva
 		}
 	}
@@ -437,6 +459,23 @@ func chooseRVAForSingleAttachment(rvas []v1alpha1.ReplicatedVolumeAttachment) v1
 
 func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string, error) {
 	rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]string, 0, len(rvas))
+	for _, rva := range rvas {
+		if rva.Spec.NodeName == "" {
+			continue
+		}
+		nodes = append(nodes, rva.Spec.NodeName)
+	}
+
+	return nodes, nil
+}
+
+func (v *VolumeAttacher) listAttachmentIntentNodesDirect(ctx context.Context) ([]string, error) {
+	rvas, err := v.client.ListAllRVAsByRVNameDirect(ctx, v.rvName)
 	if err != nil {
 		return nil, err
 	}

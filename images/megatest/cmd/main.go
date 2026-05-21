@@ -167,32 +167,60 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 	}
 
 	fmt.Fprintf(os.Stdout, "\nChecker Statistics:\n")
-	fmt.Fprintf(os.Stdout, "%-40s %20s %20s\n", "RV Name", "FTT Transitions", "GMDR Transitions")
+	fmt.Fprintf(os.Stdout, "%-40s %20s %20s %12s %12s\n", "RV Name", "FTT Transitions", "GMDR Transitions", "FTT Status", "GMDR Status")
 	fmt.Fprintf(os.Stdout, "%s\n", "────────────────────────────────────────────────────────────────────────────────")
 
-	var stableCount, recoveredCount, brokenCount int
+	var stableCount, recoveredCount, brokenCount, unknownCount int
 
 	for _, s := range stats {
 		ftt := s.FTTTransitions.Load()
 		gmdr := s.GMDRTransitions.Load()
+		fttStatus := runners.HealthStatusString(s.LastFTTStatus.Load())
+		gmdrStatus := runners.HealthStatusString(s.LastGMDRStatus.Load())
 
-		fmt.Fprintf(os.Stdout, "%-40s %20d %20d\n", s.RVName, ftt, gmdr)
+		fmt.Fprintf(os.Stdout, "%-40s %20d %20d %12s %12s\n", s.RVName, ftt, gmdr, fttStatus, gmdrStatus)
 
-		// Categorize RV state: odd transition count = ended unhealthy
-		switch {
-		case ftt == 0 && gmdr == 0:
-			stableCount++
-		case ftt%2 == 1 || gmdr%2 == 1:
+		switch classifyCheckerStats(ftt, gmdr, fttStatus, gmdrStatus) {
+		case checkerStatsCategoryUnknown:
+			unknownCount++
+		case checkerStatsCategoryBroken:
 			brokenCount++
-		default:
+		case checkerStatsCategoryStable:
+			stableCount++
+		case checkerStatsCategoryRecovered:
 			recoveredCount++
 		}
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", "────────────────────────────────────────────────────────────────────────────────")
 	fmt.Fprintf(os.Stdout, "Stable (0 transitions):        %d\n", stableCount)
-	fmt.Fprintf(os.Stdout, "Recovered (even transitions):  %d\n", recoveredCount)
-	fmt.Fprintf(os.Stdout, "Broken (odd transitions):      %d\n", brokenCount)
+	fmt.Fprintf(os.Stdout, "Recovered after transitions:   %d\n", recoveredCount)
+	fmt.Fprintf(os.Stdout, "Broken final health:           %d\n", brokenCount)
+	fmt.Fprintf(os.Stdout, "Unknown final health:          %d\n", unknownCount)
+}
+
+type checkerStatsCategory string
+
+const (
+	checkerStatsCategoryStable    checkerStatsCategory = "stable"
+	checkerStatsCategoryRecovered checkerStatsCategory = "recovered"
+	checkerStatsCategoryBroken    checkerStatsCategory = "broken"
+	checkerStatsCategoryUnknown   checkerStatsCategory = "unknown"
+)
+
+func classifyCheckerStats(fttTransitions, gmdrTransitions int64, fttStatus, gmdrStatus string) checkerStatsCategory {
+	// Unknown states are not counted as transitions, so transition parity is not
+	// a final-health proxy. Final status is the source of truth.
+	switch {
+	case fttStatus == "unknown" || gmdrStatus == "unknown":
+		return checkerStatsCategoryUnknown
+	case fttStatus == "unhealthy" || gmdrStatus == "unhealthy":
+		return checkerStatsCategoryBroken
+	case fttTransitions == 0 && gmdrTransitions == 0:
+		return checkerStatsCategoryStable
+	default:
+		return checkerStatsCategoryRecovered
+	}
 }
 
 // setupChaosRunners initializes and starts chaos engineering runners
