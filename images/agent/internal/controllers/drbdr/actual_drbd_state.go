@@ -40,6 +40,10 @@ type ActualNonAttachedDiskMetadata interface {
 	// DiskDeviceUUID returns the device-uuid from on-disk metadata (16 hex digits).
 	// Empty when metadata does not exist or device-uuid is zero.
 	DiskDeviceUUID() string
+
+	// MetadataNodeID returns the node-id from on-disk metadata.
+	// Nil when metadata does not exist or node-id could not be parsed.
+	MetadataNodeID() *uint8
 }
 
 // ActualDRBDState represents the actual DRBD state observed from the system.
@@ -86,6 +90,20 @@ type ActualDRBDState interface {
 
 	// Peers returns the list of peer connections for this resource.
 	Peers() []ActualPeer
+
+	// AdminLockHeld reports whether the cluster-wide DRBD admin lock is
+	// currently held on this node. False when drbdsetup status data is
+	// missing or DRBD_FF_ADMIN_LOCK is not negotiated.
+	AdminLockHeld() bool
+
+	// AdminLockHolderNodeID returns the DRBD node id that currently holds
+	// the cluster-wide admin lock. -1 indicates "no holder" (or the field
+	// is unavailable for any reason).
+	AdminLockHolderNodeID() int8
+
+	// AdminLockGeneration returns the monotonic sequence-number-like
+	// generation of the current admin lock acquisition. 0 when not held.
+	AdminLockGeneration() uint32
 
 	// Report fills the status fields from the actual state.
 	// Returns error if reporting invariants are violated (e.g., multiple volumes).
@@ -190,11 +208,13 @@ type actualState struct {
 	show           *drbdutils.ShowResource
 	hasMetadata    bool
 	diskDeviceUUID string
+	metadataNodeID *uint8
 }
 
 func (aState *actualState) IsZero() bool           { return aState == nil }
 func (aState *actualState) HasMetadata() bool      { return aState.hasMetadata }
 func (aState *actualState) DiskDeviceUUID() string { return aState.diskDeviceUUID }
+func (aState *actualState) MetadataNodeID() *uint8 { return aState.metadataNodeID }
 
 func (aState *actualState) ResourceName() string {
 	if aState.status != nil {
@@ -307,6 +327,27 @@ func (aState *actualState) Volumes() []ActualVolume {
 	return volumes
 }
 
+func (aState *actualState) AdminLockHeld() bool {
+	if aState.status == nil {
+		return false
+	}
+	return aState.status.AdminLock.Held
+}
+
+func (aState *actualState) AdminLockHolderNodeID() int8 {
+	if aState.status == nil || !aState.status.AdminLock.Held {
+		return -1
+	}
+	return aState.status.AdminLock.HolderNodeID
+}
+
+func (aState *actualState) AdminLockGeneration() uint32 {
+	if aState.status == nil {
+		return 0
+	}
+	return aState.status.AdminLock.Generation
+}
+
 func (aState *actualState) Peers() []ActualPeer {
 	if aState.status == nil {
 		return nil
@@ -349,6 +390,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.Peers = nil
 		status.DeviceOpen = nil
 		status.DeviceIOSuspended = nil
+		status.AdminLock = nil
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -411,6 +453,18 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 
 	if aState.diskDeviceUUID != "" && status.DeviceUUID == "" {
 		status.DeviceUUID = aState.diskDeviceUUID
+	}
+
+	if aState.metadataNodeID != nil {
+		status.MetadataNodeID = aState.metadataNodeID
+	}
+
+	if aState.status != nil {
+		status.AdminLock = &v1alpha1.DRBDResourceAdminLockStatus{
+			Held:         aState.status.AdminLock.Held,
+			HolderNodeID: aState.status.AdminLock.HolderNodeID,
+			Generation:   aState.status.AdminLock.Generation,
+		}
 	}
 
 	return err
@@ -863,6 +917,8 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 
 	if diskAttached {
 		state.hasMetadata = true
+		nid := uint8(state.NodeID())
+		state.metadataNodeID = &nid
 		if statusDeviceUUID == "" {
 			diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 			if err != nil {
@@ -881,11 +937,12 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 		checkMDMinor = uint(state.Volumes()[0].Minor())
 	}
 
-	hasMD, err := drbdutils.ExecuteCheckMD(ctx, checkMDMinor, intendedBackingDev)
+	hasMD, metaNodeID, err := drbdutils.ExecuteCheckMDWithMetadata(ctx, checkMDMinor, intendedBackingDev)
 	if err != nil {
 		return fmt.Errorf("probing backing device metadata: %w", err)
 	}
 	state.hasMetadata = hasMD
+	state.metadataNodeID = metaNodeID
 	if hasMD {
 		diskUUID, err := drbdutils.ExecuteReadDevUUID(ctx, intendedBackingDev)
 		if err != nil {

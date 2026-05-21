@@ -1,0 +1,6 @@
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedVolumeSnapshot
+metadata:
+  name: pvc-d44d1a8a-6ba7-49fb-a847-28418276d7b0-snap-20260115
+spec:
+  replicatedVolumeName: pvc-d44d1a8a-6ba7-49fb-a847-28418276d7b0

@@ -66,6 +66,12 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	resourceName := iState.ResourceName()
 
+	if aState.ResourceExists() && uint8(aState.NodeID()) != iState.NodeID() {
+		res = append(res, RemoveDeviceSymlinkAction{Name: iState.SymlinkName()})
+		res = append(res, DownAction{ResourceName: resourceName})
+		return res
+	}
+
 	// Shared minor pointer for passing between actions when creating new minor
 	var allocatedMinor uint
 
@@ -182,30 +188,32 @@ func generateDeviceUUID() string {
 	return fmt.Sprintf("%016X", binary.BigEndian.Uint64(buf[:]))
 }
 
-// computeAttachActions implements the device-uuid decision table and returns the
-// sequence of actions to prepare metadata and attach the disk.
-func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID string, minor *uint, backingDev string) DRBDActions {
+func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID string, minor *uint, backingDev string, nodeID uint8) DRBDActions {
 	var actions DRBDActions
 
-	if aState.HasMetadata() {
+	switch {
+	case aState.HasMetadata() && statusUUID != "":
 		diskUUID := aState.DiskDeviceUUID()
 		switch {
 		case diskUUID != "" && statusUUID == diskUUID:
-			// Match — proceed to attach.
-		case diskUUID != "" && statusUUID != "" && statusUUID != diskUUID:
+		case diskUUID != "" && statusUUID != diskUUID:
 			return DRBDActions{FailAction{Err: ConfiguredReasonError(
 				fmt.Errorf("backing device %s has device-uuid %s, DRBDResource expects %s", backingDev, diskUUID, statusUUID),
 				v1alpha1.DRBDResourceCondConfiguredReasonForeignDiskDetected,
 			)}}
-		case diskUUID != "" && statusUUID == "":
-			// Adopt from disk — proceed to attach.
-		case diskUUID == "" && statusUUID != "":
+		case diskUUID == "":
 			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: statusUUID})
-		default:
-			actions = append(actions, WriteDeviceUUIDAction{Minor: minor, BackingDev: backingDev, UUID: generateDeviceUUID()})
 		}
 		actions = append(actions, ApplyALAction{Minor: minor, BackingDev: backingDev})
-	} else {
+	case aState.HasMetadata():
+		if nid := aState.MetadataNodeID(); nid != nil && *nid != nodeID {
+			return DRBDActions{FailAction{Err: ConfiguredReasonError(
+				fmt.Errorf("on-disk metadata node-id %d does not match configured node-id %d on %s", *nid, nodeID, backingDev),
+				v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
+			)}}
+		}
+		actions = append(actions, ApplyALAction{Minor: minor, BackingDev: backingDev})
+	default:
 		uuid := statusUUID
 		if uuid == "" {
 			uuid = generateDeviceUUID()
@@ -239,7 +247,7 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 	}
 
 	if actualDisk == "" && intendedDisk != "" && iState.Type() == v1alpha1.DRBDResourceTypeDiskful {
-		res = append(res, computeAttachActions(aState, iState.StatusDeviceUUID(), minor, intendedDisk)...)
+		res = append(res, computeAttachActions(aState, iState.StatusDeviceUUID(), minor, intendedDisk, iState.NodeID())...)
 		res = append(res, computeDiskOptionsAction(minor, iState)...)
 		return
 	}

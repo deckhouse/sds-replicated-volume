@@ -80,7 +80,7 @@ func (rvr *ReplicatedVolumeReplica) GetStatusPhase() string { return string(rvr.
 // ID extracts ID from the RVR name (e.g., "pvc-xxx-5" → 5).
 // Result is cached after first successful call
 func (rvr *ReplicatedVolumeReplica) ID() uint8 {
-	return idFromName(rvr.Name)
+	return IDFromName(rvr.Name)
 }
 
 // idSuffixes is a lookup table for ID (0-31) to "-N" suffix conversion.
@@ -451,7 +451,7 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 
 // ID extracts ID from the peer name (e.g., "pvc-xxx-5" → 5).
 func (p ReplicatedVolumeReplicaStatusPeerStatus) ID() uint8 {
-	return idFromName(p.Name)
+	return IDFromName(p.Name)
 }
 
 // ReplicatedVolumeReplicaStatusDRBDRReconciliationCache holds cached values used to optimize DRBDResource reconciliation.

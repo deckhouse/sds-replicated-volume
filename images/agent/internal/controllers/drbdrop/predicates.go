@@ -34,14 +34,14 @@ func operationPredicates(nodeName string) []predicate.Predicate {
 				if !ok {
 					return false
 				}
-				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && needsReconcile(op)
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				op, ok := e.ObjectNew.(*v1alpha1.DRBDResourceOperation)
 				if !ok {
 					return false
 				}
-				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && needsReconcile(op)
 			},
 			DeleteFunc: func(_ event.DeleteEvent) bool {
 				// No need to reconcile deleted operations
@@ -52,10 +52,20 @@ func operationPredicates(nodeName string) []predicate.Predicate {
 				if !ok {
 					return false
 				}
-				return op.Spec.NodeName == nodeName && !isOperationTerminal(op)
+				return op.Spec.NodeName == nodeName && needsReconcile(op)
 			},
 		},
 	}
+}
+
+// needsReconcile returns true if the operation must reach the reconciler:
+// either it is not yet in a terminal phase, or it carries the admin_lock
+// finalizer that still needs to be cleaned up on deletion.
+func needsReconcile(op *v1alpha1.DRBDResourceOperation) bool {
+	if !isOperationTerminal(op) {
+		return true
+	}
+	return op.DeletionTimestamp != nil && hasFinalizer(op, AdminLockFinalizer)
 }
 
 // isOperationTerminal returns true if the operation is in a terminal state.

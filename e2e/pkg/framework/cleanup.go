@@ -57,6 +57,52 @@ func (f *Framework) scavengeAllE2E(ctx context.Context) {
 		time.Now().Format("15:04:05.000"))
 }
 
+// scavengePriorRuns deletes objects left over from previous (possibly
+// interrupted) e2e runs, identified by the run-label being set to anything
+// other than the current f.runID. Selector-based, not name-based, so no
+// reliance on naming conventions.
+//
+// Fire-and-forget: it issues DeleteAllOf for each known e2e type and does
+// NOT wait for finalizers to drain — this is a best-effort safety net at
+// suite startup. The current run is excluded so parallel runs (different
+// runIDs on the same cluster) do not clobber each other.
+func (f *Framework) scavengePriorRuns(ctx context.Context) {
+	if f.Client == nil || f.runID == "" {
+		return
+	}
+
+	reqExists, err := labels.NewRequirement(LabelE2ERunKey, selection.Exists, nil)
+	if err != nil {
+		return
+	}
+	reqNotMine, err := labels.NewRequirement(LabelE2ERunKey, selection.NotEquals, []string{f.runID})
+	if err != nil {
+		return
+	}
+	sel := labels.NewSelector().Add(*reqExists, *reqNotMine)
+	opts := &client.DeleteAllOfOptions{}
+	opts.LabelSelector = sel
+
+	stale := f.countByLabelSelector(ctx, sel)
+	if stale == 0 {
+		return
+	}
+	fmt.Fprintf(GinkgoWriter,
+		"[%s] PRIOR-RUN SCAVENGE: %d stale e2e-labeled object(s) (run!=%s)\n",
+		time.Now().Format("15:04:05.000"), stale, f.runID)
+
+	for _, obj := range e2eTypes() {
+		if err := f.Client.DeleteAllOf(ctx, obj, opts); err != nil {
+			fmt.Fprintf(GinkgoWriter,
+				"[%s] PRIOR-RUN SCAVENGE: failed to delete %T: %v\n",
+				time.Now().Format("15:04:05.000"), obj, err)
+		}
+	}
+	fmt.Fprintf(GinkgoWriter,
+		"[%s] PRIOR-RUN SCAVENGE: fired delete for stale e2e-labeled objects\n",
+		time.Now().Format("15:04:05.000"))
+}
+
 // cleanupWorkerObjects is the per-worker AfterSuite safety net. It deletes
 // all objects belonging to this run+worker, then polls until they are gone.
 func (f *Framework) cleanupWorkerObjects(ctx context.Context) {
@@ -101,6 +147,21 @@ func (f *Framework) countByLabel(ctx context.Context, sel client.MatchingLabels)
 	count := 0
 	for _, list := range e2eListTypes() {
 		if err := f.Client.List(ctx, list, sel); err != nil {
+			continue
+		}
+		items, _ := meta.ExtractList(list)
+		count += len(items)
+	}
+	return count
+}
+
+// countByLabelSelector counts all e2e-managed objects matching the given
+// labels.Selector (supports set-based requirements, unlike countByLabel).
+func (f *Framework) countByLabelSelector(ctx context.Context, sel labels.Selector) int {
+	count := 0
+	opts := &client.ListOptions{LabelSelector: sel}
+	for _, list := range e2eListTypes() {
+		if err := f.Client.List(ctx, list, opts); err != nil {
 			continue
 		}
 		items, _ := meta.ExtractList(list)

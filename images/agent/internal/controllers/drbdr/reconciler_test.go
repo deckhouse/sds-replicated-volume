@@ -298,6 +298,30 @@ func TestReconciler_Reconcile(t *testing.T) {
 				statusCmd(drbdutils.StatusResult{}),
 			},
 		},
+		{
+			name:  "deleting diskful with LLVS spec - recovery releases LLVS finalizer",
+			drbdr: deletingDiskfulDRBDR(testNodeName, "", testLLVName, v1alpha1.AgentFinalizer),
+			objs:  []client.Object{testLLVSWithFinalizer(testLLVName)},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				expectLLVSHasNoAgentFinalizer(t, cl, testLLVName)
+			},
+		},
+		{
+			name:  "deleting diskful with LLV spec - recovery releases LLV finalizer",
+			drbdr: deletingDiskfulDRBDR(testNodeName, testLLVName, "", v1alpha1.AgentFinalizer),
+			objs:  []client.Object{testLLVWithFinalizer(testLLVName)},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				statusCmd(drbdutils.StatusResult{}),
+				statusCmd(drbdutils.StatusResult{}),
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				expectLLVHasNoAgentFinalizer(t, cl, testLLVName)
+			},
+		},
 
 		// Custom DRBD resource name - triggers rename flow
 		{
@@ -796,6 +820,45 @@ func testLLVWithFinalizer(name string) *snc.LVMLogicalVolume {
 			Size:                  "100Mi",
 			LVMVolumeGroupName:    "test-lvg",
 		},
+	}
+}
+
+func testLLVSWithFinalizer(name string) *snc.LVMLogicalVolumeSnapshot {
+	return &snc.LVMLogicalVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Finalizers: []string{v1alpha1.AgentFinalizer},
+		},
+		Spec: snc.LVMLogicalVolumeSnapshotSpec{
+			ActualSnapshotNameOnTheNode: name,
+			LVMLogicalVolumeName:        name,
+		},
+	}
+}
+
+func deletingDiskfulDRBDR(nodeName, specLLV, specLLVS string, finalizers ...string) *v1alpha1.DRBDResource {
+	dr := baseDRBDR()
+	dr.Spec.NodeName = nodeName
+	dr.Spec.Type = v1alpha1.DRBDResourceTypeDiskful
+	dr.Spec.LVMLogicalVolumeName = specLLV
+	dr.Spec.LVMLogicalVolumeSnapshotName = specLLVS
+	dr.Finalizers = finalizers
+	now := metav1.NewTime(time.Now())
+	dr.DeletionTimestamp = &now
+	return dr
+}
+
+func expectLLVSHasNoAgentFinalizer(t *testing.T, cl client.Client, name string) {
+	t.Helper()
+	llvs := &snc.LVMLogicalVolumeSnapshot{}
+	if err := cl.Get(t.Context(), client.ObjectKey{Name: name}, llvs); err != nil {
+		t.Fatalf("getting LLVS %q: %v", name, err)
+	}
+	for _, f := range llvs.Finalizers {
+		if f == v1alpha1.AgentFinalizer {
+			t.Errorf("LLVS %q still has agent finalizer %q", name, v1alpha1.AgentFinalizer)
+			return
+		}
 	}
 }
 

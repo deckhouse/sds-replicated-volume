@@ -27,6 +27,8 @@ import (
 	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvrcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_controller"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	rvrscontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvrs_controller"
+	rvscontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvs_controller"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
 
@@ -58,6 +60,8 @@ func BuildAll(mgr manager.Manager) error {
 		{name: nodecontroller.NodeControllerName, build: nodecontroller.BuildController},
 		{name: rspcontroller.RSPControllerName, build: rspcontroller.BuildController},
 		{name: rvrcontroller.RVRControllerName, build: rvrcontroller.BuildController},
+		{name: rvscontroller.RVSControllerName, build: rvscontroller.BuildController},
+		{name: rvrscontroller.RVRSControllerName, build: rvrscontroller.BuildController},
 	}
 
 	for _, b := range builders {

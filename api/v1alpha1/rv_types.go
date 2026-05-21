@@ -67,6 +67,8 @@ func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName) && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
 // Manual mode requires manualConfiguration, forbids RSC name:
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName) == 0))",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
+// dataSource is immutable once set:
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.dataSource) || has(self.dataSource)",message="dataSource cannot be removed once set"
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
@@ -109,6 +111,35 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:default=1
 	// +optional
 	MaxAttachments *byte `json:"maxAttachments,omitempty"`
+
+	// +optional
+	DataSource *VolumeDataSource `json:"dataSource,omitempty"`
+}
+
+// VolumeDataSourceKind enumerates supported kinds of data source a ReplicatedVolume
+// can be populated from.
+// +kubebuilder:validation:Enum=ReplicatedVolumeSnapshot;ReplicatedVolume
+type VolumeDataSourceKind string
+
+const (
+	VolumeDataSourceKindReplicatedVolumeSnapshot VolumeDataSourceKind = "ReplicatedVolumeSnapshot"
+	VolumeDataSourceKindReplicatedVolume         VolumeDataSourceKind = "ReplicatedVolume"
+)
+
+// +kubebuilder:object:generate=true
+type VolumeDataSource struct {
+	// Kind selects the type of the source object: a ReplicatedVolumeSnapshot
+	// (snapshot restore) or a ReplicatedVolume (volume clone).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kind is immutable"
+	Kind VolumeDataSourceKind `json:"kind"`
+
+	// Name is the name of the source object of the selected Kind.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
+	Name string `json:"name"`
 }
 
 // ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.
@@ -253,7 +284,7 @@ type ReplicatedVolumeDatameshReplicaRequest struct {
 
 // ID extracts ID from the replica name (e.g., "pvc-xxx-5" → 5).
 func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
-	return idFromName(t.Name)
+	return IDFromName(t.Name)
 }
 
 // ReplicatedVolumeDatameshTransition represents an active datamesh transition.
@@ -274,7 +305,7 @@ func (t ReplicatedVolumeDatameshReplicaRequest) ID() uint8 {
 type ReplicatedVolumeDatameshTransition struct {
 	// Type is the transition type.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;RemoveReplica;RepairNetworkAddresses;ResizeVolume
+	// +kubebuilder:validation:Enum=AddReplica;Attach;ChangeQuorum;ChangeReplicaType;ChangeSystemNetworks;Detach;DisableMultiattach;EnableMultiattach;ForceDetach;ForceRemoveReplica;Formation;PrepareSnapshot;RemoveReplica;RepairNetworkAddresses;ResizeVolume;SyncSnapshot
 	Type ReplicatedVolumeDatameshTransitionType `json:"type"`
 
 	// ReplicaName is the name of the replica this transition applies to.
@@ -331,7 +362,7 @@ type ReplicatedVolumeDatameshTransition struct {
 	// Set by the controller at transition creation time. Read-only for users.
 	// Provides observability: explains why a transition may be waiting.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;Resize;VotingMembership
+	// +kubebuilder:validation:Enum=Attachment;Emergency;Formation;Multiattach;Network;NonVotingMembership;Quorum;Resize;Sync;VotingMembership
 	Group ReplicatedVolumeDatameshTransitionGroup `json:"group"`
 
 	// PlanID identifies the transition plan used to create this transition.
@@ -357,7 +388,7 @@ func (t ReplicatedVolumeDatameshTransition) ReplicaID() uint8 {
 	if t.ReplicaName == "" {
 		panic("ReplicaID called on transition without replicaName (type: " + string(t.Type) + ")")
 	}
-	return idFromName(t.ReplicaName)
+	return IDFromName(t.ReplicaName)
 }
 
 // CurrentStep returns a pointer to the first non-Completed step, or nil if all steps are completed.
@@ -471,6 +502,10 @@ const (
 	ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses ReplicatedVolumeDatameshTransitionType = "RepairNetworkAddresses"
 	// ReplicatedVolumeDatameshTransitionTypeResizeVolume resizes the datamesh volume.
 	ReplicatedVolumeDatameshTransitionTypeResizeVolume ReplicatedVolumeDatameshTransitionType = "ResizeVolume"
+	// ReplicatedVolumeDatameshTransitionTypePrepareSnapshot prepares snapshot creation with bitmap tracking.
+	ReplicatedVolumeDatameshTransitionTypePrepareSnapshot ReplicatedVolumeDatameshTransitionType = "PrepareSnapshot"
+	// ReplicatedVolumeDatameshTransitionTypeSyncSnapshot synchronizes snapshot data across replicas.
+	ReplicatedVolumeDatameshTransitionTypeSyncSnapshot ReplicatedVolumeDatameshTransitionType = "SyncSnapshot"
 )
 
 func (t ReplicatedVolumeDatameshTransitionType) String() string {
@@ -500,6 +535,8 @@ const (
 	ReplicatedVolumeDatameshTransitionGroupResize ReplicatedVolumeDatameshTransitionGroup = "Resize"
 	// ReplicatedVolumeDatameshTransitionGroupEmergency is the emergency group (preemptive).
 	ReplicatedVolumeDatameshTransitionGroupEmergency ReplicatedVolumeDatameshTransitionGroup = "Emergency"
+	// ReplicatedVolumeDatameshTransitionGroupSync is the sync group for snapshot synchronization.
+	ReplicatedVolumeDatameshTransitionGroupSync ReplicatedVolumeDatameshTransitionGroup = "Sync"
 )
 
 func (g ReplicatedVolumeDatameshTransitionGroup) String() string { return string(g) }
@@ -561,6 +598,37 @@ func (dm *ReplicatedVolumeDatamesh) FindMemberByName(name string) *DatameshMembe
 		}
 	}
 	return nil
+}
+
+// AttachedDiskfulMembers returns the names of datamesh members that are
+// currently attached (DRBD Primary) and have type Diskful — matching the
+// set of members that participate in the snapshot mesh. TieBreaker,
+// Access, ShadowDiskful and Liminal* members are intentionally ignored.
+func (rv *ReplicatedVolume) AttachedDiskfulMembers() []string {
+	if rv == nil {
+		return nil
+	}
+	var names []string
+	for _, m := range rv.Status.Datamesh.Members {
+		if !m.Attached {
+			continue
+		}
+		if m.Type != DatameshMemberTypeDiskful {
+			continue
+		}
+		names = append(names, m.Name)
+	}
+	return names
+}
+
+// IsMultiPrimary reports whether the ReplicatedVolume is currently in
+// multi-primary state (≥2 attached diskful members in
+// Status.Datamesh.Members). Such volumes cannot be safely snapshotted —
+// the snapshot pipeline can only quiesce IO on a single primary at a
+// time, and a writer on a second primary would slip past
+// SuspendIO/FlushBitmap and produce an inconsistent point-in-time image.
+func (rv *ReplicatedVolume) IsMultiPrimary() bool {
+	return len(rv.AttachedDiskfulMembers()) >= 2
 }
 
 // SharedSecretAlg enumerates possible hashing algorithms for DRBD shared secrets.
@@ -633,7 +701,7 @@ type DatameshMember struct {
 
 // ID extracts ID from the member name (e.g., "pvc-xxx-5" → 5).
 func (m DatameshMember) ID() uint8 {
-	return idFromName(m.Name)
+	return IDFromName(m.Name)
 }
 
 // DatameshMemberType enumerates possible types for datamesh members.

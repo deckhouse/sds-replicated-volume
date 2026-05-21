@@ -105,6 +105,7 @@ type TestRV struct {
 	buildManualCfg         *v1alpha1.ReplicatedVolumeConfiguration
 	buildAdopt             bool
 	buildAdoptSharedSecret string
+	buildDataSource        *v1alpha1.VolumeDataSource
 
 	// Safety switches (populated by ActivateSafetyInvariants).
 	swQuorumCorrect    *tkmatch.Switch
@@ -173,6 +174,26 @@ func (t *TestRV) AdoptSharedSecret(s string) *TestRV {
 	return t
 }
 
+// DataSourceRVS binds the new RV to a ReplicatedVolumeSnapshot source
+// (restore from snapshot). The RV and the source RVS must be in the
+// same cluster.
+func (t *TestRV) DataSourceRVS(rvsName string) *TestRV {
+	t.buildDataSource = &v1alpha1.VolumeDataSource{
+		Kind: v1alpha1.VolumeDataSourceKindReplicatedVolumeSnapshot,
+		Name: rvsName,
+	}
+	return t
+}
+
+// DataSourceRV binds the new RV to a source ReplicatedVolume (clone).
+func (t *TestRV) DataSourceRV(rvName string) *TestRV {
+	t.buildDataSource = &v1alpha1.VolumeDataSource{
+		Kind: v1alpha1.VolumeDataSourceKindReplicatedVolume,
+		Name: rvName,
+	}
+	return t
+}
+
 // ---------------------------------------------------------------------------
 // buildObject
 // ---------------------------------------------------------------------------
@@ -233,6 +254,10 @@ func (t *TestRV) buildObject(ctx context.Context) *v1alpha1.ReplicatedVolume {
 			ann[v1alpha1.AdoptSharedSecretAnnotationKey] = t.buildAdoptSharedSecret
 		}
 		rv.SetAnnotations(ann)
+	}
+	if t.buildDataSource != nil {
+		ds := *t.buildDataSource
+		rv.Spec.DataSource = &ds
 	}
 	return rv
 }
