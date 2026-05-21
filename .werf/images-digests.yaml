@@ -14,6 +14,11 @@
 ---
 image: images-digests
 fromImage: builder/alpine
+import:
+  - image: tools/jq
+    add: /usr/bin/jq
+    to: /usr/bin/jq
+    before: setup
 dependencies:
 {{- range $ImageID := $ImagesIDList }}
   {{- $ImageNameCamel  := $ImageID | splitList "/" | last  | camelcase | untitle }}
@@ -24,8 +29,6 @@ dependencies:
       targetEnv: MODULE_IMAGE_DIGEST_{{ $ImageNameCamel }}
 {{- end }}
 shell:
-  beforeInstall:
-  - apk add --no-cache jq
   setup:
     - |
       env | grep MODULE_IMAGE_DIGEST | jq -Rn '
