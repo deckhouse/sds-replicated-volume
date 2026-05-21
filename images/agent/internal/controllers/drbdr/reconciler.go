@@ -236,6 +236,15 @@ func (r *Reconciler) reconcileDRBDR(
 		}
 	}
 
+	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && drbdr.DeletionTimestamp != nil {
+		if name := drbdr.Spec.LVMLogicalVolumeSnapshotName; name != "" && !slices.Contains(pendingReleaseLLVS, name) {
+			pendingReleaseLLVS = append(pendingReleaseLLVS, name)
+		}
+		if name := drbdr.Spec.LVMLogicalVolumeName; name != "" && !slices.Contains(pendingRelease, name) {
+			pendingRelease = append(pendingRelease, name)
+		}
+	}
+
 	// Step 2: DRBD convergence.
 	if aErr == nil {
 		if diskErr := observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID); diskErr != nil {
