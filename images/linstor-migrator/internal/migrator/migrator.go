@@ -188,6 +188,16 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	if err := m.crdExists(ctx, config.LinstorCRDName); err != nil {
 		if apierrors.IsNotFound(err) {
 			m.log.Info("LINSTOR not found in cluster, no resource migration needed")
+
+			// Step 11: Remove all ReplicatedStorageMetadataBackup objects even if LINSTOR is already gone.
+			if err := metadatabackupcleanup.DeleteAll(ctx, m.dynamicClient, m.log); err != nil {
+				return fmt.Errorf("delete ReplicatedStorageMetadataBackup objects: %w", err)
+			}
+
+			// Note: Step 12 (Delete legacy ReplicatedStoragePool objects) cannot be performed here
+			// because it requires reading LINSTOR database (which is already deleted) to get pool names.
+
+			// Step 13: Mark stage 1 completed.
 			if err := m.updateMigrationState(ctx, config.StateStage1Completed); err != nil {
 				return fmt.Errorf("failed to set migration state to %s: %w", config.StateStage1Completed, err)
 			}
