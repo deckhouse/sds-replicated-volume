@@ -71,6 +71,22 @@ TestDRBDResource
 │       Verifies the agent handles orphan DRBD resources left behind
 │       when the K8S object disappears without the normal finalizer flow.
 │
+├── DStateRecovery — agent stays responsive when a child process hangs in D-state
+│       Creates a diskful DRBDResource ("frozen") with an LLV on node 0.
+│       Runs `dmsetup suspend` on the LLV's backing device path via
+│       NodeExec, which makes every subsequent drbd I/O against that LV
+│       (drbdmeta dump-md in the observe loop, drbdsetup attach on
+│       retry) block in uninterruptible kernel D-state. Then creates a
+│       second diskful DRBDResource ("canary") on the same node and
+│       asserts it reaches Configured=True within the normal timeout —
+│       proving the agent's reconcile worker pool is not exhausted by
+│       the wedged reconciles. Cleanup `dmsetup resume`s the LV so the
+│       parent scope's frozen-DRBDR cleanup can tear it down. Verifies
+│       the ctrlexec.WithCache + WithTimeout + WithWaitDelay wrapping
+│       installed in drbdr.BuildController bounds each reconcile attempt
+│       to ~drbdExecTimeout + drbdExecWaitDelay instead of blocking
+│       forever.
+│
 ├── NonManagedResource — non-managed DRBD resource left untouched
 │       Creates a DRBD resource directly on the node (via drbdsetup
 │       new-resource) without the sdsrv- prefix. Waits for the scanner
@@ -209,6 +225,13 @@ Every subtest's cleanup exercises a teardown path:
   finalizer flow), then re-creates it. Verifies the agent tears down the
   orphan DRBD resource on the node and brings the re-created object up
   cleanly. Cleanup deletes the re-created DRBDResource normally.
+
+- **DStateRecovery cleanup** (LIFO): canary's DisklessToDiskfulReplica
+  cleanup tears down the canary first (its LV was never suspended).
+  Then the helper's own cleanup runs `dmsetup resume` on the frozen LV
+  so the parent scope's frozen-DRBDR cleanup can teardown normally
+  afterward. Any accumulated D-state processes inside the agent pod
+  unblock as soon as the device resumes.
 
 - **NonManagedResource**: creates a non-prefixed DRBD resource directly
   on the node and verifies it survives after the scanner processes events.
