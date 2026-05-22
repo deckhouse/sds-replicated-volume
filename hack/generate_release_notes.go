@@ -161,12 +161,36 @@ func formatPyValue(node *yaml.Node) string {
 }
 
 // formatChange formats one list item from the Changes/Изменения sequence.
-// Plain scalars are emitted verbatim (no quotes), more complex nodes use the
-// Python-style str() representation to stay compatible with the previous
-// pyyaml-based script output.
+// Plain scalars are emitted verbatim (no quotes).
+//
+// YAML treats "Title: details" as a mapping when the colon is followed by a space,
+// so a bullet like "- CI: fix foo" becomes {CI: fix foo} instead of a string.
+// Render such single-key maps as "key: value" for readable release notes.
 func formatChange(node *yaml.Node) string {
-	if node.Kind == yaml.ScalarNode {
+	switch node.Kind {
+	case yaml.ScalarNode:
 		return node.Value
+	case yaml.MappingNode:
+		parts := make([]string, 0, len(node.Content)/2)
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			parts = append(parts, node.Content[i].Value+": "+formatChange(node.Content[i+1]))
+		}
+		return strings.Join(parts, ", ")
+	case yaml.SequenceNode:
+		parts := make([]string, 0, len(node.Content))
+		for _, c := range node.Content {
+			parts = append(parts, formatChange(c))
+		}
+		return strings.Join(parts, ", ")
+	case yaml.DocumentNode:
+		if len(node.Content) > 0 {
+			return formatChange(node.Content[0])
+		}
+		return ""
+	case yaml.AliasNode:
+		if node.Alias != nil {
+			return formatChange(node.Alias)
+		}
 	}
 	return formatPyValue(node)
 }
