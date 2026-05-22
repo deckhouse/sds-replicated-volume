@@ -17,36 +17,49 @@ limitations under the License.
 package drbdutils
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 )
 
-// CombinedOutputRunner is the minimal interface needed by executeCommand.
-type CombinedOutputRunner interface {
-	CombinedOutput() ([]byte, error)
-	String() string
+const (
+	// ExecTimeout is the production per-invocation timeout for one-shot
+	// drbdsetup/drbdmeta commands. Sized for happy-path metadata
+	// operations (create-md, attach, resize, write-dev-uuid) on typical
+	// volumes while still being small enough to cap goroutine pile-up
+	// when a command gets stuck behind a kernel-side stall.
+	ExecTimeout = 10 * time.Second
+
+	// ExecWaitDelay is the production WaitDelay applied by ConfigureCmd.
+	// drbdsetup and drbdmeta wrap kernel ioctls and can leave helpers
+	// behind on error paths, so a nonzero value is required to keep
+	// Cmd.Wait from blocking forever on orphaned pipes.
+	ExecWaitDelay = 3 * time.Second
+)
+
+// ConfigureCmd applies the production *exec.Cmd policy for
+// drbdsetup/drbdmeta invocations. Pass it as the configure argument to
+// ctrlexec.ExecCommandContext when wiring a factory.
+func ConfigureCmd(c *exec.Cmd) {
+	c.WaitDelay = ExecWaitDelay
 }
 
-// Cmd is the full command interface used for both one-shot and streaming
-// (e.g. events2) command execution.
-type Cmd interface {
-	CombinedOutputRunner
-	StdoutPipe() (io.ReadCloser, error)
-	Start() error
-	Wait() error
-}
+// ExecCommandContext is the factory used by every one-shot Execute*
+// helper (status, attach, options, peer mgmt, etc.). It is overridable at
+// controller startup; the package default applies no policy, so
+// production code MUST override it (see ConfigureCmd, ExecTimeout).
+var ExecCommandContext ctrlexec.ExecCommandContextFactory = ctrlexec.ExecCommandContext(nil)
 
-type ExecCommandContextFactory func(ctx context.Context, name string, arg ...string) Cmd
-
-func defaultExecCommandContext(ctx context.Context, name string, arg ...string) Cmd {
-	return exec.CommandContext(ctx, name, arg...)
-}
-
-var ExecCommandContext ExecCommandContextFactory = defaultExecCommandContext
+// Events2ExecCommandContext is the factory used exclusively by
+// ExecuteEvents2. It is a separate variable because events2 streams via
+// StdoutPipe+Start+Wait — incompatible with ctrlexec.WithCache's
+// CombinedOutput path — and is expected to run for the entire manager
+// lifetime, ruling out a per-call timeout.
+var Events2ExecCommandContext ctrlexec.ExecCommandContextFactory = ctrlexec.ExecCommandContext(nil)
 
 var DRBDSetupCommand = "drbdsetup"
 
@@ -76,7 +89,7 @@ func withOutput(err error, out []byte) error {
 }
 
 func executeCommand(
-	cmd CombinedOutputRunner,
+	cmd ctrlexec.CombinedOutputRunner,
 	knownErrors []KnownError,
 ) ([]byte, error) {
 	out, err := cmd.CombinedOutput()
