@@ -17,35 +17,40 @@ limitations under the License.
 package dmsetup
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
+	"time"
+
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 )
 
 const dmsetupCommand = "dmsetup"
 
-// Cmd abstracts command execution for testing.
-type Cmd interface {
-	CombinedOutput() ([]byte, error)
+const (
+	// ExecTimeout is the production per-invocation timeout. dmsetup
+	// info/create/remove are normally sub-second; this value is the
+	// worst-case bound for a kernel-side stall (e.g. backing block
+	// device in D-state).
+	ExecTimeout = 10 * time.Second
+
+	// ExecWaitDelay is the production WaitDelay applied by ConfigureCmd.
+	// dmsetup speaks to the device-mapper ioctl interface and can leave
+	// helpers behind on error paths, so a nonzero value is required to
+	// keep Cmd.Wait from blocking forever on orphaned pipes.
+	ExecWaitDelay = 3 * time.Second
+)
+
+// ConfigureCmd applies the production *exec.Cmd policy for dmsetup
+// invocations. Pass it as the configure argument to
+// ctrlexec.ExecCommandContext when wiring a factory.
+func ConfigureCmd(c *exec.Cmd) {
+	c.WaitDelay = ExecWaitDelay
 }
 
-// ExecCommandContextFactory creates a Cmd for the given command and arguments.
-type ExecCommandContextFactory func(ctx context.Context, name string, arg ...string) Cmd
-
-// ExecCommandContext is overridable for testing purposes.
-var ExecCommandContext ExecCommandContextFactory = func(
-	ctx context.Context,
-	name string,
-	arg ...string,
-) Cmd {
-	return (*execCmd)(exec.CommandContext(ctx, name, arg...))
-}
-
-type execCmd exec.Cmd
-
-var _ Cmd = &execCmd{}
-
-func (r *execCmd) CombinedOutput() ([]byte, error) { return (*exec.Cmd)(r).CombinedOutput() }
+// ExecCommandContext is overridable for testing and for installing a
+// wrapped factory at controller startup. The package default applies no
+// policy; production code MUST override it (see ConfigureCmd, ExecTimeout).
+var ExecCommandContext ctrlexec.ExecCommandContextFactory = ctrlexec.ExecCommandContext(nil)
 
 func withOutput(err error, out []byte) error {
 	if len(out) == 0 {

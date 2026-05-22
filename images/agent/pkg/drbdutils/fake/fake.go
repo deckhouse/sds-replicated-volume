@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 )
 
 type Exec struct {
@@ -38,11 +39,17 @@ func (b *Exec) ExpectCommands(cmds ...*ExpectedCmd) {
 func (b *Exec) Setup(t *testing.T) {
 	t.Helper()
 
-	tmp := drbdutils.ExecCommandContext
+	tmpExec := drbdutils.ExecCommandContext
+	tmpEvents2 := drbdutils.Events2ExecCommandContext
 
 	i := 0
 
-	drbdutils.ExecCommandContext = func(_ context.Context, name string, args ...string) drbdutils.Cmd {
+	// Both factories route through the same expectation queue so tests can
+	// assert command order across Execute* + ExecuteEvents2 calls. Production
+	// wiring composes wrappers (cache/timeout/WaitDelay) differently for
+	// each factory, but the test fake is concerned only with what command
+	// names and arguments were invoked.
+	shared := func(_ context.Context, name string, args ...string) ctrlexec.Cmd {
 		if len(b.cmds) <= i {
 			t.Fatalf("expected %d command executions, got more", len(b.cmds))
 		}
@@ -56,11 +63,13 @@ func (b *Exec) Setup(t *testing.T) {
 		return cmd
 	}
 
-	t.Cleanup(func() {
-		// actual cleanup
-		drbdutils.ExecCommandContext = tmp
+	drbdutils.ExecCommandContext = shared
+	drbdutils.Events2ExecCommandContext = shared
 
-		// assert all commands executed
+	t.Cleanup(func() {
+		drbdutils.ExecCommandContext = tmpExec
+		drbdutils.Events2ExecCommandContext = tmpEvents2
+
 		if i != len(b.cmds) {
 			t.Errorf("expected %d command executions, got %d", len(b.cmds), i)
 		}
@@ -78,7 +87,7 @@ type ExpectedCmd struct {
 	stdoutReader io.ReadCloser
 }
 
-var _ drbdutils.Cmd = &ExpectedCmd{}
+var _ ctrlexec.Cmd = &ExpectedCmd{}
 
 func (c *ExpectedCmd) Matches(name string, args ...string) bool {
 	return c.Name == name && slices.Equal(c.Args, args)
