@@ -1,0 +1,83 @@
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: Nodes
+metadata:
+  name: node-a-hash
+spec:
+  node_dsp_name: node-a
+  node_name: NODE-A
+  node_type: 2
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: NodeNetInterfaces
+metadata:
+  name: net-a
+spec:
+  inet_address: 10.0.0.1
+  node_name: NODE-A
+  stlt_conn_encr_type: SSL
+  stlt_conn_port: 3367
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: StorPoolDefinitions
+metadata:
+  name: spd-a
+spec:
+  pool_dsp_name: pool-a
+  pool_name: POOL-A
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: NodeStorPool
+metadata:
+  name: nsp-a
+spec:
+  driver_name: LVM
+  node_name: NODE-A
+  pool_name: POOL-A
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: PropsContainers
+metadata:
+  name: prop-a
+spec:
+  prop_key: StorDriver/StorPoolName
+  prop_value: vg0
+  props_instance: /STORPOOLCONF/NODE-A/POOL-A
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: LayerDrbdVolumeDefinitions
+metadata:
+  name: ldvd-a
+spec:
+  resource_name: PVC-TEST
+  vlm_minor_nr: 1000
+  vlm_nr: 0
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: LayerResourceIds
+metadata:
+  name: lrid-storage
+spec:
+  layer_resource_id: 10
+  layer_resource_kind: STORAGE
+  node_name: NODE-A
+  resource_name: PVC-TEST
+  vlm_nr: 0
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: LayerStorageVolumes
+metadata:
+  name: lsv-a
+spec:
+  layer_resource_id: 10
+  node_name: NODE-A
+  stor_pool_name: POOL-A
+  vlm_nr: 0
+---
+apiVersion: internal.linstor.linbit.com/v1-19-1
+kind: Volumes
+metadata:
+  name: vol-a
+spec:
+  node_name: NODE-A
+  resource_name: PVC-TEST
+  vlm_nr: 0

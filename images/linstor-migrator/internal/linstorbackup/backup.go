@@ -65,6 +65,7 @@ Files:
   crds.gz — gzip multi-document YAML: one CustomResourceDefinition per document
             (spec.group internal.linstor.linbit.com).
   crs.gz  — gzip multi-document YAML: every custom resource instance for those CRDs.
+  linstor-viewer — helper binary to print LINSTOR-style listings from crs.gz (read-only).
 
 Restore:
   1. mkdir -p /tmp/linstor-restore && cd /tmp/linstor-restore
@@ -73,9 +74,16 @@ Restore:
   4. gunzip -c %s > crs.yaml
   5. kubectl apply -f crs.yaml
 
+View cluster snapshot (from backup directory):
+  ./linstor-viewer crs.gz node list
+  ./linstor-viewer crs.gz storage-pool list
+  ./linstor-viewer crs.gz volume list
+  ./linstor-viewer --help
+
 Notes:
   - Apply CRDs before CRs. Status and server-owned metadata (managedFields, resourceVersion, uid,
     creationTimestamp, generation) are omitted from both files so manifests are apply-friendly.
+  - Listings are reconstructed from CR data; fields not present in the backup show "-".
 `, exampleCRDs, exampleCRs)
 }
 
@@ -175,6 +183,10 @@ func WriteGroupBackup(ctx context.Context, kClient client.Client, dyn dynamic.In
 	}
 	if err := deduplicateBackups(log, dir, backupCRsGzFile); err != nil {
 		return fmt.Errorf("deduplicate CR backups: %w", err)
+	}
+
+	if err := InstallLinstorViewer(dir); err != nil {
+		return fmt.Errorf("install linstor backup viewer: %w", err)
 	}
 
 	readmePath := filepath.Join(dir, backupReadme)

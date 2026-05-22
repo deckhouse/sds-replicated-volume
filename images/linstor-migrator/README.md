@@ -113,7 +113,7 @@ High-level flow:
 1. set state to `stage1_started`;
 2. wait until `Deployment/linstor-controller` disappears from `d8-sds-replicated-volume` (up to 10 minutes);
 3. if the LINSTOR CRD is missing, set `stage1_completed` and skip the rest of stage 1;
-4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
+4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, install the `linstor-viewer` backup viewer binary, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
 5. load LINSTOR data from CRDs into an in-memory snapshot;
 6. list `PersistentVolume`, `ReplicatedStorageClass`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
 7. classify LINSTOR resources into:
@@ -257,3 +257,17 @@ data:
   state: not_started
 EOF
 ```
+
+## LINSTOR backup viewer (`linstor-viewer`)
+
+After stage 1, the backup directory contains a read-only helper binary `linstor-viewer` that prints LINSTOR-style listings reconstructed from `crs.gz` (no live LINSTOR controller required). Fields not stored in the CR backup are shown as `-`.
+
+```bash
+cd /opt/deckhouse/tmp/linstor-migrator/linstor-backup-db
+./linstor-viewer crs.gz node list
+./linstor-viewer crs.gz storage-pool list
+./linstor-viewer crs.gz volume list
+./linstor-viewer --help
+```
+
+To rebuild the embedded viewer when developing the migrator locally, see `internal/linstorbackup/embedded/README.md`.
