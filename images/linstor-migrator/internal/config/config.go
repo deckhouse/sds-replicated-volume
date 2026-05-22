@@ -31,7 +31,8 @@ const (
 	// MigratorLogFileName is the log file name inside MigratorHostDir (opened with O_APPEND).
 	MigratorLogFileName = "linstor-migrator.log"
 
-	// MigratorLinstorBackupDirName is the subdirectory under MigratorHostDir for LINSTOR CR YAML backup (crds.gz, crs.gz, linstor-viewer, readme.txt).
+	// MigratorLinstorBackupDirName is the subdirectory under MigratorHostDir for LINSTOR CR YAML backup
+	// (crds.gz, crs.gz, linstor-viewer, legacy-rsp.gz when present, readme.txt).
 	MigratorLinstorBackupDirName = "linstor-backup-db"
 
 	// MigrationConfigMapName is the name of the ConfigMap used to track migration state.

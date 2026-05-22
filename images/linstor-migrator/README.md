@@ -124,7 +124,7 @@ High-level flow:
 9. migrate resources with PVs first, then resources without PVs;
 10. delete every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com` (cluster data was backed up in step 4);
 11. delete all `ReplicatedStorageMetadataBackup` objects (cluster-held LINSTOR metadata backups);
-12. delete legacy `ReplicatedStoragePool` objects whose names equal a migrated LINSTOR storage pool name (skips `linstor-auto-*` and `auto-rsp-*`);
+12. back up legacy `ReplicatedStoragePool` objects (name = LINSTOR pool, skips `linstor-auto-*` and `auto-rsp-*`) to `legacy-rsp.gz` when any exist, then delete them;
 13. set state to `stage1_completed`.
 
 ### Stage 2
@@ -187,7 +187,7 @@ Current behavior:
 
 If the migrator cannot resolve the corresponding `LVMVolumeGroup` or thin pool for a LINSTOR pool, it fails fast.
 
-After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a LINSTOR pool (typical for manually created pools on the old control plane) is removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place.
+After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a LINSTOR pool (typical for manually created pools on the old control plane) is written to `legacy-rsp.gz` in the backup directory (if present) and then removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place. If no legacy pools exist, `legacy-rsp.gz` is not created.
 
 ## Created Resources
 

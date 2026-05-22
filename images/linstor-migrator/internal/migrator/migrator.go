@@ -378,18 +378,17 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	return nil
 }
 
-// deleteLegacyReplicatedStoragePoolsForLinstorPoolNames deletes ReplicatedStoragePool objects whose metadata.name
-// equals a LINSTOR storage pool name seen during migration. Under the legacy control plane such pools were often
-// created with that exact name. Migrator-owned pools are named linstor-auto-* and RSC-controller pools are auto-rsp-*;
-// those prefixes are skipped so only legacy/manual objects are removed.
+// deleteLegacyReplicatedStoragePoolsForLinstorPoolNames backs up then deletes ReplicatedStoragePool objects whose
+// metadata.name equals a LINSTOR storage pool name seen during migration. Under the legacy control plane such pools
+// were often created with that exact name. Migrator-owned pools are named linstor-auto-* and RSC-controller pools are
+// auto-rsp-*; those prefixes are skipped so only legacy/manual objects are removed.
 func (m *Migrator) deleteLegacyReplicatedStoragePoolsForLinstorPoolNames(ctx context.Context, linstorPoolNames []string) error {
-	for _, poolName := range linstorPoolNames {
-		if poolName == "" {
-			continue
-		}
-		if strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolNamePrefix) || strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolRSCNamePrefix) {
-			continue
-		}
+	toDelete, err := linstorbackup.WriteLegacyRSPBackup(ctx, m.client, m.log, linstorbackup.BackupDir(), linstorPoolNames)
+	if err != nil {
+		return fmt.Errorf("backup legacy ReplicatedStoragePool objects: %w", err)
+	}
+
+	for _, poolName := range toDelete {
 		rsp := &srvv1alpha1.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: poolName},
 		}
