@@ -378,18 +378,17 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	return nil
 }
 
-// deleteLegacyReplicatedStoragePoolsForLinstorPoolNames deletes ReplicatedStoragePool objects whose metadata.name
-// equals a LINSTOR storage pool name seen during migration. Under the legacy control plane such pools were often
-// created with that exact name. Migrator-owned pools are named linstor-auto-* and RSC-controller pools are auto-rsp-*;
-// those prefixes are skipped so only legacy/manual objects are removed.
+// deleteLegacyReplicatedStoragePoolsForLinstorPoolNames backs up then deletes ReplicatedStoragePool objects whose
+// metadata.name equals a LINSTOR storage pool name seen during migration. Under the legacy control plane such pools
+// were often created with that exact name. Migrator-owned pools are named linstor-auto-* and RSC-controller pools are
+// auto-rsp-*; those prefixes are skipped so only legacy/manual objects are removed.
 func (m *Migrator) deleteLegacyReplicatedStoragePoolsForLinstorPoolNames(ctx context.Context, linstorPoolNames []string) error {
-	for _, poolName := range linstorPoolNames {
-		if poolName == "" {
-			continue
-		}
-		if strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolNamePrefix) || strings.HasPrefix(poolName, config.AutoReplicatedStoragePoolRSCNamePrefix) {
-			continue
-		}
+	toDelete, err := linstorbackup.WriteLegacyRSPBackup(ctx, m.client, m.log, linstorbackup.BackupDir(), linstorPoolNames)
+	if err != nil {
+		return fmt.Errorf("backup legacy ReplicatedStoragePool objects: %w", err)
+	}
+
+	for _, poolName := range toDelete {
 		rsp := &srvv1alpha1.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: poolName},
 		}
@@ -449,7 +448,7 @@ func (m *Migrator) migrateResource(
 		return nil
 	}
 
-	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, poolName, repStorClasses)
+	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, repStorClasses)
 
 	sharedSecret, err := db.GetSharedSecret(resName)
 	if err != nil {
@@ -755,7 +754,8 @@ func (m *Migrator) createRVAFromVolumeAttachments(
 		rvaName := fmt.Sprintf("%s-%s-%s", "csi", resName, strings.ToLower(va.Spec.NodeName))
 		rva := &srvv1alpha1.ReplicatedVolumeAttachment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: rvaName,
+				Name:       rvaName,
+				Finalizers: csiControllerFinalizers(),
 			},
 			Spec: srvv1alpha1.ReplicatedVolumeAttachmentSpec{
 				ReplicatedVolumeName: resName,
@@ -865,6 +865,12 @@ func (m *Migrator) checkNewControlPlaneEnabled(ctx context.Context) error {
 	return fmt.Errorf("ModuleConfig %q has newControlPlane=false; enable the new control-plane by setting spec.settings.newControlPlane to true before running migration", config.ModuleName)
 }
 
+// csiControllerFinalizers returns the CSI controller finalizer set on ReplicatedVolume
+// and ReplicatedVolumeAttachment at create time (same as images/csi-driver).
+func csiControllerFinalizers() []string {
+	return []string{srvv1alpha1.CSIControllerFinalizer}
+}
+
 // createIfNotExists creates a Kubernetes resource if it does not already exist.
 // It is idempotent: if the resource already exists, it logs and returns nil.
 // Pass a logger from log.With(...) so Info/Debug lines include stable identifying attributes (see ensureMigrationRSP).
@@ -972,22 +978,14 @@ func (m *Migrator) ensureMigrationRSP(
 }
 
 // findReplicatedStorageClassForResource returns an existing ReplicatedStorageClass name when RV
-// should use Auto configuration (PV storage class name matches an RSC, or legacy pool match without PV).
+// should use Auto configuration (PV storage class name matches an RSC).
 func (m *Migrator) findReplicatedStorageClassForResource(
 	pv *corev1.PersistentVolume,
-	linstorPoolName string,
 	repStorClasses map[string]srvv1alpha1.ReplicatedStorageClass,
 ) (rscName string, ok bool) {
 	if pv != nil && pv.Spec.StorageClassName != "" {
 		if _, exists := repStorClasses[pv.Spec.StorageClassName]; exists {
 			return pv.Spec.StorageClassName, true
-		}
-		return "", false
-	}
-	for _, rsc := range repStorClasses {
-		// nolint:staticcheck // deprecated spec.storagePool still used for legacy pool binding
-		if strings.EqualFold(rsc.Spec.StoragePool, linstorPoolName) {
-			return rsc.Name, true
 		}
 	}
 	return "", false
@@ -1086,6 +1084,7 @@ func (m *Migrator) createRV(
 			Name:        resName,
 			Labels:      labels,
 			Annotations: ann,
+			Finalizers:  csiControllerFinalizers(),
 		},
 		Spec: spec,
 	}
