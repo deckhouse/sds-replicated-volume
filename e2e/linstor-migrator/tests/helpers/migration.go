@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	. "github.com/onsi/ginkgo/v2"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -769,6 +771,24 @@ func CheckRVAPairsMatchInUseVolumesFromSnapshot(snapshot *RVASnapshot) []error {
 	return errors
 }
 
+// CheckRVACSIControllerFinalizerFromSnapshot verifies each RVA has the CSI controller finalizer.
+func CheckRVACSIControllerFinalizerFromSnapshot(snapshot *RVASnapshot) []error {
+	if len(snapshot.ExpectedPairs) == 0 {
+		Skip("Skipping RVA checks: no InUse=true volumes in saved linstor state")
+		return nil
+	}
+	var errors []error
+	for _, rva := range snapshot.CurrentRVAs {
+		if !slices.Contains(rva.Finalizers, srvv1.CSIControllerFinalizer) {
+			errors = append(errors, fmt.Errorf(
+				"RVA %s is missing finalizer %q (finalizers=%v)",
+				rva.Name, srvv1.CSIControllerFinalizer, rva.Finalizers,
+			))
+		}
+	}
+	return errors
+}
+
 func CheckRVANamePatternFromSnapshot(snapshot *RVASnapshot) []error {
 	if len(snapshot.ExpectedPairs) == 0 {
 		Skip("Skipping RVA checks: no InUse=true volumes in saved linstor state")
@@ -1175,6 +1195,24 @@ func CheckRVManualConfigurationFieldsFromSnapshot(snapshot *RVSnapshot, manualEx
 			errors = append(errors, fmt.Errorf(
 				"RV %s has spec.manualConfiguration.volumeAccess=%q (expected PreferablyLocal)",
 				resourceName, mc.VolumeAccess,
+			))
+		}
+	}
+	return errors
+}
+
+// CheckRVCSIControllerFinalizerFromSnapshot verifies each RV has the CSI controller finalizer.
+func CheckRVCSIControllerFinalizerFromSnapshot(snapshot *RVSnapshot) []error {
+	var errors []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		if !slices.Contains(rv.Finalizers, srvv1.CSIControllerFinalizer) {
+			errors = append(errors, fmt.Errorf(
+				"RV %s is missing finalizer %q (finalizers=%v)",
+				resourceName, srvv1.CSIControllerFinalizer, rv.Finalizers,
 			))
 		}
 	}
