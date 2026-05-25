@@ -332,7 +332,7 @@ func PrepareOrRestoreMigratorScenario(
 		hasFilter := len(suiteConfig.FocusStrings) > 0 || len(suiteConfig.FocusFiles) > 0 || suiteConfig.LabelFilter != ""
 		if cfg.RequireFocused && !hasFilter {
 			return nil, fmt.Errorf(
-				"TEST_PREVIOUS_RUNID is incompatible with full suite run (no focus).",
+				"TEST_PREVIOUS_RUNID is incompatible with full suite run (no focus)",
 			)
 		}
 
@@ -387,7 +387,7 @@ func SimulateLostPVs(ctx context.Context, c client.Client, podNames []string) er
 		}
 		slog.Info("linstor-controller deployment not found, skipping scale-down")
 	} else {
-		var replicas int32 = 0
+		var replicas int32
 		patchPayload := []map[string]interface{}{
 			{"op": "replace", "path": "/spec/replicas", "value": replicas},
 		}
