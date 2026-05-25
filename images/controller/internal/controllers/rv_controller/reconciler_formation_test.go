@@ -1182,6 +1182,8 @@ var _ = Describe("Formation: BootstrapData", func() {
 		var drbdrOp v1alpha1.DRBDResourceOperation
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rv-1-formation"}, &drbdrOp)).To(Succeed())
 		Expect(drbdrOp.Spec.Type).To(Equal(v1alpha1.DRBDResourceOperationCreateNewUUID))
+		// NodeName must be set to the node that owns the chosen diskful replica.
+		Expect(drbdrOp.Spec.NodeName).To(Equal("node-1"))
 		// Single replica + LVM → clear-bitmap (no force-resync).
 		Expect(drbdrOp.Spec.CreateNewUUID.ClearBitmap).To(BeTrue())
 		Expect(drbdrOp.Spec.CreateNewUUID.ForceResync).To(BeFalse())

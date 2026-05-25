@@ -33,13 +33,20 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const RVRControllerName = "rvr-controller"
 
-func BuildController(mgr manager.Manager, agentPodNamespace string) error {
+func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+	agentPodNamespace := cfg.PodNamespace()
+
 	cl := mgr.GetClient()
 	scheme := mgr.GetScheme()
 

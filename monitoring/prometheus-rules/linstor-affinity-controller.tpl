@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 - name: kubernetes.linstor.affinity-controller_state
   rules:
     - alert: D8LinstorAffinityControllerPodIsNotReady
@@ -34,3 +35,4 @@
           The recommended course of action:
           1. Retrieve details of the Deployment: `kubectl -n d8-sds-replicated-volume describe deploy linstor-affinity-controller`
           2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod -l app=linstor-affinity-controller`
+{{- end }}

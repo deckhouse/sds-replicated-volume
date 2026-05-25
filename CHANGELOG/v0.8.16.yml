@@ -1,0 +1,4 @@
+Изменения:
+- Added missing mount points in webhooks distroless image
+- Update base images, Go and lib-helm (CVE fix)
+- Clarifications in the documentation

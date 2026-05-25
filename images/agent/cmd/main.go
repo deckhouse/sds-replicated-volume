@@ -62,7 +62,15 @@ func main() {
 const drbdUsermodeHelperPath = "/sys/module/drbd/parameters/usermode_helper"
 
 func disableDRBDUsermodeHelper(log *slog.Logger) {
-	if err := os.WriteFile(drbdUsermodeHelperPath, []byte("disabled\n"), 0o644); err != nil {
+	// MUST be exactly "disabled" without a trailing newline: DRBD's
+	// drbd_maybe_khelper short-circuits on strcmp(drbd_usermode_helper,
+	// "disabled") == 0 (see 3p-drbd drbd/drbd_nl.c). The kernel's
+	// param_set_copystring is a raw strcpy and preserves whatever we
+	// write, so a trailing '\n' breaks the equality test, the
+	// short-circuit doesn't fire, every helper invocation reaches
+	// call_usermodehelper("disabled\n", ...), fails with -ENOENT, and
+	// the kernel logs a KERN_WARNING per invocation.
+	if err := os.WriteFile(drbdUsermodeHelperPath, []byte("disabled"), 0o644); err != nil {
 		log.Warn("failed to disable DRBD usermode helper", "path", drbdUsermodeHelperPath, "err", err)
 	} else {
 		log.Info("disabled DRBD usermode helper", "path", drbdUsermodeHelperPath)
@@ -81,7 +89,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 
 	envConfig, err := env.GetConfig()
 	if err != nil {
-		return u.LogError(log, fmt.Errorf("getting env config: %w", err))
+		return u.LogError(log, err)
 	}
 	log = log.With("nodeName", envConfig.NodeName())
 

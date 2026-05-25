@@ -89,6 +89,11 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupOrphanCleanup(e, cl, cluster, "oc", 0)
 	})
 
+	e.Run("DStateRecovery", func(e envtesting.E) {
+		drbdrFrozen, llvFrozen := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "ds", 0)
+		suite.SetupDStateRecovery(e, cl, cluster, nodeExec, drbdrFrozen, llvFrozen, "dsc", 0)
+	})
+
 	ne := kubetesting.DiscoverNodeExec(e, cs, podLogOpts)
 
 	e.Run("NonManagedResource", func(e envtesting.E) {

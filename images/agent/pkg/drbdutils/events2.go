@@ -73,7 +73,7 @@ func ExecuteEvents2(
 	}
 
 	return func(yield func(Events2Result) bool) {
-		cmd := ExecCommandContext(
+		cmd := Events2ExecCommandContext(
 			ctx,
 			DRBDSetupCommand,
 			Events2Args...,

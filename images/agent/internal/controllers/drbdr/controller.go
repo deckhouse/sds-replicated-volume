@@ -37,6 +37,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 )
 
 // BuildController creates and registers the DRBD controller and scanner with the manager.
@@ -54,18 +55,30 @@ func BuildController(mgr manager.Manager) error {
 
 	cfg, err := env.GetConfig()
 	if err != nil {
-		return fmt.Errorf("getting config: %w", err)
+		return err
 	}
 
 	cl := mgr.GetClient()
 	nodeName := cfg.NodeName()
 
-	// Set up drbd command logging
-	origExec := drbdutils.ExecCommandContext
-	drbdutils.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdutils.Cmd {
-		log.FromContext(ctx).Info("executing drbd command", "command", name, "args", arg)
-		return origExec(ctx, name, arg...)
-	}
+	// drbdsetup/drbdmeta can hang indefinitely on backing-device I/O
+	// (most commonly when an LV underneath enters uninterruptible
+	// D-state); bare exec would leak the reconcile goroutine forever.
+	// The one-shot factory wraps each call so the reconcile context
+	// stays cancellable (WithCache), the underlying process is bounded
+	// (WithTimeout), and Cmd.Wait survives pipe-holding grandchildren
+	// (ConfigureCmd sets WaitDelay).
+	//
+	// events2 streams via StdoutPipe+Start+Wait and runs for the
+	// manager lifetime — neither WithCache (CombinedOutput-only) nor a
+	// per-call timeout fits — so it uses a bare factory and relies on
+	// ConfigureCmd alone for pipe-orphan safety.
+	drbdutils.ExecCommandContext = withDRBDCommandLogging(
+		ctrlexec.WithCache(
+			ctrlexec.WithTimeout(drbdutils.ExecTimeout,
+				ctrlexec.ExecCommandContext(drbdutils.ConfigureCmd))))
+	drbdutils.Events2ExecCommandContext = withDRBDCommandLogging(
+		ctrlexec.ExecCommandContext(drbdutils.ConfigureCmd))
 
 	// Create internal request channel (scanner sends here)
 	requestCh := make(chan event.TypedGenericEvent[DRBDReconcileRequest], 100)
@@ -128,6 +141,15 @@ func BuildController(mgr manager.Manager) error {
 	}
 
 	return nil
+}
+
+// withDRBDCommandLogging wraps a factory so every drbd command invocation
+// is logged at info level on the per-call context's logger.
+func withDRBDCommandLogging(factory ctrlexec.ExecCommandContextFactory) ctrlexec.ExecCommandContextFactory {
+	return func(ctx context.Context, name string, args ...string) ctrlexec.Cmd {
+		log.FromContext(ctx).Info("executing drbd command", "command", name, "args", args)
+		return factory(ctx, name, args...)
+	}
 }
 
 func withDurationLogging(inner reconcile.TypedReconciler[DRBDReconcileRequest]) reconcile.TypedReconciler[DRBDReconcileRequest] {

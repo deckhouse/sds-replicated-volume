@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -213,12 +212,14 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 	})
 })
 
-var _ = Describe("WaitForAttachedToProvided", func() {
+var _ = Describe("WaitForRVADeleted", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
 		traceID string
 	)
+
+	const stuckFinalizer = "test.deckhouse.io/stuck"
 
 	BeforeEach(func() {
 		cl = newFakeClient()
@@ -226,83 +227,122 @@ var _ = Describe("WaitForAttachedToProvided", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when node already in status.actuallyAttachedTo", func() {
-		It("should return immediately", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
-
-			rv := createTestReplicatedVolume(volumeName)
-			rv.Status.ActuallyAttachedTo = []string{nodeName}
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+	Context("when RVA does not exist", func() {
+		It("should return immediately without error", func(ctx SpecContext) {
+			err := WaitForRVADeleted(ctx, cl, &log, traceID, "missing-volume", "missing-node")
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("when node appears in status.actuallyAttachedTo", func() {
-		It("should wait and return successfully", func(ctx SpecContext) {
+	Context("when RVA is deleted in background", func() {
+		It("should wait and return successfully once the object is gone", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
+			rvaName := BuildRVAName(volumeName, nodeName)
 
-			rv := createTestReplicatedVolume(volumeName)
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       rvaName,
+					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: volumeName,
+					NodeName:             nodeName,
+				},
+			}
+			Expect(cl.Create(ctx, rva)).To(Succeed())
 
-			// Update status in background after a short delay
+			// Delete sets DeletionTimestamp but keeps the object while the
+			// stuck finalizer is present (mimics rv-controller finalizer).
+			Expect(cl.Delete(ctx, rva)).To(Succeed())
+
 			go func() {
 				defer GinkgoRecover()
-				time.Sleep(100 * time.Millisecond)
-				updatedRV := &v1alpha1.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.ActuallyAttachedTo = []string{nodeName}
-				// Use Update instead of Status().Update for fake client
-				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+				time.Sleep(150 * time.Millisecond)
+				cur := &v1alpha1.ReplicatedVolumeAttachment{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, cur)).To(Succeed())
+				cur.Finalizers = nil
+				Expect(cl.Update(ctx, cur)).To(Succeed())
 			}()
 
-			// Use context with timeout to prevent hanging
-			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForAttachedToProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForRVADeleted(waitCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
+
+			got := &v1alpha1.ReplicatedVolumeAttachment{}
+			getErr := cl.Get(ctx, client.ObjectKey{Name: rvaName}, got)
+			Expect(getErr).To(HaveOccurred())
 		})
 	})
 
-	Context("when ReplicatedVolume does not exist", func() {
-		It("should return an error", func(ctx SpecContext) {
-			volumeName := "non-existent-volume"
+	Context("when context deadline expires while RVA is stuck", func() {
+		It("should return a wrapped DeadlineExceeded error carrying diagnostics", func(ctx SpecContext) {
+			volumeName := "test-volume"
 			nodeName := "node-1"
+			rvaName := BuildRVAName(volumeName, nodeName)
 
-			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       rvaName,
+					Finalizers: []string{stuckFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: volumeName,
+					NodeName:             nodeName,
+				},
+			}
+			Expect(cl.Create(ctx, rva)).To(Succeed())
+			Expect(cl.Delete(ctx, rva)).To(Succeed())
+
+			timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+			defer cancel()
+
+			err := WaitForRVADeleted(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("ReplicatedVolume"))
+			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
+			Expect(err.Error()).To(ContainSubstring(stuckFinalizer))
 		})
 	})
 
 	Context("when context is cancelled", func() {
-		It("should return context error", func(ctx SpecContext) {
+		It("should return a wrapped Canceled error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
+			rvaName := BuildRVAName(volumeName, nodeName)
 
-			rv := createTestReplicatedVolume(volumeName)
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       rvaName,
+					Finalizers: []string{stuckFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: volumeName,
+					NodeName:             nodeName,
+				},
+			}
+			Expect(cl.Create(ctx, rva)).To(Succeed())
+			Expect(cl.Delete(ctx, rva)).To(Succeed())
 
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForAttachedToProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForRVADeleted(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(Equal(context.Canceled))
+			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 		})
 	})
 })
 
-var _ = Describe("WaitForAttachedToRemoved", func() {
+var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
 		traceID string
 	)
+
+	const stuckFinalizer = "test.deckhouse.io/stuck"
 
 	BeforeEach(func() {
 		cl = newFakeClient()
@@ -310,87 +350,79 @@ var _ = Describe("WaitForAttachedToRemoved", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when node already not in status.actuallyAttachedTo", func() {
-		It("should return immediately", func(ctx SpecContext) {
+	Context("when stale RVA gets deleted before the deadline", func() {
+		It("should wait for deletion and then create a fresh RVA", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
+			rvaName := BuildRVAName(volumeName, nodeName)
 
-			rv := createTestReplicatedVolume(volumeName)
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+			stale := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       rvaName,
+					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: volumeName,
+					NodeName:             nodeName,
+				},
+			}
+			Expect(cl.Create(ctx, stale)).To(Succeed())
+			Expect(cl.Delete(ctx, stale)).To(Succeed())
 
-			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
-
-	Context("when node is removed from status.actuallyAttachedTo", func() {
-		It("should wait and return successfully", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
-
-			rv := createTestReplicatedVolume(volumeName)
-			rv.Status.ActuallyAttachedTo = []string{nodeName}
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			// Update status in background after a short delay
 			go func() {
 				defer GinkgoRecover()
-				time.Sleep(100 * time.Millisecond)
-				updatedRV := &v1alpha1.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.ActuallyAttachedTo = []string{}
-				// Use Update instead of Status().Update for fake client
-				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+				time.Sleep(150 * time.Millisecond)
+				cur := &v1alpha1.ReplicatedVolumeAttachment{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, cur)).To(Succeed())
+				cur.Finalizers = nil
+				Expect(cl.Update(ctx, cur)).To(Succeed())
 			}()
 
-			// Use context with timeout to prevent hanging
-			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			ensureCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForAttachedToRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			got, err := EnsureRVA(ensureCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(rvaName))
+
+			fresh := &v1alpha1.ReplicatedVolumeAttachment{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, fresh)).To(Succeed())
+			Expect(fresh.DeletionTimestamp).To(BeNil())
+			Expect(fresh.Finalizers).To(ContainElement(SDSReplicatedVolumeCSIFinalizer))
 		})
 	})
 
-	Context("when ReplicatedVolume does not exist", func() {
-		It("should return nil (considered success)", func(ctx SpecContext) {
-			volumeName := "non-existent-volume"
-			nodeName := "node-1"
-
-			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
-
-	Context("when status is empty", func() {
-		It("should return nil (considered success)", func(ctx SpecContext) {
+	Context("when stale RVA is stuck past the deadline", func() {
+		It("should return a DeadlineExceeded error instead of creating a new RVA", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
+			rvaName := BuildRVAName(volumeName, nodeName)
 
-			rv := createTestReplicatedVolume(volumeName)
-			rv.Status = v1alpha1.ReplicatedVolumeStatus{}
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+			stale := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       rvaName,
+					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: volumeName,
+					NodeName:             nodeName,
+				},
+			}
+			Expect(cl.Create(ctx, stale)).To(Succeed())
+			Expect(cl.Delete(ctx, stale)).To(Succeed())
 
-			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
+			ensureCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+			defer cancel()
 
-	Context("when context is cancelled", func() {
-		It("should return context error", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
-
-			rv := createTestReplicatedVolume(volumeName)
-			rv.Status.ActuallyAttachedTo = []string{nodeName}
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			cancelledCtx, cancel := context.WithCancel(ctx)
-			cancel()
-
-			err := WaitForAttachedToRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			_, err := EnsureRVA(ensureCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(Equal(context.Canceled))
+			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
+
+			// Stale object is still present with its DeletionTimestamp;
+			// no second RVA has been created in its place.
+			got := &v1alpha1.ReplicatedVolumeAttachment{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, got)).To(Succeed())
+			Expect(got.DeletionTimestamp).NotTo(BeNil())
 		})
 	})
 })
@@ -408,17 +440,3 @@ func newFakeClient() client.Client {
 	return builder.Build()
 }
 
-func createTestReplicatedVolume(name string) *v1alpha1.ReplicatedVolume {
-	return &v1alpha1.ReplicatedVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1alpha1.ReplicatedVolumeSpec{
-			Size:                       resource.MustParse("1Gi"),
-			ReplicatedStorageClassName: "rsc",
-		},
-		Status: v1alpha1.ReplicatedVolumeStatus{
-			ActuallyAttachedTo: []string{},
-		},
-	}
-}

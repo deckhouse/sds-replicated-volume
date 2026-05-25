@@ -38,7 +38,7 @@ func SetupInitialSync(
 
 	SetupDRBDResourceOperation(
 		e.ScopeWithTimeout(opTimeout.Duration), cl,
-		newCreateNewUUIDClearBitmap(drbdrs[0].Name+"-sync", drbdrs[0].Name),
+		newCreateNewUUIDClearBitmap(drbdrs[0].Name+"-sync", drbdrs[0].Name, drbdrs[0].Spec.NodeName),
 	)
 
 	type waitFn = func(envtesting.E, *v1alpha1.DRBDResource, func(*v1alpha1.DRBDResource) bool) *v1alpha1.DRBDResource
@@ -59,12 +59,13 @@ func SetupInitialSync(
 	}
 }
 
-func newCreateNewUUIDClearBitmap(name, drbdrName string) *v1alpha1.DRBDResourceOperation {
+func newCreateNewUUIDClearBitmap(name, drbdrName, nodeName string) *v1alpha1.DRBDResourceOperation {
 	return &v1alpha1.DRBDResourceOperation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         nodeName,
 			DRBDResourceName: drbdrName,
 			Type:             v1alpha1.DRBDResourceOperationCreateNewUUID,
 			CreateNewUUID:    &v1alpha1.CreateNewUUIDParams{ClearBitmap: true},

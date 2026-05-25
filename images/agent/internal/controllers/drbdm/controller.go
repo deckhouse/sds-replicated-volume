@@ -34,6 +34,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 )
 
 // BuildController creates and registers the DRBD mapper controller and scanner with the manager.
@@ -44,17 +45,19 @@ func BuildController(mgr manager.Manager) error {
 
 	cfg, err := env.GetConfig()
 	if err != nil {
-		return fmt.Errorf("getting config: %w", err)
+		return err
 	}
 
 	cl := mgr.GetClient()
 	nodeName := cfg.NodeName()
 
-	origExec := dmsetup.ExecCommandContext
-	dmsetup.ExecCommandContext = func(ctx context.Context, name string, arg ...string) dmsetup.Cmd {
-		log.FromContext(ctx).Info("executing command", "command", name, "args", arg)
-		return origExec(ctx, name, arg...)
-	}
+	// dmsetup can block on backing-device I/O; bare exec would leak the
+	// reconcile goroutine. See drbdr.BuildController for the rationale
+	// behind this wrapper composition.
+	dmsetup.ExecCommandContext = withDMSetupCommandLogging(
+		ctrlexec.WithCache(
+			ctrlexec.WithTimeout(dmsetup.ExecTimeout,
+				ctrlexec.ExecCommandContext(dmsetup.ConfigureCmd))))
 
 	requestCh := make(chan event.TypedGenericEvent[reconcile.Request], 100)
 
@@ -84,4 +87,13 @@ func BuildController(mgr manager.Manager) error {
 	}
 
 	return nil
+}
+
+// withDMSetupCommandLogging wraps a factory so every dmsetup command
+// invocation is logged at info level on the per-call context's logger.
+func withDMSetupCommandLogging(factory ctrlexec.ExecCommandContextFactory) ctrlexec.ExecCommandContextFactory {
+	return func(ctx context.Context, name string, args ...string) ctrlexec.Cmd {
+		log.FromContext(ctx).Info("executing command", "command", name, "args", args)
+		return factory(ctx, name, args...)
+	}
 }
