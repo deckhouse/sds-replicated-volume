@@ -755,7 +755,8 @@ func (m *Migrator) createRVAFromVolumeAttachments(
 		rvaName := fmt.Sprintf("%s-%s-%s", "csi", resName, strings.ToLower(va.Spec.NodeName))
 		rva := &srvv1alpha1.ReplicatedVolumeAttachment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: rvaName,
+				Name:       rvaName,
+				Finalizers: csiControllerFinalizers(),
 			},
 			Spec: srvv1alpha1.ReplicatedVolumeAttachmentSpec{
 				ReplicatedVolumeName: resName,
@@ -863,6 +864,12 @@ func (m *Migrator) checkNewControlPlaneEnabled(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("ModuleConfig %q has newControlPlane=false; enable the new control-plane by setting spec.settings.newControlPlane to true before running migration", config.ModuleName)
+}
+
+// csiControllerFinalizers returns the CSI controller finalizer set on ReplicatedVolume
+// and ReplicatedVolumeAttachment at create time (same as images/csi-driver).
+func csiControllerFinalizers() []string {
+	return []string{srvv1alpha1.CSIControllerFinalizer}
 }
 
 // createIfNotExists creates a Kubernetes resource if it does not already exist.
@@ -1078,6 +1085,7 @@ func (m *Migrator) createRV(
 			Name:        resName,
 			Labels:      labels,
 			Annotations: ann,
+			Finalizers:  csiControllerFinalizers(),
 		},
 		Spec: spec,
 	}

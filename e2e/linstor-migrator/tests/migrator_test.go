@@ -197,6 +197,11 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 					errs := helpers.CheckRVANamePatternFromSnapshot(rvaSnapshot)
 					Expect(errs).To(BeEmpty(), "RVA naming pattern check failed")
 				})
+
+				It("should set CSI controller finalizer on each RVA", func() {
+					errs := helpers.CheckRVACSIControllerFinalizerFromSnapshot(rvaSnapshot)
+					Expect(errs).To(BeEmpty(), "RVA CSI controller finalizer check failed")
+				})
 			})
 
 			Describe("RV resource checks", func() {
@@ -259,6 +264,11 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 				It("should not set no-persistent-volume label on each RV", func() {
 					errs := helpers.CheckRVNoPersistentVolumeLabelAbsentFromSnapshot(rvSnapshot)
 					Expect(errs).To(BeEmpty(), "RV no-persistent-volume label check failed")
+				})
+
+				It("should set CSI controller finalizer on each RV", func() {
+					errs := helpers.CheckRVCSIControllerFinalizerFromSnapshot(rvSnapshot)
+					Expect(errs).To(BeEmpty(), "RV CSI controller finalizer check failed")
 				})
 			})
 
@@ -618,6 +628,11 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 			It("should set no-persistent-volume label on each RV", func() {
 				errs := helpers.CheckRVNoPersistentVolumeLabelFromSnapshot(rvSnapshot)
 				Expect(errs).To(BeEmpty(), "RV no-persistent-volume label check failed")
+			})
+
+			It("should set CSI controller finalizer on each RV", func() {
+				errs := helpers.CheckRVCSIControllerFinalizerFromSnapshot(rvSnapshot)
+				Expect(errs).To(BeEmpty(), "RV CSI controller finalizer check failed")
 			})
 		})
 
