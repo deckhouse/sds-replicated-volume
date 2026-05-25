@@ -113,7 +113,7 @@ High-level flow:
 1. set state to `stage1_started`;
 2. wait until `Deployment/linstor-controller` disappears from `d8-sds-replicated-volume` (up to 10 minutes);
 3. if the LINSTOR CRD is missing, set `stage1_completed` and skip the rest of stage 1;
-4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
+4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, install the `linstor-viewer` backup viewer binary, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
 5. load LINSTOR data from CRDs into an in-memory snapshot;
 6. list `PersistentVolume`, `ReplicatedStorageClass`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
 7. classify LINSTOR resources into:
@@ -124,7 +124,7 @@ High-level flow:
 9. migrate resources with PVs first, then resources without PVs;
 10. delete every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com` (cluster data was backed up in step 4);
 11. delete all `ReplicatedStorageMetadataBackup` objects (cluster-held LINSTOR metadata backups);
-12. delete legacy `ReplicatedStoragePool` objects whose names equal a migrated LINSTOR storage pool name (skips `linstor-auto-*` and `auto-rsp-*`);
+12. back up legacy `ReplicatedStoragePool` objects (name = LINSTOR pool, skips `linstor-auto-*` and `auto-rsp-*`) to `legacy-rsp.gz` when any exist, then delete them;
 13. set state to `stage1_completed`.
 
 ### Stage 2
@@ -187,7 +187,7 @@ Current behavior:
 
 If the migrator cannot resolve the corresponding `LVMVolumeGroup` or thin pool for a LINSTOR pool, it fails fast.
 
-After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a LINSTOR pool (typical for manually created pools on the old control plane) is removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place.
+After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a LINSTOR pool (typical for manually created pools on the old control plane) is written to `legacy-rsp.gz` in the backup directory (if present) and then removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place. If no legacy pools exist, `legacy-rsp.gz` is not created.
 
 ## Created Resources
 
@@ -257,3 +257,17 @@ data:
   state: not_started
 EOF
 ```
+
+## LINSTOR backup viewer (`linstor-viewer`)
+
+After stage 1, the backup directory contains a read-only helper binary `linstor-viewer` that prints LINSTOR-style listings reconstructed from `crs.gz` (no live LINSTOR controller required). Fields not stored in the CR backup are shown as `-`.
+
+```bash
+cd /opt/deckhouse/tmp/linstor-migrator/linstor-backup-db
+./linstor-viewer crs.gz node list
+./linstor-viewer crs.gz storage-pool list
+./linstor-viewer crs.gz volume list
+./linstor-viewer --help
+```
+
+To rebuild the embedded viewer when developing the migrator locally, see `internal/linstorbackup/embedded/README.md`.

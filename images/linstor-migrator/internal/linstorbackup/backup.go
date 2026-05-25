@@ -58,13 +58,16 @@ func backupReadmeText() string {
 	exampleDir := filepath.Join(config.MigratorHostDir, config.MigratorLinstorBackupDirName)
 	exampleCRDs := filepath.Join(exampleDir, backupCRDsGzFile)
 	exampleCRs := filepath.Join(exampleDir, backupCRsGzFile)
-	return fmt.Sprintf(`LINSTOR backup (API group internal.linstor.linbit.com)
+	return fmt.Sprintf(`LINSTOR backup
 ========================================================
 
 Files:
   crds.gz — gzip multi-document YAML: one CustomResourceDefinition per document
             (spec.group internal.linstor.linbit.com).
   crs.gz  — gzip multi-document YAML: every custom resource instance for those CRDs.
+  linstor-viewer — helper binary to print LINSTOR-style listings from crs.gz (read-only).
+  legacy-rsp.gz — gzip multi-document YAML of legacy ReplicatedStoragePool objects removed during
+                  migration (only created when such pools exist).
 
 Restore:
   1. mkdir -p /tmp/linstor-restore && cd /tmp/linstor-restore
@@ -72,6 +75,15 @@ Restore:
   3. kubectl apply -f crds.yaml
   4. gunzip -c %s > crs.yaml
   5. kubectl apply -f crs.yaml
+
+Restore legacy ReplicatedStoragePool (if legacy-rsp.gz exists):
+  gunzip -c <backup-dir>/legacy-rsp.gz | kubectl apply -f -
+
+View cluster snapshot (from backup directory):
+  ./linstor-viewer crs.gz node list
+  ./linstor-viewer crs.gz storage-pool list
+  ./linstor-viewer crs.gz volume list
+  ./linstor-viewer --help
 
 Notes:
   - Apply CRDs before CRs. Status and server-owned metadata (managedFields, resourceVersion, uid,
@@ -175,6 +187,10 @@ func WriteGroupBackup(ctx context.Context, kClient client.Client, dyn dynamic.In
 	}
 	if err := deduplicateBackups(log, dir, backupCRsGzFile); err != nil {
 		return fmt.Errorf("deduplicate CR backups: %w", err)
+	}
+
+	if err := InstallLinstorViewer(dir); err != nil {
+		return fmt.Errorf("install linstor backup viewer: %w", err)
 	}
 
 	readmePath := filepath.Join(dir, backupReadme)

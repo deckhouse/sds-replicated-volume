@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -288,7 +290,9 @@ func WaitForMigrationComplete(ctx context.Context, c client.Client, timeout time
 
 // VerifyMigratorArtifactsOnMaster verifies that migrator artifacts exist on one
 // of the master/control-plane nodes and that required files/directories are
-// present with non-zero file sizes.
+// present with non-zero file sizes (including the linstor-viewer backup helper).
+// It also runs linstor-viewer against crs.gz for node list, storage-pool list,
+// and volume list; each command must exit 0 and print non-whitespace output.
 func VerifyMigratorArtifactsOnMaster(ctx context.Context, c client.Client, clientset kubernetes.Interface, restConfig *rest.Config) []error {
 	var nodeList corev1.NodeList
 	if err := c.List(ctx, &nodeList); err != nil {
@@ -323,12 +327,34 @@ test -d "${BASE}"
 test -d "${BASE}/linstor-backup-db"
 test -f "${BASE}/linstor-backup-db/crds.gz"
 test -f "${BASE}/linstor-backup-db/crs.gz"
+test -f "${BASE}/linstor-backup-db/linstor-viewer"
 test -f "${BASE}/linstor-backup-db/readme.txt"
 test -f "${BASE}/linstor-migrator.log"
 test -s "${BASE}/linstor-backup-db/crds.gz"
 test -s "${BASE}/linstor-backup-db/crs.gz"
+test -s "${BASE}/linstor-backup-db/linstor-viewer"
 test -s "${BASE}/linstor-backup-db/readme.txt"
 test -s "${BASE}/linstor-migrator.log"
+test -x "${BASE}/linstor-backup-db/linstor-viewer"
+`
+
+	viewerScript := `
+set -e
+BASE="/opt/deckhouse/tmp/linstor-migrator"
+V="${BASE}/linstor-backup-db/linstor-viewer"
+C="${BASE}/linstor-backup-db/crs.gz"
+for sub in "node list" "storage-pool list" "volume list"; do
+  set -- ${sub}
+  out=$("$V" "$C" "$@") || {
+    echo "linstor-viewer ${sub} failed" >&2
+    exit 1
+  }
+  trimmed=$(printf '%s' "$out" | tr -d '[:space:]')
+  if [ -z "${trimmed}" ]; then
+    echo "linstor-viewer ${sub} produced empty output" >&2
+    exit 1
+  fi
+done
 `
 
 	for _, nodeName := range masterNodes {
@@ -396,7 +422,26 @@ test -s "${BASE}/linstor-migrator.log"
 			)}
 		}
 
-		slog.Debug(fmt.Sprintf("PASS: Migrator artifacts found on master node %s with required non-empty files", nodeName))
+		viewerCmd := []string{
+			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
+			"sh", "-ec", viewerScript,
+		}
+		if _, err := execInPodWithOutputInContainer(
+			ctx,
+			clientset,
+			restConfig,
+			agentPodName,
+			"d8-sds-node-configurator",
+			"sds-node-configurator-agent",
+			viewerCmd,
+		); err != nil {
+			return []error{fmt.Errorf(
+				"linstor-viewer smoke check failed on master node %s via pod %s: %w",
+				nodeName, agentPodName, err,
+			)}
+		}
+
+		slog.Debug(fmt.Sprintf("PASS: Migrator artifacts and linstor-viewer listings verified on master node %s", nodeName))
 		return nil
 	}
 
