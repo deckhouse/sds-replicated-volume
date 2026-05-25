@@ -28,8 +28,6 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -669,7 +667,8 @@ func CompareReplicatedVolumeAttachmentsWithLinstor(ctx context.Context, c client
 		key := normalizeAttachmentPairKey(rva.Spec.ReplicatedVolumeName, rva.Spec.NodeName)
 		currentPairs[key] = true
 
-		expectedRVAName := fmt.Sprintf("csi-%s-%s", rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
+		expectedRVAName := srvv1.FormatReplicatedVolumeAttachmentName(
+			rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
 		if rva.Name != expectedRVAName {
 			errors = append(errors, fmt.Errorf(
 				"RVA name %s does not match expected pattern csi-<replicatedVolumeName>-<lower(nodeName)> (expected %s)",
@@ -796,7 +795,8 @@ func CheckRVANamePatternFromSnapshot(snapshot *RVASnapshot) []error {
 	}
 	var errors []error
 	for _, rva := range snapshot.CurrentRVAs {
-		expectedRVAName := fmt.Sprintf("csi-%s-%s", rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
+		expectedRVAName := srvv1.FormatReplicatedVolumeAttachmentName(
+			rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
 		if rva.Name != expectedRVAName {
 			errors = append(errors, fmt.Errorf(
 				"RVA name %s does not match expected pattern csi-<replicatedVolumeName>-<lower(nodeName)> (expected %s)",
