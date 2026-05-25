@@ -143,9 +143,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	// Keep all Kubernetes nodes in the zero-filled node matrix intentionally.
-	// RVA is an attachment intent and can target any node, not only storage nodes.
-	// Pre-emitting zero series keeps Grafana panels continuous for node filters.
+	// Build the zero-filled node matrix from Kubernetes nodes because RVA targets
+	// are regular node names. Pre-emitting zero series keeps Grafana node filters continuous.
 	nodes := collectNodeNames(nodeList.Items, rvrList.Items, rvaList.Items)
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 

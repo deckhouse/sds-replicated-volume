@@ -46,7 +46,7 @@ import (
 const (
 	// informerResyncPeriod is the resync period for shared informers.
 	// Normally events arrive instantly via Watch. Resync is a safety net
-	// for rare cases (~1%) when Watch connection drops and events are missed.
+	// for watch reconnects or missed events.
 	// Every resync period, informer re-lists all objects to ensure cache is accurate.
 	informerResyncPeriod = 30 * time.Second
 
@@ -329,10 +329,9 @@ func (c *Client) dispatchRVEvent(obj interface{}) {
 	c.rvCheckersMu.RUnlock()
 
 	if exists {
-		// Blocking backpressure is intentional while the checker is alive:
-		// VolumeChecker reports transition counters, so dropping RV events would
-		// make short health flaps invisible. Per-checker done and informerStop
-		// keep shutdown paths from hanging the shared informer handler.
+		// Block while the checker is alive to preserve RV transition events.
+		// Per-checker done and informerStop keep shutdown paths from hanging
+		// the shared informer handler.
 		select {
 		case reg.ch <- rv:
 		case <-reg.done:

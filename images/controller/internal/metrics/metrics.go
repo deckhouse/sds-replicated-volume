@@ -61,7 +61,7 @@ var (
 var (
 	RVInitialFormationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_initial_formation_duration_seconds",
-		Help:    "Time from RV creation to first completed initial datamesh formation (datameshRevision > 0 and no active Formation transition). This is not RV IOReady.",
+		Help:    "Time from RV creation to first completed initial datamesh formation (datameshRevision > 0 and no active Formation transition).",
 		Buckets: bucketsRVFormation,
 	}, []string{LabelStorageClass})
 

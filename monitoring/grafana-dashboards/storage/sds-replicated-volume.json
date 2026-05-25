@@ -440,7 +440,7 @@
       "id": 60,
       "type": "stat",
       "title": "RVR Backing Volume Duration P90",
-      "description": "P90 time from RVR creation to BackingVolumeReady over the selected dashboard range. Useful as LLV/LVM provisioning proxy; thresholds are intentionally conservative and may depend on volume size/backend.",
+      "description": "P90 time from RVR creation to BackingVolumeReady over the selected dashboard range. Useful as LLV/LVM provisioning proxy; thresholds are conservative and may depend on volume size/backend.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -915,7 +915,7 @@
       "id": 54,
       "type": "timeseries",
       "title": "RV Initial Formation Duration P90",
-      "description": "P90 time from RV creation to first completed initial datamesh formation. Completion is detected like CSI readiness: datameshRevision > 0 and no active Formation transition. This is not RV IOReady.",
+      "description": "P90 time from RV creation to first completed initial datamesh formation. Completion is detected like CSI readiness: datameshRevision > 0 and no active Formation transition.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -1663,7 +1663,7 @@
       "id": 2003,
       "type": "timeseries",
       "title": "DRBDResource Configured Duration Bands",
-      "description": "Completed DRBDResource configure durations: DRBDResource creation -> Configured=True. Healthy <=2s, slow >2s and <=8s, too slow >8s; wider buckets are debug boundaries, not acceptable time.",
+      "description": "Completed DRBDResource configure durations: DRBDResource creation -> Configured=True. Healthy <=2s, slow >2s and <=8s, too slow >8s; wider buckets are debug-only overflow boundaries.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -4293,7 +4293,7 @@
       "id": 2014,
       "type": "timeseries",
       "title": "DRBDResource Deletion Duration P90",
-      "description": "Time from DRBDResource deletionTimestamp to agent finalizer removal. This isolates agent-side DRBDResource cleanup duration, not overall RVR deletion time.",
+      "description": "Time from DRBDResource deletionTimestamp to agent finalizer removal. Shows agent-side DRBDResource cleanup duration separately from overall RVR deletion time.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -4722,7 +4722,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "DRBD Runtime Problem Count",
-      "description": "Current DRBD runtime problems from DRBD exporter: bad connection state, missing quorum, and unintentionally diskless devices. This is runtime state, not DRBDResource CR lifecycle.",
+      "description": "Current DRBD runtime problems from DRBD exporter: bad connection state, missing quorum, and unintentionally diskless devices. Shows DRBD exporter runtime state separately from DRBDResource CR lifecycle.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -4782,7 +4782,7 @@
       "id": 20,
       "type": "timeseries",
       "title": "DRBD Runtime Out-of-Sync Bytes",
-      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag. This is runtime state, not DRBDResource CR lifecycle.",
+      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag. Shows DRBD exporter runtime state separately from DRBDResource CR lifecycle.",
       "datasource": {
         "type": "prometheus",
         "uid": "$ds_prometheus"
@@ -5006,7 +5006,7 @@
           "id": 34,
           "type": "timeseries",
           "title": "Prometheus Scrape Duration",
-          "description": "Prometheus-side scrape duration for likely SDS/controller targets. This includes the whole /metrics endpoint, not only the current metrics collector.",
+          "description": "Prometheus-side scrape duration for likely SDS/controller targets. Covers the full /metrics endpoint, including the current metrics collector.",
           "datasource": {
             "type": "prometheus",
             "uid": "$ds_prometheus"

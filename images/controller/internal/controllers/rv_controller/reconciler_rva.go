@@ -89,9 +89,8 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
 			}
-			// patchRVAStatus ignores NotFound because RVA deletion is a normal race.
-			// In that rare case we still keep the attach duration observation: the
-			// reconciliation path reached Attached before the object disappeared.
+			// patchRVAStatus treats NotFound as success because the RVA may be deleted
+			// concurrently. Keep the attach observation for the completed reconcile path.
 			metricObservations.observe()
 		}
 	}
