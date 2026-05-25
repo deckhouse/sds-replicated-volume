@@ -238,7 +238,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 		It("should wait and return successfully once the object is gone", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
-			rvaName := BuildRVAName(volumeName, nodeName)
+			rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 			rva := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -281,7 +281,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 		It("should return a wrapped DeadlineExceeded error carrying diagnostics", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
-			rvaName := BuildRVAName(volumeName, nodeName)
+			rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 			rva := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -310,7 +310,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 		It("should return a wrapped Canceled error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
-			rvaName := BuildRVAName(volumeName, nodeName)
+			rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 			rva := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -354,7 +354,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 		It("should wait for deletion and then create a fresh RVA", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
-			rvaName := BuildRVAName(volumeName, nodeName)
+			rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 			stale := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -396,7 +396,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 		It("should return a DeadlineExceeded error instead of creating a new RVA", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
-			rvaName := BuildRVAName(volumeName, nodeName)
+			rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 			stale := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
