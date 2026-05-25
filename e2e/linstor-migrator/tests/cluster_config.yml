@@ -1,0 +1,66 @@
+# Nested test cluster configuration for storage-e2e (alwaysCreateNew mode).
+# OS image names must match storage-e2e internal/config/images.go.
+clusterDefinition:
+  masters:
+    - hostname: "master-1"
+      hostType: "vm"
+      osType: "Ubuntu 24.04 6.8.0-53-generic"
+      #osType: "Ubuntu 22.04 6.2.0-39-generic"
+      #osType: "RedOS 8.0 6.6.26-1.red80.x86_64"
+      cpu: 4
+      coreFraction: 20
+      ram: 8
+      diskSize: 60
+  workers:
+    - hostname: "worker-1"
+      hostType: "vm"
+      osType: "Ubuntu 24.04 6.8.0-53-generic"
+      #osType: "Ubuntu 22.04 6.2.0-39-generic"
+      #osType: "RedOS 8.0 6.6.26-1.red80.x86_64"
+      cpu: 2
+      coreFraction: 20
+      ram: 8
+      diskSize: 20
+    - hostname: "worker-2"
+      hostType: "vm"
+      osType: "Ubuntu 24.04 6.8.0-53-generic"
+      #osType: "Ubuntu 22.04 6.2.0-39-generic"
+      #osType: "RedOS 8.0 6.6.26-1.red80.x86_64"
+      cpu: 2
+      coreFraction: 20
+      ram: 8
+      diskSize: 20
+    - hostname: "worker-3"
+      hostType: "vm"
+      osType: "Ubuntu 24.04 6.8.0-53-generic"
+      #osType: "Ubuntu 22.04 6.2.0-39-generic"
+      #osType: "RedOS 8.0 6.6.26-1.red80.x86_64"
+      cpu: 2
+      coreFraction: 20
+      ram: 8
+      diskSize: 20
+  dkpParameters:
+    kubernetesVersion: "Automatic"
+    podSubnetCIDR: "10.112.0.0/16"
+    serviceSubnetCIDR: "10.225.0.0/16"
+    clusterDomain: "cluster.local"
+    registryRepo: "dev-registry.deckhouse.io/sys/deckhouse-oss"
+    devBranch: "main"
+    modules:
+      - name: "snapshot-controller"
+        version: 1
+        enabled: true
+        modulePullOverride: "main"
+        dependencies: []
+      - name: "sds-node-configurator"
+        version: 1
+        enabled: true
+        modulePullOverride: "main"
+        dependencies: []
+      - name: "sds-replicated-volume"
+        version: 1
+        enabled: true
+        modulePullOverride: "main"
+        dependencies:
+          - "snapshot-controller"
+          - "sds-node-configurator"
