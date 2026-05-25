@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	. "github.com/onsi/ginkgo/v2"
 	"log/slog"
 	"slices"
 	"sort"
@@ -28,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1032,21 +1032,22 @@ func CheckRVConfigurationModeFromSnapshot(snapshot *RVSnapshot, autoExpected, ma
 			continue
 		}
 
-		if stringInSlice(resourceName, autoExpected) {
+		switch {
+		case stringInSlice(resourceName, autoExpected):
 			if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeAuto {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has spec.configurationMode=%q (expected Auto)",
 					resourceName, rv.Spec.ConfigurationMode,
 				))
 			}
-		} else if stringInSlice(resourceName, manualExpected) {
+		case stringInSlice(resourceName, manualExpected):
 			if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeManual {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has spec.configurationMode=%q (expected Manual)",
 					resourceName, rv.Spec.ConfigurationMode,
 				))
 			}
-		} else {
+		default:
 			errors = append(errors, fmt.Errorf(
 				"RV %s is not expected in auto or manual resource lists",
 				resourceName,
@@ -1064,7 +1065,8 @@ func CheckRVReplicatedStorageClassMatchesPVFromSnapshot(snapshot *RVSnapshot, au
 			continue
 		}
 
-		if stringInSlice(resourceName, autoExpected) {
+		switch {
+		case stringInSlice(resourceName, autoExpected):
 			pv := snapshot.PVsByResource[resourceName]
 			if pv == nil {
 				errors = append(errors, fmt.Errorf("PV %s not found: this scenario expects PV-backed RVs only", resourceName))
@@ -1080,14 +1082,14 @@ func CheckRVReplicatedStorageClassMatchesPVFromSnapshot(snapshot *RVSnapshot, au
 					resourceName, rv.Spec.ReplicatedStorageClassName, pv.Spec.StorageClassName,
 				))
 			}
-		} else if stringInSlice(resourceName, manualExpected) {
+		case stringInSlice(resourceName, manualExpected):
 			if rv.Spec.ReplicatedStorageClassName != "" {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
 					resourceName, rv.Spec.ReplicatedStorageClassName,
 				))
 			}
-		} else {
+		default:
 			errors = append(errors, fmt.Errorf(
 				"RV %s is not expected in auto or manual resource lists",
 				resourceName,
@@ -1105,21 +1107,22 @@ func CheckRVManualConfigurationFromSnapshot(snapshot *RVSnapshot, autoExpected, 
 			continue
 		}
 
-		if stringInSlice(resourceName, autoExpected) {
+		switch {
+		case stringInSlice(resourceName, autoExpected):
 			if rv.Spec.ManualConfiguration != nil {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has non-nil spec.manualConfiguration (expected nil for Auto-configured resource)",
 					resourceName,
 				))
 			}
-		} else if stringInSlice(resourceName, manualExpected) {
+		case stringInSlice(resourceName, manualExpected):
 			if rv.Spec.ManualConfiguration == nil {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has nil spec.manualConfiguration (expected non-nil for Manual-configured resource)",
 					resourceName,
 				))
 			}
-		} else {
+		default:
 			errors = append(errors, fmt.Errorf(
 				"RV %s is not expected in auto or manual resource lists",
 				resourceName,
@@ -1284,21 +1287,22 @@ func CheckRVReplicatedStorageClassWithoutPVSnapshot(snapshot *RVSnapshot, autoEx
 			continue
 		}
 
-		if stringInSlice(resourceName, autoExpected) {
+		switch {
+		case stringInSlice(resourceName, autoExpected):
 			if rv.Spec.ReplicatedStorageClassName == "" {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has empty spec.replicatedStorageClassName (expected non-empty, migrator should resolve RSC by pool name)",
 					resourceName,
 				))
 			}
-		} else if stringInSlice(resourceName, manualExpected) {
+		case stringInSlice(resourceName, manualExpected):
 			if rv.Spec.ReplicatedStorageClassName != "" {
 				errors = append(errors, fmt.Errorf(
 					"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
 					resourceName, rv.Spec.ReplicatedStorageClassName,
 				))
 			}
-		} else {
+		default:
 			errors = append(errors, fmt.Errorf(
 				"RV %s is not expected in auto or manual resource lists",
 				resourceName,
