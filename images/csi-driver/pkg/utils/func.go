@@ -37,9 +37,8 @@ import (
 )
 
 const (
-	KubernetesAPIRequestLimit       = 3
-	KubernetesAPIRequestTimeout     = 1
-	SDSReplicatedVolumeCSIFinalizer = "sds-replicated-volume.deckhouse.io/csi-controller"
+	KubernetesAPIRequestLimit   = 3
+	KubernetesAPIRequestTimeout = 1
 )
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource
@@ -54,7 +53,7 @@ func CreateReplicatedVolume(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
-			Finalizers:      []string{SDSReplicatedVolumeCSIFinalizer},
+			Finalizers:      []string{srv.CSIControllerFinalizer},
 			Annotations: map[string]string{
 				srv.SchedulingReservationIDAnnotationKey:      pvcNamespace + "/" + pvcName,
 				srv.ReplicatedVolumePVCNamespaceAnnotationKey: pvcNamespace,
@@ -191,16 +190,16 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	}
 
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] ReplicatedVolume found: %+v", traceID, name, rv))
-	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Removing finalizer %s if exists", traceID, name, SDSReplicatedVolumeCSIFinalizer))
+	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Removing finalizer %s if exists", traceID, name, srv.CSIControllerFinalizer))
 
-	removed, err := removervdeletepropagationIfExist(ctx, kc, log, rv, SDSReplicatedVolumeCSIFinalizer)
+	removed, err := removervdeletepropagationIfExist(ctx, kc, log, rv, srv.CSIControllerFinalizer)
 	if err != nil {
 		return fmt.Errorf("remove finalizers from ReplicatedVolume %s: %w", name, err)
 	}
 	if removed {
-		log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s removed from ReplicatedVolume %s", traceID, name, SDSReplicatedVolumeCSIFinalizer, name))
+		log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s removed from ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
 	} else {
-		log.Warning(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s not found in ReplicatedVolume %s", traceID, name, SDSReplicatedVolumeCSIFinalizer, name))
+		log.Warning(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s not found in ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
 	}
 
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Trying to delete ReplicatedVolume", traceID, name))
@@ -372,8 +371,8 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 			return "", fmt.Errorf("ReplicatedVolumeAttachment %s is being deleted (phase=%s); cannot publish volume until deletion completes",
 				rvaName, existing.Status.Phase)
 		}
-		if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-			existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
+		if !slices.Contains(existing.Finalizers, srv.CSIControllerFinalizer) {
+			existing.Finalizers = append(existing.Finalizers, srv.CSIControllerFinalizer)
 			if err := kc.Update(ctx, existing); err != nil {
 				return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, err)
 			}
@@ -387,7 +386,7 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	rva := &srv.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvaName,
-			Finalizers: []string{SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{srv.CSIControllerFinalizer},
 		},
 		Spec: srv.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeName,
@@ -420,8 +419,8 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return fmt.Errorf("ReplicatedVolumeAttachment %s is still in use on node %s, cannot delete", rvaName, nodeName)
 	}
 
-	if slices.Contains(rva.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == SDSReplicatedVolumeCSIFinalizer })
+	if slices.Contains(rva.Finalizers, srv.CSIControllerFinalizer) {
+		rva.Finalizers = slices.DeleteFunc(rva.Finalizers, func(s string) bool { return s == srv.CSIControllerFinalizer })
 		if err := kc.Update(ctx, rva); err != nil {
 			return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
