@@ -428,8 +428,8 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		return createRVA(ctx, kc, log, traceID, volumeName, nodeName)
 	}
 
-	if !slices.Contains(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer) {
-		existing.Finalizers = append(existing.Finalizers, SDSReplicatedVolumeCSIFinalizer)
+	if !slices.Contains(existing.Finalizers, srv.CSIControllerFinalizer) {
+		existing.Finalizers = append(existing.Finalizers, srv.CSIControllerFinalizer)
 		if uerr := kc.Update(ctx, existing); uerr != nil {
 			return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, uerr)
 		}
@@ -699,4 +699,3 @@ func WaitForRVADeleted(
 		}
 	}
 }
-
