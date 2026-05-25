@@ -80,7 +80,7 @@ func TestControllerUnpublishVolume_WaitsForRVADeletion(t *testing.T) {
 	rva := &v1alpha1.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvaName,
-			Finalizers: []string{testStuckFinalizer, utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{testStuckFinalizer, v1alpha1.CSIControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeID,
@@ -146,7 +146,7 @@ func TestControllerUnpublishVolume_ReturnsDeadlineExceededIfRVAStuck(t *testing.
 	rva := &v1alpha1.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvaName,
-			Finalizers: []string{testStuckFinalizer, utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{testStuckFinalizer, v1alpha1.CSIControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeID,
@@ -203,7 +203,7 @@ func createRVPastFormation(t *testing.T, ctx context.Context, cl client.Client, 
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       volumeID,
-			Finalizers: []string{utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{v1alpha1.CSIControllerFinalizer},
 		},
 	}
 	if err := cl.Create(ctx, rv); err != nil {
@@ -223,7 +223,7 @@ func createRVStillForming(t *testing.T, ctx context.Context, cl client.Client, v
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       volumeID,
-			Finalizers: []string{utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{v1alpha1.CSIControllerFinalizer},
 		},
 	}
 	if err := cl.Create(ctx, rv); err != nil {
@@ -528,7 +528,7 @@ func TestCreateVolume_FreshCreate_WaitFails_DeletionTimestamp_DoesNotDelete(t *t
 	// CreateVolume must NOT have stripped the CSI finalizer as part of a Delete.
 	csiFinalizerFound := false
 	for _, f := range got.Finalizers {
-		if f == utils.SDSReplicatedVolumeCSIFinalizer {
+		if f == v1alpha1.CSIControllerFinalizer {
 			csiFinalizerFound = true
 			break
 		}
