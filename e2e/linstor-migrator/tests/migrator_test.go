@@ -38,7 +38,7 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 )
 
-func buildMigratorScenario(scenarioName string, label string, mode helpers.ScenarioMode) bool {
+func buildMigratorScenario(scenarioName string, label string, mode helpers.ScenarioMode) {
 	var _ = Describe(scenarioName, Ordered, Label(label), func() {
 		// Shared variables for all tests in the suite
 		var (
@@ -437,12 +437,14 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 			})
 		})
 	})
-	return true
 }
 
-var _ = buildMigratorScenario("All RVs are created with ConfigurationMode: Auto", "Auto", helpers.ScenarioModeAutoOnly)
-var _ = buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual", helpers.ScenarioModeManualOnly)
-var _ = buildMigratorScenario("RVs are created with mixed ConfigurationMode (Auto and Manual)", "Mixed", helpers.ScenarioModeMixed)
+// Register migrator scenarios at package init (side effect: Ginkgo Describe).
+func init() {
+	buildMigratorScenario("All RVs are created with ConfigurationMode: Auto", "Auto", helpers.ScenarioModeAutoOnly)
+	buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual", helpers.ScenarioModeManualOnly)
+	buildMigratorScenario("RVs are created with mixed ConfigurationMode (Auto and Manual)", "Mixed", helpers.ScenarioModeMixed)
+}
 
 var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), func() {
 	var (
