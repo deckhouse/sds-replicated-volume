@@ -270,17 +270,7 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 		m.log.Info("resources without ResourceDefinition (will be skipped)", "names", resourcesWithoutRD)
 	}
 
-	// 8. List RSCs, VolumeAttachments, LVMVolumeGroups; ensure migration RSP per LINSTOR pool.
-	rscList := &srvv1alpha1.ReplicatedStorageClassList{}
-	if err := m.client.List(ctx, rscList); err != nil {
-		return fmt.Errorf("failed to list ReplicatedStorageClasses: %w", err)
-	}
-	repStorClasses := make(map[string]srvv1alpha1.ReplicatedStorageClass, len(rscList.Items))
-	for _, rsc := range rscList.Items {
-		repStorClasses[rsc.Name] = rsc
-	}
-	m.log.Debug("loaded ReplicatedStorageClasses", "count", len(repStorClasses))
-
+	// 8. List VolumeAttachments, LVMVolumeGroups; ensure migration RSP per LINSTOR pool.
 	vaList := &storagev1.VolumeAttachmentList{}
 	if err := m.client.List(ctx, vaList); err != nil {
 		return fmt.Errorf("failed to list VolumeAttachments: %w", err)
@@ -339,13 +329,13 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	// 9. Migrate: first resources with PV, then without PV
 	for _, resName := range resourcesWithPV {
 		pv := pvMap[resName]
-		if err := m.migrateResource(ctx, resName, &pv, db, migrationRSPByPool, repStorClasses, replicatedVAList, lvgs); err != nil {
+		if err := m.migrateResource(ctx, resName, &pv, db, migrationRSPByPool, replicatedVAList, lvgs); err != nil {
 			return fmt.Errorf("failed to migrate resource %s (with PV): %w", resName, err)
 		}
 	}
 
 	for _, resName := range resourcesWithoutPV {
-		if err := m.migrateResource(ctx, resName, nil, db, migrationRSPByPool, repStorClasses, replicatedVAList, lvgs); err != nil {
+		if err := m.migrateResource(ctx, resName, nil, db, migrationRSPByPool, replicatedVAList, lvgs); err != nil {
 			return fmt.Errorf("failed to migrate resource %s (without PV): %w", resName, err)
 		}
 	}
@@ -421,7 +411,6 @@ func (m *Migrator) migrateResource(
 	pv *corev1.PersistentVolume,
 	db *linstordb.LinstorDB,
 	migrationRSPByPool map[string]*srvv1alpha1.ReplicatedStoragePool,
-	repStorClasses map[string]srvv1alpha1.ReplicatedStorageClass,
 	vaList []storagev1.VolumeAttachment,
 	lvgs map[string]sncv1alpha1.LVMVolumeGroup,
 ) error {
@@ -448,8 +437,6 @@ func (m *Migrator) migrateResource(
 		return nil
 	}
 
-	rscName, rscOK := m.findReplicatedStorageClassForResource(pv, repStorClasses)
-
 	sharedSecret, err := db.GetSharedSecret(resName)
 	if err != nil {
 		return fmt.Errorf("failed to get shared secret: %w", err)
@@ -463,8 +450,6 @@ func (m *Migrator) migrateResource(
 
 	log.Debug("determined resource parameters",
 		"size", size.String(),
-		"replicatedStorageClass", rscName,
-		"replicatedStorageClassFound", rscOK,
 		"hasPV", pv != nil,
 		"sharedSecretPrefix", sharedSecretPrefix,
 		"poolName", poolName,
@@ -560,8 +545,6 @@ func (m *Migrator) migrateResource(
 
 	// Create RV with adopt annotations (RVR + optional shared secret from LINSTOR).
 	if err := m.createRV(ctx, log, resName, size, sharedSecret, pv != nil, rvCreateOptions{
-		autoRSCName:    rscName,
-		useAutoConfig:  rscOK,
 		manualPoolName: rsp.Name,
 		manualFTT:      ftt,
 		manualGMDR:     gmdr,
@@ -978,20 +961,6 @@ func (m *Migrator) ensureMigrationRSP(
 	return rsp, nil
 }
 
-// findReplicatedStorageClassForResource returns an existing ReplicatedStorageClass name when RV
-// should use Auto configuration (PV storage class name matches an RSC).
-func (m *Migrator) findReplicatedStorageClassForResource(
-	pv *corev1.PersistentVolume,
-	repStorClasses map[string]srvv1alpha1.ReplicatedStorageClass,
-) (rscName string, ok bool) {
-	if pv != nil && pv.Spec.StorageClassName != "" {
-		if _, exists := repStorClasses[pv.Spec.StorageClassName]; exists {
-			return pv.Spec.StorageClassName, true
-		}
-	}
-	return "", false
-}
-
 // computeMigrationFTTGMDR derives failuresToTolerate and guaranteedMinimumDataRedundancy from replica counts,
 // caps both at 1, and maps (0,1) Consistency to (1,0) Availability (not representable from legacy LINSTOR).
 func (m *Migrator) computeMigrationFTTGMDR(log *slog.Logger, resName string, diskful, tieBreaker int) (ftt, gmdr byte) {
@@ -1027,14 +996,28 @@ func (m *Migrator) computeMigrationFTTGMDR(log *slog.Logger, resName string, dis
 }
 
 type rvCreateOptions struct {
-	autoRSCName    string
-	useAutoConfig  bool
 	manualPoolName string
 	manualFTT      byte
 	manualGMDR     byte
 }
 
 // createRV idempotently creates a ReplicatedVolume with adopt-rvr annotation.
+//
+// All migrated ReplicatedVolumes use Manual configuration intentionally.
+//
+// A PV may still reference a pre-migration ReplicatedStorageClass (by storage class name),
+// but that RSC usually points at a legacy ReplicatedStoragePool name. During migration we
+// create per-pool ReplicatedStoragePools as linstor-auto-* and remove legacy RSP objects
+// that matched the old LINSTOR pool name.
+//
+// Auto mode would derive rv.status.configuration from the RSC, pinning
+// replicatedStoragePoolName to that legacy (often deleted) pool. The RV controller then
+// fails to load the RSP (getRSP) and never runs adopt/v1 formation; stage 2 waits for that
+// formation to finish.
+//
+// Manual mode sets spec.manualConfiguration.replicatedStoragePoolName to the migration RSP
+// (linstor-auto-*) created for the LINSTOR pool, which is the pool adopt/v1 needs.
+//
 // When sharedSecret is non-empty, AdoptSharedSecretAnnotationKey is set so adopt/v1 formation reuses the LINSTOR secret.
 // If hasPersistentVolume is false, LabelKeyNoPersistentVolume is set (LINSTOR resource had no PV in cluster).
 func (m *Migrator) createRV(
@@ -1047,15 +1030,10 @@ func (m *Migrator) createRV(
 	opts rvCreateOptions,
 ) error {
 	spec := srvv1alpha1.ReplicatedVolumeSpec{
-		Size:           size,
-		MaxAttachments: ptr.To(byte(2)),
-	}
-	if opts.useAutoConfig && opts.autoRSCName != "" {
-		spec.ConfigurationMode = srvv1alpha1.ReplicatedVolumeConfigurationModeAuto
-		spec.ReplicatedStorageClassName = opts.autoRSCName
-	} else {
-		spec.ConfigurationMode = srvv1alpha1.ReplicatedVolumeConfigurationModeManual
-		spec.ManualConfiguration = &srvv1alpha1.ReplicatedVolumeConfiguration{
+		Size:              size,
+		MaxAttachments:    ptr.To(byte(2)),
+		ConfigurationMode: srvv1alpha1.ReplicatedVolumeConfigurationModeManual,
+		ManualConfiguration: &srvv1alpha1.ReplicatedVolumeConfiguration{
 			ReplicatedStoragePoolName: opts.manualPoolName,
 			// TODO: Calculate topology instead of hard-coded value.
 			Topology:                        srvv1alpha1.TopologyIgnored,
@@ -1063,7 +1041,7 @@ func (m *Migrator) createRV(
 			GuaranteedMinimumDataRedundancy: opts.manualGMDR,
 			// TODO: Calculate volumeAccess instead of hard-coded value.
 			VolumeAccess: srvv1alpha1.VolumeAccessPreferablyLocal,
-		}
+		},
 	}
 
 	var labels map[string]string
