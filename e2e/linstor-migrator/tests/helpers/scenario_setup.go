@@ -35,20 +35,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	srvv1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
-)
-
-// ScenarioMode defines how RSC resources should be handled during scenario setup:
-// - AutoOnly: keep all RSCs (all resources migrate in Auto mode)
-// - ManualOnly: delete all RSCs (all resources migrate in Manual mode)
-// - Mixed: delete only thick RSCs (thick → Manual, thin → Auto)
-type ScenarioMode string
-
-const (
-	ScenarioModeAutoOnly   ScenarioMode = "Auto"
-	ScenarioModeManualOnly ScenarioMode = "Manual"
-	ScenarioModeMixed      ScenarioMode = "Mixed"
 )
 
 // MigratorSetupConfig describes what baseline configuration should be created
@@ -60,21 +47,18 @@ type MigratorSetupConfig struct {
 
 	ExpectedRSPCount int
 	ExpectedRSCCount int
-
-	Mode ScenarioMode
 }
 
 // MigratorSetupResult contains all resources prepared for migration and
 // verification stages.
 type MigratorSetupResult struct {
-	RunID           string
-	AttachedDisks   []*attachedDiskResult
-	LVGResults      []*lvmVolumeGroupResult
-	RSPResults      []*RSPResult
-	RSCResults      []*rscResult
-	PodResults      []*PodPVCResult
-	AutoResources   []string
-	ManualResources []string
+	RunID             string
+	AttachedDisks     []*attachedDiskResult
+	LVGResults        []*lvmVolumeGroupResult
+	RSPResults        []*RSPResult
+	RSCResults        []*rscResult
+	PodResults        []*PodPVCResult
+	MigratedResources []string
 
 	OldRSPs       []RSPBaseline
 	PodNames      []string
@@ -235,16 +219,11 @@ func PrepareMigratorScenario(
 		result.FileChecksums[pod.PodName] = checksum.Checksum
 	}
 
-	// ========== RSC DELETION BASED ON SCENARIO MODE ==========
-	slog.Info("========== RSC Deletion ==========", "mode", cfg.Mode)
+	// Keep RSCs in the cluster; migrator must still create Manual RVs when an RSC matches PV storage class.
+	slog.Info("========== Recording migrated resource names (RSCs kept) ==========")
 
-	autoResources := make([]string, 0, len(podResults))
-	manualResources := make([]string, 0)
-
-	for i, rsc := range rscResults {
-		pod := podResults[i]
-
-		// Fetch the PVC to obtain the bound PV name (Linstor resource name).
+	migratedResources := make([]string, 0, len(podResults))
+	for _, pod := range podResults {
 		var pvc corev1.PersistentVolumeClaim
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: pod.PVCName, Namespace: cfg.Namespace}, &pvc); err != nil {
 			return nil, fmt.Errorf("failed to get PVC %s: %w", pod.PVCName, err)
@@ -253,34 +232,11 @@ func PrepareMigratorScenario(
 		if pvName == "" {
 			return nil, fmt.Errorf("PVC %s has no bound PV (VolumeName is empty)", pod.PVCName)
 		}
-
-		shouldDelete := false
-		switch cfg.Mode {
-		case ScenarioModeAutoOnly:
-			shouldDelete = false
-		case ScenarioModeManualOnly:
-			shouldDelete = true
-		case ScenarioModeMixed:
-			shouldDelete = strings.Contains(rsc.Name, "thick")
-		}
-
-		if shouldDelete {
-			slog.Info("Deleting RSC (PV goes to Manual)", "rsc", rsc.Name, "pv", pvName)
-			if err := k8sClient.Delete(ctx, &srvv1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: rsc.Name},
-			}); err != nil {
-				return nil, fmt.Errorf("failed to delete RSC %s: %w", rsc.Name, err)
-			}
-			manualResources = append(manualResources, pvName)
-		} else {
-			slog.Info("Keeping RSC (PV goes to Auto)", "rsc", rsc.Name, "pv", pvName)
-			autoResources = append(autoResources, pvName)
-		}
+		migratedResources = append(migratedResources, pvName)
 	}
 
-	result.AutoResources = autoResources
-	result.ManualResources = manualResources
-	slog.Info("========== RSC Deletion Complete ==========")
+	result.MigratedResources = migratedResources
+	slog.Info("========== Migrated resource names recorded ==========", "count", len(migratedResources))
 
 	slog.Info("Saving Linstor state before migration")
 	linstorBefore, saveErr := collectLinstorState(ctx, clientset, restConfig, cfg.RunID)
@@ -291,13 +247,12 @@ func PrepareMigratorScenario(
 	logLinstorState(linstorBefore)
 
 	stateFilePath, stateErr := SaveMigratorScenarioState(&MigratorScenarioState{
-		RunID:           cfg.RunID,
-		OldRSPs:         result.OldRSPs,
-		PodNames:        result.PodNames,
-		FileChecksums:   result.FileChecksums,
-		LinstorBefore:   result.LinstorBefore,
-		AutoResources:   result.AutoResources,
-		ManualResources: result.ManualResources,
+		RunID:             cfg.RunID,
+		OldRSPs:           result.OldRSPs,
+		PodNames:          result.PodNames,
+		FileChecksums:     result.FileChecksums,
+		LinstorBefore:     result.LinstorBefore,
+		MigratedResources: result.MigratedResources,
 	})
 	if stateErr != nil {
 		return nil, fmt.Errorf("failed to save migrator scenario state: %w", stateErr)
@@ -338,14 +293,13 @@ func PrepareOrRestoreMigratorScenario(
 
 		slog.Info("Restore mode enabled, loaded state", "path", restoredFilePath, "runID", restoredState.RunID)
 		return &MigratorSetupResult{
-			RunID:           restoredState.RunID,
-			OldRSPs:         append([]RSPBaseline(nil), restoredState.OldRSPs...),
-			PodNames:        append([]string(nil), restoredState.PodNames...),
-			FileChecksums:   restoredState.FileChecksums,
-			LinstorBefore:   restoredState.LinstorBefore,
-			StateFilePath:   restoredFilePath,
-			AutoResources:   restoredState.AutoResources,
-			ManualResources: restoredState.ManualResources,
+			RunID:             restoredState.RunID,
+			OldRSPs:           append([]RSPBaseline(nil), restoredState.OldRSPs...),
+			PodNames:          append([]string(nil), restoredState.PodNames...),
+			FileChecksums:     restoredState.FileChecksums,
+			LinstorBefore:     restoredState.LinstorBefore,
+			StateFilePath:     restoredFilePath,
+			MigratedResources: restoredState.MigratedResources,
 		}, nil
 	}
 
