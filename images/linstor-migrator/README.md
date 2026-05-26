@@ -115,7 +115,7 @@ High-level flow:
 3. if the LINSTOR CRD is missing, set `stage1_completed` and skip the rest of stage 1;
 4. discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, install the `linstor-viewer` backup viewer binary, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`);
 5. load LINSTOR data from CRDs into an in-memory snapshot;
-6. list `PersistentVolume`, `ReplicatedStorageClass`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
+6. list `PersistentVolume`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
 7. classify LINSTOR resources into:
    - resources with a matching replicated PV,
    - resources without a PV,
@@ -145,17 +145,14 @@ For each LINSTOR resource selected for migration, the migrator:
 
 1. resolves the LINSTOR pool and the volume size;
 2. resolves the DRBD shared secret from LINSTOR metadata;
-3. picks an existing `ReplicatedStorageClass` for auto mode when possible:
-   - prefer `PV.spec.storageClassName` if it matches an existing `ReplicatedStorageClass`;
-   - if there is no PV, fall back to legacy `ReplicatedStorageClass.spec.storagePool` matching;
-4. creates per-replica resources:
+3. creates per-replica resources:
    - `LVMLogicalVolume` for diskful replicas only,
    - `DRBDResource` for every replica,
    - `ReplicatedVolumeReplica` for every replica;
-5. patches owner references so `LVMLogicalVolume` and `DRBDResource` are owned by their `ReplicatedVolumeReplica`;
-6. computes manual FTT/GMDR heuristics when auto mode is not possible;
-7. creates `ReplicatedVolume`;
-8. creates `ReplicatedVolumeAttachment` objects from matching `VolumeAttachment` objects when a PV exists.
+4. patches owner references so `LVMLogicalVolume` and `DRBDResource` are owned by their `ReplicatedVolumeReplica`;
+5. computes FTT/GMDR heuristics for manual configuration;
+6. creates `ReplicatedVolume` with `configurationMode=Manual` (always, even when a matching `ReplicatedStorageClass` exists);
+7. creates `ReplicatedVolumeAttachment` objects from matching `VolumeAttachment` objects when a PV exists.
 
 Replica type mapping:
 
@@ -202,9 +199,9 @@ After stage 1 step 12, any `ReplicatedStoragePool` that was named exactly like a
 
 Additional details for `ReplicatedVolume`:
 
-- if an existing `ReplicatedStorageClass` is found, the migrator uses `configurationMode=Auto`;
-- otherwise it uses `configurationMode=Manual` and writes:
-  - `replicatedStoragePoolName`,
+- every migrated volume uses `configurationMode=Manual` with `spec.manualConfiguration` pointing at the migration `ReplicatedStoragePool` (`linstor-auto-*`), not at a pre-migration `ReplicatedStorageClass`, so adopt/v1 formation can load the correct RSP;
+- `spec.manualConfiguration` includes:
+  - `replicatedStoragePoolName` (migration pool),
   - `topology=Ignored`,
   - `volumeAccess=PreferablyLocal`,
   - computed `failuresToTolerate`,
@@ -216,8 +213,6 @@ Additional details for `ReplicatedVolume`:
 - Stage 2 does not add post-migration data validation beyond the adopt formation gate described above.
 - DRBD shared secrets are read from LINSTOR, but they are not yet propagated into the created `ReplicatedVolume`.
 - Manual topology and volume access are still hard-coded (`Ignored` and `PreferablyLocal`).
-- Migration relies on the legacy `ReplicatedStorageClass.spec.storagePool` fallback when a resource has no PV.
-
 ## Idempotency and Restart
 
 The migrator uses create-if-not-exists semantics for all created resources:
