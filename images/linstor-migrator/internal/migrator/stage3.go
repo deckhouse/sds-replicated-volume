@@ -1,0 +1,85 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package migrator
+
+import (
+	"context"
+	"fmt"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/linstorbackup"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/metadatabackupcleanup"
+)
+
+// runStage3 backs up and removes LINSTOR CRs, metadata backups, and legacy ReplicatedStoragePool objects.
+func (m *Migrator) runStage3(ctx context.Context) error {
+	m.log.Info("stage 3: starting LINSTOR cleanup")
+
+	if err := m.updateMigrationStateRetrying(ctx, config.StateStage3Started); err != nil {
+		return err
+	}
+
+	if err := m.crdExists(ctx, config.LinstorCRDName); err != nil {
+		if apierrors.IsNotFound(err) {
+			m.log.Info("LINSTOR CRD already gone, skipping CR backup and CRD deletion")
+		} else {
+			return fmt.Errorf("failed to check LINSTOR CRD %q: %w", config.LinstorCRDName, err)
+		}
+	} else {
+		if err := linstorbackup.WriteGroupBackup(ctx, m.client, m.dynamicClient, m.log, linstorbackup.BackupDir()); err != nil {
+			return fmt.Errorf("LINSTOR CR backup: %w", err)
+		}
+		if err := linstorbackup.DeleteCRDsForGroup(ctx, m.client, m.log, linstorbackup.APIGroup); err != nil {
+			return fmt.Errorf("delete LINSTOR CRDs: %w", err)
+		}
+	}
+
+	if err := metadatabackupcleanup.DeleteAll(ctx, m.dynamicClient, m.log); err != nil {
+		return fmt.Errorf("delete ReplicatedStorageMetadataBackup objects: %w", err)
+	}
+
+	toDelete, err := linstorbackup.WriteLegacyRSPBackupFromCluster(ctx, m.client, m.log, linstorbackup.BackupDir())
+	if err != nil {
+		return fmt.Errorf("backup legacy ReplicatedStoragePool objects: %w", err)
+	}
+	for _, poolName := range toDelete {
+		rsp := &srvv1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: poolName},
+		}
+		if err := m.client.Delete(ctx, rsp); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("delete legacy ReplicatedStoragePool %q: %w", poolName, err)
+		}
+		m.log.Info("deleted legacy ReplicatedStoragePool", "name", poolName)
+	}
+
+	return m.updateMigrationStateAllCompleted(ctx)
+}
+
+func (m *Migrator) updateMigrationStateAllCompleted(ctx context.Context) error {
+	if err := m.updateMigrationStateRetrying(ctx, config.StateAllCompleted); err != nil {
+		return err
+	}
+	m.log.Info("stage 3: completed, migration finished")
+	return nil
+}

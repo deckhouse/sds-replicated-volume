@@ -18,10 +18,7 @@ package migrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
@@ -42,21 +39,9 @@ const (
 // reaches the Exit maintenance step, then clears DRBDResource maintenance and removes adopt annotations.
 func (m *Migrator) runStage2(ctx context.Context) error {
 	m.log.Info("stage 2: starting adopt exit-maintenance polling",
-		"pollInterval", m.stage2PollInterval, "workerCount", m.stage2WorkerCount)
-	for {
-		err := m.updateMigrationState(ctx, config.StateStage2Started)
-		if err == nil {
-			break
-		}
-		if !isTransientAPIError(err) {
-			return fmt.Errorf("failed to update migration state: %w", err)
-		}
-		m.log.Warn("transient error updating migration state to stage2_started, retrying", "err", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(m.stage2PollInterval):
-		}
+		"pollInterval", m.retryInterval, "workerCount", m.stage2WorkerCount)
+	if err := m.updateMigrationStateRetrying(ctx, config.StateStage2Started); err != nil {
+		return err
 	}
 
 	remainingRVNames, err := m.listAdoptReplicatedVolumeNames(ctx)
@@ -64,13 +49,13 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		return err
 	}
 	if len(remainingRVNames) == 0 {
-		m.log.Info("stage 2: no ReplicatedVolumes with adopt annotation, marking migration completed")
-		return m.updateMigrationStateAllCompleted(ctx)
+		m.log.Info("stage 2: no ReplicatedVolumes with adopt annotation, marking stage 2 completed")
+		return m.updateMigrationStateStage2Completed(ctx)
 	}
 
 	m.log.Info("stage 2: tracking ReplicatedVolumes until adopt exit-maintenance", "count", len(remainingRVNames))
 
-	ticker := time.NewTicker(m.stage2PollInterval)
+	ticker := time.NewTicker(m.retryInterval)
 	defer ticker.Stop()
 
 	firstRound := true
@@ -150,26 +135,15 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 		}
 	}
 
-	return m.updateMigrationStateAllCompleted(ctx)
+	return m.updateMigrationStateStage2Completed(ctx)
 }
 
-func (m *Migrator) updateMigrationStateAllCompleted(ctx context.Context) error {
-	for {
-		err := m.updateMigrationState(ctx, config.StateAllCompleted)
-		if err == nil {
-			m.log.Info("stage 2: completed, migration finished")
-			return nil
-		}
-		if !isTransientAPIError(err) {
-			return fmt.Errorf("failed to update migration state to all_completed: %w", err)
-		}
-		m.log.Warn("transient error updating migration state to all_completed, retrying", "err", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(m.stage2PollInterval):
-		}
+func (m *Migrator) updateMigrationStateStage2Completed(ctx context.Context) error {
+	if err := m.updateMigrationStateRetrying(ctx, config.StateStage2Completed); err != nil {
+		return err
 	}
+	m.log.Info("stage 2: adopt exit-maintenance completed")
+	return nil
 }
 
 // listAdoptReplicatedVolumeNames returns a set of ReplicatedVolume names (map keys are metadata.name of each RV
@@ -183,7 +157,7 @@ func (m *Migrator) listAdoptReplicatedVolumeNames(ctx context.Context) (map[stri
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
-				case <-time.After(m.stage2PollInterval):
+				case <-time.After(m.retryInterval):
 				}
 				continue
 			}
@@ -314,43 +288,4 @@ func (m *Migrator) patchRVRemoveAdoptAnnotations(ctx context.Context, rv *srvv1a
 	}
 	m.log.Info("removed adopt annotations from ReplicatedVolume", "replicatedVolume", rv.Name)
 	return nil
-}
-
-// isTransientAPIError reports errors that should not fail the stage 2 loop (network blips, overload, etc.).
-func isTransientAPIError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-
-	var statusErr *apierrors.StatusError
-	if errors.As(err, &statusErr) {
-		code := int(statusErr.Status().Code)
-		switch code {
-		case http.StatusRequestTimeout, http.StatusTooManyRequests,
-			http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
-		}
-		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) {
-			return true
-		}
-		if code == http.StatusConflict {
-			return true
-		}
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-
-	// DNS / connection failures often surface as *net.OpError without Timeout().
-	var opErr *net.OpError
-	return errors.As(err, &opErr)
 }
