@@ -1,3 +1,5 @@
+//go:build embed_linstor_viewer
+
 /*
 Copyright 2026 Flant JSC
 

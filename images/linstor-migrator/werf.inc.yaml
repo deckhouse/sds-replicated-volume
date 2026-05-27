@@ -40,7 +40,7 @@ shell:
     - cd /src/images/{{ $.ImageName }}
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/linstor-viewer ./cmd/linstor-viewer
     - install -Dm 0755 /tmp/linstor-viewer ./internal/linstorbackup/embedded/linstor-viewer
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }} ./cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags embed_linstor_viewer -ldflags="-s -w" -o /{{ $.ImageName }} ./cmd
     - chmod +x /{{ $.ImageName }}
 
 ---
