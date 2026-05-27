@@ -65,6 +65,28 @@ func TestIsLegacyReplicatedStoragePoolCandidate(t *testing.T) {
 	}
 }
 
+func TestWriteLegacyRSPBackupFromCluster_filtersLegacyPools(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacy := &srvv1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "thick-data"},
+		Spec:       srvv1alpha1.ReplicatedStoragePoolSpec{Type: srvv1alpha1.ReplicatedStoragePoolTypeLVM},
+	}
+	auto := &srvv1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: config.AutoReplicatedStoragePoolNamePrefix + "thick-data"},
+		Spec:       srvv1alpha1.ReplicatedStoragePoolSpec{Type: srvv1alpha1.ReplicatedStoragePoolTypeLVM},
+	}
+	cl := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(legacy, auto).Build()
+
+	names, err := WriteLegacyRSPBackupFromCluster(context.Background(), cl, slog.Default(), dir)
+	if err != nil {
+		t.Fatalf("WriteLegacyRSPBackupFromCluster: %v", err)
+	}
+	if len(names) != 1 || names[0] != "thick-data" {
+		t.Fatalf("names: %v", names)
+	}
+}
+
 func TestWriteLegacyRSPBackup_skipsWhenNoneExist(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

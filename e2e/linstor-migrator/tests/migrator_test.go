@@ -40,7 +40,7 @@ import (
 
 // Register migrator scenarios at package init (side effect: Ginkgo Describe).
 func init() {
-	buildMigratorScenario("All RVs are created with ConfigurationMode: Manual (RSCs kept)", "Manual")
+	buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual")
 }
 
 func buildMigratorScenario(scenarioName string, label string) {

@@ -104,8 +104,8 @@ func run() int {
 	}
 
 	m := migrator.New(kClient, dynClient, log, migrator.MigratorOptions{
-		Stage2PollInterval: opt.Stage2PollInterval,
-		Stage2WorkerCount:  opt.Stage2WorkerCount,
+		RetryInterval:     opt.RetryInterval,
+		Stage2WorkerCount: opt.Stage2WorkerCount,
 	})
 	if err := m.Run(ctx); err != nil {
 		log.Error("linstor-migrator exited with error", "err", err)

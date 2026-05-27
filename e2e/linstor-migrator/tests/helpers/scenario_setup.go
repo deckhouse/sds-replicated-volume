@@ -219,8 +219,7 @@ func PrepareMigratorScenario(
 		result.FileChecksums[pod.PodName] = checksum.Checksum
 	}
 
-	// Keep RSCs in the cluster; migrator must still create Manual RVs when an RSC matches PV storage class.
-	slog.Info("========== Recording migrated resource names (RSCs kept) ==========")
+	slog.Info("========== Recording migrated resource names ==========")
 
 	migratedResources := make([]string, 0, len(podResults))
 	for _, pod := range podResults {
