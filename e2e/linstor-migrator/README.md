@@ -13,7 +13,7 @@ The testing lifecycle looks like this:
 3. Run the next scenario on the cleaned cluster.
 
 ### Implemented Scenarios (Describe blocks):
-* **`All RVs are created with ConfigurationMode: Manual (RSCs kept)`** (Label: `"Manual"`): Pre-migration RSCs remain in the cluster; after migration every RV must use Manual configuration pointing at `linstor-auto-*` pools.
+* **`All RVs are created with ConfigurationMode: Manual`** (Label: `"Manual"`): After migration every RV must use Manual configuration pointing at `linstor-auto-*` pools.
 * **`Linstor resources without PV`** (Label: `"WithoutPV"`): Emulates a situation where PVCs and PVs are lost before migration to verify correct handling of orphaned ReplicatedVolumes (Manual configuration and the `no-persistent-volume` label).
 
 ## Environment Setup (Variables)
