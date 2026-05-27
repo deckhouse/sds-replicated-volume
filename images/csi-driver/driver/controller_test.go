@@ -80,7 +80,7 @@ func TestControllerUnpublishVolume_WaitsForRVADeletion(t *testing.T) {
 	rva := &v1alpha1.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvaName,
-			Finalizers: []string{testStuckFinalizer, utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{testStuckFinalizer, v1alpha1.CSIControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeID,
@@ -146,7 +146,7 @@ func TestControllerUnpublishVolume_ReturnsDeadlineExceededIfRVAStuck(t *testing.
 	rva := &v1alpha1.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       rvaName,
-			Finalizers: []string{testStuckFinalizer, utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{testStuckFinalizer, v1alpha1.CSIControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 			ReplicatedVolumeName: volumeID,
@@ -198,12 +198,12 @@ func newCreateVolumeRequest(volumeID string) *csi.CreateVolumeRequest {
 }
 
 // createRVPastFormation pre-creates an RV and marks its status as past Formation.
-func createRVPastFormation(t *testing.T, ctx context.Context, cl client.Client, volumeID string) *v1alpha1.ReplicatedVolume {
+func createRVPastFormation(ctx context.Context, t *testing.T, cl client.Client, volumeID string) *v1alpha1.ReplicatedVolume {
 	t.Helper()
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       volumeID,
-			Finalizers: []string{utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{v1alpha1.CSIControllerFinalizer},
 		},
 	}
 	if err := cl.Create(ctx, rv); err != nil {
@@ -218,12 +218,12 @@ func createRVPastFormation(t *testing.T, ctx context.Context, cl client.Client, 
 
 // createRVStillForming pre-creates an RV with empty status so the predicate
 // IsReplicatedVolumePastFormation is false for it.
-func createRVStillForming(t *testing.T, ctx context.Context, cl client.Client, volumeID string) *v1alpha1.ReplicatedVolume {
+func createRVStillForming(ctx context.Context, t *testing.T, cl client.Client, volumeID string) *v1alpha1.ReplicatedVolume {
 	t.Helper()
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       volumeID,
-			Finalizers: []string{utils.SDSReplicatedVolumeCSIFinalizer},
+			Finalizers: []string{v1alpha1.CSIControllerFinalizer},
 		},
 	}
 	if err := cl.Create(ctx, rv); err != nil {
@@ -233,7 +233,7 @@ func createRVStillForming(t *testing.T, ctx context.Context, cl client.Client, v
 }
 
 // formRVAsync marks the RV past Formation after a delay, letting the Wait loop observe it.
-func formRVAsync(t *testing.T, ctx context.Context, cl client.Client, volumeID string, after time.Duration) chan struct{} {
+func formRVAsync(ctx context.Context, t *testing.T, cl client.Client, volumeID string, after time.Duration) chan struct{} {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -270,7 +270,7 @@ func TestCreateVolume_AlreadyExists_PastFormation_ReturnsSuccessWithoutWait(t *t
 
 	volumeID := "rv-already-formed"
 	cl := newTestFakeClient()
-	createRVPastFormation(t, ctx, cl, volumeID)
+	createRVPastFormation(ctx, t, cl, volumeID)
 
 	// waitActionTimeout is intentionally large. If we accidentally enter Wait,
 	// we still expect Wait to finish quickly because DatameshRevision>0 already,
@@ -301,11 +301,11 @@ func TestCreateVolume_AlreadyExists_StillForming_WaitSucceeds(t *testing.T) {
 
 	volumeID := "rv-forming-ok"
 	cl := newTestFakeClient()
-	createRVStillForming(t, ctx, cl, volumeID)
+	createRVStillForming(ctx, t, cl, volumeID)
 
 	d := newTestDriver(t, cl, 5*time.Second)
 
-	done := formRVAsync(t, ctx, cl, volumeID, 300*time.Millisecond)
+	done := formRVAsync(ctx, t, cl, volumeID, 300*time.Millisecond)
 
 	resp, err := d.CreateVolume(ctx, newCreateVolumeRequest(volumeID))
 	<-done
@@ -327,7 +327,7 @@ func TestCreateVolume_AlreadyExists_StillForming_WaitFails_DeletesGarbage(t *tes
 
 	volumeID := "rv-forming-stuck"
 	cl := newTestFakeClient()
-	createRVStillForming(t, ctx, cl, volumeID)
+	createRVStillForming(ctx, t, cl, volumeID)
 
 	d := newTestDriver(t, cl, 200*time.Millisecond)
 
@@ -351,7 +351,7 @@ func TestCreateVolume_AlreadyExists_BeingDeleted_ReturnsAborted(t *testing.T) {
 
 	volumeID := "rv-being-deleted"
 	cl := newTestFakeClient()
-	rv := createRVStillForming(t, ctx, cl, volumeID)
+	rv := createRVStillForming(ctx, t, cl, volumeID)
 	// Delete; fake client keeps the object around (finalizer) with DeletionTimestamp.
 	if err := cl.Delete(ctx, rv); err != nil {
 		t.Fatalf("delete rv: %v", err)
@@ -384,7 +384,7 @@ func TestCreateVolume_FreshCreate_WaitSucceeds_ReturnsResponse(t *testing.T) {
 
 	d := newTestDriver(t, cl, 5*time.Second)
 
-	done := formRVAsync(t, ctx, cl, volumeID, 300*time.Millisecond)
+	done := formRVAsync(ctx, t, cl, volumeID, 300*time.Millisecond)
 
 	resp, err := d.CreateVolume(ctx, newCreateVolumeRequest(volumeID))
 	<-done
@@ -457,7 +457,7 @@ func TestCreateVolume_WaitFails_RaceWin_ReturnsSuccess(t *testing.T) {
 		}).
 		Build()
 
-	createRVStillForming(t, ctx, cl, volumeID)
+	createRVStillForming(ctx, t, cl, volumeID)
 
 	// waitActionTimeout=1ns forces Wait to return ctx.Err immediately in its
 	// first select iteration, without ever Get-ing the RV itself (otherwise
@@ -528,7 +528,7 @@ func TestCreateVolume_FreshCreate_WaitFails_DeletionTimestamp_DoesNotDelete(t *t
 	// CreateVolume must NOT have stripped the CSI finalizer as part of a Delete.
 	csiFinalizerFound := false
 	for _, f := range got.Finalizers {
-		if f == utils.SDSReplicatedVolumeCSIFinalizer {
+		if f == v1alpha1.CSIControllerFinalizer {
 			csiFinalizerFound = true
 			break
 		}

@@ -243,7 +243,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 			rva := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       rvaName,
-					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+					Finalizers: []string{stuckFinalizer, v1alpha1.CSIControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 					ReplicatedVolumeName: volumeName,
@@ -359,7 +359,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 			stale := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       rvaName,
-					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+					Finalizers: []string{stuckFinalizer, v1alpha1.CSIControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 					ReplicatedVolumeName: volumeName,
@@ -388,7 +388,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 			fresh := &v1alpha1.ReplicatedVolumeAttachment{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, fresh)).To(Succeed())
 			Expect(fresh.DeletionTimestamp).To(BeNil())
-			Expect(fresh.Finalizers).To(ContainElement(SDSReplicatedVolumeCSIFinalizer))
+			Expect(fresh.Finalizers).To(ContainElement(v1alpha1.CSIControllerFinalizer))
 		})
 	})
 
@@ -401,7 +401,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 			stale := &v1alpha1.ReplicatedVolumeAttachment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       rvaName,
-					Finalizers: []string{stuckFinalizer, SDSReplicatedVolumeCSIFinalizer},
+					Finalizers: []string{stuckFinalizer, v1alpha1.CSIControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 					ReplicatedVolumeName: volumeName,
@@ -439,4 +439,3 @@ func newFakeClient() client.Client {
 		WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{})
 	return builder.Build()
 }
-
