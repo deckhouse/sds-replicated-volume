@@ -37,9 +37,21 @@ const (
 	currentMetricsNodeGlobal      = "global"
 	currentMetricsNodeUnknown     = "unknown"
 	currentMetricsSCUnknown       = "unknown"
+	currentMetricsCollectTimeout  = 5 * time.Second
 )
 
 var registerCurrentMetricsCollectorOnce sync.Once
+
+type currentMetricLabels2 struct {
+	first  string
+	second string
+}
+
+type currentMetricLabels3 struct {
+	first  string
+	second string
+	third  string
+}
 
 // RegisterCurrentMetricsCollector registers a custom Prometheus collector that
 // builds current metrics directly from the controller cache at scrape time.
@@ -111,7 +123,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		CurrentMetricsCollectDuration.Observe(time.Since(start).Seconds())
 	}()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), currentMetricsCollectTimeout)
+	defer cancel()
 
 	var nodeList corev1.NodeList
 	if err := c.reader.List(ctx, &nodeList, client.UnsafeDisableDeepCopy); err != nil {
@@ -143,16 +156,13 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	// Build the zero-filled node matrix from Kubernetes nodes because RVA targets
-	// are regular node names. Pre-emitting zero series keeps Grafana node filters continuous.
-	nodes := collectNodeNames(nodeList.Items, rvrList.Items, rvaList.Items)
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
-	collectRVRCounts(ch, c.rvrCountDesc, nodes, storageClasses, rvrList.Items)
-	collectRVACounts(ch, c.rvaCountDesc, nodes, storageClasses, rvList.Items, rvaList.Items)
-	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, nodes, storageClasses, rvrList.Items)
-	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, nodes, storageClasses, rvList.Items, rvrList.Items)
+	collectRVRCounts(ch, c.rvrCountDesc, rvrList.Items)
+	collectRVACounts(ch, c.rvaCountDesc, rvList.Items, rvaList.Items)
+	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvrList.Items)
+	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, rvList.Items, rvrList.Items)
 
 	CurrentMetricsObjects.WithLabelValues("node").Set(float64(len(nodeList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rsc").Set(float64(len(rscList.Items)))
@@ -265,20 +275,9 @@ func collectRVCounts(
 func collectRVRCounts(
 	ch chan<- prometheus.Metric,
 	countDesc *prometheus.Desc,
-	nodes []string,
-	storageClasses []string,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
-	phases := rvrMetricPhases()
-	counts := make(map[string]float64, len(nodes)*len(storageClasses)*len(phases))
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			for _, phase := range phases {
-				counts[metricKey(node, sc, phase)] = 0
-			}
-		}
-	}
-
+	counts := make(map[currentMetricLabels3]float64, len(rvrs))
 	for i := range rvrs {
 		node := currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
 		sc := currentMetricsStorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])
@@ -286,41 +285,26 @@ func collectRVRCounts(
 		if phase == "" {
 			phase = "Unknown"
 		}
-		counts[metricKey(node, sc, phase)]++
+		counts[currentMetricLabels3{node, sc, phase}]++
 	}
 
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			for _, phase := range phases {
-				ch <- prometheus.MustNewConstMetric(countDesc, prometheus.GaugeValue, counts[metricKey(node, sc, phase)], node, sc, phase)
-			}
-		}
+	for _, labels := range sortedCurrentMetricLabels3(counts) {
+		ch <- prometheus.MustNewConstMetric(countDesc, prometheus.GaugeValue, counts[labels], labels.first, labels.second, labels.third)
 	}
 }
 
 func collectRVACounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
-	nodes []string,
-	storageClasses []string,
 	rvs []v1alpha1.ReplicatedVolume,
 	rvas []v1alpha1.ReplicatedVolumeAttachment,
 ) {
-	phases := rvaMetricPhases()
-	counts := make(map[string]float64, len(nodes)*len(storageClasses)*len(phases))
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			for _, phase := range phases {
-				counts[metricKey(node, sc, phase)] = 0
-			}
-		}
-	}
-
 	rvStorageClasses := make(map[string]string, len(rvs))
 	for i := range rvs {
 		rvStorageClasses[rvs[i].Name] = currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
 	}
 
+	counts := make(map[currentMetricLabels3]float64, len(rvas))
 	for i := range rvas {
 		node := currentMetricsNodeLabel(rvas[i].Spec.NodeName)
 		sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]
@@ -332,32 +316,20 @@ func collectRVACounts(
 		if phase == "" {
 			phase = "Unknown"
 		}
-		counts[metricKey(node, sc, phase)]++
+		counts[currentMetricLabels3{node, sc, phase}]++
 	}
 
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			for _, phase := range phases {
-				ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, sc, phase)], node, sc, phase)
-			}
-		}
+	for _, labels := range sortedCurrentMetricLabels3(counts) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[labels], labels.first, labels.second, labels.third)
 	}
 }
 
 func collectRVRDeletingCounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
-	nodes []string,
-	storageClasses []string,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
-	counts := make(map[string]float64, len(nodes)*len(storageClasses))
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			counts[metricKey(node, sc)] = 0
-		}
-	}
-
+	counts := make(map[currentMetricLabels2]float64, len(rvrs))
 	for i := range rvrs {
 		rvr := &rvrs[i]
 		if rvr.DeletionTimestamp == nil {
@@ -365,40 +337,26 @@ func collectRVRDeletingCounts(
 		}
 		node := currentMetricsNodeLabel(rvr.Spec.NodeName)
 		sc := currentMetricsStorageClassLabel(rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey])
-		counts[metricKey(node, sc)]++
+		counts[currentMetricLabels2{node, sc}]++
 	}
 
-	for _, node := range nodes {
-		for _, sc := range storageClasses {
-			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(node, sc)], node, sc)
-		}
+	for _, labels := range sortedCurrentMetricLabels2(counts) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[labels], labels.first, labels.second)
 	}
 }
 
 func collectDatameshActiveTransitions(
 	ch chan<- prometheus.Metric,
 	activeDesc *prometheus.Desc,
-	nodes []string,
-	storageClasses []string,
 	rvs []v1alpha1.ReplicatedVolume,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
-	nodes = prependMissingCurrentMetricsNodes(nodes, currentMetricsNodeGlobal, currentMetricsNodeUnknown)
-	types := datameshTransitionTypes()
-	typeCounts := make(map[string]float64, len(storageClasses)*len(nodes)*len(types))
-	for _, sc := range storageClasses {
-		for _, node := range nodes {
-			for _, typ := range types {
-				typeCounts[metricKey(sc, node, typ)] = 0
-			}
-		}
-	}
-
 	replicaNodes := make(map[string]string, len(rvrs))
 	for i := range rvrs {
 		replicaNodes[rvrs[i].Name] = currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
 	}
 
+	typeCounts := make(map[currentMetricLabels3]float64)
 	for i := range rvs {
 		rv := &rvs[i]
 		sc := currentMetricsStorageClassLabel(rv.Spec.ReplicatedStorageClassName)
@@ -412,64 +370,12 @@ func collectDatameshActiveTransitions(
 					node = currentMetricsNodeUnknown
 				}
 			}
-			typeCounts[metricKey(sc, node, typ)]++
+			typeCounts[currentMetricLabels3{sc, node, typ}]++
 		}
 	}
 
-	for _, sc := range storageClasses {
-		for _, node := range nodes {
-			for _, typ := range types {
-				ch <- prometheus.MustNewConstMetric(activeDesc, prometheus.GaugeValue, typeCounts[metricKey(sc, node, typ)], sc, node, typ)
-			}
-		}
-	}
-}
-
-func rvrMetricPhases() []string {
-	return []string{
-		"Unknown",
-		string(v1alpha1.ReplicatedVolumeReplicaPhasePending),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseProvisioning),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy),
-		string(v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseCritical),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseAgentNotReady),
-		string(v1alpha1.ReplicatedVolumeReplicaPhaseTerminating),
-	}
-}
-
-func rvaMetricPhases() []string {
-	return []string{
-		"Unknown",
-		string(v1alpha1.ReplicatedVolumeAttachmentPhasePending),
-		string(v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching),
-		string(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached),
-		string(v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching),
-		string(v1alpha1.ReplicatedVolumeAttachmentPhaseTerminating),
-	}
-}
-
-func datameshTransitionTypes() []string {
-	return []string{
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeSystemNetworks),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDisableMultiattach),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeEnableMultiattach),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceDetach),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRepairNetworkAddresses),
-		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume),
+	for _, labels := range sortedCurrentMetricLabels3(typeCounts) {
+		ch <- prometheus.MustNewConstMetric(activeDesc, prometheus.GaugeValue, typeCounts[labels], labels.first, labels.second, labels.third)
 	}
 }
 
@@ -487,23 +393,6 @@ func currentMetricsStorageClassLabel(storageClass string) string {
 	return storageClass
 }
 
-func prependMissingCurrentMetricsNodes(nodes []string, prefixes ...string) []string {
-	seen := make(map[string]struct{}, len(nodes)+len(prefixes))
-	for _, node := range nodes {
-		seen[node] = struct{}{}
-	}
-
-	result := make([]string, 0, len(nodes)+len(prefixes))
-	for _, node := range prefixes {
-		if _, exists := seen[node]; exists {
-			continue
-		}
-		seen[node] = struct{}{}
-		result = append(result, node)
-	}
-	return append(result, nodes...)
-}
-
 func metricKey(values ...string) string {
 	key := ""
 	for i, value := range values {
@@ -513,4 +402,35 @@ func metricKey(values ...string) string {
 		key += value
 	}
 	return key
+}
+
+func sortedCurrentMetricLabels2(counts map[currentMetricLabels2]float64) []currentMetricLabels2 {
+	labels := make([]currentMetricLabels2, 0, len(counts))
+	for label := range counts {
+		labels = append(labels, label)
+	}
+	sort.Slice(labels, func(i, j int) bool {
+		if labels[i].first != labels[j].first {
+			return labels[i].first < labels[j].first
+		}
+		return labels[i].second < labels[j].second
+	})
+	return labels
+}
+
+func sortedCurrentMetricLabels3(counts map[currentMetricLabels3]float64) []currentMetricLabels3 {
+	labels := make([]currentMetricLabels3, 0, len(counts))
+	for label := range counts {
+		labels = append(labels, label)
+	}
+	sort.Slice(labels, func(i, j int) bool {
+		if labels[i].first != labels[j].first {
+			return labels[i].first < labels[j].first
+		}
+		if labels[i].second != labels[j].second {
+			return labels[i].second < labels[j].second
+		}
+		return labels[i].third < labels[j].third
+	})
+	return labels
 }

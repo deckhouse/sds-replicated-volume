@@ -102,13 +102,6 @@ func observeRVADetach(rva *v1alpha1.ReplicatedVolumeAttachment) {
 	metrics.RVADetachDuration.WithLabelValues(rva.Spec.NodeName).Observe(dur)
 }
 
-// cleanupRVAMetrics removes all per-object metrics for a deleted RVA.
-func cleanupRVAMetrics(rva *v1alpha1.ReplicatedVolumeAttachment) {
-	if rva == nil {
-		return
-	}
-}
-
 // computeDatameshMetricObservations compares datamesh transitions before and after ProcessTransitions.
 // Transitions that were in oldTransitions but are absent in rv.Status.DatameshTransitions
 // were completed during this reconcile cycle.

@@ -592,6 +592,24 @@ func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 
 // ListRVAsByRVName lists non-deleting RVAs for a given RV from the informer cache.
 func (c *Client) ListRVAsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
+	items, err := c.ListAllRVAsByRVName(rvName)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []v1alpha1.ReplicatedVolumeAttachment
+	for _, item := range items {
+		if !item.DeletionTimestamp.IsZero() {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListAllRVAsByRVName lists all RVAs for a given RV from the informer cache,
+// including objects that are already marked for deletion but still have finalizers.
+func (c *Client) ListAllRVAsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
 	c.informerMu.RLock()
 	defer c.informerMu.RUnlock()
 
@@ -608,9 +626,6 @@ func (c *Client) ListRVAsByRVName(rvName string) ([]v1alpha1.ReplicatedVolumeAtt
 	for _, obj := range objs {
 		rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
 		if !ok {
-			continue
-		}
-		if !rva.DeletionTimestamp.IsZero() {
 			continue
 		}
 		out = append(out, *rva)

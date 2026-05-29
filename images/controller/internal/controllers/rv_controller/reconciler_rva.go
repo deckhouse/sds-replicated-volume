@@ -362,7 +362,6 @@ func (r *Reconciler) reconcileRVAMetadata(
 				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
 			}
 			observeRVADetach(rva)
-			cleanupRVAMetrics(rva)
 		}
 	}
 

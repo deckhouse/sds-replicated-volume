@@ -44,12 +44,12 @@ type VolumeAttacher struct {
 }
 
 // NewVolumeAttacher creates a new VolumeAttacher
-func NewVolumeAttacher(rvName string, cfg config.VolumeAttacherConfig, client *kubeutils.Client, periodrMinMax []int, forceCleanupChan <-chan struct{}) *VolumeAttacher {
+func NewVolumeAttacher(rvName string, cfg config.VolumeAttacherConfig, client *kubeutils.Client, periodMinMax []int, forceCleanupChan <-chan struct{}) *VolumeAttacher {
 	return &VolumeAttacher{
 		rvName:           rvName,
 		cfg:              cfg,
 		client:           client,
-		log:              slog.Default().With("runner", "volume-attacher", "rv_name", rvName, "period_min_max", periodrMinMax),
+		log:              slog.Default().With("runner", "volume-attacher", "rv_name", rvName, "period_min_max", periodMinMax),
 		forceCleanupChan: forceCleanupChan,
 	}
 }
@@ -239,7 +239,7 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		attachedNodes, err := v.listAttachedNodesDirect(ctx)
+		attachedNodes, err := v.listAttachedNodes()
 		if err != nil {
 			return err
 		}
@@ -326,7 +326,7 @@ func (v *VolumeAttacher) migrationCleanup(log *slog.Logger) {
 
 func (v *VolumeAttacher) waitForSingleRVA(ctx context.Context, keepName string) error {
 	for {
-		rvas, err := v.client.ListAllRVAsByRVNameDirect(ctx, v.rvName)
+		rvas, err := v.client.ListAllRVAsByRVName(v.rvName)
 		if err != nil {
 			return err
 		}
@@ -392,7 +392,7 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		attachedNodes, err := v.listAttachmentIntentNodesDirect(ctx)
+		attachedNodes, err := v.listAttachmentIntentNodes()
 		if err != nil {
 			return err
 		}
@@ -416,7 +416,7 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error {
 	if nodeName == "" {
 		// Detach from all nodes - delete all RVAs for this RV.
-		rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+		rvas, err := v.client.ListRVAsByRVName(v.rvName)
 		if err != nil {
 			return err
 		}
@@ -457,8 +457,8 @@ func chooseRVAForSingleAttachment(rvas []v1alpha1.ReplicatedVolumeAttachment) v1
 	return rvas[0]
 }
 
-func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string, error) {
-	rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
+func (v *VolumeAttacher) listAttachedNodes() ([]string, error) {
+	rvas, err := v.client.ListRVAsByRVName(v.rvName)
 	if err != nil {
 		return nil, err
 	}
@@ -474,8 +474,8 @@ func (v *VolumeAttacher) listAttachedNodesDirect(ctx context.Context) ([]string,
 	return nodes, nil
 }
 
-func (v *VolumeAttacher) listAttachmentIntentNodesDirect(ctx context.Context) ([]string, error) {
-	rvas, err := v.client.ListAllRVAsByRVNameDirect(ctx, v.rvName)
+func (v *VolumeAttacher) listAttachmentIntentNodes() ([]string, error) {
+	rvas, err := v.client.ListAllRVAsByRVName(v.rvName)
 	if err != nil {
 		return nil, err
 	}

@@ -40,13 +40,13 @@ func NewVolumeReplicaDestroyer(
 	rvName string,
 	cfg config.VolumeReplicaDestroyerConfig,
 	client *kubeutils.Client,
-	periodrMinMax []int,
+	periodMinMax []int,
 ) *VolumeReplicaDestroyer {
 	return &VolumeReplicaDestroyer{
 		rvName: rvName,
 		cfg:    cfg,
 		client: client,
-		log:    slog.Default().With("runner", "volume-replica-destroyer", "rv_name", rvName, "period_min_max", periodrMinMax),
+		log:    slog.Default().With("runner", "volume-replica-destroyer", "rv_name", rvName, "period_min_max", periodMinMax),
 	}
 }
 

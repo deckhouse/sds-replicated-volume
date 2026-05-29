@@ -85,7 +85,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -133,7 +133,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -181,7 +181,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=~\"PartiallyDegraded|Degraded|Critical|AgentNotReady\"})",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=~\"PartiallyDegraded|Degraded|Critical|AgentNotReady\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -277,7 +277,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"})",
+          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -591,7 +591,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or vector(0)",
           "legendFormat": "Total",
           "refId": "B"
         }
@@ -647,7 +647,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or vector(0)",
           "legendFormat": "Total",
           "refId": "B"
         }

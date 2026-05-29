@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -369,7 +370,14 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 			return err
 		}
 		if rv == nil {
-			return nil
+			_, err := v.client.GetRV(ctx, v.rvName)
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			log.Debug("RV is absent from cache but still exists in API")
 		}
 
 		if err := waitWithContext(ctx, 1*time.Second); err != nil {

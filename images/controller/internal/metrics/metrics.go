@@ -41,7 +41,6 @@ const (
 )
 
 // Histogram bucket configurations.
-// Calibrated on a working cluster (5Gi, 3 replicas, replicated-r3, 3 test runs).
 // Prometheus automatically adds +Inf, so data is never lost even if values exceed the upper bound.
 var (
 	bucketsRVRReady           = []float64{1, 2, 5, 10, 20, 30, 60, 120}
@@ -49,9 +48,9 @@ var (
 	bucketsDeletion           = []float64{1, 2, 5, 10, 20, 40, 120}
 	bucketsDatameshTransition = []float64{0.5, 1, 2, 5, 10, 20, 30, 40, 60, 120}
 	bucketsDatameshStep       = []float64{0.5, 1, 2, 5, 10, 20, 30}
-	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 40, 120, 300}
+	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 40, 120, 300, 600, 1200, 1800}
 	bucketsBackingVolume      = []float64{0.5, 1, 2, 5, 10, 20, 30}
-	bucketsCollect            = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}
+	bucketsCollect            = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
