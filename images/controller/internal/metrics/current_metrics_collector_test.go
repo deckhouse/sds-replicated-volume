@@ -22,30 +22,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
-
-func TestCollectNodeNamesIncludesUnknownForUnscheduledObjectsOnce(t *testing.T) {
-	nodes := collectNodeNames(
-		[]corev1.Node{
-			{ObjectMeta: metav1.ObjectMeta{Name: currentMetricsNodeUnknown}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
-		},
-		[]v1alpha1.ReplicatedVolumeReplica{
-			{Spec: v1alpha1.ReplicatedVolumeReplicaSpec{}},
-		},
-		[]v1alpha1.ReplicatedVolumeAttachment{
-			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{}},
-		},
-	)
-
-	if !slices.Contains(nodes, currentMetricsNodeUnknown) || countString(nodes, currentMetricsNodeUnknown) != 1 {
-		t.Fatalf("unexpected nodes: %v", nodes)
-	}
-}
 
 func TestCollectStorageClassNamesUsesUnknownForMissingLabels(t *testing.T) {
 	storageClasses := collectStorageClassNames(
@@ -64,8 +44,65 @@ func TestCollectStorageClassNamesUsesUnknownForMissingLabels(t *testing.T) {
 	}
 }
 
+func TestCollectRVCountsEmitsStorageClassPhaseMatrix(t *testing.T) {
+	deleteTime := metav1.Now()
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc(
+		"test_rv_count",
+		"test",
+		[]string{LabelStorageClass, LabelPhase},
+		nil,
+	)
+
+	go func() {
+		defer close(ch)
+		collectRVCounts(
+			ch,
+			desc,
+			[]string{"sc-a", "sc-b"},
+			[]v1alpha1.ReplicatedVolume{
+				{
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "sc-a",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						DeletionTimestamp: &deleteTime,
+						Finalizers:        []string{"test"},
+					},
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "sc-a",
+					},
+				},
+			},
+		)
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 4 {
+		t.Fatalf("expected storage_class x phase matrix, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 1, map[string]string{
+		LabelStorageClass: "sc-a",
+		LabelPhase:        currentMetricsRVPhaseActive,
+	})
+	assertMetric(t, metrics[1], 1, map[string]string{
+		LabelStorageClass: "sc-a",
+		LabelPhase:        currentMetricsRVPhaseDeleting,
+	})
+	assertMetric(t, metrics[2], 0, map[string]string{
+		LabelStorageClass: "sc-b",
+		LabelPhase:        currentMetricsRVPhaseActive,
+	})
+	assertMetric(t, metrics[3], 0, map[string]string{
+		LabelStorageClass: "sc-b",
+		LabelPhase:        currentMetricsRVPhaseDeleting,
+	})
+}
+
 func TestCollectRVRCountsEmitsOnlyNonZeroCombinations(t *testing.T) {
-	ch := make(chan prometheus.Metric, 10)
+	ch := make(chan prometheus.Metric, 100)
 	desc := prometheus.NewDesc(
 		"test_rvr_count",
 		"test",
@@ -73,31 +110,33 @@ func TestCollectRVRCountsEmitsOnlyNonZeroCombinations(t *testing.T) {
 		nil,
 	)
 
-	collectRVRCounts(ch, desc, []v1alpha1.ReplicatedVolumeReplica{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+	go func() {
+		defer close(ch)
+		collectRVRCounts(ch, desc, []v1alpha1.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Phase: v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
 				},
 			},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				Phase: v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Phase: v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
 				},
 			},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
-			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
-				Phase: v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
-			},
-		},
-	})
-	close(ch)
+		})
+	}()
 
 	metrics := collectTestMetrics(t, ch)
 	if len(metrics) != 1 {
@@ -110,8 +149,52 @@ func TestCollectRVRCountsEmitsOnlyNonZeroCombinations(t *testing.T) {
 	})
 }
 
+func TestCollectRVRDeletingCountsEmitsOnlyDeletingReplicas(t *testing.T) {
+	deleteTime := metav1.Now()
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc(
+		"test_rvr_deleting_count",
+		"test",
+		[]string{LabelNode, LabelStorageClass},
+		nil,
+	)
+
+	go func() {
+		defer close(ch)
+		collectRVRDeletingCounts(ch, desc, []v1alpha1.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &deleteTime,
+					Finalizers:        []string{"test"},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "sc-a",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"},
+			},
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 1 {
+		t.Fatalf("expected one deleting metric, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 1, map[string]string{
+		LabelNode:         "node-a",
+		LabelStorageClass: "sc-a",
+	})
+}
+
 func TestCollectRVACountsFallsBackToRVStorageClass(t *testing.T) {
-	ch := make(chan prometheus.Metric, 10)
+	ch := make(chan prometheus.Metric, 100)
 	desc := prometheus.NewDesc(
 		"test_rva_count",
 		"test",
@@ -119,30 +202,32 @@ func TestCollectRVACountsFallsBackToRVStorageClass(t *testing.T) {
 		nil,
 	)
 
-	collectRVACounts(
-		ch,
-		desc,
-		[]v1alpha1.ReplicatedVolume{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-a"},
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					ReplicatedStorageClassName: "sc-from-rv",
+	go func() {
+		defer close(ch)
+		collectRVACounts(
+			ch,
+			desc,
+			[]v1alpha1.ReplicatedVolume{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rv-a"},
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "sc-from-rv",
+					},
 				},
 			},
-		},
-		[]v1alpha1.ReplicatedVolumeAttachment{
-			{
-				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
-					ReplicatedVolumeName: "rv-a",
-					NodeName:             "node-a",
-				},
-				Status: v1alpha1.ReplicatedVolumeAttachmentStatus{
-					Phase: v1alpha1.ReplicatedVolumeAttachmentPhaseAttached,
+			[]v1alpha1.ReplicatedVolumeAttachment{
+				{
+					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+						ReplicatedVolumeName: "rv-a",
+						NodeName:             "node-a",
+					},
+					Status: v1alpha1.ReplicatedVolumeAttachmentStatus{
+						Phase: v1alpha1.ReplicatedVolumeAttachmentPhaseAttached,
+					},
 				},
 			},
-		},
-	)
-	close(ch)
+		)
+	}()
 
 	metrics := collectTestMetrics(t, ch)
 	if len(metrics) != 1 {
@@ -156,7 +241,7 @@ func TestCollectRVACountsFallsBackToRVStorageClass(t *testing.T) {
 }
 
 func TestCollectDatameshActiveTransitionsUsesGlobalAndUnknownNodes(t *testing.T) {
-	ch := make(chan prometheus.Metric, 10)
+	ch := make(chan prometheus.Metric, 100)
 	desc := prometheus.NewDesc(
 		"test_datamesh_active_transitions",
 		"test",
@@ -164,28 +249,30 @@ func TestCollectDatameshActiveTransitionsUsesGlobalAndUnknownNodes(t *testing.T)
 		nil,
 	)
 
-	collectDatameshActiveTransitions(
-		ch,
-		desc,
-		[]v1alpha1.ReplicatedVolume{
-			{
-				Spec: v1alpha1.ReplicatedVolumeSpec{
-					ReplicatedStorageClassName: "sc-a",
-				},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
-						{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation},
-						{
-							Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
-							ReplicaName: "missing-rvr",
+	go func() {
+		defer close(ch)
+		collectDatameshActiveTransitions(
+			ch,
+			desc,
+			[]v1alpha1.ReplicatedVolume{
+				{
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "sc-a",
+					},
+					Status: v1alpha1.ReplicatedVolumeStatus{
+						DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+							{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation},
+							{
+								Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach,
+								ReplicaName: "missing-rvr",
+							},
 						},
 					},
 				},
 			},
-		},
-		nil,
-	)
-	close(ch)
+			nil,
+		)
+	}()
 
 	metrics := collectTestMetrics(t, ch)
 	if len(metrics) != 2 {
@@ -212,10 +299,14 @@ func collectTestMetrics(t *testing.T, ch <-chan prometheus.Metric) []testMetric 
 	t.Helper()
 
 	var metrics []testMetric
+	var writeErr error
 	for metric := range ch {
 		var dtoMetric dto.Metric
 		if err := metric.Write(&dtoMetric); err != nil {
-			t.Fatalf("writing metric: %v", err)
+			if writeErr == nil {
+				writeErr = err
+			}
+			continue
 		}
 		labels := make(map[string]string, len(dtoMetric.Label))
 		for _, label := range dtoMetric.Label {
@@ -225,6 +316,9 @@ func collectTestMetrics(t *testing.T, ch <-chan prometheus.Metric) []testMetric 
 			labels: labels,
 			value:  dtoMetric.GetGauge().GetValue(),
 		})
+	}
+	if writeErr != nil {
+		t.Fatalf("writing metric: %v", writeErr)
 	}
 	return metrics
 }
@@ -240,14 +334,4 @@ func assertMetric(t *testing.T, metric testMetric, value float64, labels map[str
 			t.Fatalf("expected label %s=%q, got %q in %#v", name, value, metric.labels[name], metric.labels)
 		}
 	}
-}
-
-func countString(values []string, target string) int {
-	var count int
-	for _, value := range values {
-		if value == target {
-			count++
-		}
-	}
-	return count
 }

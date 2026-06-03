@@ -37,7 +37,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\"})",
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -85,7 +85,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -133,7 +133,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -181,7 +181,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=~\"PartiallyDegraded|Degraded|Critical|AgentNotReady\"}) or vector(0)",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=~\"PartiallyDegraded|Degraded|Critical|AgentNotReady\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -229,7 +229,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"})",
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -277,7 +277,7 @@
       },
       "targets": [
         {
-          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or vector(0)",
+          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true
@@ -535,7 +535,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
           "legendFormat": "Total",
           "refId": "B"
         }
@@ -591,7 +591,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or vector(0)",
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
           "legendFormat": "Total",
           "refId": "B"
         }
@@ -647,7 +647,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or vector(0)",
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
           "legendFormat": "Total",
           "refId": "B"
         }
@@ -5057,7 +5057,7 @@
           "id": 2010,
           "type": "timeseries",
           "title": "Metrics Collector Duration Bands",
-          "description": "Completed collector runs: healthy <=0.05s, slow 0.05-0.25s, too slow >0.25s.",
+          "description": "Completed collector runs: healthy <=0.25s, slow 0.25-1s, too slow >1s.",
           "datasource": {
             "type": "prometheus",
             "uid": "$ds_prometheus"
@@ -5070,18 +5070,18 @@
           },
           "targets": [
             {
-              "expr": "sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.05\"}[$__rate_interval])) or vector(0)",
-              "legendFormat": "healthy <= 0.05s",
+              "expr": "sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "healthy <= 0.25s",
               "refId": "A"
             },
             {
-              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.05\"}[$__rate_interval]))), 0) or vector(0)",
-              "legendFormat": "slow 0.05-0.25s",
+              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"1\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval]))), 0) or on() vector(0)",
+              "legendFormat": "slow 0.25-1s",
               "refId": "B"
             },
             {
-              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval]))), 0) or vector(0)",
-              "legendFormat": "too slow > 0.25s",
+              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"1\"}[$__rate_interval]))), 0) or on() vector(0)",
+              "legendFormat": "too slow > 1s",
               "refId": "C"
             }
           ],

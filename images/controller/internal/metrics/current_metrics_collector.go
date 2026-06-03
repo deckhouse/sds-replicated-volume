@@ -176,44 +176,6 @@ func (c *currentMetricsCollector) collectError(err error, msg string) {
 	c.log.Error(err, msg)
 }
 
-func collectNodeNames(
-	nodes []corev1.Node,
-	rvrs []v1alpha1.ReplicatedVolumeReplica,
-	rvas []v1alpha1.ReplicatedVolumeAttachment,
-) []string {
-	values := make([]string, 0, len(nodes)+len(rvrs)+len(rvas))
-	seen := make(map[string]struct{}, len(nodes)+len(rvrs)+len(rvas))
-	for i := range nodes {
-		name := nodes[i].Name
-		if name == "" {
-			continue
-		}
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		values = append(values, name)
-	}
-	for i := range rvrs {
-		name := currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		values = append(values, name)
-	}
-	for i := range rvas {
-		name := currentMetricsNodeLabel(rvas[i].Spec.NodeName)
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		values = append(values, name)
-	}
-	sort.Strings(values)
-	return values
-}
-
 func collectStorageClassNames(
 	rscs []v1alpha1.ReplicatedStorageClass,
 	rvs []v1alpha1.ReplicatedVolume,
