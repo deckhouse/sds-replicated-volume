@@ -1,7 +1,7 @@
 # CLI флаги
 
-# Operational scope
-Megatest is intended for dedicated test clusters or isolated environments with an appropriate APF FlowSchema. It disables client-side Kubernetes rate limiting to keep high-concurrency test runs from blocking on local throttling, so running it on shared clusters can affect API server responsiveness for other workloads.
+# Область применения
+Megatest предназначен для выделенных тестовых кластеров или изолированных окружений с подходящей APF FlowSchema. Он отключает клиентское ограничение частоты запросов Kubernetes, чтобы высококонкурентные тестовые запуски не блокировались локальным ограничителем, поэтому запуск на общих кластерах может повлиять на отзывчивость API server для других нагрузок.
 
 ```
 # Общие
