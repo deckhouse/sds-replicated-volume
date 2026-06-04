@@ -323,9 +323,16 @@ Applicable to both single-zone clusters and clusters using multiple availability
 {{< /alert >}}
 
 - Use stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
-  - A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
-  - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5 ms will cause serious performance issues.
-  - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
+- A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
+- To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5 ms will cause serious performance issues.
+- Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
+- For `DRBD` replication to work, communication between nodes on ports `7000–7999` using the `UDP` protocol must be enabled. For more details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If necessary, you can override the port range using the [`drbdPortRange` setting](configuration.html#parameters-drbdportrange) by specifying the desired `minPort` and `maxPort` values.
+  
+  {{< alert level="info" >}}
+  After changing the `drbdPortRange` settings, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources will retain their assigned ports.
+  {{< /alert >}}
+
+Translated with DeepL.com (free version)
 
 ### Recommendations
 
