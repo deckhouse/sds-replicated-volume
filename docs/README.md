@@ -332,8 +332,6 @@ Applicable to both single-zone clusters and clusters using multiple availability
   After changing the `drbdPortRange` settings, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources will retain their assigned ports.
   {{< /alert >}}
 
-Translated with DeepL.com (free version)
-
 ### Recommendations
 
 - Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
