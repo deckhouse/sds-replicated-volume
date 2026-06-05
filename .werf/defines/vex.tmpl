@@ -1,7 +1,7 @@
 {{- define "vex mitigation" }}
   {{- $ctx := index . 0 }}
   {{- $imageName := index . 1 }}
-  {{- $isVault := (all $ctx.CosignVaugtAdress $ctx.CosignVaugtToken $ctx.CosignVaugtKey $ctx.CosignTransitSecret $ctx.ActionsIdTokenRequestUrl $ctx.ActionsIdTokenRequestToken) }}
+  {{- $isVault := (all $ctx.CosignVaultAdress $ctx.CosignVaultToken $ctx.CosignVaultKey $ctx.CosignTransitSecret $ctx.ActionsIdTokenRequestUrl $ctx.ActionsIdTokenRequestToken) }}
 ---
 image: {{ $imageName }}-vex-artifact
 fromImage: base/vex

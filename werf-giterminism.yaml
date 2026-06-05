@@ -13,16 +13,24 @@ config:
       - SOURCE_REPO_TAG
       - REGISTRY_USER
       - REGISTRY_PASSWORD
-      - /COSIGN_.+/
-      - /ACTIONS_ID_.+/
+      - COSIGN_VAULTADRESS
+      - COSIGN_VAULTTOKEN
+      - COSIGN_VAULTKEY
+      - COSIGN_TRANSITSECRET
+      - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      - ACTIONS_ID_TOKEN_REQUEST_URL
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:
     allowEnvVariables:
       - REGISTRY_USER
       - REGISTRY_PASSWORD
-      - /COSIGN_.+/
-      - /ACTIONS_ID_TOKEN_REQUEST_.+/
+      - COSIGN_VAULTADRESS
+      - COSIGN_VAULTTOKEN
+      - COSIGN_VAULTKEY
+      - COSIGN_TRANSITSECRET
+      - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      - ACTIONS_ID_TOKEN_REQUEST_URL
     allowValueIds:
       - GOPROXY
       - SOURCE_REPO
