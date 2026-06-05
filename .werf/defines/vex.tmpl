@@ -11,7 +11,7 @@ secrets:
   env: REGISTRY_USER
 - id: REGISTRY_PASSWORD
   env: REGISTRY_PASSWORD
-  {{- if $isVault }}
+{{- if $isVault }}
 - id: COSIGN_VAULT_ADDRESS
   env: COSIGN_VAULT_ADDRESS
 - id: COSIGN_VAULT_KEY
@@ -24,7 +24,7 @@ secrets:
   env: ACTIONS_ID_TOKEN_REQUEST_TOKEN
 - id: ACTIONS_ID_TOKEN_REQUEST_URL
   env: ACTIONS_ID_TOKEN_REQUEST_URL
-  {{- end }}
+{{- end }}
 git:
 - add: /images/{{ $imageName }}/known_vulnerabilities.vex
   to: /known_vulnerabilities.vex
@@ -58,6 +58,7 @@ shell:
     export KEY="hashivault://${COSIGN_VAULT_KEY}"
   {{- else }}
   - |
+    echo -e "\033[33mWARNING!!! Cosign will sign attestation with self-generated key pair! Some or all required env variables are missing!\033[0m"
     export COSIGN_PASSWORD=""
     cosign generate-key-pair
     export KEY="cosign.key"
