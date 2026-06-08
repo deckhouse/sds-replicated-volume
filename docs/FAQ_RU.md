@@ -686,7 +686,7 @@ linstor resource list --faulty
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 
@@ -788,7 +788,7 @@ StorageClass'ы в данном модуле управляются через �
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 

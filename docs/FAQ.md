@@ -653,7 +653,7 @@ linstor resource list --faulty
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 
@@ -755,7 +755,7 @@ Note that the module control-plane and its CSI will be unavailable during the mi
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 

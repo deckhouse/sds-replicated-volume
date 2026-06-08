@@ -97,7 +97,7 @@ moduleStatus: preview
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
   
