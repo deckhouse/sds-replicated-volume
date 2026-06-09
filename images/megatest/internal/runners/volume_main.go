@@ -346,6 +346,8 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
+		// Cache staleness is safe here: it can only make us wait a little longer
+		// before starting the checker, unlike deletion where API confirmation matters.
 		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
 			return err
@@ -371,13 +373,16 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 		}
 		if rv == nil {
 			_, err := v.client.GetRV(ctx, v.rvName)
-			if apierrors.IsNotFound(err) {
+			switch {
+			case apierrors.IsNotFound(err):
 				return nil
+			case err == nil:
+				log.Debug("RV is absent from cache but still exists in API")
+			case ctx.Err() != nil:
+				return ctx.Err()
+			default:
+				log.Debug("RV deletion confirmation failed, will retry", "error", err)
 			}
-			if err != nil {
-				return err
-			}
-			log.Debug("RV is absent from cache but still exists in API")
 		}
 
 		if err := waitWithContext(ctx, 1*time.Second); err != nil {
