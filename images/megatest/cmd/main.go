@@ -19,9 +19,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -62,6 +64,12 @@ func main() {
 
 	start := time.Now()
 	log.Info("megatest started")
+
+	rvSize, err := opt.ResolveRVSizeConfig()
+	if err != nil {
+		log.Error("failed to resolve RV size config", "error", err)
+		os.Exit(1)
+	}
 
 	// Create Kubernetes client first, before setting up signal handling
 	// This allows us to exit early if cluster is unreachable
@@ -113,6 +121,7 @@ func main() {
 		StorageClasses:               opt.StorageClasses,
 		MaxVolumes:                   opt.MaxVolumes,
 		VolumeStep:                   config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
+		RVSize:                       rvSize,
 		StepPeriod:                   config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
 		VolumePeriod:                 config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
 		AttacherPeriod:               config.DurationMinMax{Min: opt.AttacherPeriodMin, Max: opt.AttacherPeriodMax},
@@ -122,6 +131,9 @@ func main() {
 		EnableVolumeReplicaCreator:   opt.EnableVolumeReplicaCreator,
 		ChaosDebugMode:               opt.ChaosDebugMode,
 	}
+
+	printStartupSummary(os.Stdout, opt, cfg)
+	time.Sleep(500 * time.Millisecond)
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
 	_ = multiVolume.Run(ctx)
@@ -157,6 +169,65 @@ func main() {
 	os.Stdout.Sync()
 
 	// Function returns normally, defer statements will execute
+}
+
+func printStartupSummary(w io.Writer, opt Opt, cfg config.MultiVolumeConfig) {
+	fmt.Fprintln(w, "\nStartup configuration:")
+	fmt.Fprintf(w, "  %-30s %s\n", "storage classes", strings.Join(cfg.StorageClasses, ","))
+	fmt.Fprintf(w, "  %-30s %d\n", "max volumes", cfg.MaxVolumes)
+	fmt.Fprintf(w, "  %-30s %d..%d\n", "volume creation step", cfg.VolumeStep.Min, cfg.VolumeStep.Max)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "step period", cfg.StepPeriod.Min, cfg.StepPeriod.Max)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "volume lifetime", cfg.VolumePeriod.Min, cfg.VolumePeriod.Max)
+	attacherPeriod := runners.ResolveAttacherPeriod(cfg)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "attacher period", attacherPeriod.Min, attacherPeriod.Max)
+	fmt.Fprintf(w, "  %-30s %s\n", "RV size", describeRVSize(cfg.RVSize))
+	fmt.Fprintf(w, "  %-30s %s\n", "enabled runners", describeEnabledRunners(opt))
+	fmt.Fprintf(w, "  %-30s %s\n", "chaos", describeChaos(opt))
+	fmt.Fprintln(w, "Starting in 500ms...")
+}
+
+func describeRVSize(size config.RVSizeConfig) string {
+	if size.MinMi == size.MaxMi {
+		return fmt.Sprintf("fixed %dMi", size.MaxMi)
+	}
+	return fmt.Sprintf("random %dMi..%dMi, step %dMi, inclusive endpoints", size.MinMi, size.MaxMi, size.StepMi)
+}
+
+func describeEnabledRunners(opt Opt) string {
+	var runners []string
+	if opt.EnablePodDestroyer {
+		runners = append(runners, "pod-destroyer")
+	}
+	if opt.EnableVolumeResizer {
+		runners = append(runners, "volume-resizer")
+	}
+	if opt.EnableVolumeReplicaDestroyer {
+		runners = append(runners, "volume-replica-destroyer")
+	}
+	if opt.EnableVolumeReplicaCreator {
+		runners = append(runners, "volume-replica-creator")
+	}
+	if len(runners) == 0 {
+		return "none"
+	}
+	return strings.Join(runners, ",")
+}
+
+func describeChaos(opt Opt) string {
+	var features []string
+	if opt.EnableChaosNetBlock {
+		features = append(features, "network-block")
+	}
+	if opt.EnableChaosNetDegrade {
+		features = append(features, "network-degrade")
+	}
+	if opt.EnableChaosVMReboot {
+		features = append(features, "vm-reboot")
+	}
+	if len(features) == 0 {
+		return "disabled"
+	}
+	return strings.Join(features, ",")
 }
 
 // printCheckerStats prints a summary table of all checker statistics

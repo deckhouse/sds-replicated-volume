@@ -83,6 +83,9 @@ func NewMultiVolume(
 	client *kubeutils.Client,
 	forceCleanupChan <-chan struct{},
 ) *MultiVolume {
+	if cfg.RVSize.MaxMi == 0 {
+		cfg.RVSize = config.RVSizeConfig{MinMi: 100, MaxMi: 100, StepMi: 100}
+	}
 	return &MultiVolume{
 		cfg:              cfg,
 		client:           client,
@@ -197,17 +200,17 @@ const (
 	attacherPeriodMaxFloor = 120 * time.Second
 )
 
-// resolveAttacherPeriod computes the effective attacher period.
-// If CLI flags are zero (default), derives from VolumePeriod with floor clamps.
-func (m *MultiVolume) resolveAttacherPeriod() config.DurationMinMax {
-	minP := m.cfg.AttacherPeriod.Min
-	maxP := m.cfg.AttacherPeriod.Max
+// ResolveAttacherPeriod computes the effective attacher period.
+// If CLI flags are zero (default), it derives from VolumePeriod with floor clamps.
+func ResolveAttacherPeriod(cfg config.MultiVolumeConfig) config.DurationMinMax {
+	minP := cfg.AttacherPeriod.Min
+	maxP := cfg.AttacherPeriod.Max
 
 	if minP == 0 {
-		minP = m.cfg.VolumePeriod.Min
+		minP = cfg.VolumePeriod.Min
 	}
 	if maxP == 0 {
-		maxP = m.cfg.VolumePeriod.Max / 2
+		maxP = cfg.VolumePeriod.Max / 2
 	}
 
 	if minP < attacherPeriodMinFloor {
@@ -223,12 +226,45 @@ func (m *MultiVolume) resolveAttacherPeriod() config.DurationMinMax {
 	return config.DurationMinMax{Min: minP, Max: maxP}
 }
 
+func (m *MultiVolume) resolveAttacherPeriod() config.DurationMinMax {
+	return ResolveAttacherPeriod(m.cfg)
+}
+
+func (m *MultiVolume) resolveRVSize() resource.Quantity {
+	size := m.cfg.RVSize
+	if size.MinMi >= size.MaxMi {
+		return resource.MustParse(fmt.Sprintf("%dMi", size.MaxMi))
+	}
+
+	buckets := rvSizeBucketsMi(size.MinMi, size.MaxMi, size.StepMi)
+	//nolint:gosec // G404: math/rand is fine for non-security-critical test data selection
+	return resource.MustParse(fmt.Sprintf("%dMi", buckets[rand.Intn(len(buckets))]))
+}
+
+func rvSizeBucketsMi(minMi, maxMi, stepMi int64) []int64 {
+	if minMi >= maxMi {
+		return []int64{maxMi}
+	}
+	if stepMi <= 0 {
+		stepMi = maxMi - minMi
+	}
+
+	buckets := []int64{minMi}
+	for value := minMi + stepMi; value < maxMi; value += stepMi {
+		buckets = append(buckets, value)
+	}
+	if buckets[len(buckets)-1] != maxMi {
+		buckets = append(buckets, maxMi)
+	}
+	return buckets
+}
+
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
 	cfg := config.VolumeMainConfig{
 		StorageClassName:             storageClass,
 		VolumeLifetime:               volumeLifetime,
 		AttacherPeriod:               m.resolveAttacherPeriod(),
-		InitialSize:                  resource.MustParse("100Mi"),
+		InitialSize:                  m.resolveRVSize(),
 		EnableVolumeResizer:          m.cfg.EnableVolumeResizer,
 		EnableVolumeReplicaDestroyer: m.cfg.EnableVolumeReplicaDestroyer,
 		EnableVolumeReplicaCreator:   m.cfg.EnableVolumeReplicaCreator,

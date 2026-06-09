@@ -95,7 +95,7 @@ func NewVolumeMain(
 		attacherPeriod:               cfg.AttacherPeriod,
 		initialSize:                  cfg.InitialSize,
 		client:                       client,
-		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
+		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime, "initial_size", cfg.InitialSize.String()),
 		enableVolumeResizer:          cfg.EnableVolumeResizer,
 		enableVolumeReplicaDestroyer: cfg.EnableVolumeReplicaDestroyer,
 		enableVolumeReplicaCreator:   cfg.EnableVolumeReplicaCreator,

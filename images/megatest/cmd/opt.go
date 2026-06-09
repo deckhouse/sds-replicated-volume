@@ -26,6 +26,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
+)
+
+const (
+	defaultRVSize     = "100Mi"
+	defaultRVSizeStep = "100Mi"
+	minRVSizeMi       = int64(100)
+	miBytes           = int64(1024 * 1024)
 )
 
 type Opt struct {
@@ -34,6 +44,9 @@ type Opt struct {
 	MaxVolumes        int
 	VolumeStepMin     int
 	VolumeStepMax     int
+	RVSize            string
+	RVSizeMin         string
+	RVSizeStep        string
 	StepPeriodMin     time.Duration
 	StepPeriodMax     time.Duration
 	VolumePeriodMin   time.Duration
@@ -78,6 +91,9 @@ func printGroupedFlags(cmd *cobra.Command) {
 			"max-volumes",
 			"volume-step-min",
 			"volume-step-max",
+			"rv-size",
+			"rv-size-min",
+			"rv-size-step",
 			"step-period-min",
 			"step-period-max",
 			"volume-period-min",
@@ -254,6 +270,9 @@ Interrupting Cleanup:
 			if o.VolumeStepMax < o.VolumeStepMin {
 				return errors.New("volume-step-max must be >= volume-step-min")
 			}
+			if _, err := o.ResolveRVSizeConfig(); err != nil {
+				return err
+			}
 			if o.StepPeriodMax < o.StepPeriodMin {
 				return errors.New("step-period-max must be >= step-period-min")
 			}
@@ -316,6 +335,9 @@ Interrupting Cleanup:
 	rootCmd.Flags().IntVarP(&o.MaxVolumes, "max-volumes", "", 10, "Maximum number of concurrent ReplicatedVolumes")
 	rootCmd.Flags().IntVarP(&o.VolumeStepMin, "volume-step-min", "", 1, "Minimum number of ReplicatedVolumes to create per step")
 	rootCmd.Flags().IntVarP(&o.VolumeStepMax, "volume-step-max", "", 3, "Maximum number of ReplicatedVolumes to create per step")
+	rootCmd.Flags().StringVarP(&o.RVSize, "rv-size", "", defaultRVSize, "ReplicatedVolume size or maximum size for random range (Kubernetes quantity, minimum 100Mi)")
+	rootCmd.Flags().StringVarP(&o.RVSizeMin, "rv-size-min", "", "", "Minimum ReplicatedVolume size for random range (Kubernetes quantity, optional)")
+	rootCmd.Flags().StringVarP(&o.RVSizeStep, "rv-size-step", "", defaultRVSizeStep, "ReplicatedVolume random size step (Kubernetes quantity, default 100Mi)")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMin, "step-period-min", "", 10*time.Second, "Minimum wait between ReplicatedVolume creation steps")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between ReplicatedVolume creation steps")
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMin, "volume-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
@@ -356,4 +378,60 @@ Interrupting Cleanup:
 		// we expect err to be logged already
 		os.Exit(1)
 	}
+}
+
+func (o Opt) ResolveRVSizeConfig() (config.RVSizeConfig, error) {
+	rvSize := o.RVSize
+	if rvSize == "" {
+		rvSize = defaultRVSize
+	}
+	rvSizeStep := o.RVSizeStep
+	if rvSizeStep == "" {
+		rvSizeStep = defaultRVSizeStep
+	}
+
+	maxMi, err := parseQuantityMi("rv-size", rvSize)
+	if err != nil {
+		return config.RVSizeConfig{}, err
+	}
+	if maxMi < minRVSizeMi {
+		return config.RVSizeConfig{}, fmt.Errorf("rv-size must be >= %dMi", minRVSizeMi)
+	}
+
+	minMi := maxMi
+	if o.RVSizeMin != "" {
+		minMi, err = parseQuantityMi("rv-size-min", o.RVSizeMin)
+		if err != nil {
+			return config.RVSizeConfig{}, err
+		}
+		if minMi < minRVSizeMi {
+			return config.RVSizeConfig{}, fmt.Errorf("rv-size-min must be >= %dMi", minRVSizeMi)
+		}
+		if minMi > maxMi {
+			return config.RVSizeConfig{}, errors.New("rv-size-min must be <= rv-size")
+		}
+	}
+
+	stepMi, err := parseQuantityMi("rv-size-step", rvSizeStep)
+	if err != nil {
+		return config.RVSizeConfig{}, err
+	}
+	if stepMi <= 0 {
+		return config.RVSizeConfig{}, errors.New("rv-size-step must be > 0")
+	}
+
+	return config.RVSizeConfig{MinMi: minMi, MaxMi: maxMi, StepMi: stepMi}, nil
+}
+
+func parseQuantityMi(name, value string) (int64, error) {
+	q, err := resource.ParseQuantity(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a Kubernetes quantity: %w", name, err)
+	}
+
+	bytes := q.Value()
+	if bytes%miBytes != 0 {
+		return 0, fmt.Errorf("%s must be a whole Mi quantity", name)
+	}
+	return bytes / miBytes, nil
 }
