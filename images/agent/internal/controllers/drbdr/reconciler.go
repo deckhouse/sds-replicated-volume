@@ -310,7 +310,6 @@ func (r *Reconciler) reconcileDRBDR(
 		// If finalizer was removed during cleanup, observe deletion metrics.
 		if finalizerOutcome.Error() == nil && isInCleanup(drbdr) && !obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
 			observeDRBDRDeletion(drbdr)
-			cleanupDRBDRMetrics(drbdr)
 		}
 	}
 

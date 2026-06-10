@@ -33,14 +33,13 @@ import (
 // Do not call t.Parallel in subtests that touch these process-global collectors.
 var metricsTestMu sync.Mutex
 
-func TestComputeDRBDRMetricObservationsRecordsConfiguredTransitionAndGauge(t *testing.T) {
+func TestComputeDRBDRMetricObservationsRecordsConfiguredTransition(t *testing.T) {
 	metricsTestMu.Lock()
 	defer metricsTestMu.Unlock()
 
 	start := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	now := start.Add(20 * time.Second)
 	beforeCount, beforeSum := collectHistogramCountSum(t, metrics.DRBDRConfiguredDuration)
-	metrics.DRBDRCondition.DeleteLabelValues("drbdr-a", "rv-a", v1alpha1.DRBDResourceCondConfiguredType)
 
 	statusBase := &v1alpha1.DRBDResource{
 		Status: v1alpha1.DRBDResourceStatus{
@@ -71,8 +70,8 @@ func TestComputeDRBDRMetricObservationsRecordsConfiguredTransitionAndGauge(t *te
 	}
 
 	observations := computeDRBDRMetricObservations(now, drbdr, statusBase)
-	if len(observations) != 2 {
-		t.Fatalf("expected Configured transition and gauge observations, got %d", len(observations))
+	if len(observations) != 1 {
+		t.Fatalf("expected Configured transition observation, got %d", len(observations))
 	}
 	observations.observe()
 
@@ -80,11 +79,6 @@ func TestComputeDRBDRMetricObservationsRecordsConfiguredTransitionAndGauge(t *te
 	if afterCount-beforeCount != 1 || afterSum-beforeSum != 20 {
 		t.Fatalf("expected configured histogram delta count/sum 1/20, got %d/%v", afterCount-beforeCount, afterSum-beforeSum)
 	}
-	assertGaugeSample(t, metrics.DRBDRCondition, map[string]string{
-		metrics.LabelName: "drbdr-a",
-		metrics.LabelRV:   "rv-a",
-		metrics.LabelType: v1alpha1.DRBDResourceCondConfiguredType,
-	}, 1)
 }
 
 func TestComputeDRBDRMetricObservationsDoesNotRepeatConfiguredTransition(t *testing.T) {
@@ -93,7 +87,6 @@ func TestComputeDRBDRMetricObservationsDoesNotRepeatConfiguredTransition(t *test
 
 	now := time.Date(2026, 1, 1, 0, 0, 20, 0, time.UTC)
 	beforeCount, beforeSum := collectHistogramCountSum(t, metrics.DRBDRConfiguredDuration)
-	metrics.DRBDRCondition.DeleteLabelValues("drbdr-a", "rv-a", v1alpha1.DRBDResourceCondConfiguredType)
 	statusBase := &v1alpha1.DRBDResource{
 		Status: v1alpha1.DRBDResourceStatus{
 			Conditions: []metav1.Condition{
@@ -111,8 +104,8 @@ func TestComputeDRBDRMetricObservationsDoesNotRepeatConfiguredTransition(t *test
 	}
 
 	observations := computeDRBDRMetricObservations(now, drbdr, statusBase)
-	if len(observations) != 1 {
-		t.Fatalf("expected only gauge observation, got %d", len(observations))
+	if len(observations) != 0 {
+		t.Fatalf("expected no repeated Configured transition observation, got %d", len(observations))
 	}
 	observations.observe()
 
@@ -120,16 +113,9 @@ func TestComputeDRBDRMetricObservationsDoesNotRepeatConfiguredTransition(t *test
 	if afterCount != beforeCount || afterSum != beforeSum {
 		t.Fatalf("expected no configured histogram change, got before %d/%v after %d/%v", beforeCount, beforeSum, afterCount, afterSum)
 	}
-	assertGaugeSample(t, metrics.DRBDRCondition, map[string]string{
-		metrics.LabelName: "drbdr-a",
-		metrics.LabelRV:   "rv-a",
-		metrics.LabelType: v1alpha1.DRBDResourceCondConfiguredType,
-	}, 1)
 }
 
 type prometheusSample struct {
-	labels         map[string]string
-	gauge          float64
 	histogram      bool
 	histogramCount uint64
 	histogramSum   float64
@@ -173,14 +159,7 @@ func collectPrometheusSamples(t *testing.T, collector prometheus.Collector) []pr
 			}
 			continue
 		}
-		labels := make(map[string]string, len(dtoMetric.Label))
-		for _, label := range dtoMetric.Label {
-			labels[label.GetName()] = label.GetValue()
-		}
-		sample := prometheusSample{labels: labels}
-		if dtoMetric.Gauge != nil {
-			sample.gauge = dtoMetric.Gauge.GetValue()
-		}
+		sample := prometheusSample{}
 		if dtoMetric.Histogram != nil {
 			sample.histogram = true
 			sample.histogramCount = dtoMetric.Histogram.GetSampleCount()
@@ -192,32 +171,4 @@ func collectPrometheusSamples(t *testing.T, collector prometheus.Collector) []pr
 		t.Fatalf("writing metric: %v", writeErr)
 	}
 	return samples
-}
-
-func findPrometheusSample(samples []prometheusSample, labels map[string]string) (prometheusSample, bool) {
-	for _, sample := range samples {
-		matches := true
-		for name, value := range labels {
-			if sample.labels[name] != value {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return sample, true
-		}
-	}
-	return prometheusSample{}, false
-}
-
-func assertGaugeSample(t *testing.T, collector prometheus.Collector, labels map[string]string, value float64) {
-	t.Helper()
-
-	sample, ok := findPrometheusSample(collectPrometheusSamples(t, collector), labels)
-	if !ok {
-		t.Fatalf("expected gauge sample with labels %#v", labels)
-	}
-	if sample.gauge != value {
-		t.Fatalf("expected gauge value %v, got %v", value, sample.gauge)
-	}
 }

@@ -21,13 +21,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-// Metric label name constants.
-const (
-	LabelName = "name"
-	LabelRV   = "rv"
-	LabelType = "type"
-)
-
 // Histogram bucket configurations.
 // Agent runs one instance per node, so no node label is needed on histograms.
 var (
@@ -54,23 +47,9 @@ var (
 	})
 )
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Health gauges
-//
-
-var (
-	// DRBDRCondition reports 1=True, 0=False/Unknown for each condition type.
-	// Currently only "Configured" condition exists; new conditions will be auto-discovered.
-	DRBDRCondition = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "sds_drbdr_condition",
-		Help: "Status of DRBDResource conditions (1=True, 0=False/Unknown).",
-	}, []string{LabelName, LabelRV, LabelType})
-)
-
 func init() {
 	crmetrics.Registry.MustRegister(
 		DRBDRConfiguredDuration,
 		DRBDRDeletionDuration,
-		DRBDRCondition,
 	)
 }

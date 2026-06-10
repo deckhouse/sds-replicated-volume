@@ -49,7 +49,6 @@ func computeDRBDRMetricObservations(
 		return nil
 	}
 
-	rvLabel := drbdr.Labels[v1alpha1.ReplicatedVolumeLabelKey]
 	var observations drbdrMetricObservations
 
 	// Detect Configured condition transition to True.
@@ -66,18 +65,6 @@ func computeDRBDRMetricObservations(
 		})
 	}
 
-	// Health gauge: report Configured condition value.
-	if newCond != nil {
-		val := float64(0)
-		if newCond.Status == metav1.ConditionTrue {
-			val = 1
-		}
-		name := drbdr.Name
-		observations = append(observations, func() {
-			metrics.DRBDRCondition.WithLabelValues(name, rvLabel, v1alpha1.DRBDResourceCondConfiguredType).Set(val)
-		})
-	}
-
 	return observations
 }
 
@@ -88,13 +75,4 @@ func observeDRBDRDeletion(drbdr *v1alpha1.DRBDResource) {
 	}
 	dur := time.Since(drbdr.DeletionTimestamp.Time).Seconds()
 	metrics.DRBDRDeletionDuration.Observe(dur)
-}
-
-// cleanupDRBDRMetrics removes all per-object metrics for a deleted DRBDR.
-func cleanupDRBDRMetrics(drbdr *v1alpha1.DRBDResource) {
-	if drbdr == nil {
-		return
-	}
-	rvLabel := drbdr.Labels[v1alpha1.ReplicatedVolumeLabelKey]
-	metrics.DRBDRCondition.DeleteLabelValues(drbdr.Name, rvLabel, v1alpha1.DRBDResourceCondConfiguredType)
 }
