@@ -23,7 +23,10 @@
   {{- if eq (len ($context.Files.Glob $knownVulnPath)) 1 }}
     {{- $vexFile = true }}
   {{- end }}
-  {{- if or (ne (env "WERF_SIGN_KEY" "") "") (ne (env "VAULT_ID_TOKEN" "") "") (ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "") (ne (env "COSIGN_VAULT_ADDRESS" "") "") }}
+  {{- $werfSignKey := env "WERF_SIGN_KEY" "" }}
+  {{- $vaultKey := env "VAULT_KEY" "" }}
+  {{- $actionsIdToken := env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "" }}
+  {{- if or (ne $werfSignKey "") (ne $vaultKey "") (ne $actionsIdToken "") }}
     {{- $isVault = true }}
   {{- end }}
   {{- if $vexFile }}
@@ -36,27 +39,27 @@ secrets:
   env: REGISTRY_USER
 - id: REGISTRY_PASSWORD
   env: REGISTRY_PASSWORD
-{{- if ne (env "WERF_SIGN_KEY" "") "" }}
+{{- if ne $werfSignKey "" }}
 - id: VAULT_ADDR
   env: VAULT_ADDR
 - id: VAULT_KEY
   env: WERF_SIGN_KEY
-- id: TRANSIT_SECRET_ENGINE_PATH
-  env: TRANSIT_SECRET_ENGINE_PATH
 - id: VAULT_ROLE
   env: WERF_VAULT_AUTH_ROLE
 - id: VAULT_JWT
   env: WERF_VAULT_AUTH_JWT
+- id: TRANSIT_SECRET_ENGINE_PATH
+  env: TRANSIT_SECRET_ENGINE_PATH
 {{- else if $isVault }}
 - id: VAULT_ADDR
-  env: COSIGN_VAULT_ADDRESS
+  env: VAULT_ADDR
 - id: VAULT_KEY
-  env: COSIGN_VAULT_KEY
+  env: VAULT_KEY
 - id: VAULT_ROLE
-  env: COSIGN_AUTH_ROLE
+  env: VAULT_ROLE
 - id: TRANSIT_SECRET_ENGINE_PATH
-  env: COSIGN_TRANSIT_SECRET_ENGINE_PATH
-{{- if ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "" }}
+  env: TRANSIT_SECRET_ENGINE_PATH
+{{- if ne $actionsIdToken "" }}
 - id: ACTIONS_ID_TOKEN_REQUEST_TOKEN
   env: ACTIONS_ID_TOKEN_REQUEST_TOKEN
 - id: ACTIONS_ID_TOKEN_REQUEST_URL
@@ -88,8 +91,8 @@ shell:
   - export VAULT_ADDR="$(cat /run/secrets/VAULT_ADDR)"
   - export VAULT_ROLE="$(cat /run/secrets/VAULT_ROLE)"
   - export TRANSIT_SECRET_ENGINE_PATH="$(cat /run/secrets/TRANSIT_SECRET_ENGINE_PATH)"
-  - export VAULT_AUTH_PATH="fox"
-{{- if ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "" }}
+  - export VAULT_KEY="hashivault://$(cat /run/secrets/VAULT_KEY | sed 's|hashivault://||')"
+{{- if ne $actionsIdToken "" }}
   - export ACTIONS_ID_TOKEN_REQUEST_TOKEN="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_TOKEN)"
   - export ACTIONS_ID_TOKEN_REQUEST_URL="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_URL)"
   - export VAULT_AUTH_PATH="github"
@@ -102,7 +105,7 @@ shell:
       echo "Actions token empty";
     fi
 {{- else }}
-  - export VAULT_KEY="hashivault://$(cat /run/secrets/VAULT_KEY | sed 's|hashivault://||')"
+  - export VAULT_AUTH_PATH="fox"
   - export VAULT_JWT="$(cat /run/secrets/VAULT_JWT)"
 {{- end }}
   - >
