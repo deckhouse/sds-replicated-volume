@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
@@ -33,7 +34,6 @@ import (
 )
 
 var (
-	attacherPeriodMinMax         = []int{30, 60}
 	replicaDestroyerPeriodMinMax = []int{30, 300}
 	replicaCreatorPeriodMinMax   = []int{30, 300}
 
@@ -46,6 +46,7 @@ type VolumeMain struct {
 	rvName         string
 	storageClass   string
 	volumeLifetime time.Duration
+	attacherPeriod config.DurationMinMax
 	initialSize    resource.Quantity
 	client         *kubeutils.Client
 	log            *slog.Logger
@@ -91,9 +92,10 @@ func NewVolumeMain(
 		rvName:                       rvName,
 		storageClass:                 cfg.StorageClassName,
 		volumeLifetime:               cfg.VolumeLifetime,
+		attacherPeriod:               cfg.AttacherPeriod,
 		initialSize:                  cfg.InitialSize,
 		client:                       client,
-		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
+		log:                          slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime, "initial_size", cfg.InitialSize.String()),
 		enableVolumeResizer:          cfg.EnableVolumeResizer,
 		enableVolumeReplicaDestroyer: cfg.EnableVolumeReplicaDestroyer,
 		enableVolumeReplicaCreator:   cfg.EnableVolumeReplicaCreator,
@@ -118,7 +120,7 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 
 	// Determine initial attach nodes (random distribution: 0=30%, 1=60%, 2=10%)
 	numberOfPublishNodes := v.getRundomNumberForNodes()
-	attachNodes, err := v.getPublishNodes(ctx, numberOfPublishNodes)
+	attachNodes, err := v.getPublishNodes(numberOfPublishNodes)
 	if err != nil {
 		v.log.Error("failed to get attached nodes", "error", err)
 		return err
@@ -244,12 +246,12 @@ func (v *VolumeMain) getRundomNumberForNodes() int {
 	}
 }
 
-func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, error) {
+func (v *VolumeMain) getPublishNodes(count int) ([]string, error) {
 	if count == 0 {
 		return nil, nil
 	}
 
-	nodes, err := v.client.GetRandomNodes(ctx, count)
+	nodes, err := v.client.GetRandomNodes(count)
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +265,11 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 
 // createRV creates a ReplicatedVolume and RVAs for the given nodes.
 func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
+	maxAttachments := byte(1)
+	if len(attachNodes) > 1 {
+		maxAttachments = byte(len(attachNodes))
+	}
+
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -270,6 +277,7 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
+			MaxAttachments:             ptr.To(maxAttachments),
 		},
 	}
 
@@ -301,7 +309,8 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 
 func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) error {
 	// Unattach from all nodes - delete all RVAs for this RV.
-	rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+	// Use direct API call for accurate snapshot before deletion.
+	rvas, err := v.client.ListRVAsByRVNameDirect(ctx, v.rvName)
 	if err != nil {
 		return err
 	}
@@ -337,18 +346,14 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		// Cache staleness is safe here: it can only make us wait a little longer
+		// before starting the checker, unlike deletion where API confirmation matters.
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
-			if apierrors.IsNotFound(err) {
-				if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
-					return err
-				}
-				continue
-			}
 			return err
 		}
 
-		if v.client.IsRVReady(rv) {
+		if rv != nil && v.client.IsRVReady(rv) {
 			return nil
 		}
 
@@ -362,12 +367,22 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 	for {
 		log.Debug("waiting for RV to be deleted")
 
-		_, err := v.client.GetRV(ctx, v.rvName)
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
+		rv, err := v.client.GetRVFromCache(v.rvName)
 		if err != nil {
 			return err
+		}
+		if rv == nil {
+			_, err := v.client.GetRV(ctx, v.rvName)
+			switch {
+			case apierrors.IsNotFound(err):
+				return nil
+			case err == nil:
+				log.Debug("RV is absent from cache but still exists in API")
+			case ctx.Err() != nil:
+				return ctx.Err()
+			default:
+				log.Debug("RV deletion confirmation failed, will retry", "error", err)
+			}
 		}
 
 		if err := waitWithContext(ctx, 1*time.Second); err != nil {
@@ -379,11 +394,9 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	// Start attacher
 	attacherCfg := config.VolumeAttacherConfig{
-		Period: config.DurationMinMax{
-			Min: time.Duration(attacherPeriodMinMax[0]) * time.Second,
-			Max: time.Duration(attacherPeriodMinMax[1]) * time.Second,
-		},
+		Period: v.attacherPeriod,
 	}
+	attacherPeriodMinMax := []int{int(v.attacherPeriod.Min / time.Second), int(v.attacherPeriod.Max / time.Second)}
 	attacher := NewVolumeAttacher(v.rvName, attacherCfg, v.client, attacherPeriodMinMax, v.forceCleanupChan)
 	attacherCtx, cancel := context.WithCancel(ctx)
 	go func() {

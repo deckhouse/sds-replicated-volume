@@ -19,6 +19,7 @@ package rvcontroller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -83,9 +84,14 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			// Copy attachment fields from RVR if available, clear otherwise.
 			applyRVAAttachmentFields(rva, dmrctx.RVR())
 
+			metricObservations := computeRVAPhaseChangeMetricObservations(time.Now(), rva, base.Status.Phase, phase)
+
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
 			}
+			// patchRVAStatus treats NotFound as success because the RVA may be deleted
+			// concurrently. Keep the attach observation for the completed reconcile path.
+			metricObservations.observe()
 		}
 	}
 
@@ -355,6 +361,7 @@ func (r *Reconciler) reconcileRVAMetadata(
 			if err := r.patchRVA(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
 			}
+			observeRVADetach(rva)
 		}
 	}
 

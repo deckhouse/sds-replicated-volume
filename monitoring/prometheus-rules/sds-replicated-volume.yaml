@@ -1,0 +1,7 @@
+# Recording rules for sds-replicated-volume custom metrics.
+# Used by the "SDS Replicated Volume" Grafana dashboard.
+- name: sds.replicated.volume.recording
+  rules:
+    # Count of RVRs in degraded-like phases (cluster-wide current snapshot).
+    - record: sds:rvr_degraded_count
+      expr: sum(sds_rvr_count{phase=~"PartiallyDegraded|Degraded|Critical|AgentNotReady"}) or vector(0)
