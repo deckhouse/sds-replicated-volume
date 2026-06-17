@@ -1,0 +1,5448 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview / Current State",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "description": ""
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "RVs",
+      "description": "Current matching RVs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "RVRs",
+      "description": "Current matching RVRs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "RVAs",
+      "description": "Current matching RVAs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Unhealthy RVRs",
+      "description": "Current RVRs in degraded-like phases.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",phase=~\"PartiallyDegraded|Degraded|Critical|AgentNotReady\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Deleting RVs",
+      "description": "Scrape-time count of RVs with deletionTimestamp. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Deleting RVRs",
+      "description": "Scrape-time count of RVRs with deletionTimestamp. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}) or on() vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 58,
+      "type": "stat",
+      "title": "RV Initial Formation Duration Avg",
+      "description": "Average RV initial formation time over the selected dashboard range. Uses completed RV initial formation observations only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rv_initial_formation_duration_seconds_sum{storage_class=~\"$storage_class\"}[$__range])) / sum(increase(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 40
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 59,
+      "type": "stat",
+      "title": "RV Initial Formation Duration P90",
+      "description": "P90 RV initial formation time over the selected dashboard range. Uses completed RV initial formation observations only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__range])) by (le))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 40
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 60,
+      "type": "stat",
+      "title": "RVR Backing Volume Duration P90",
+      "description": "P90 time from RVR creation to BackingVolumeReady over the selected dashboard range. Useful as LLV/LVM provisioning proxy; thresholds are conservative and may depend on volume size/backend.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__range])) by (le))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 51,
+      "type": "row",
+      "title": "Overview / Counts by Storage Class",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "description": ""
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "RV Count by Storage Class",
+      "description": "Current RV count by storage class plus total. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rv_count{storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "RVR Count by Storage Class",
+      "description": "Current RVR count by storage class plus total. Node selector still filters the scope, but the graph does not split series by node. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "RVA Count by Storage Class",
+      "description": "Current RVA count by storage class plus total. Node selector still filters the scope, but the graph does not split series by node. Series with storage_class=\"unknown\" are hidden to reduce cache-lag noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"}) or on() vector(0)",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "RVR Count by Node",
+      "description": "Current RVR counts by node and storage class. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, storage_class) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}} / {{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 57,
+      "type": "timeseries",
+      "title": "RVA Count by Node",
+      "description": "Current RVA counts by node and storage class. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, storage_class) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\"})",
+          "legendFormat": "{{storage_class}} / {{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Overview Details",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "description": ""
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "RVR Count by Node / Phase",
+      "description": "Current non-zero RVR count split by node, storage class, and phase. Controlled by the RVR Phase selector. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "expr": "(sum by (node, storage_class, phase) (sds_rvr_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\",phase=~\"$rvr_phase\"}) > 0)",
+          "legendFormat": "{{node}} / {{storage_class}} / {{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "RVA Count by Node / Phase",
+      "description": "Current non-zero RVA count split by node, storage class, and phase. Controlled by the RVA Phase selector. Series with storage_class=\"unknown\" are hidden because they are usually temporary cache-lag noise before the object can be matched to its storage class.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "targets": [
+        {
+          "expr": "(sum by (node, storage_class, phase) (sds_rva_count{node=~\"$node\",storage_class=~\"$storage_class\",storage_class!=\"unknown\",phase=~\"$rva_phase\"}) > 0)",
+          "legendFormat": "{{node}} / {{storage_class}} / {{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Creation / Readiness",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "description": ""
+    },
+    {
+      "id": 54,
+      "type": "timeseries",
+      "title": "RV Initial Formation Duration P90",
+      "description": "P90 time from RV creation to first completed initial datamesh formation. Completion is detected like CSI readiness: datameshRevision > 0 and no active Formation transition.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, storage_class))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "cluster p90",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(sds_rv_initial_formation_duration_seconds_sum{storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster avg",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 55,
+      "type": "timeseries",
+      "title": "RV Initial Formation Completed Count",
+      "description": "Completed initial formation observations in each dashboard rate interval. Use this to see how many RV create operations reached the first formed datamesh state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (increase(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rv_initial_formation_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2001,
+      "type": "timeseries",
+      "title": "RV Initial Formation Duration Bands",
+      "description": "Completed RV initial formation observations: healthy <=10s, slow >10s and <=40s, too slow >40s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 35
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 10s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval])) - sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >10s <=40s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rv_initial_formation_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 40s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "RVR Backing Volume Duration P90",
+      "description": "P90 time from RVR creation to BackingVolumeReady, used as LLV/LVM provisioning proxy. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 43
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "cluster p90",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(sds_rvr_backing_volume_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster avg",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "type": "timeseries",
+      "title": "RVR Backing Volume Completed Count",
+      "description": "Completed BackingVolumeReady observations in each dashboard rate interval. Compare with RVR phases to see whether provisioning is moving.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 43
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rvr_backing_volume_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2002,
+      "type": "timeseries",
+      "title": "RVR Backing Volume Duration Bands",
+      "description": "Completed BackingVolumeReady observations: healthy <=5s, slow >5s and <=20s, too slow >20s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 43
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"20\"}[$__rate_interval])) - sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rvr_backing_volume_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "DRBDResource Configured Duration P90",
+      "description": "Time from DRBDResource creation to Configured=True. This includes agent reconcile latency, DRBD configuration, and status update latency; it is not raw DRBD runtime replication state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le, node, instance))",
+          "legendFormat": "configured {{node}} / {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_configured_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "configured cluster p90",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(sds_drbdr_configured_duration_seconds_sum[$__rate_interval])) / sum(rate(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "configured cluster avg",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "DRBDResource Configured Completed Count",
+      "description": "Completed DRBDResource configure events in each dashboard rate interval. Configured means DRBDResource creation -> Configured=True.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, instance) (increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "configured {{node}} / {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_drbdr_configured_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "configured cluster total",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2003,
+      "type": "timeseries",
+      "title": "DRBDResource Configured Duration Bands",
+      "description": "Completed DRBDResource configure durations: DRBDResource creation -> Configured=True. Healthy <=2s, slow >2s and <=8s, too slow >8s; wider buckets are debug-only overflow boundaries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{node}} healthy <= 2s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"2\"}[$__rate_interval])), 0) or vector(0)",
+          "legendFormat": "{{node}} slow >2s <=8s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_configured_duration_seconds_bucket{le=\"8\"}[$__rate_interval])), 0) or vector(0)",
+          "legendFormat": "{{node}} too slow > 8s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Duration P10",
+      "description": "P10 duration of RVR Ready condition transitions from non-True to True. This highlights the fastest successful transitions and can help spot very fast recovery/flap patterns. Deleting RVRs are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.10, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.10, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "cluster p10",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster avg",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Duration Avg",
+      "description": "Average duration of RVR Ready condition transitions from non-True to True. Use together with P10/P90 to understand whether slow transitions are isolated or common.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (node) / sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (node)",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster avg",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Duration P90",
+      "description": "P90 duration of RVR Ready condition transitions from non-True to True. This highlights slow starts or recoveries. Deleting RVRs are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "cluster p90",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(sds_rvr_ready_transition_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster avg",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2004,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Duration Bands",
+      "description": "Completed RVR Ready transitions: healthy <=5s, slow >5s and <=20s, too slow >20s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"20\"}[$__rate_interval])) - sum(increase(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rvr_ready_transition_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "RVR Ready Transition Completed Count by Node",
+      "description": "Ready transitions completed in each dashboard rate interval by node. Compare with cluster total to spot flapping concentrated on one node.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rvr_ready_transition_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Datamesh / Attach",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "description": ""
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Datamesh Completed Transition Count",
+      "description": "Completed Datamesh transitions in each dashboard rate interval by storage class, node, and type. Zero-only series are hidden unless they had activity during the selected interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class, node, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) and on(storage_class, node, type) (sum by (storage_class, node, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__range])) > 0)",
+          "legendFormat": "{{storage_class}} / {{node}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Datamesh Transition / Step Duration P90",
+      "description": "Datamesh transition and step duration. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type))",
+          "legendFormat": "transition {{storage_class}} / {{node}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, storage_class, node, type, step))",
+          "legendFormat": "step {{storage_class}} / {{node}} / {{type}} / {{step}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le))",
+          "legendFormat": "transition cluster p90",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(sds_rv_datamesh_transition_duration_seconds_sum{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) / sum(rate(sds_rv_datamesh_transition_duration_seconds_count{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval]))",
+          "legendFormat": "transition cluster avg",
+          "refId": "D"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (le, step))",
+          "legendFormat": "step cluster p90 {{step}}",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rate(sds_rv_datamesh_step_duration_seconds_sum{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (step) / sum(rate(sds_rv_datamesh_step_duration_seconds_count{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) by (step)",
+          "legendFormat": "step cluster avg {{step}}",
+          "refId": "F"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2011,
+      "type": "timeseries",
+      "title": "Datamesh Formation Duration Bands",
+      "description": "Completed Datamesh Formation transitions: healthy <=10s, slow >10s and <=40s, too slow >40s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type=\"Formation\",le=\"10\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "Formation healthy <= 10s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type=\"Formation\",le=\"40\"}[$__rate_interval])) - sum(increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type=\"Formation\",le=\"10\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "Formation slow >10s <=40s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type=\"Formation\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type=\"Formation\",le=\"40\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "Formation too slow > 40s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2012,
+      "type": "timeseries",
+      "title": "Datamesh Non-Formation Duration Bands by Type",
+      "description": "Completed non-Formation Datamesh transitions by type: healthy <=5s, slow >5s and <=20s, too slow >20s. Use the transition_type filter to reduce noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "targets": [
+        {
+          "expr": "sum by (type) (increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type!=\"Formation\",le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{type}} healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum by (type) (increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type!=\"Formation\",le=\"20\"}[$__rate_interval])) - sum by (type) (increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type!=\"Formation\",le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{type}} slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum by (type) (increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type!=\"Formation\",le=\"+Inf\"}[$__rate_interval])) - sum by (type) (increase(sds_rv_datamesh_transition_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",type!=\"Formation\",le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{type}} too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2013,
+      "type": "timeseries",
+      "title": "Datamesh Step Duration Bands by Type and Step",
+      "description": "Completed Datamesh steps by type and step: healthy <=5s, slow >5s and <=20s, too slow >20s. Use filters to reduce noise.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "targets": [
+        {
+          "expr": "sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{type}}/{{step}} healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",le=\"20\"}[$__rate_interval])) - sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{type}}/{{step}} slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",le=\"+Inf\"}[$__rate_interval])) - sum by (type, step) (increase(sds_rv_datamesh_step_duration_seconds_bucket{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\",le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "{{type}}/{{step}} too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Datamesh Transitions",
+      "description": "Active Datamesh transitions and completed transition count per dashboard rate interval. Series are shown only after they were non-zero during the selected interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "targets": [
+        {
+          "expr": "sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"} and on(storage_class, node, type) (max_over_time(sds_rv_datamesh_active_transitions{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__range]) > 0)",
+          "legendFormat": "active {{node}} / {{storage_class}} / {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (storage_class, node, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__rate_interval])) and on(storage_class, node, type) (sum by (storage_class, node, type) (increase(sds_rv_datamesh_transitions_completed_total{storage_class=~\"$storage_class\",node=~\"$node|global|unknown\",type=~\"$transition_type\"}[$__range])) > 0)",
+          "legendFormat": "completed {{node}} / {{storage_class}} / {{type}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^completed "
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "Attach / Deletion",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 100
+      },
+      "description": ""
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "RVA Ready / Detach Duration P90",
+      "description": "RVA attach and detach duration by node. No data means there were no completed operations in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 101
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "ready {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_detach_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "detach {{node}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_ready_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le))",
+          "legendFormat": "ready cluster p90",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(sds_rva_ready_duration_seconds_sum{node=~\"$node\"}[$__rate_interval])) / sum(rate(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "ready cluster avg",
+          "refId": "D"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rva_detach_duration_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le))",
+          "legendFormat": "detach cluster p90",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rate(sds_rva_detach_duration_seconds_sum{node=~\"$node\"}[$__rate_interval])) / sum(rate(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "detach cluster avg",
+          "refId": "F"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 49,
+      "type": "timeseries",
+      "title": "RVA Ready / Detach Completed Count",
+      "description": "Completed RVA attach and detach operations in each dashboard rate interval.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 101
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "ready {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (increase(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "detach {{node}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(sds_rva_ready_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "ready cluster total",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(increase(sds_rva_detach_duration_seconds_count{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "detach cluster total",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2005,
+      "type": "timeseries",
+      "title": "RVA Ready Duration Bands",
+      "description": "Completed RVA attach observations: healthy <=10s, slow >10s and <=40s, too slow >40s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 101
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rva_ready_duration_seconds_bucket{node=~\"$node\",le=\"10\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 10s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rva_ready_duration_seconds_bucket{node=~\"$node\",le=\"40\"}[$__rate_interval])) - sum(increase(sds_rva_ready_duration_seconds_bucket{node=~\"$node\",le=\"10\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >10s <=40s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rva_ready_duration_seconds_bucket{node=~\"$node\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rva_ready_duration_seconds_bucket{node=~\"$node\",le=\"40\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 40s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2006,
+      "type": "timeseries",
+      "title": "RVA Detach Duration Bands",
+      "description": "Completed RVA detach observations: healthy <=5s, slow >5s and <=20s, too slow >20s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 101
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rva_detach_duration_seconds_bucket{node=~\"$node\",le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rva_detach_duration_seconds_bucket{node=~\"$node\",le=\"20\"}[$__rate_interval])) - sum(increase(sds_rva_detach_duration_seconds_bucket{node=~\"$node\",le=\"5\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rva_detach_duration_seconds_bucket{node=~\"$node\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rva_detach_duration_seconds_bucket{node=~\"$node\",le=\"20\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "RV Deletion Duration P90",
+      "description": "P90 and average time from RV deletionTimestamp to finalizer removal. No data means there were no completed RV deletions in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 109
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "RV deletion p90",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(sds_rv_deletion_duration_seconds_sum{storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "RV cluster avg",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "RV Deletion Completed Count",
+      "description": "Completed RV deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 109
+      },
+      "targets": [
+        {
+          "expr": "sum by (storage_class) (increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rv_deletion_duration_seconds_count{storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2009,
+      "type": "timeseries",
+      "title": "RV Deletion Duration Bands",
+      "description": "Completed RV deletion observations: healthy <=10s, slow >10s and <=40s, too slow >40s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 109
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 10s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval])) - sum(increase(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >10s <=40s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rv_deletion_duration_seconds_bucket{storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 40s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2016,
+      "type": "timeseries",
+      "title": "RVR Deletion Duration P90",
+      "description": "P90 and average time from RVR deletionTimestamp to finalizer removal, including per-node RVR p90. No data means there were no completed RVR deletions in the selected range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 117
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le, node))",
+          "legendFormat": "RVR deletion {{node}} p90",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) by (le))",
+          "legendFormat": "RVR cluster p90",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rate(sds_rvr_deletion_duration_seconds_sum{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval])) / sum(rate(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "RVR cluster avg",
+          "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 47,
+      "type": "timeseries",
+      "title": "RVR Deletion Completed Count",
+      "description": "Completed RVR deletions in each dashboard rate interval. Compare with current deleting count: growing current with low completed count points to stuck deletion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 117
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, storage_class) (increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_rvr_deletion_duration_seconds_count{node=~\"$node\",storage_class=~\"$storage_class\"}[$__rate_interval]))",
+          "legendFormat": "cluster total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2008,
+      "type": "timeseries",
+      "title": "RVR Deletion Duration Bands",
+      "description": "Completed RVR deletion observations: healthy <=10s, slow >10s and <=40s, too slow >40s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 117
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "healthy <= 10s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval])) - sum(increase(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"10\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "slow >10s <=40s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min((sum(increase(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_rvr_deletion_duration_seconds_bucket{node=~\"$node\",storage_class=~\"$storage_class\",le=\"40\"}[$__rate_interval]))), 0) or vector(0)",
+          "legendFormat": "too slow > 40s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2014,
+      "type": "timeseries",
+      "title": "DRBDResource Deletion Duration P90",
+      "description": "Time from DRBDResource deletionTimestamp to agent finalizer removal. Shows agent-side DRBDResource cleanup duration separately from overall RVR deletion time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 125
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le, node, instance))",
+          "legendFormat": "deleted {{node}} / {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(sds_drbdr_deletion_duration_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "deleted cluster p90",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(sds_drbdr_deletion_duration_seconds_sum[$__rate_interval])) / sum(rate(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "deleted cluster avg",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2015,
+      "type": "timeseries",
+      "title": "DRBDResource Deletion Completed Count",
+      "description": "Completed DRBDResource deletion events in each dashboard rate interval: deletionTimestamp -> agent finalizer removed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 125
+      },
+      "targets": [
+        {
+          "expr": "sum by (node, instance) (increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "deleted {{node}} / {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(sds_drbdr_deletion_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "deleted cluster total",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2007,
+      "type": "timeseries",
+      "title": "DRBDResource Deletion Duration Bands",
+      "description": "Completed DRBDResource deletion observations: deletionTimestamp -> agent finalizer removed; healthy <=5s, slow >5s and <=20s, too slow >20s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 125
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "{{node}} healthy <= 5s",
+          "refId": "A"
+        },
+        {
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"5\"}[$__rate_interval])), 0) or vector(0)",
+          "legendFormat": "{{node}} slow >5s <=20s",
+          "refId": "B"
+        },
+        {
+          "expr": "clamp_min(sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum by (node) (increase(sds_drbdr_deletion_duration_seconds_bucket{le=\"20\"}[$__rate_interval])), 0) or vector(0)",
+          "legendFormat": "{{node}} too slow > 20s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Formation bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other healthy"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other slow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "other bad"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Deleting RV Current Count by Storage Class",
+      "description": "Scrape-time count of RVs with deletionTimestamp by storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 133
+      },
+      "targets": [
+        {
+          "expr": "sds_rv_count{storage_class=~\"$storage_class\",phase=\"Deleting\"}",
+          "legendFormat": "{{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Deleting RVR Current Count by Node and Storage Class",
+      "description": "Scrape-time count of RVRs with deletionTimestamp by node and storage class. Short deletes can happen between scrapes; sustained non-zero values likely mean deletion is stuck.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 133
+      },
+      "targets": [
+        {
+          "expr": "sds_rvr_deleting_count{node=~\"$node\",storage_class=~\"$storage_class\"}",
+          "legendFormat": "{{node}} / {{storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 64,
+      "type": "row",
+      "title": "DRBD Runtime State",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 142
+      },
+      "description": ""
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "DRBD Runtime Problem Count",
+      "description": "Current DRBD runtime problems from DRBD exporter: bad connection state, missing quorum, and unintentionally diskless devices. Shows DRBD exporter runtime state separately from DRBDResource CR lifecycle.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (drbd_connection_state{node=~\"$node\",drbd_connection_state!=\"UpToDate\",drbd_connection_state!=\"Connected\"} == 1) or on(node) (0 * sum by (node) (drbd_connection_state{node=~\"$node\"}))",
+          "legendFormat": "bad connection {{node}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (drbd_device_quorum{node=~\"$node\"} == 0) or on(node) (0 * sum by (node) (drbd_device_quorum{node=~\"$node\"}))",
+          "legendFormat": "no quorum {{node}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"} == 1) or on(node) (0 * sum by (node) (drbd_device_unintentionaldiskless{node=~\"$node\"}))",
+          "legendFormat": "unexpected diskless {{node}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "DRBD Runtime Out-of-Sync Bytes",
+      "description": "Existing DRBD exporter metric aligned with DRBD alert rules. Non-zero values indicate replication lag. Shows DRBD exporter runtime state separately from DRBDResource CR lifecycle.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (drbd_peerdevice_outofsync_bytes{node=~\"$node\"})",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Debug / Metrics Collector",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 151
+      },
+      "panels": [
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "Metrics Collector Duration P90",
+          "description": "Duration of SDS current metrics collector runs. Use this together with Prometheus scrape duration if the /metrics target becomes slow.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 152
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p90",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(sds_metrics_collector_collect_duration_seconds_bucket[$__rate_interval])) by (le))",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "min",
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 32,
+          "type": "timeseries",
+          "title": "Metrics Collector Objects",
+          "description": "Number of objects processed by the current metrics collector by kind.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 152
+          },
+          "targets": [
+            {
+              "expr": "sds_metrics_collector_objects",
+              "legendFormat": "{{kind}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "min",
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 33,
+          "type": "timeseries",
+          "title": "Metrics Collector Errors",
+          "description": "Collector errors over the selected range.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 152
+          },
+          "targets": [
+            {
+              "expr": "increase(sds_metrics_collector_collect_errors_total[$__range])",
+              "legendFormat": "errors",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 34,
+          "type": "timeseries",
+          "title": "Prometheus Scrape Duration",
+          "description": "Prometheus-side scrape duration for likely SDS/controller targets. Covers the full /metrics endpoint, including the current metrics collector.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 152
+          },
+          "targets": [
+            {
+              "expr": "scrape_duration_seconds{job=~\".*sds.*|.*controller.*\"}",
+              "legendFormat": "{{job}} / {{instance}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "min",
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 2010,
+          "type": "timeseries",
+          "title": "Metrics Collector Duration Bands",
+          "description": "Completed collector runs: healthy <=0.25s, slow 0.25-1s, too slow >1s.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 160
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "healthy <= 0.25s",
+              "refId": "A"
+            },
+            {
+              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"1\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"0.25\"}[$__rate_interval]))), 0) or on() vector(0)",
+              "legendFormat": "slow 0.25-1s",
+              "refId": "B"
+            },
+            {
+              "expr": "clamp_min((sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"+Inf\"}[$__rate_interval])) - sum(increase(sds_metrics_collector_collect_duration_seconds_bucket{le=\"1\"}[$__rate_interval]))), 0) or on() vector(0)",
+              "legendFormat": "too slow > 1s",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "bars",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^healthy"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "green"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^slow"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "yellow"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^bad"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "Formation healthy"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "green"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "Formation slow"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "yellow"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "Formation bad"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "other healthy"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "semi-dark-green"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "other slow"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "orange"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "other bad"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "dark-red"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        }
+      ],
+      "description": ""
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "sds",
+    "replicated-volume"
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "datasource",
+        "name": "ds_prometheus",
+        "label": "Prometheus",
+        "query": "prometheus",
+        "refresh": 1,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "default",
+          "value": "default",
+          "selected": false
+        },
+        "options": [],
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
+        "type": "query",
+        "name": "node",
+        "label": "Node",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rvr_count, node)",
+          "refId": "Prometheus-node-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "storage_class",
+        "label": "Storage Class",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rv_count, storage_class)",
+          "refId": "Prometheus-storage-class-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "rvr_phase",
+        "label": "RVR Phase",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rvr_count, phase)",
+          "refId": "Prometheus-rvr-phase-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "rva_phase",
+        "label": "RVA Phase",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rva_count, phase)",
+          "refId": "Prometheus-rva-phase-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      },
+      {
+        "type": "query",
+        "name": "transition_type",
+        "label": "Transition Type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$ds_prometheus"
+        },
+        "query": {
+          "query": "label_values(sds_rv_datamesh_active_transitions, type)",
+          "refId": "Prometheus-transition-type-Variable-Query"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        },
+        "options": [],
+        "definition": "",
+        "regex": "",
+        "sort": 1,
+        "hide": 0,
+        "skipUrlSync": false,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "SDS Replicated Volume",
+  "uid": "sds-replicated-volume",
+  "version": 1
+}

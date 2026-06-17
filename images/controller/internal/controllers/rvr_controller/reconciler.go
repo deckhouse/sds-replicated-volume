@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -105,6 +106,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Reconcile the RVR metadata (finalizers and labels).
 		outcome := r.reconcileMetadata(rf.Ctx(), rvr, rv, llvs, drbdr)
 		if outcome.ShouldReturn() {
+			// If finalizer was removed (deletion completed), observe deletion metrics and cleanup.
+			if outcome.Error() == nil && rvr.DeletionTimestamp != nil && !obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer) {
+				observeRVRDeletion(rvr, rv)
+			}
 			return outcome.ToCtrl()
 		}
 	}
@@ -173,11 +178,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		outcome = outcome.WithChangeFrom(eo)
 	}
 
+	// Compute pending metric observations before patching, then observe them
+	// only after the status state they describe has been committed.
+	metricObservations := computeRVRMetricObservations(time.Now(), rvr, base, rv)
+
 	// Patch the RVR status if changed.
 	if outcome.DidChange() && rvr != nil {
 		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
+		metricObservations.observe()
 	}
 
 	// If RVR should not exist but our finalizer is still present (children were

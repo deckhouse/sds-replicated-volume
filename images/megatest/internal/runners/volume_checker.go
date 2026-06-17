@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -38,24 +39,49 @@ const (
 	updateChBufferSize = 10
 )
 
-// CheckerStats holds statistics about condition transitions for a ReplicatedVolume.
-// Even number of transitions means RV maintains desired state despite disruption attempts.
-// Odd number means disruption attempts succeeded.
-// Ideal: all counters at zero.
+// CheckerStats holds statistics about EffectiveLayout health transitions for a ReplicatedVolume.
+// FTT (FailuresToTolerate) reflects quorum health; GMDR (GuaranteedMinimumDataRedundancy) reflects IO/data health.
+// Transition counters count health changes between known healthy/unhealthy states.
+// Final health is reported separately via LastFTTStatus and LastGMDRStatus.
 type CheckerStats struct {
-	RVName             string
-	IOReadyTransitions atomic.Int64
-	QuorumTransitions  atomic.Int64
+	RVName          string
+	FTTTransitions  atomic.Int64
+	GMDRTransitions atomic.Int64
+	LastFTTStatus   atomic.Int32
+	LastGMDRStatus  atomic.Int32
 }
 
-// conditionState tracks the current state of monitored conditions
-type conditionState struct {
-	ioReadyStatus metav1.ConditionStatus
-	quorumStatus  metav1.ConditionStatus
+// healthState tracks the current EffectiveLayout-derived health (FTT and GMDR).
+type healthState struct {
+	ftt  healthStatus
+	gmdr healthStatus
+}
+
+type healthStatus int32
+
+const (
+	healthStatusUnknown healthStatus = iota
+	healthStatusHealthy
+	healthStatusUnhealthy
+)
+
+func (s healthStatus) String() string {
+	switch s {
+	case healthStatusHealthy:
+		return "healthy"
+	case healthStatusUnhealthy:
+		return "unhealthy"
+	default:
+		return "unknown"
+	}
+}
+
+func HealthStatusString(value int32) string {
+	return healthStatus(value).String()
 }
 
 // VolumeChecker watches a ReplicatedVolume and logs state changes.
-// It monitors IOReady and Quorum conditions and counts transitions.
+// It monitors EffectiveLayout.FTT (quorum health) and EffectiveLayout.GMDR (IO health) and counts transitions.
 //
 // Uses shared informer with dispatcher pattern:
 //   - One informer handler for all checkers (not N handlers for N checkers)
@@ -69,7 +95,7 @@ type VolumeChecker struct {
 	client *kubeutils.Client
 	log    *slog.Logger
 	stats  *CheckerStats
-	state  conditionState
+	state  healthState
 
 	// Channel for receiving RV updates (dispatcher sends here)
 	updateCh chan *v1alpha1.ReplicatedVolume
@@ -77,15 +103,17 @@ type VolumeChecker struct {
 
 // NewVolumeChecker creates a new VolumeChecker for the given RV
 func NewVolumeChecker(rvName string, client *kubeutils.Client, stats *CheckerStats) *VolumeChecker {
+	stats.LastFTTStatus.Store(int32(healthStatusHealthy))
+	stats.LastGMDRStatus.Store(int32(healthStatusHealthy))
+
 	return &VolumeChecker{
 		rvName: rvName,
 		client: client,
 		log:    slog.Default().With("runner", "volume-checker", "rv_name", rvName),
 		stats:  stats,
-		state: conditionState{
-			// Initial expected state: both conditions should be True
-			ioReadyStatus: metav1.ConditionTrue,
-			quorumStatus:  metav1.ConditionTrue,
+		state: healthState{
+			ftt:  healthStatusHealthy,
+			gmdr: healthStatusHealthy,
 		},
 		updateCh: make(chan *v1alpha1.ReplicatedVolume, updateChBufferSize),
 	}
@@ -96,8 +124,9 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 	v.log.Info("started")
 	defer v.log.Info("finished")
 
-	// Registration always succeeds if app started (informer is ready after NewClient)
-	v.register()
+	if err := v.register(ctx); err != nil {
+		return err
+	}
 	defer v.unregister()
 
 	// Check initial state
@@ -111,16 +140,24 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case rv := <-v.updateCh:
-			v.processRVUpdate(ctx, rv)
+			v.processRVUpdate(rv)
 		}
 	}
 }
 
 // register adds this checker to the dispatcher.
 // Dispatcher will route RV events matching our name to updateCh.
-func (v *VolumeChecker) register() {
-	// Error only possible if informer not ready, but it's always ready after NewClient()
-	_ = v.client.RegisterRVChecker(v.rvName, v.updateCh)
+func (v *VolumeChecker) register(ctx context.Context) error {
+	for {
+		if err := v.client.RegisterRVChecker(v.rvName, v.updateCh, ctx.Done()); err != nil {
+			v.log.Warn("failed to register RV checker, retrying", "error", err)
+			if waitErr := waitWithContext(ctx, 500*time.Millisecond); waitErr != nil {
+				return waitErr
+			}
+			continue
+		}
+		return nil
+	}
 }
 
 // unregister removes this checker from the dispatcher.
@@ -129,7 +166,7 @@ func (v *VolumeChecker) unregister() {
 }
 
 // checkInitialState checks current RV state and counts transition if not in expected state.
-// Uses processRVUpdate to detect changes from initial True state.
+// Uses processRVUpdate to detect changes from initial healthy state.
 func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
@@ -138,6 +175,10 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 	// Try to get from cache first, fall back to API with timeout
 	rv, err := v.client.GetRVFromCache(v.rvName)
 	if err != nil {
+		v.log.Error("failed to get from cache", "error", err)
+		return
+	}
+	if rv == nil {
 		v.log.Debug("not in cache, fetching from API")
 
 		callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
@@ -153,94 +194,82 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 		}
 	}
 
-	// Reuse processRVUpdate - it will detect and log changes from initial True state
-	// (v.state is initialized as {True, True}). If state is OK, nothing is logged.
-	v.processRVUpdate(ctx, rv)
+	// Reuse processRVUpdate - it will detect and log changes from initial healthy state
+	v.processRVUpdate(rv)
 }
 
-// processRVUpdate checks for condition changes and logs them
-func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
+// processRVUpdate checks EffectiveLayout (FTT and GMDR) and logs transitions.
+func (v *VolumeChecker) processRVUpdate(rv *v1alpha1.ReplicatedVolume) {
 	if rv == nil {
-		v.log.Debug("RV is nil, skipping condition check")
+		v.log.Debug("RV is nil, skipping health check")
 		return
 	}
 
-	// Status is a struct in the API, but Conditions can be empty (e.g. just created / during deletion).
-	if len(rv.Status.Conditions) == 0 {
-		v.log.Debug("RV has no conditions yet, skipping condition check")
+	el := rv.Status.EffectiveLayout
+
+	newFTT := healthStatusFromPointer(el.FailuresToTolerate)
+	newGMDR := healthStatusFromPointer(el.GuaranteedMinimumDataRedundancy)
+
+	v.processHealthStatus("FTT", newFTT, &v.state.ftt, &v.stats.FTTTransitions, &v.stats.LastFTTStatus, el.FailuresToTolerate, el)
+	v.processHealthStatus("GMDR", newGMDR, &v.state.gmdr, &v.stats.GMDRTransitions, &v.stats.LastGMDRStatus, el.GuaranteedMinimumDataRedundancy, el)
+}
+
+func (v *VolumeChecker) processHealthStatus(
+	metric string,
+	newStatus healthStatus,
+	current *healthStatus,
+	transitions *atomic.Int64,
+	lastStatus *atomic.Int32,
+	value *int8,
+	el v1alpha1.ReplicatedVolumeEffectiveLayout,
+) {
+	if newStatus == *current {
 		return
 	}
 
-	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
-	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
+	oldStatus := *current
+	*current = newStatus
+	lastStatus.Store(int32(newStatus))
 
-	// Check IOReady transition.
-	// v.state stores previous status (default: True = expected healthy state).
-	// If new status differs from saved → log + count transition + update saved state.
-	if newIOReadyStatus != v.state.ioReadyStatus {
-		oldStatus := v.state.ioReadyStatus       // Save old for logging
-		v.stats.IOReadyTransitions.Add(1)        // Count transition for final stats
-		v.state.ioReadyStatus = newIOReadyStatus // Update saved state
-
-		v.log.Warn("condition changed",
-			"condition", v1alpha1.ReplicatedVolumeCondIOReadyType,
-			"transition", string(oldStatus)+"->"+string(newIOReadyStatus))
-
-		// On False: log failed RVRs for debugging
-		if newIOReadyStatus == metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
-			v.logConditionDetails(ctx, v1alpha1.ReplicatedVolumeCondIOReadyType, reason, message)
-		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
+	valueText := "nil"
+	if value != nil {
+		valueText = fmt.Sprintf("%d", *value)
 	}
 
-	// Check Quorum transition (same logic as IOReady).
-	if newQuorumStatus != v.state.quorumStatus {
-		oldStatus := v.state.quorumStatus      // Save old for logging
-		v.stats.QuorumTransitions.Add(1)       // Count transition for final stats
-		v.state.quorumStatus = newQuorumStatus // Update saved state
+	v.log.Warn(metric+" health changed",
+		"transition", oldStatus.String()+"->"+newStatus.String(),
+		"value", valueText,
+		"message", el.Message)
 
-		v.log.Warn("condition changed",
-			"condition", v1alpha1.ReplicatedVolumeCondQuorumType,
-			"transition", string(oldStatus)+"->"+string(newQuorumStatus))
-
-		// Log RVRs only if IOReady didn't just log them (avoid duplicate output)
-		if newQuorumStatus == metav1.ConditionFalse && v.state.ioReadyStatus != metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
-			v.logConditionDetails(ctx, v1alpha1.ReplicatedVolumeCondQuorumType, reason, message)
-		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
+	if oldStatus != healthStatusUnknown && newStatus != healthStatusUnknown {
+		transitions.Add(1)
+	}
+	if newStatus == healthStatusUnhealthy {
+		v.logHealthDetails(metric, el)
 	}
 }
 
-// logConditionDetails logs condition details with failed RVRs listing.
-// Uses structured logging with rv_name from logger context.
-// RVR table is included in "failed_rvrs_details" field when there are failures.
-func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reason, message string) {
-	// Check if context is already done - skip RVR listing
-	if ctx.Err() != nil {
-		v.log.Warn("condition details (context cancelled, skipped RVR listing)",
-			"condition", condType,
-			"reason", reason,
-			"message", message)
-		return
+func healthStatusFromPointer(value *int8) healthStatus {
+	if value == nil {
+		return healthStatusUnknown
 	}
+	if *value >= 0 {
+		return healthStatusHealthy
+	}
+	return healthStatusUnhealthy
+}
 
-	// Use timeout for API call
-	callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
-	defer cancel()
-
-	rvrs, err := v.client.ListRVRsByRVName(callCtx, v.rvName)
+// logHealthDetails logs EffectiveLayout summary and failed RVRs when health is unhealthy.
+func (v *VolumeChecker) logHealthDetails(metric string, el v1alpha1.ReplicatedVolumeEffectiveLayout) {
+	rvrs, err := v.client.ListRVRsByRVName(v.rvName)
 	if err != nil {
-		v.log.Warn("condition details",
-			"condition", condType,
-			"reason", reason,
-			"message", message,
+		v.log.Warn("health details",
+			"metric", metric,
+			"message", el.Message,
 			"list_rvrs_error", err.Error())
 		return
 	}
 
-	// Find failed RVRs (those with at least one False condition)
 	var failedRVRs []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrs {
 		if hasAnyFalseCondition(rvr.Status) {
@@ -249,24 +278,21 @@ func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reaso
 	}
 
 	if len(failedRVRs) == 0 {
-		v.log.Warn("condition details",
-			"condition", condType,
-			"reason", reason,
-			"message", message,
+		v.log.Warn("health details",
+			"metric", metric,
+			"message", el.Message,
 			"failed_rvrs", 0)
 		return
 	}
 
-	// Build RVR details table
 	var sb strings.Builder
 	for _, rvr := range failedRVRs {
 		sb.WriteString(buildRVRConditionsTable(&rvr))
 	}
 
-	v.log.Warn("condition details",
-		"condition", condType,
-		"reason", reason,
-		"message", message,
+	v.log.Warn("health details",
+		"metric", metric,
+		"message", el.Message,
 		"failed_rvrs", len(failedRVRs),
 		"failed_rvrs_details", "\n"+sb.String())
 }
@@ -286,12 +312,6 @@ func hasAnyFalseCondition(status v1alpha1.ReplicatedVolumeReplicaStatus) bool {
 //
 //	RVR: <name> (node: <node>, type: <type>)
 //	  - <condition>: <status> | <reason> | <message>
-//
-// Example:
-//
-//	RVR: test-rv-1-abc (node: worker-1, type: Diskful)
-//	  - Ready: False | StoragePoolUnavailable | Pool xyz not found
-//	  - Synchronized: True | InSync
 func buildRVRConditionsTable(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	var sb strings.Builder
 	sb.WriteString("    RVR: ")
@@ -327,33 +347,4 @@ func buildRVRConditionsTable(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	}
 
 	return sb.String()
-}
-
-// Helper functions to extract condition fields
-
-func getConditionStatus(conditions []metav1.Condition, condType string) metav1.ConditionStatus {
-	for _, cond := range conditions {
-		if cond.Type == condType {
-			return cond.Status
-		}
-	}
-	return metav1.ConditionUnknown
-}
-
-func getConditionReason(conditions []metav1.Condition, condType string) string {
-	for _, cond := range conditions {
-		if cond.Type == condType {
-			return cond.Reason
-		}
-	}
-	return ""
-}
-
-func getConditionMessage(conditions []metav1.Condition, condType string) string {
-	for _, cond := range conditions {
-		if cond.Type == condType {
-			return cond.Message
-		}
-	}
-	return ""
 }

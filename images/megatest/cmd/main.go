@@ -19,9 +19,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -62,6 +64,12 @@ func main() {
 
 	start := time.Now()
 	log.Info("megatest started")
+
+	rvSize, err := opt.ResolveRVSizeConfig()
+	if err != nil {
+		log.Error("failed to resolve RV size config", "error", err)
+		os.Exit(1)
+	}
 
 	// Create Kubernetes client first, before setting up signal handling
 	// This allows us to exit early if cluster is unreachable
@@ -113,14 +121,19 @@ func main() {
 		StorageClasses:               opt.StorageClasses,
 		MaxVolumes:                   opt.MaxVolumes,
 		VolumeStep:                   config.StepMinMax{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
+		RVSize:                       rvSize,
 		StepPeriod:                   config.DurationMinMax{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
 		VolumePeriod:                 config.DurationMinMax{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		AttacherPeriod:               config.DurationMinMax{Min: opt.AttacherPeriodMin, Max: opt.AttacherPeriodMax},
 		EnablePodDestroyer:           opt.EnablePodDestroyer,
 		EnableVolumeResizer:          opt.EnableVolumeResizer,
 		EnableVolumeReplicaDestroyer: opt.EnableVolumeReplicaDestroyer,
 		EnableVolumeReplicaCreator:   opt.EnableVolumeReplicaCreator,
 		ChaosDebugMode:               opt.ChaosDebugMode,
 	}
+
+	printStartupSummary(os.Stdout, opt, cfg)
+	time.Sleep(500 * time.Millisecond)
 
 	multiVolume := runners.NewMultiVolume(cfg, kubeClient, forceCleanupChan)
 	_ = multiVolume.Run(ctx)
@@ -158,6 +171,65 @@ func main() {
 	// Function returns normally, defer statements will execute
 }
 
+func printStartupSummary(w io.Writer, opt Opt, cfg config.MultiVolumeConfig) {
+	fmt.Fprintln(w, "\nStartup configuration:")
+	fmt.Fprintf(w, "  %-30s %s\n", "storage classes", strings.Join(cfg.StorageClasses, ","))
+	fmt.Fprintf(w, "  %-30s %d\n", "max volumes", cfg.MaxVolumes)
+	fmt.Fprintf(w, "  %-30s %d..%d\n", "volume creation step", cfg.VolumeStep.Min, cfg.VolumeStep.Max)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "step period", cfg.StepPeriod.Min, cfg.StepPeriod.Max)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "volume lifetime", cfg.VolumePeriod.Min, cfg.VolumePeriod.Max)
+	attacherPeriod := runners.ResolveAttacherPeriod(cfg)
+	fmt.Fprintf(w, "  %-30s %s..%s\n", "attacher period", attacherPeriod.Min, attacherPeriod.Max)
+	fmt.Fprintf(w, "  %-30s %s\n", "RV size", describeRVSize(cfg.RVSize))
+	fmt.Fprintf(w, "  %-30s %s\n", "enabled runners", describeEnabledRunners(opt))
+	fmt.Fprintf(w, "  %-30s %s\n", "chaos", describeChaos(opt))
+	fmt.Fprintln(w, "Starting in 500ms...")
+}
+
+func describeRVSize(size config.RVSizeConfig) string {
+	if size.MinMi == size.MaxMi {
+		return fmt.Sprintf("fixed %dMi", size.MaxMi)
+	}
+	return fmt.Sprintf("random %dMi..%dMi, step %dMi, inclusive endpoints", size.MinMi, size.MaxMi, size.StepMi)
+}
+
+func describeEnabledRunners(opt Opt) string {
+	var runners []string
+	if opt.EnablePodDestroyer {
+		runners = append(runners, "pod-destroyer")
+	}
+	if opt.EnableVolumeResizer {
+		runners = append(runners, "volume-resizer")
+	}
+	if opt.EnableVolumeReplicaDestroyer {
+		runners = append(runners, "volume-replica-destroyer")
+	}
+	if opt.EnableVolumeReplicaCreator {
+		runners = append(runners, "volume-replica-creator")
+	}
+	if len(runners) == 0 {
+		return "none"
+	}
+	return strings.Join(runners, ",")
+}
+
+func describeChaos(opt Opt) string {
+	var features []string
+	if opt.EnableChaosNetBlock {
+		features = append(features, "network-block")
+	}
+	if opt.EnableChaosNetDegrade {
+		features = append(features, "network-degrade")
+	}
+	if opt.EnableChaosVMReboot {
+		features = append(features, "vm-reboot")
+	}
+	if len(features) == 0 {
+		return "disabled"
+	}
+	return strings.Join(features, ",")
+}
+
 // printCheckerStats prints a summary table of all checker statistics
 func printCheckerStats(stats []*runners.CheckerStats) {
 	if len(stats) == 0 {
@@ -166,32 +238,60 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 	}
 
 	fmt.Fprintf(os.Stdout, "\nChecker Statistics:\n")
-	fmt.Fprintf(os.Stdout, "%-40s %20s %20s\n", "RV Name", "IOReady Transitions", "Quorum Transitions")
+	fmt.Fprintf(os.Stdout, "%-40s %20s %20s %12s %12s\n", "RV Name", "FTT Transitions", "GMDR Transitions", "FTT Status", "GMDR Status")
 	fmt.Fprintf(os.Stdout, "%s\n", "────────────────────────────────────────────────────────────────────────────────")
 
-	var stableCount, recoveredCount, brokenCount int
+	var stableCount, recoveredCount, brokenCount, unknownCount int
 
 	for _, s := range stats {
-		ioReady := s.IOReadyTransitions.Load()
-		quorum := s.QuorumTransitions.Load()
+		ftt := s.FTTTransitions.Load()
+		gmdr := s.GMDRTransitions.Load()
+		fttStatus := runners.HealthStatusString(s.LastFTTStatus.Load())
+		gmdrStatus := runners.HealthStatusString(s.LastGMDRStatus.Load())
 
-		fmt.Fprintf(os.Stdout, "%-40s %20d %20d\n", s.RVName, ioReady, quorum)
+		fmt.Fprintf(os.Stdout, "%-40s %20d %20d %12s %12s\n", s.RVName, ftt, gmdr, fttStatus, gmdrStatus)
 
-		// Categorize RV state
-		switch {
-		case ioReady == 0 && quorum == 0:
-			stableCount++ // No issues at all
-		case ioReady%2 == 1 || quorum%2 == 1:
-			brokenCount++ // Odd = still in bad state
-		default:
-			recoveredCount++ // Even >0 = had issues but recovered
+		switch classifyCheckerStats(ftt, gmdr, fttStatus, gmdrStatus) {
+		case checkerStatsCategoryUnknown:
+			unknownCount++
+		case checkerStatsCategoryBroken:
+			brokenCount++
+		case checkerStatsCategoryStable:
+			stableCount++
+		case checkerStatsCategoryRecovered:
+			recoveredCount++
 		}
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", "────────────────────────────────────────────────────────────────────────────────")
 	fmt.Fprintf(os.Stdout, "Stable (0 transitions):        %d\n", stableCount)
-	fmt.Fprintf(os.Stdout, "Recovered (even transitions):  %d\n", recoveredCount)
-	fmt.Fprintf(os.Stdout, "Broken (odd transitions):      %d\n", brokenCount)
+	fmt.Fprintf(os.Stdout, "Recovered after transitions:   %d\n", recoveredCount)
+	fmt.Fprintf(os.Stdout, "Broken final health:           %d\n", brokenCount)
+	fmt.Fprintf(os.Stdout, "Unknown final health:          %d\n", unknownCount)
+}
+
+type checkerStatsCategory string
+
+const (
+	checkerStatsCategoryStable    checkerStatsCategory = "stable"
+	checkerStatsCategoryRecovered checkerStatsCategory = "recovered"
+	checkerStatsCategoryBroken    checkerStatsCategory = "broken"
+	checkerStatsCategoryUnknown   checkerStatsCategory = "unknown"
+)
+
+func classifyCheckerStats(fttTransitions, gmdrTransitions int64, fttStatus, gmdrStatus string) checkerStatsCategory {
+	// Unknown states are not counted as transitions, so transition parity is not
+	// a final-health proxy. Final status is the source of truth.
+	switch {
+	case fttStatus == "unknown" || gmdrStatus == "unknown":
+		return checkerStatsCategoryUnknown
+	case fttStatus == "unhealthy" || gmdrStatus == "unhealthy":
+		return checkerStatsCategoryBroken
+	case fttTransitions == 0 && gmdrTransitions == 0:
+		return checkerStatsCategoryStable
+	default:
+		return checkerStatsCategoryRecovered
+	}
 }
 
 // setupChaosRunners initializes and starts chaos engineering runners
