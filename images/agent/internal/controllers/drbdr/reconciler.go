@@ -147,9 +147,9 @@ func (r *Reconciler) reconcileDRBDR(
 
 	maintenanceMode := drbdr.Spec.Maintenance == v1alpha1.MaintenanceModeNoResourceReconciliation
 
-	// Phase 0: Handle ActualNameOnTheNode rename if set.
-	// Maintenance mode skips the rename but falls through to Phase 4+
-	// where DRBDResourceNameOnTheNode returns the old name correctly.
+	// Phase 1: Rename the on-node resource to its canonical name. Maintenance
+	// skips the rename; later phases still resolve the old name via
+	// DRBDResourceNameOnTheNode.
 	if drbdr.Spec.ActualNameOnTheNode != "" {
 		if !maintenanceMode {
 			outcome = r.reconcileActualNameOnTheNode(rf.Ctx(), drbdr)
@@ -159,29 +159,24 @@ func (r *Reconciler) reconcileDRBDR(
 			"actualName", drbdr.Spec.ActualNameOnTheNode)
 	}
 
-	// Phase 1: Ensure finalizer (adds if needed for up resources)
+	// Phase 2: Add our finalizer (Up, non-deleting resources only).
 	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, true, isUpAndNotInCleanup(drbdr)); finalizerOutcome.ShouldReturn() {
 		if finalizerOutcome.Error() != nil {
 			return rf.Fail(finalizerOutcome.Error())
 		}
 		return rf.Done()
 	}
-
-	// Snapshot deletion state after Phase 1. Phase 1 may have patched the
-	// object, refreshing its metadata from the API server. This snapshot is
-	// used by all subsequent phases to ensure consistent behavior even if
-	// the status patch further mutates drbdr metadata.
+	// Re-evaluate after Phase 2's patch may have refreshed metadata.
 	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
-	// Observe DRBD state early — the result is used both by Phase 2
-	// (existing port adoption) and Phase 4 (convergence).
+	// Observe the on-node DRBD state; reused by Phases 3 and 6.
 	drbdResName := DRBDResourceNameOnTheNode(drbdr)
 	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
-	// Phase 2: Ensure addresses are persisted (patch with optimistic lock).
-	// Must happen before DRBD convergence so that stale-cache races cause
-	// a conflict error here, before any destructive kernel actions execute.
+	// Phase 3: Persist allocated addresses before any destructive DRBD action,
+	// so a stale-cache race fails here on the optimistic lock rather than after
+	// a kernel change.
 	existingPorts := existingPortsFromState(aState)
 	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts); addrOutcome.ShouldReturn() {
 		if addrOutcome.Error() != nil {
@@ -190,55 +185,40 @@ func (r *Reconciler) reconcileDRBDR(
 		return rf.Done()
 	}
 
-	// Snapshot status after addresses are persisted. The addresses patch may
-	// have updated the object's resourceVersion; taking the snapshot here
-	// ensures the final status patch uses the correct base.
+	// Patch base for the final status patch (Phase 8), taken after the
+	// addresses patch settled the resourceVersion.
 	statusBase := drbdr.DeepCopy()
 
-	// Collect the pending-release list from status.
-	var pendingRelease []string
-	if drbdr.Status.ActiveConfiguration != nil {
-		pendingRelease = drbdr.Status.ActiveConfiguration.LLVFinalizersToRelease
+	// Phase 4: Write-ahead the LLV finalizer-release list. Recording which LLV
+	// we (will) hold a finalizer on BEFORE adding the finalizer (Phase 5) or
+	// attaching a disk (Phase 6) is what makes the finalizer impossible to leak:
+	// Phase 9 will not drop our DRBDResource finalizer while this list is
+	// non-empty.
+	intendedLLVFinalizersToRelease, llvListOutcome := r.reconcileLLVFinalizersToRelease(
+		rf.Ctx(), drbdr, upAndNotInCleanup, maintenanceMode)
+	if llvListOutcome.ShouldReturn() {
+		return llvListOutcome
 	}
 
-	// Recovery: if DRBD has a disk whose LLV is not yet tracked in the
-	// pending-release list, add it and requeue. This handles partial
-	// reconciliation where a previous cycle added a finalizer but failed
-	// the status patch.
-	actualDiskLLV := r.computeActualLLVName(rf.Ctx(), aState)
-	if actualDiskLLV != "" && !slices.Contains(pendingRelease, actualDiskLLV) {
-		if recoveryOutcome := r.reconcileLLVRecovery(rf.Ctx(), drbdr, statusBase, actualDiskLLV); recoveryOutcome.ShouldReturn() {
-			return recoveryOutcome
-		}
-	}
-
-	// Step 1: Add finalizer to intended LLV (before DRBD operations).
-	// Skip in maintenance (no attach will happen) and when not Up+Diskful.
-	// Record the LLV in the pending-release list (written to status in Step 4)
-	// so we never lose track of it.
+	// Phase 5: Add our finalizer to the LLV we are about to attach (Up +
+	// Diskful, outside maintenance). It is already tracked by Phase 4.
 	var intendedDisk string
 	var llvErr error
 	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
-		llvName := drbdr.Spec.LVMLogicalVolumeName
-		if llvName != "" && !slices.Contains(pendingRelease, llvName) {
-			pendingRelease = append(pendingRelease, llvName)
-		}
-		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), llvName)
+		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
 	}
 
-	// Step 2: DRBD convergence.
+	// Phase 6: Converge the on-node DRBD state to the intended state, then
+	// re-observe so the status report and finalizer decisions below reflect the
+	// result of our actions.
 	if aErr == nil {
 		if diskErr := observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID); diskErr != nil {
 			aErr = ConfiguredReasonError(diskErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 		}
 	}
-
 	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
-
 	targetActions := computeTargetDRBDActions(iState, aState)
-
 	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
-
 	drbdErr = ensureLocalPortConflictResolved(rf.Ctx(), drbdr, drbdErr, r.portRegistry.Allocate)
 
 	var aErr2 error
@@ -250,52 +230,65 @@ func (r *Reconciler) reconcileDRBDR(
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
-	// Step 3: Release finalizers from LLVs we no longer need (after detach).
-	// Skip in maintenance (no detach happened).
-	if !maintenanceMode {
-		keepLLV := ""
-		if upAndNotInCleanup {
-			keepLLV = drbdr.Spec.LVMLogicalVolumeName
-		}
-		for _, llv := range pendingRelease {
-			if llv == keepLLV {
-				continue
-			}
+	// LLV backing the disk after convergence: empty once detached, non-empty if
+	// a detach failed or was skipped (maintenance). Drives both the release
+	// below and the reported lvmLogicalVolumeName.
+	currentDiskLLV := r.computeActualLLVName(rf.Ctx(), aState)
+
+	// Phase 7: Release finalizers from LLVs no longer backing the disk. This is
+	// a Kubernetes operation, so it is not gated on maintenance — only on the
+	// actual disk state: keep the finalizer while the LLV is the spec disk we
+	// intend to keep (Up) or is still attached (releasing an attached LLV would
+	// orphan it). What remains in the list is what we still owe a release.
+	kept := make([]string, 0, len(intendedLLVFinalizersToRelease))
+	for _, llv := range intendedLLVFinalizersToRelease {
+		keep := (upAndNotInCleanup && llv == drbdr.Spec.LVMLogicalVolumeName) || llv == currentDiskLLV
+		if !keep {
 			if releaseErr := r.releaseLLVFinalizer(rf.Ctx(), llv); releaseErr != nil {
 				llvErr = errors.Join(llvErr, releaseErr)
-				continue
+				keep = true // release failed; retry next reconcile
 			}
-			pendingRelease = slices.DeleteFunc(pendingRelease, func(s string) bool { return s == llv })
+		}
+		if keep {
+			kept = append(kept, llv)
 		}
 	}
+	intendedLLVFinalizersToRelease = kept
 
-	// Step 4: Report and status patch.
-	// lvmLogicalVolumeName always reflects actual DRBD state.
-	newStatusLLV := r.computeActualLLVName(rf.Ctx(), aState)
-
+	// Phase 8: Report status (lvmLogicalVolumeName mirrors the actual disk) and
+	// patch it. The pending-release list is written after ensureReportState,
+	// which may initialize ActiveConfiguration.
 	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
-	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, newStatusLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
+	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
-
-	// Write the pending-release list after ensureReportState (which may
-	// initialize ActiveConfiguration via aState.Report).
-	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = pendingRelease
-
-	// Patch status if changed
+	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = intendedLLVFinalizersToRelease
 	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
 		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true)
-		// Ignore "not found" error if object was being deleted
+		// Tolerate not-found while the object is being deleted.
 		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
 		}
 	}
 
-	// Phase 6: Finalize (removes finalizer if needed for down/deleted resources)
-	if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
-		if finalizerOutcome.Error() != nil {
-			reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
+	// Phase 9: Drop our DRBDResource finalizer only once fully torn down: every
+	// owed LLV finalizer released (else the LLV finalizer leaks) AND the on-node
+	// resource gone (else we orphan it). Maintenance is not special-cased — a
+	// pending detach/down simply keeps the actual state from reaching "torn
+	// down", so we hold the finalizer until it runs. A nil aState means the
+	// status query failed; reconcileErr is set and we requeue rather than assume
+	// teardown.
+	drbdResourceGone := !aState.IsZero() && !aState.ResourceExists()
+	if len(intendedLLVFinalizersToRelease) == 0 && drbdResourceGone {
+		if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
+			if finalizerOutcome.Error() != nil {
+				reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
+			}
 		}
+	} else if !upAndNotInCleanup {
+		rf.Log().Info("Deferring DRBDResource finalizer removal until DRBD teardown completes",
+			"pendingLLVFinalizersToRelease", intendedLLVFinalizersToRelease,
+			"drbdResourceGone", drbdResourceGone)
 	}
 
 	if reconcileErr != nil {
@@ -455,24 +448,49 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
-// reconcileLLVRecovery adds an untracked LLV to the pending-release list
-// and requeues. This handles the case where a previous cycle added a
-// finalizer but failed the status patch.
-func (r *Reconciler) reconcileLLVRecovery(
+// reconcileLLVFinalizersToRelease maintains the write-ahead set of LVMLogicalVolume
+// names whose agent finalizer this DRBDResource owes a release for, stored in
+// status.ActiveConfiguration.LLVFinalizersToRelease. It records the LLV we are
+// about to attach (and add a finalizer to in Phase 5) BEFORE doing either, so a
+// crash can never strand a finalizer: Phase 9 will not drop our DRBDResource
+// finalizer while this list is non-empty. Entries are removed only in Phase 7,
+// after the finalizer is released.
+//
+// If the set grew it is persisted and the reconcile requeues, so the remaining
+// phases proceed from durable state.
+func (r *Reconciler) reconcileLLVFinalizersToRelease(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
-	statusBase *v1alpha1.DRBDResource,
-	llvName string,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "llv-recovery")
+	upAndNotInCleanup bool,
+	maintenanceMode bool,
+) (list []string, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "llv-finalizers-to-release")
 	defer rf.OnEnd(&outcome)
 
-	ac := ensureActiveConfiguration(drbdr)
-	ac.LLVFinalizersToRelease = append(ac.LLVFinalizersToRelease, llvName)
-	if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true); err != nil {
-		return rf.Fail(err)
+	if drbdr.Status.ActiveConfiguration != nil {
+		list = slices.Clone(drbdr.Status.ActiveConfiguration.LLVFinalizersToRelease)
 	}
-	return rf.DoneAndRequeue()
+	originalLen := len(list)
+
+	if !maintenanceMode && upAndNotInCleanup &&
+		drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful &&
+		drbdr.Spec.LVMLogicalVolumeName != "" &&
+		!slices.Contains(list, drbdr.Spec.LVMLogicalVolumeName) {
+		list = append(list, drbdr.Spec.LVMLogicalVolumeName)
+	}
+
+	if len(list) == originalLen {
+		return list, rf.Continue()
+	}
+
+	// Commit the grown list before any finalizer add / DRBD action, then
+	// requeue so subsequent phases proceed from durable state.
+	base := drbdr.DeepCopy()
+	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = list
+	if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
+		return list, rf.Fail(err)
+	}
+	return list, rf.DoneAndRequeue()
 }
 
 func ensureActiveConfiguration(drbdr *v1alpha1.DRBDResource) *v1alpha1.DRBDResourceActiveConfiguration {
@@ -688,6 +706,10 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 	log := log.FromContext(ctx)
 	for _, action := range actions {
 		if maintenanceMode {
+			// Maintenance pauses DRBD operations only: we do not execute the
+			// action, but we log the one we would have run so the skipped work
+			// stays observable.
+			log.Info("Skipping DRBD action due to maintenance mode", "action", action.String())
 			continue
 		}
 		log.Info("DRBD action", "action", action.String(), "maintenanceMode", maintenanceMode)
