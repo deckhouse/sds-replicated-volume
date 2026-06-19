@@ -47,6 +47,8 @@ func SetupDiskfulToDiskless(
 	)
 	assertDRBDRConfigured(e, drbdr)
 	assertDRBDRType(e, drbdr, v1alpha1.DRBDResourceTypeDiskless)
+	assertDRBDRDiskState(e, drbdr, v1alpha1.DiskStateDiskless)
+	assertDRBDRSizeNil(e, drbdr)
 
 	return drbdr
 }
