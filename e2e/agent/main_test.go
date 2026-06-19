@@ -186,6 +186,10 @@ func TestDRBDResource(t *testing.T) {
 				e.Run("RemovePeer", func(e envtesting.E) {
 					suite.SetupRemovePeer(e, cl, drbdrs[0])
 				})
+
+				e.Run("DiskfulToDisklessPeerCheck", func(e envtesting.E) {
+					suite.SetupDiskfulToDisklessPeerCheck(e, cl, drbdrs)
+				})
 			}
 		})
 	}
