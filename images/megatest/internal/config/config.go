@@ -40,6 +40,13 @@ type SizeMinMax struct {
 	Max resource.Quantity
 }
 
+// RVSizeConfig configures initial ReplicatedVolume size selection in Mi.
+type RVSizeConfig struct {
+	MinMi  int64
+	MaxMi  int64
+	StepMi int64
+}
+
 // Float64MinMax represents a float64 range with min and max values
 type Float64MinMax struct {
 	Min float64
@@ -51,8 +58,10 @@ type MultiVolumeConfig struct {
 	StorageClasses               []string
 	MaxVolumes                   int
 	VolumeStep                   StepMinMax
+	RVSize                       RVSizeConfig
 	StepPeriod                   DurationMinMax
 	VolumePeriod                 DurationMinMax
+	AttacherPeriod               DurationMinMax
 	EnablePodDestroyer           bool
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool
@@ -64,6 +73,7 @@ type MultiVolumeConfig struct {
 type VolumeMainConfig struct {
 	StorageClassName             string
 	VolumeLifetime               time.Duration
+	AttacherPeriod               DurationMinMax
 	InitialSize                  resource.Quantity
 	EnableVolumeResizer          bool
 	EnableVolumeReplicaDestroyer bool

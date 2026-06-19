@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -115,11 +116,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		//    Kubernetes finalization = object deletion). Must run after reconcileDeletion,
 		//    otherwise reconcileDeletion would try to patch conditions on an already-deleted RVA.
 		// 3. reconcileMetadata: remove RV finalizer if no children remain.
-		return flow.MergeReconciles(
+		result := flow.MergeReconciles(
 			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
 			r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
-		).ToCtrl()
+		)
+		if result.Error() == nil && !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
+			observeRVDeletion(rv)
+		}
+		return result.ToCtrl()
 	}
 
 	// Reconcile the RV metadata (finalizers and labels).
@@ -188,10 +193,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return outcome.ToCtrl()
 	}
 
+	// Compute pending metric observations before patching, then observe them
+	// only after the status state they describe has been committed.
+	now := time.Now()
+	metricObservations := computeDatameshMetricObservations(now, rv, base.Status.DatameshTransitions, rvrs)
+	metricObservations = append(metricObservations, computeRVInitialFormationMetricObservations(now, base, rv)...)
+
 	if outcome.DidChange() {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
 			return rf.Fail(err).ToCtrl()
 		}
+		metricObservations.observe()
 	}
 
 	return outcome.ToCtrl()

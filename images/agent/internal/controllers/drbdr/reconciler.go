@@ -23,6 +23,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -263,12 +264,23 @@ func (r *Reconciler) reconcileDRBDR(
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = intendedLLVFinalizersToRelease
-	if !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status) {
+
+	// Compute pending metric observations before patching, then observe them
+	// only after the status state they describe has been committed.
+	metricObservations := computeDRBDRMetricObservations(time.Now(), drbdr, statusBase)
+
+	statusChanged := !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status)
+	if statusChanged {
 		statusPatchErr := r.patchDRBDRStatus(rf.Ctx(), drbdr, statusBase, true)
 		// Tolerate not-found while the object is being deleted.
 		if statusPatchErr != nil && (drbdr.DeletionTimestamp == nil || client.IgnoreNotFound(statusPatchErr) != nil) {
 			reconcileErr = errors.Join(reconcileErr, statusPatchErr)
 		}
+		if statusPatchErr == nil {
+			metricObservations.observe()
+		}
+	} else {
+		metricObservations.observe()
 	}
 
 	// Phase 9: Drop our DRBDResource finalizer only once fully torn down: every
@@ -283,6 +295,10 @@ func (r *Reconciler) reconcileDRBDR(
 		if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 			if finalizerOutcome.Error() != nil {
 				reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
+			}
+			// If finalizer was removed during cleanup, observe deletion metrics.
+			if finalizerOutcome.Error() == nil && isInCleanup(drbdr) && !obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
+				observeDRBDRDeletion(drbdr)
 			}
 		}
 	} else if !upAndNotInCleanup {
