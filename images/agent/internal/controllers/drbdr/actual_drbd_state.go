@@ -383,12 +383,21 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		status.DiskState = v1alpha1.DiskState(vol.DiskState)
 		status.Quorum = &vol.Quorum
 
-		// DRBD reports size in KiB, convert to bytes for resource.Quantity.
-		sizeBytes := int64(vol.Size) * 1024
-		if sizeBytes > 0 {
-			status.Size = resource.NewQuantity(sizeBytes, resource.BinarySI)
-		} else {
+		// status.Size is the usable capacity of the *local* backing disk; per
+		// the API contract it MUST be nil when the resource is diskless (or
+		// down). A diskless volume still appears in `drbdsetup status` with a
+		// non-zero Size (DRBD echoes the logical/peer size), so gate on the
+		// disk state rather than the reported size.
+		if status.DiskState == v1alpha1.DiskStateDiskless {
 			status.Size = nil
+		} else {
+			// DRBD reports size in KiB, convert to bytes for resource.Quantity.
+			sizeBytes := int64(vol.Size) * 1024
+			if sizeBytes > 0 {
+				status.Size = resource.NewQuantity(sizeBytes, resource.BinarySI)
+			} else {
+				status.Size = nil
+			}
 		}
 	}
 

@@ -43,6 +43,21 @@ TestDRBDResource
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
 │       because spec doesn't change on delete).
 │
+├── DeleteDiskfulInMaintenance — deletion is safely deferred in maintenance
+│       Creates a diskful DRBDResource with an LLV (same setup as R1).
+│       Puts it into maintenance mode, then deletes it. Maintenance pauses
+│       DRBD operations only, so the detach/down required to tear the resource
+│       down never runs and the disk stays attached. Asserts that for a
+│       sustained window the DRBDResource lingers (DeletionTimestamp set,
+│       agent finalizer held) and the LLV finalizer stays put — the agent
+│       refuses to drop a finalizer while the disk is still attached and the
+│       DRBD resource is still up on the node. Then lifts maintenance and
+│       asserts a clean teardown: the DRBDResource is deleted only after the
+│       disk is detached and the LLV finalizer is released. Guards against the
+│       reported leak, where the agent removed its DRBDResource finalizer
+│       (Phase 6) without releasing the LLV finalizer (Step 3), orphaning the
+│       backing volume.
+│
 ├── LLVFinalizer — LLV finalizer behavior across state/spec transitions
 │   │   Creates a diskful DRBDResource with an LLV (same setup as R1).
 │   │   Exercises sequences of state and spec changes, asserting the
@@ -220,6 +235,19 @@ Every subtest's cleanup exercises a teardown path:
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
+
+- **DeleteDiskfulInMaintenance**: deletes a diskful DRBDResource while it is
+  in maintenance mode. Maintenance pauses DRBD operations only, so the
+  detach/down required to tear it down is deferred and the deletion is safely
+  blocked — for a sustained window the DRBDResource lingers with its agent
+  finalizer and the LLV finalizer stays put (the disk is still attached and the
+  DRBD resource is still up on the node). Then lifts maintenance and verifies a
+  clean teardown: the DRBDResource is deleted only after the disk is detached
+  and the LLV finalizer is released. Cleanup lifts maintenance, downs any
+  leftover DRBD resource on the node, and force-releases the DRBDResource and
+  LLV agent finalizers if a regression left them stuck (only acceptable because
+  these are the resources under test); the parent cleanup then deletes the
+  DRBDResource and LLV.
 
 - **OrphanCleanup**: force-deletes a DRBDResource (bypassing agent
   finalizer flow), then re-creates it. Verifies the agent tears down the

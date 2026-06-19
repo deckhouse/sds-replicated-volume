@@ -281,8 +281,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				statusCmd(drbdutils.StatusResult{}),
 			},
 			postCheck: func(t *testing.T, cl client.Client) {
-				// No LLV in the pending-release list → nothing to release.
-				// Recovery would catch this if DRBD had the disk attached.
+				// No LLV in the pending-release list → nothing to release, so
+				// the LLV keeps its agent finalizer.
 				expectLLVHasAgentFinalizer(t, cl, testLLVName)
 			},
 		},

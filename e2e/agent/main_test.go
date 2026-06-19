@@ -65,6 +65,11 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
 	})
 
+	e.Run("DeleteDiskfulInMaintenance", func(e envtesting.E) {
+		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dm", 0)
+		suite.SetupDeleteDiskfulInMaintenance(e, cl, nodeExec, cluster.Nodes[0].Name, drbdr, llv)
+	})
+
 	e.Run("LLVFinalizer", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "lf", 0)
 
@@ -180,6 +185,10 @@ func TestDRBDResource(t *testing.T) {
 			if tc.n == 2 {
 				e.Run("RemovePeer", func(e envtesting.E) {
 					suite.SetupRemovePeer(e, cl, drbdrs[0])
+				})
+
+				e.Run("DiskfulToDisklessPeerCheck", func(e envtesting.E) {
+					suite.SetupDiskfulToDisklessPeerCheck(e, cl, drbdrs)
 				})
 			}
 		})

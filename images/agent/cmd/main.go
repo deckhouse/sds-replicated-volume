@@ -78,10 +78,15 @@ func disableDRBDUsermodeHelper(log *slog.Logger) {
 }
 
 func run(ctx context.Context, log *slog.Logger) (err error) {
-	disableDRBDUsermodeHelper(log)
-
-	drbdutils.DetectCapabilities()
+	// Detect capabilities first: it runs "drbdsetup status", which loads and
+	// initializes the DRBD kernel module when /sys/module/drbd is absent. The
+	// usermode-helper write below targets /sys/module/drbd and needs it present.
+	if err := drbdutils.DetectCapabilities(ctx); err != nil {
+		log.Warn("DRBD capability detection: drbdsetup status failed", "err", err)
+	}
 	log.Info("DRBD capabilities detected", "flantExtensions", drbdutils.FlantExtensionsSupported)
+
+	disableDRBDUsermodeHelper(log)
 
 	// The derived Context is canceled the first time a function passed to eg.Go
 	// returns a non-nil error or the first time Wait returns

@@ -18,6 +18,7 @@ package kubetesting
 
 import (
 	"bytes"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,6 +63,21 @@ func DiscoverNodeExec(e envtesting.E, cs *kubernetes.Clientset, podOpts PodLogMo
 // its combined stdout. Uses e.Context() (during cleanup the scope supplies
 // context.Background()). Fails the test on error.
 func (ne *NodeExec) Exec(e envtesting.E, nodeName string, cmd ...string) string {
+	stdout, err := ne.TryExec(e, nodeName, cmd...)
+	if err != nil {
+		e.Fatalf("exec in agent pod on node %q (cmd: %v): %v", nodeName, cmd, err)
+	}
+	return stdout
+}
+
+// TryExec runs a command inside the agent pod on the given node and returns its
+// combined stdout together with any error, without failing the test. Use it for
+// best-effort cleanup commands that may legitimately fail (e.g. tearing down a
+// DRBD resource that is already gone). The agent image is distroless — there is
+// no shell, so commands cannot be wrapped in `sh -c '... || true'`; TryExec is
+// the supported way to tolerate a non-zero exit. The returned error includes
+// captured stderr for diagnostics.
+func (ne *NodeExec) TryExec(e envtesting.E, nodeName string, cmd ...string) (string, error) {
 	ctx := e.Context()
 	podName := ne.findPodOnNode(e, nodeName)
 
@@ -80,7 +96,7 @@ func (ne *NodeExec) Exec(e envtesting.E, nodeName string, cmd ...string) string 
 
 	executor, err := remotecommand.NewSPDYExecutor(ne.cfg, "POST", req.URL())
 	if err != nil {
-		e.Fatalf("creating executor for pod %q on node %q: %v", podName, nodeName, err)
+		return "", fmt.Errorf("creating executor for pod %q on node %q: %w", podName, nodeName, err)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -89,10 +105,9 @@ func (ne *NodeExec) Exec(e envtesting.E, nodeName string, cmd ...string) string 
 		Stderr: &stderr,
 	})
 	if err != nil {
-		e.Fatalf("exec in pod %q on node %q (cmd: %v): %v\nstdout: %s\nstderr: %s",
-			podName, nodeName, cmd, err, stdout.String(), stderr.String())
+		return stdout.String(), fmt.Errorf("%w\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
-	return stdout.String()
+	return stdout.String(), nil
 }
 
 func (ne *NodeExec) findPodOnNode(e envtesting.E, nodeName string) string {
