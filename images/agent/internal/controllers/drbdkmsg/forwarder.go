@@ -32,6 +32,34 @@ import (
 // Look for messages starting with "drbd"
 var drbdMatch = []byte(";drbd")
 
+// benignKernelMessages are substrings of DRBD kernel messages that the kernel
+// emits at warning/error severity but which are expected and harmless (normal
+// teardown / disconnect chatter). They are forwarded at Info instead of Error
+// so they do not look like real failures:
+//
+//   - "Can not disconnect a StandAlone device": during peer removal the agent
+//     explicitly disconnects a peer before del-peer; del-peer then performs its
+//     own implicit disconnect, which fails because the connection is already
+//     StandAlone. The peer is still removed successfully — only the redundant
+//     state change is rejected.
+//   - "meta connection shut down by peer": a peer closed its connection, which
+//     is expected when a peer resource is downed/removed during teardown.
+var benignKernelMessages = [][]byte{
+	[]byte("Can not disconnect a StandAlone device"),
+	[]byte("meta connection shut down by peer"),
+}
+
+// isBenignKernelMessage reports whether line contains any known-benign DRBD
+// kernel message substring (see benignKernelMessages).
+func isBenignKernelMessage(line []byte) bool {
+	for _, m := range benignKernelMessages {
+		if bytes.Contains(line, m) {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	retryBaseDelay = 10 * time.Millisecond
 	retryMaxDelay  = 10 * time.Second
@@ -136,6 +164,11 @@ func (f *Forwarder) follow(ctx context.Context, logger logr.Logger, buf []byte) 
 
 		const event = "DRBD kernel message"
 		switch {
+		case isBenignKernelMessage(line):
+			// Known-benign teardown/disconnect chatter (see
+			// benignKernelMessages). Forward at Info despite the kernel's
+			// warning/error severity.
+			logger.Info(event, "text", string(line))
 		case sev >= 0 && sev <= kernSeverityWarning:
 			// EMERG..WARNING: real problems and "something might be
 			// wrong" (e.g. DRBD resync rate caps, bitmap pressure).
