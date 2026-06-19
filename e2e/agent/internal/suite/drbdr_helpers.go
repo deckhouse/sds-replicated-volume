@@ -127,3 +127,19 @@ func assertDRBDRType(e envtesting.E, drbdr *v1alpha1.DRBDResource, expected v1al
 			drbdr.Name, drbdr.Status.ActiveConfiguration.Type, expected)
 	}
 }
+
+func assertDRBDRDiskState(e envtesting.E, drbdr *v1alpha1.DRBDResource, expected v1alpha1.DiskState) {
+	e.Helper()
+	if drbdr.Status.DiskState != expected {
+		e.Fatalf("DRBDResource %q status.diskState is %q, want %q",
+			drbdr.Name, drbdr.Status.DiskState, expected)
+	}
+}
+
+func assertDRBDRSizeNil(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
+	e.Helper()
+	if drbdr.Status.Size != nil {
+		e.Fatalf("DRBDResource %q status.size is %s, want nil for diskless/down",
+			drbdr.Name, drbdr.Status.Size.String())
+	}
+}
