@@ -18,6 +18,7 @@ package drbdutils
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"strings"
 )
@@ -30,15 +31,26 @@ var FlantExtensionsSupported bool
 // ProcDRBDPath is the path to /proc/drbd. Overridable in tests.
 var ProcDRBDPath = "/proc/drbd"
 
-// DetectCapabilities reads /proc/drbd, parses the DRBD kernel module version,
-// and sets capability flags. The version line looks like:
+// DetectCapabilities ensures the DRBD kernel module is loaded, then reads
+// /proc/drbd, parses the DRBD kernel module version, and sets capability flags.
+// The version line looks like:
 //
 //	version: 9.2.13-flant.1 (api:2/proto:118-122)
 //
 // If the version string contains "-flant", FlantExtensionsSupported is set to true.
-func DetectCapabilities() {
+//
+// A "drbdsetup status" is run first purely for its side effect: when
+// /sys/module/drbd does not exist, drbdsetup triggers a module load and
+// initializes it, so the /proc/drbd read below (and any /sys/module/drbd access
+// by the caller) observe a loaded module. The status output is irrelevant; the
+// command's error is returned so the caller can report a non-zero exit.
+func DetectCapabilities(ctx context.Context) error {
+	_, statusErr := ExecuteStatus(ctx, "")
+
 	version := readDRBDVersion()
 	FlantExtensionsSupported = strings.Contains(version, "-flant")
+
+	return statusErr
 }
 
 // readDRBDVersion reads the first line of /proc/drbd and extracts the version string.
