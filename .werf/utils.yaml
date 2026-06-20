@@ -181,7 +181,18 @@
   - chown -R rpmbuilder:rpmbuilder .
   # we need tarball first
   - sudo -u rpmbuilder ${TARBALL_CMD} KEEPNAME=1 VERSION={{ .version }}
-  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz /home/rpmbuilder/RPM/SOURCES/
+  - |
+    TARBALL_DIR="{{ printf "%s/" (.gen_path | default ".") }}"
+    TARBALL="${TARBALL_DIR}{{ .name }}-{{ .version }}.tar.gz"
+    if [ ! -f "${TARBALL}" ]; then
+      TARBALL="${TARBALL_DIR}$(echo '{{ .name }}' | tr '-' '_')-{{ .version }}.tar.gz"
+    fi
+    if [ ! -f "${TARBALL}" ]; then
+      echo "Tarball not found: expected {{ .name }}-{{ .version }}.tar.gz in ${TARBALL_DIR}"
+      ls -la "${TARBALL_DIR}" || true
+      exit 1
+    fi
+    mv "${TARBALL}" /home/rpmbuilder/RPM/SOURCES/
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")

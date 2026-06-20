@@ -137,7 +137,13 @@ shell:
 
     # patch sdist to do not replace - with _ or RPM build will fail
     # - sed -i "s/canonicalize_name(name).replace('-', '_')/canonicalize_name(name)/g" /usr/lib64/python3/site-packages/setuptools/_distutils/dist.py
-    - sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" /usr/lib64/python3/site-packages/setuptools/_core_metadata.py
+    - |
+      for f in /usr/lib64/python3/site-packages/setuptools/_core_metadata.py \
+               /usr/lib/python3/site-packages/setuptools/_core_metadata.py; do
+        if [ -f "${f}" ]; then
+          sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" "${f}"
+        fi
+      done
 
     # make .rpm package
     # make only spec before building RPM
