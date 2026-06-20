@@ -93,6 +93,13 @@ linters-settings:
   images:
     patches:
       disable: true
+  module:
+    exclude-rules:
+      oss:
+        version-not-semver:
+          - id: LINSTOR_COMMON
+          - id: LINSTOR_CSI
+          - id: LINSTOR_SERVER_PIRAEUS
   no-cyrillic:
     exclude-rules:
       directories:

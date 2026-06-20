@@ -44,8 +44,8 @@
     {{- end }}
 
     if [ ${#SUBMODULES_BRANCHES[@]} -eq 0 ]; then
-      # Без кастомных веток — checkout по gitlink родительского коммита.
-      # submodule add -b master перезаписывает gitlink и ломает сборку (drbd-headers).
+      # No custom branches — checkout submodules from the parent commit gitlink.
+      # submodule add -b master overwrites the gitlink and breaks the build (drbd-headers).
       git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
           while read -r KEY MODULE_PATH
           do
