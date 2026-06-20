@@ -17,7 +17,7 @@
 ---
 # build linstor-server packages
 image: {{ $.ImageName }}-server-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -87,7 +87,7 @@ shell:
     # linstor-satellite-1.24.2-1.noarch.rpm
 ---
 image: {{ $.ImageName }}-client-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -187,7 +187,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-k8s-await-election-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 git:
@@ -219,7 +219,7 @@ shell:
 ---
 # main image based on AltLinux for now because we need bash and other tools
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 git:
   - add: /images/{{ $.ImageName }}
     to: /utils

@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 git:
   - url: {{ $.Root.SOURCE_REPO }}/linbit/linstor-csi
@@ -39,7 +39,7 @@ shell:
 {{- $csiBinariesXfsprogs  := "/usr/lib64/xfsprogs/xfs_scrub_fail /usr/sbin/fsck.xfs /usr/sbin/mkfs.xfs /usr/sbin/xfs_* /usr/share/xfsprogs/mkfs/* " }}
 {{- $csiBinariesUtilLinux := "/usr/sbin/blkid /usr/sbin/blockdev" }}
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
@@ -63,7 +63,7 @@ shell:
     - ln -sf /proc/mounts /relocate/etc/mtab
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 shell:
   beforeInstall:
@@ -83,7 +83,7 @@ shell:
     - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ $.Root.BASE_SCRATCH }}
+from: {{ index $.Images "builder/scratch" }}
 final: false
 import:
   - image: {{ $.ImageName }}-distroless-artifact

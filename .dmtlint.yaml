@@ -93,3 +93,7 @@ linters-settings:
   images:
     patches:
       disable: true
+  no-cyrillic:
+    exclude-rules:
+      directories:
+        - hack/

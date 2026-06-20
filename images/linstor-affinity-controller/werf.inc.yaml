@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 git:
@@ -37,7 +37,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+from: {{ index $.Images "builder/scratch" }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact

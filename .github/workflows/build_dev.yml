@@ -10,7 +10,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v0.5.79"
+  BASE_IMAGES_VERSION: "v1.0.51"
 on:
   #pull_request:
   # call from trivy_image_check.yaml, which in turn call from pull_request
@@ -122,7 +122,7 @@ jobs:
 
       - name: Download base images and auth prepare
         run: |
-          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fcontainer-base%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
       - uses: deckhouse/modules-actions/setup@v4
