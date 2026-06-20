@@ -25,7 +25,7 @@ secrets:
 
 shell:
   setup:
-    - apk add --no-cache git
+    - pm install git
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi

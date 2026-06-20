@@ -212,7 +212,7 @@ git:
         - "**/*"
 shell:
   setup:
-    - apk add --no-cache git make
+    - pm install git make
     - cd /usr/local/go/k8s-await-election
     # apply git patches to upstream's code
     - |

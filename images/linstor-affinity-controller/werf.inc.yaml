@@ -27,7 +27,7 @@ secrets:
 
 shell:
   setup:    
-    - apk add --no-cache git
+    - pm install git
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-affinity-controller

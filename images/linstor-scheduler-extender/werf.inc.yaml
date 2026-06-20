@@ -40,7 +40,7 @@ secrets:
 
 shell:
   beforeSetup:
-    - apk add --no-cache git
+    - pm install git
     - cd /usr/local/go/stork
     - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
     - git apply /patches/stork/*.patch
