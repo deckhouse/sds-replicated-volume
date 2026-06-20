@@ -38,45 +38,60 @@
     # .submodules is a string like "submodule1-name=submodule1-branch submodule2-name="
     # If branch is not set then using branch from .git-submodules file
     {{- range $submod := $.submodules | default "" | splitList " " }}
+    {{- if $submod }}
     SUBMODULES_BRANCHES+=( {{ $submod }} )
     {{- end }}
+    {{- end }}
 
-    echo "Processing submodules: ${SUBMODULES_BRANCHES[@]}"
-    git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
-        while read -r KEY MODULE_PATH
-        do
-            # If the module's path exists, remove it.
-            # This is done b/c the module's path is currently
-            # not a valid git repo and adding the submodule will cause an error.
-            [ -d "${MODULE_PATH}" ] && rm -rf "${MODULE_PATH}"
-
-            NAME="$(echo "${KEY}" | sed 's/^submodule\.\(.*\)\.path$/\1/')"
-
-            url_key="$(echo "${KEY}" | sed 's/\.path$/.url/')"
-            branch_key="$(echo "${KEY}" | sed 's/\.path$/.branch/')"
-
-            URL="$(git config -f .gitmodules --get "${url_key}")"
-            BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
-
-            git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
-
-            for submod in "${SUBMODULES_BRANCHES[@]}"; do
-              submod_name=${submod%=*}
-              submod_branch=${submod#*=}
-
-              if [ -n "${submod_branch}" -a "${NAME}"=="${submod_name}" ]; then
-                echo "Checkout branch/commit '${submod_branch}' for submodule '${NAME}'"
-                git -C "{{ .folder }}" submodule set-branch --branch ${submod_branch} -- ${MODULE_PATH}
-                git -C "{{ .folder }}/${MODULE_PATH}" checkout -f ${submod_branch}
+    if [ ${#SUBMODULES_BRANCHES[@]} -eq 0 ]; then
+      # Без кастомных веток — checkout по gitlink родительского коммита.
+      # submodule add -b master перезаписывает gitlink и ломает сборку (drbd-headers).
+      git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+          while read -r KEY MODULE_PATH
+          do
+              if [ -d "${MODULE_PATH}" ] && [ ! -e "${MODULE_PATH}/.git" ]; then
+                rm -rf "${MODULE_PATH}"
               fi
-            done
-        done
-    # DO NOT do submodule update, or it revert all changes for submodule's branches back :-(
-    # git -C "{{ .folder }}" submodule update --init --recursive
+          done
+      git -C "{{ .folder }}" submodule update --init --recursive
+    else
+      echo "Processing submodules with custom branches: ${SUBMODULES_BRANCHES[@]}"
+      git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+          while read -r KEY MODULE_PATH
+          do
+              # If the module's path exists, remove it.
+              # This is done b/c the module's path is currently
+              # not a valid git repo and adding the submodule will cause an error.
+              [ -d "${MODULE_PATH}" ] && rm -rf "${MODULE_PATH}"
 
-    if ! tmp=$(git diff --name-status HEAD 2>&1) || test -n "$tmp" ; then
-      echo "Auto-commit changes in .gitmodules"
-      git -C "{{ .folder }}" commit -am "Auto-commit changes in .gitmodules"
+              NAME="$(echo "${KEY}" | sed 's/^submodule\.\(.*\)\.path$/\1/')"
+
+              url_key="$(echo "${KEY}" | sed 's/\.path$/.url/')"
+              branch_key="$(echo "${KEY}" | sed 's/\.path$/.branch/')"
+
+              URL="$(git config -f .gitmodules --get "${url_key}")"
+              BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
+
+              git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
+
+              for submod in "${SUBMODULES_BRANCHES[@]}"; do
+                submod_name=${submod%=*}
+                submod_branch=${submod#*=}
+
+                if [ -n "${submod_branch}" -a "${NAME}"=="${submod_name}" ]; then
+                  echo "Checkout branch/commit '${submod_branch}' for submodule '${NAME}'"
+                  git -C "{{ .folder }}" submodule set-branch --branch ${submod_branch} -- ${MODULE_PATH}
+                  git -C "{{ .folder }}/${MODULE_PATH}" checkout -f ${submod_branch}
+                fi
+              done
+          done
+      # DO NOT do submodule update, or it revert all changes for submodule's branches back :-(
+      # git -C "{{ .folder }}" submodule update --init --recursive
+
+      if ! tmp=$(git diff --name-status HEAD 2>&1) || test -n "$tmp" ; then
+        echo "Auto-commit changes in .gitmodules"
+        git -C "{{ .folder }}" commit -am "Auto-commit changes in .gitmodules"
+      fi
     fi
 {{ end }}
 
