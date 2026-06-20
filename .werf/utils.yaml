@@ -192,7 +192,21 @@
       ls -la "${TARBALL_DIR}" || true
       exit 1
     fi
-    mv "${TARBALL}" "/home/rpmbuilder/RPM/SOURCES/{{ .name }}-{{ .version }}.tar.gz"
+    TARGET="/home/rpmbuilder/RPM/SOURCES/{{ .name }}-{{ .version }}.tar.gz"
+    TARGET_DIR="{{ .name }}-{{ .version }}"
+    TMPDIR=$(mktemp -d)
+    tar -xzf "${TARBALL}" -C "${TMPDIR}"
+    SRCDIR=$(find "${TMPDIR}" -mindepth 1 -maxdepth 1 -type d | head -1)
+    if [ -z "${SRCDIR}" ]; then
+      echo "Tarball has no top-level directory: ${TARBALL}"
+      ls -la "${TMPDIR}" || true
+      exit 1
+    fi
+    if [ "$(basename "${SRCDIR}")" != "${TARGET_DIR}" ]; then
+      mv "${SRCDIR}" "${TMPDIR}/${TARGET_DIR}"
+    fi
+    tar -czf "${TARGET}" -C "${TMPDIR}" "${TARGET_DIR}"
+    rm -rf "${TMPDIR}"
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
