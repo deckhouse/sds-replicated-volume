@@ -192,7 +192,7 @@
       ls -la "${TARBALL_DIR}" || true
       exit 1
     fi
-    mv "${TARBALL}" /home/rpmbuilder/RPM/SOURCES/
+    mv "${TARBALL}" "/home/rpmbuilder/RPM/SOURCES/{{ .name }}-{{ .version }}.tar.gz"
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
