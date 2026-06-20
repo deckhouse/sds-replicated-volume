@@ -1,0 +1,12 @@
+diff --git a/drbd-reactor.spec b/drbd-reactor.spec
+index 3f53501..96d2efa 100644
+--- a/drbd-reactor.spec
++++ b/drbd-reactor.spec
+@@ -26,6 +26,7 @@ Plugins can for example monitor resources or promote DRBD resources.
+ 
+ 
+ %build
++export RUSTFLAGS="-A dangerous_implicit_autorefs"
+ make %{?_smp_mflags}
+ 
+ 
