@@ -20,16 +20,13 @@ config:
     allowEnvVariables:
       - REGISTRY_USER
       - REGISTRY_PASSWORD
+      - VAULT_ADDR
       - WERF_SIGN_KEY
       - WERF_VAULT_AUTH_ROLE
       - WERF_VAULT_AUTH_JWT
-      - VAULT_ROLE
-      - VAULT_ADDR
-      - VAULT_KEY
       - TRANSIT_SECRET_ENGINE_PATH
       - ACTIONS_ID_TOKEN_REQUEST_TOKEN
       - ACTIONS_ID_TOKEN_REQUEST_URL
-      - VAULT_ID_TOKEN
     allowValueIds:
       - GOPROXY
       - SOURCE_REPO
