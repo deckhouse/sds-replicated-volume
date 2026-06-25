@@ -218,3 +218,55 @@ func TestExecuteResizeKnownErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestExecuteCheckMD(t *testing.T) {
+	const (
+		minor      = uint(0)
+		backingDev = "/dev/vg-0/test"
+	)
+
+	tests := []struct {
+		name       string
+		output     string
+		exitCode   int
+		wantExists bool
+		wantErr    bool
+	}{
+		// "No valid meta data found" exits 1 on drbd-utils <= 9.31.0 (main() "!!rv")
+		// and 255 on >= 9.32.0 (main() "rv"). Both must read as "no metadata yet".
+		{name: "no metadata, exit 1", output: "No valid meta data found\n", exitCode: 1, wantExists: false},
+		{name: "no metadata, exit 255", output: "No valid meta data found\n", exitCode: 255, wantExists: false},
+		// Unclean activity log counts as "metadata exists" on either exit code.
+		{name: "unclean, exit 1", output: "Found meta data is \"unclean\", please apply-al first\n", exitCode: 1, wantExists: true},
+		{name: "unclean, exit 255", output: "Found meta data is \"unclean\", please apply-al first\n", exitCode: 255, wantExists: true},
+		// An unrecognized failure must still propagate as an error.
+		{name: "unknown failure", output: "some other error\n", exitCode: 20, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeExec := &fakedrbdutils.Exec{}
+			fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+				Name:         drbdutils.DRBDMetaCommand,
+				Args:         drbdutils.DumpMDArgs(minor, backingDev),
+				ResultOutput: []byte(tt.output),
+				ResultErr:    fakedrbdutils.ExitErr{Code: tt.exitCode},
+			})
+			fakeExec.Setup(t)
+
+			exists, err := drbdutils.ExecuteCheckMD(t.Context(), minor, backingDev)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ExecuteCheckMD() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ExecuteCheckMD() unexpected error: %v", err)
+			}
+			if exists != tt.wantExists {
+				t.Fatalf("ExecuteCheckMD() exists = %v, want %v", exists, tt.wantExists)
+			}
+		})
+	}
+}
