@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-var Events2Args = []string{"events2", "--timestamps"}
+var Events2Args = []string{"events2", "--timestamps", "--statistics"}
 
 type Events2Result interface {
 	_isEvents2Result()
@@ -33,27 +33,63 @@ type Events2Result interface {
 
 type Event struct {
 	Timestamp time.Time
-	// "exists" for an existing object;
-	//
-	// "create", "destroy", and "change" if an object
-	// is created, destroyed, or changed;
-	//
-	// "call" or "response" if an event handler
-	// is called or it returns;
-	//
-	// or "rename" when the name of an object is changed
-	Kind string
-	// "resource", "device", "connection", "peer-device", "path", "helper", or
-	// a dash ("-") to indicate that the current state has been dumped
-	// completely
-	Object string
-	// Identify the object and describe the state that the object is in
-	State map[string]string
+	Kind      EventKind
+	Object    EventObject
+	State     map[string]string
 }
 
 var _ Events2Result = &Event{}
 
 func (*Event) _isEvents2Result() {}
+
+// EventKind represents the verb in an events2 line.
+type EventKind string
+
+const (
+	EventKindExists   EventKind = "exists"
+	EventKindCreate   EventKind = "create"
+	EventKindDestroy  EventKind = "destroy"
+	EventKindChange   EventKind = "change"
+	EventKindCall     EventKind = "call"
+	EventKindResponse EventKind = "response"
+	EventKindRename   EventKind = "rename"
+)
+
+// parseEventKind returns the typed kind or empty string for unrecognized values.
+func parseEventKind(s string) (EventKind, bool) {
+	switch EventKind(s) {
+	case EventKindExists, EventKindCreate, EventKindDestroy, EventKindChange,
+		EventKindCall, EventKindResponse, EventKindRename:
+		return EventKind(s), true
+	default:
+		return "", false
+	}
+}
+
+// EventObject represents the object type in an events2 line.
+type EventObject string
+
+const (
+	EventObjectResource   EventObject = "resource"
+	EventObjectDevice     EventObject = "device"
+	EventObjectConnection EventObject = "connection"
+	EventObjectPeerDevice EventObject = "peer-device"
+	EventObjectPath       EventObject = "path"
+	EventObjectHelper     EventObject = "helper"
+	EventObjectDumpDone   EventObject = "-"
+)
+
+// parseEventObject returns the typed object or empty string for unrecognized values.
+func parseEventObject(s string) (EventObject, bool) {
+	switch EventObject(s) {
+	case EventObjectResource, EventObjectDevice, EventObjectConnection,
+		EventObjectPeerDevice, EventObjectPath, EventObjectHelper,
+		EventObjectDumpDone:
+		return EventObject(s), true
+	default:
+		return "", false
+	}
+}
 
 type UnparsedEvent struct {
 	RawEventLine string
@@ -130,8 +166,21 @@ func parseLine(line string) Events2Result {
 		}
 	}
 
-	kind := fields[1]
-	object := fields[2]
+	kind, kindOk := parseEventKind(fields[1])
+	if !kindOk {
+		return &UnparsedEvent{
+			RawEventLine: line,
+			Err:          fmt.Errorf("unrecognized event kind %q", fields[1]),
+		}
+	}
+
+	object, objectOk := parseEventObject(fields[2])
+	if !objectOk {
+		return &UnparsedEvent{
+			RawEventLine: line,
+			Err:          fmt.Errorf("unrecognized event object %q", fields[2]),
+		}
+	}
 
 	state := make(map[string]string)
 	for _, kv := range fields[3:] {

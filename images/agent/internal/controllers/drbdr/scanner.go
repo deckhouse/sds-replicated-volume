@@ -34,20 +34,24 @@ const (
 
 // Scanner listens for DRBD events via drbdutils events2 and triggers
 // reconciliation of DRBDResource objects by sending events to the controller.
-// It also maintains a DRBDPortCache with port information from path events.
+// It maintains a DRBDPortCache with port information from path events and
+// a DRBDStateStore with full runtime state for reconciler reads.
 type Scanner struct {
-	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
-	portCache *DRBDPortCache
+	requestCh  chan<- event.TypedGenericEvent[DRBDReconcileRequest]
+	portCache  *DRBDPortCache
+	stateStore *DRBDStateStore
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
 	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest],
 	portCache *DRBDPortCache,
+	stateStore *DRBDStateStore,
 ) *Scanner {
 	return &Scanner{
-		requestCh: requestCh,
-		portCache: portCache,
+		requestCh:  requestCh,
+		portCache:  portCache,
+		stateStore: stateStore,
 	}
 }
 
@@ -92,10 +96,12 @@ func (s *Scanner) Start(ctx context.Context) error {
 // Returns error if the loop terminates unexpectedly.
 func (s *Scanner) runEventsLoop(ctx context.Context) error {
 	s.portCache.BeginDump()
+	s.stateStore.BeginDump()
 	dumpCompleted := false
 	defer func() {
 		if !dumpCompleted {
 			s.portCache.AbortDump()
+			s.stateStore.AbortDump()
 		}
 	}()
 
@@ -122,8 +128,9 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 			logger.V(1).Info("DRBD event received", "kind", tev.Kind, "object", tev.Object, "state", tev.State)
 
 			// Check for "exists -" which indicates initial state dump is complete
-			if !online && tev.Kind == "exists" && tev.Object == "-" {
+			if !online && tev.Kind == drbdutils.EventKindExists && tev.Object == drbdutils.EventObjectDumpDone {
 				s.portCache.EndDump()
+				s.stateStore.EndDump()
 				dumpCompleted = true
 				online = true
 				logger.Info("DRBD events online", "pendingResources", len(pending))
@@ -133,6 +140,10 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 				}
 				pending = nil // Free memory
 				continue
+			}
+
+			if err := s.stateStore.ApplyEvent(tev); err != nil {
+				logger.Error(err, "Failed to apply event to state store", "kind", tev.Kind, "object", tev.Object)
 			}
 
 			// Process "name" field (present in most events)
@@ -145,14 +156,14 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 			s.updatePortCache(tev, drbdName)
 
 			// For rename events, also process "new_name"
-			if tev.Kind == "rename" {
+			if tev.Kind == drbdutils.EventKindRename {
 				if newName, ok := tev.State["new_name"]; ok {
 					processName(newName)
 				}
 			}
 
 		case *drbdutils.UnparsedEvent:
-			logger.Info("Unparsed event", "error", tev.Err, "line", tev.RawEventLine)
+			logger.Error(tev.Err, "Unparsed DRBD event", "line", tev.RawEventLine)
 		}
 	}
 
@@ -166,7 +177,7 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 // updatePortCache updates the DRBDPortCache based on path and resource events.
 func (s *Scanner) updatePortCache(ev *drbdutils.Event, drbdName string) {
 	switch ev.Object {
-	case "path":
+	case drbdutils.EventObjectPath:
 		local, ok := ev.State["local"]
 		if !ok {
 			return
@@ -176,13 +187,13 @@ func (s *Scanner) updatePortCache(ev *drbdutils.Event, drbdName string) {
 			return
 		}
 		switch ev.Kind {
-		case "exists", "create":
+		case drbdutils.EventKindExists, drbdutils.EventKindCreate:
 			s.portCache.Add(drbdName, ip, port)
-		case "destroy":
+		case drbdutils.EventKindDestroy:
 			s.portCache.Remove(drbdName, ip, port)
 		}
-	case "resource":
-		if ev.Kind == "destroy" {
+	case drbdutils.EventObjectResource:
+		if ev.Kind == drbdutils.EventKindDestroy {
 			s.portCache.RemoveResource(drbdName)
 		}
 	}
