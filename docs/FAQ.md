@@ -19,6 +19,32 @@ Overprovisioning in LVMThin should be used with caution, monitoring the availabi
 In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
 {{< /alert >}}
 
+## Supported disk configurations and performance
+
+### Supported disk types
+
+HDD — suitable for capacity-oriented workloads with moderate load.  
+SSD and NVMe — fully supported and recommended for high-performance workloads (databases, high-IOPS virtual machines, all-flash configurations).  
+The LINSTOR/DRBD architecture allows efficient use of SSD/NVMe block devices.
+
+TRIM/Discard support  
+TRIM operations are passed transparently through DRBD (supported since DRBD 8.4.3). If the underlying disk (SSD/NVMe) supports TRIM, the feature works automatically — this speeds up initial synchronization, formatting, and general SSD maintenance.
+
+### Performance requirements
+
+For storage disks, performance depends on disk type, network, and workload.  
+Recommendations for heavy workloads: SSD/NVMe with thousands of IOPS + 10+ Gbps network with latency <5 ms (ideally <1 ms). With NVMe, the network must match disk capabilities; otherwise it becomes the bottleneck.  
+For all-flash configurations, the general recommendation for aggregate network throughput is on the order of 25–100 GbE — depending on disk workload.
+
+### Additional recommendations
+
+Avoid hardware RAID for disks used in the storage pool — prefer JBOD or direct disk access.  
+For capacity-oriented workloads — LVM + HDD mode.  
+For performance-oriented workloads and snapshots — LVMThin + SSD/NVMe (always monitor free space in the thin pool to avoid over-provisioning issues).
+
+There are no architectural limitations for all-flash configurations.
+
+
 ## Which Replication Modes to Use and When?
 
 There are three replication modes in total:
@@ -627,7 +653,7 @@ linstor resource list --faulty
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 
@@ -729,7 +755,7 @@ Note that the module control-plane and its CSI will be unavailable during the mi
      name: sds-replicated-volume
    spec:
      enabled: true
-     version: 1
+     version: 2
    EOF
    ```
 

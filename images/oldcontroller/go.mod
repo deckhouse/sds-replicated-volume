@@ -1,11 +1,12 @@
 module github.com/deckhouse/sds-replicated-volume/images/oldcontroller
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/LINBIT/golinstor v0.49.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
+	github.com/deckhouse/sds-replicated-volume/images/controller v0.0.0-20260610060342-2f35914ebab0
 	github.com/go-logr/logr v1.4.3
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -269,7 +270,7 @@ require (
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 	moul.io/http2curl/v2 v2.3.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
+	sigs.k8s.io/yaml v1.6.0
 )
 
 tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint

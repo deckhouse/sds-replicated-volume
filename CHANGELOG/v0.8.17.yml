@@ -1,0 +1,4 @@
+Changes:
+- CI changes: DistroPackagesProxy and env proxy in werf, improvements to CVE scans
+    (role_name, checkout)
+- Added user-authz cluster roles in templates

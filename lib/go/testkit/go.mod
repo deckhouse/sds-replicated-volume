@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/lib/go/testkit
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1

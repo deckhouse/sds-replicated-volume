@@ -1,6 +1,29 @@
 
 {{- define "alt packages proxy" }}
+# Replace altlinux repos with our proxy
+  {{- if $.DistroPackagesProxy }}
+- sed -i "s|ftp.altlinux.org/pub/distributions/archive|{{ $.DistroPackagesProxy }}/repository/archive-ALT-Linux-APT-Repository|g" /etc/apt/sources.list.d/alt.list
+  {{- end }}
+- export DEBIAN_FRONTEND=noninteractive
+- apt-get update -y
 {{- end }}
 
 {{- define "alpine packages proxy" }}
+# Replace alpine repos with our proxy
+  {{- if $.DistroPackagesProxy }}
+- sed -i 's|https://dl-cdn.alpinelinux.org|http://{{ $.DistroPackagesProxy }}/repository|g' /etc/apk/repositories
+  {{- end }}
+- apk update
+{{- end }}
+
+{{- define "pypi proxy" }}
+  {{- if $.DistroPackagesProxy }}
+- |
+  cat <<"EOD" > /etc/pip.conf
+  [global]
+  index = http://{{ $.DistroPackagesProxy }}/repository/pypi-proxy/pypi
+  index-url = http://{{ $.DistroPackagesProxy }}/repository/pypi-proxy/simple
+  trusted-host = {{ $.DistroPackagesProxy }}
+  EOD
+  {{- end }}
 {{- end }}

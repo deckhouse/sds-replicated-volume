@@ -18,12 +18,18 @@ git:
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
+
 shell:
   setup:
     - apk add --no-cache git
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_CSI" $.Root) }}"
     - mv linstor-csi /
     - chmod +x /linstor-csi

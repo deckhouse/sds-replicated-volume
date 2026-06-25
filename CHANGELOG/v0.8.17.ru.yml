@@ -1,0 +1,3 @@
+Изменения:
+  - Изменения в CI: DistroPackagesProxy и env прокси в werf, доработки CVE-сканов (role_name, checkout)
+  - Добавлены кластерные роли user-authz в шаблонах

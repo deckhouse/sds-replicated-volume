@@ -1,0 +1,3 @@
+Изменения:
+  - Метки из ReplicatedStorageClass теперь пробрасываются в управляемый StorageClass Kubernetes
+  - Обновление базовых образов, Go 1.25.10 и lib-helm 1.71.12

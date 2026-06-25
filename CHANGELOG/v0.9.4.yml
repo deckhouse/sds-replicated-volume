@@ -1,0 +1,4 @@
+Changes:
+- When forwarding labels from ReplicatedStorageClass to StorageClass, labels with
+  specified ignored prefixes are now excluded
+- Updating base images and lib-helm to 1.72.0
