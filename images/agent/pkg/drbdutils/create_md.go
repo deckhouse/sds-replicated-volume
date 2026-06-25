@@ -56,10 +56,16 @@ var DumpMDArgs = func(minor uint, backingDev string) []string {
 	}
 }
 
-// DumpMDKnownErrors matches exit 1 stderr: "No valid meta data found", "unclean", "operation failed".
+// DumpMDKnownErrors classifies drbdmeta dump-md failures by exit code + stderr.
+// drbdmeta exits 1 for these on drbd-utils <= 9.31.0, whose main() returned
+// "!!rv" (normalizing the internal "return -1" to 1), and 255 on >= 9.32.0,
+// whose main() returns "rv" directly (so -1 reaches the shell as 255). Match
+// both exit codes so the probe stays correct whichever way drbd-utils lands.
 var DumpMDKnownErrors = []KnownError{
 	{ExitCode: 1, OutputSubstring: "No valid meta data found", JoinErr: ErrNoValidMetadata},
+	{ExitCode: 255, OutputSubstring: "No valid meta data found", JoinErr: ErrNoValidMetadata},
 	{ExitCode: 1, OutputSubstring: "unclean", JoinErr: ErrUncleanMetadata},
+	{ExitCode: 255, OutputSubstring: "unclean", JoinErr: ErrUncleanMetadata},
 }
 
 // ExecuteCreateMD creates DRBD metadata on a backing device.
