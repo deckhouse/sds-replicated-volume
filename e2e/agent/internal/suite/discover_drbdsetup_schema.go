@@ -162,6 +162,9 @@ func discoverShowSchema(
 		if conn.Net.Protocol == "" {
 			e.Errorf("assert: show connection[%d] net.protocol is empty", i)
 		}
+		if conn.CState == "" {
+			e.Errorf("assert: show connection[%d] _cstate is empty", i)
+		}
 		if len(conn.Paths) == 0 {
 			e.Fatalf("assert: show connection[%d] has no paths", i)
 		}

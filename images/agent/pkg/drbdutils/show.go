@@ -114,11 +114,13 @@ type ShowVolumeDisk struct {
 }
 
 type ShowConnection struct {
-	Paths        []ShowPath             `json:"paths"`
-	IsStandalone bool                   `json:"_is_standalone"`
-	Net          ShowNet                `json:"net"`
-	Volumes      []ShowConnectionVolume `json:"volumes"`
-	PeerNodeID   int                    `json:"_peer_node_id"`
+	Paths []ShowPath `json:"paths"`
+	// CState is the connection state (e.g. "Connected", "StandAlone").
+	// drbd-utils 9.32.0 replaced the boolean "_is_standalone" with "_cstate".
+	CState     string                 `json:"_cstate"`
+	Net        ShowNet                `json:"net"`
+	Volumes    []ShowConnectionVolume `json:"volumes"`
+	PeerNodeID int                    `json:"_peer_node_id"`
 }
 
 type ShowPath struct {
