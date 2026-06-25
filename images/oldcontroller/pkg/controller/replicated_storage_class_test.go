@@ -842,7 +842,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
-		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC, nil)
 
 		equal, _ := controller.CompareStorageClasses(storageClass, storageClass)
 		Expect(equal).To(BeTrue())
@@ -1766,7 +1766,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
-		storageClassResource := controller.GetNewStorageClass(&replicatedSC, true)
+		storageClassResource := controller.GetNewStorageClass(&replicatedSC, true, nil)
 		storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true", controller.StorageClassVirtualizationAnnotationKey: controller.StorageClassVirtualizationAnnotationValue, controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}
 		err := createConfigMap(ctx, cl, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "true"})
 		Expect(err).NotTo(HaveOccurred())

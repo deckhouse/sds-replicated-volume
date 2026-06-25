@@ -30,9 +30,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/config"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 // defaultIgnoredPrefixes mirrors the union of the system list (internal values)

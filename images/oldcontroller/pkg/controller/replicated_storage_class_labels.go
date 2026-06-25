@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/config"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 )
 
 // labelsMatchRSC reports whether the labels of the existing StorageClass match
