@@ -153,7 +153,10 @@ func NewReplicatedStorageClass(
 			log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get UPDATE event for ReplicatedStorageClass %s. Check if it was changed.", e.ObjectNew.GetName()))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Old ReplicatedStorageClass: %+v", e.ObjectOld))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] New ReplicatedStorageClass: %+v", e.ObjectNew))
-			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) || !reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil ||
+				!reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) ||
+				!reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) ||
+				!reflect.DeepEqual(e.ObjectNew.Labels, e.ObjectOld.Labels) {
 				log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass %s was changed. Add it to queue.", e.ObjectNew.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				q.Add(request)
@@ -163,6 +166,40 @@ func NewReplicatedStorageClass(
 	if err != nil {
 		return nil, err
 	}
+
+	// Watch the controller-config Secret so that a ModuleConfig update to
+	// storageClassLabelIgnoredPrefixes re-renders the Secret via Helm and
+	// triggers re-reconciliation of every existing ReplicatedStorageClass without
+	// requiring a controller restart or an unrelated RSC event.
+	err = c.Watch(source.Kind(
+		mgr.GetCache(),
+		&v1.Secret{},
+		handler.TypedEnqueueRequestsFromMapFunc[*v1.Secret, reconcile.Request](
+			func(ctx context.Context, s *v1.Secret) []reconcile.Request {
+				if s == nil || s.Namespace != cfg.ControllerNamespace || s.Name != cfg.ConfigSecretName {
+					return nil
+				}
+				log.Info(fmt.Sprintf("[SecretWatcher] controller-config Secret %s/%s changed; enqueueing all ReplicatedStorageClasses", s.Namespace, s.Name))
+				rscList := &srv.ReplicatedStorageClassList{}
+				if err := cl.List(ctx, rscList); err != nil {
+					log.Error(err, "[SecretWatcher] unable to list ReplicatedStorageClasses for re-reconcile after config Secret change")
+					return nil
+				}
+				reqs := make([]reconcile.Request, 0, len(rscList.Items))
+				for _, rsc := range rscList.Items {
+					reqs = append(reqs, reconcile.Request{
+						NamespacedName: types.NamespacedName{Namespace: rsc.Namespace, Name: rsc.Name},
+					})
+				}
+				return reqs
+			},
+		),
+	))
+	if err != nil {
+		log.Error(err, "[RunReplicatedStorageClassController] unable to watch the controller-config Secret")
+		return nil, err
+	}
+
 	return c, err
 }
 
@@ -256,6 +293,12 @@ func ReconcileReplicatedStorageClass(
 	log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass with name: " +
 		replicatedSC.Name + " is valid")
 
+	ignoredLabelPrefixes, err := getStorageClassLabelIgnoredPrefixes(ctx, cl, cfg.ControllerNamespace, cfg.ConfigSecretName)
+	if err != nil {
+		return true, fmt.Errorf("unable to load storage class label ignored prefixes from secret %s/%s: %w",
+			cfg.ControllerNamespace, cfg.ConfigSecretName, err)
+	}
+
 	log.Trace("[ReconcileReplicatedStorageClass] Check if virtualization module is enabled and if " +
 		"the ReplicatedStorageClass has VolumeAccess set to Local")
 	var virtualizationEnabled bool
@@ -270,7 +313,7 @@ func ReconcileReplicatedStorageClass(
 			"to Local and virtualization module is %t", virtualizationEnabled))
 	}
 
-	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled)
+	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled, ignoredLabelPrefixes)
 
 	if oldSC == nil {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " +
@@ -283,7 +326,7 @@ func ReconcileReplicatedStorageClass(
 	} else {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: Update " + replicatedSC.Name +
 			" storage class if needed.")
-		shouldRequeue, err := UpdateStorageClassIfNeeded(ctx, cl, log, newSC, oldSC)
+		shouldRequeue, err := UpdateStorageClassIfNeeded(ctx, cl, log, newSC, oldSC, ignoredLabelPrefixes)
 		if err != nil {
 			return shouldRequeue, fmt.Errorf("error updateStorageClassIfNeeded: %w", err)
 		}
@@ -467,7 +510,7 @@ func CreateStorageClass(ctx context.Context, cl client.Client, newStorageClass *
 	return nil
 }
 
-func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
+func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, ignoredLabelPrefixes []string) *storagev1.StorageClass {
 	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
@@ -540,7 +583,6 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 			OwnerReferences: nil,
 			Finalizers:      []string{StorageClassFinalizerName},
 			ManagedFields:   nil,
-			Labels:          map[string]string{ManagedLabelKey: ManagedLabelValue},
 			Annotations:     map[string]string{RSCStorageClassVolumeSnapshotClassAnnotationKey: RSCStorageClassVolumeSnapshotClassAnnotationValue},
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
@@ -549,6 +591,8 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		ReclaimPolicy:        &reclaimPolicy,
 		VolumeBindingMode:    &volumeBindingMode,
 	}
+
+	applyPropagatedLabelsToStorageClass(newStorageClass, replicatedSC.Labels, ignoredLabelPrefixes)
 
 	return newStorageClass
 }
@@ -692,8 +736,8 @@ func recreateStorageClassIfNeeded(
 	return true, false, nil
 }
 
-func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
-	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
+func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool, ignoredLabelPrefixes []string) *storagev1.StorageClass {
+	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC, ignoredLabelPrefixes)
 	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
 	// has  replicatedstorageclass.storage.deckhouse.io/ignore-local: "true".
 	ignoreLocal, _ := strconv.ParseBool(
@@ -712,13 +756,22 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 func DoUpdateStorageClass(
 	newSC *storagev1.StorageClass,
 	oldSC *storagev1.StorageClass,
+	ignoredLabelPrefixes []string,
 ) {
-	// Copy Labels from oldSC to newSC if they do not exist in newSC
+	// Copy labels from oldSC that are not managed from the ReplicatedStorageClass
+	// (e.g. operational labels set by the RSC watcher), but never re-add labels
+	// whose keys match ignoredLabelPrefixes.
 	if len(oldSC.Labels) > 0 {
 		if newSC.Labels == nil {
-			newSC.Labels = maps.Clone(oldSC.Labels)
-		} else {
-			updateMap(newSC.Labels, oldSC.Labels)
+			newSC.Labels = make(map[string]string)
+		}
+		for k, v := range oldSC.Labels {
+			if isIgnoredLabelKey(k, ignoredLabelPrefixes) {
+				continue
+			}
+			if _, exists := newSC.Labels[k]; !exists {
+				newSC.Labels[k] = v
+			}
 		}
 	}
 
@@ -755,8 +808,9 @@ func UpdateStorageClassIfNeeded(
 	log logger.Logger,
 	newSC *storagev1.StorageClass,
 	oldSC *storagev1.StorageClass,
+	ignoredLabelPrefixes []string,
 ) (bool, error) {
-	DoUpdateStorageClass(newSC, oldSC)
+	DoUpdateStorageClass(newSC, oldSC, ignoredLabelPrefixes)
 	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] old StorageClass %+v", oldSC))
 	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] updated StorageClass %+v", newSC))
 

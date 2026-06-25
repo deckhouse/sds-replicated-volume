@@ -1,4 +1,4 @@
-go 1.25.9
+go 1.25.10
 
 // The ./e2e/linstor-migrator module is intentionally not listed below: it requires
 // Go >= 1.26.0 (storage-e2e and its go.mod), while the repository currently uses

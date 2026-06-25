@@ -21,5 +21,5 @@
 
 set -euo pipefail
 
-hack/for-each-mod go mod tidy -go=1.25.9
+hack/for-each-mod go mod tidy -go=1.25.10
 

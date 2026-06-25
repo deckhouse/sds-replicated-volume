@@ -2,7 +2,7 @@
 
 Runbook for executing `e2e/agent` against a remote cluster reachable via
 `kubectl`, to verify a local change to `images/agent`. See
-[`TESTCASES.md`](TESTCASES.md) for *what* the suite covers.
+[`TESTCASES.md`](TESTCASES.md) for _what_ the suite covers.
 
 ## Ground rules
 
@@ -64,7 +64,7 @@ Bump `golang:` to match `images/agent/go.mod` and `FROM <module image>@<digest>`
 to a current digest (see "Picking a base-image digest" below). Skeleton:
 
 ```dockerfile
-FROM golang:1.25.9-alpine3.22 AS builder
+FROM golang:1.25.10-alpine3.22 AS builder
 WORKDIR /go/src
 COPY api/        /api/
 COPY lib/go/     /lib/go/
@@ -152,7 +152,7 @@ kubectl -n d8-sds-replicated-volume get controllerrevisions -o json \
 ```
 
 (If Deckhouse has not been scaled down yet, you can instead read the live
-`agent` image *before* the first override — same digest.)
+`agent` image _before_ the first override — same digest.)
 
 Verify the base before committing the change. The image is distroless (no
 `/bin/sh`), so run binaries directly — do not wrap in `sh -c`:

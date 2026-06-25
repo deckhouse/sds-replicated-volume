@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/oldcontroller
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/LINBIT/golinstor v0.49.0
@@ -269,7 +269,7 @@ require (
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 	moul.io/http2curl/v2 v2.3.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
+	sigs.k8s.io/yaml v1.6.0
 )
 
 tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint
