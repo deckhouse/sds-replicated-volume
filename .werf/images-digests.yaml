@@ -13,9 +13,9 @@
 # Images Digest: a files with all image digests to be able to use them in helm templates of a module
 ---
 image: images-digests
-fromImage: builder/alpine
+from: {{ index $.Images "builder/alpine" }}
 import:
-  - image: tools/jq
+  - from: {{ index $.Images "jq" }}
     add: /usr/bin/jq
     to: /usr/bin/jq
     before: setup

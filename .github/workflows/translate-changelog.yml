@@ -2,7 +2,7 @@ name: Translate Changelog and Create PR
 
 on:
   push:
-    # Запуск для всех веток при любом push
+    # Run for all branches on any push
 
 jobs:
   translate-and-pr:

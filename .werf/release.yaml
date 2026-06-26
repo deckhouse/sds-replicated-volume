@@ -1,7 +1,7 @@
 # Release image, stored in your.registry.io/modules/<module-name>/release:<semver>
 ---
 image: release-channel-version-artifact
-fromImage: builder/alpine
+from: {{ index $.Images "builder/alpine" }}
 final: false
 git:
 - add: /
@@ -13,7 +13,7 @@ git:
     setup:
     - '**/*'
 import:
-  - image: tools/yq
+  - from: {{ index $.Images "yq" }}
     add: /usr/bin/yq
     to: /usr/bin/yq
     before: install
@@ -24,7 +24,7 @@ shell:
     - cp -f CHANGELOG/{{ env "MODULES_MODULE_TAG" "local" }}.yml /changelog.yaml || touch /changelog.yaml
 ---
 image: release-channel-version
-fromImage: builder/scratch
+from: {{ index $.Images "builder/scratch" }}
 import:
   - image: release-channel-version-artifact
     add: /

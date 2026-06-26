@@ -17,7 +17,7 @@
 ---
 # build linstor-server packages
 image: {{ $.ImageName }}-server-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -87,7 +87,7 @@ shell:
     # linstor-satellite-1.24.2-1.noarch.rpm
 ---
 image: {{ $.ImageName }}-client-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -137,7 +137,13 @@ shell:
 
     # patch sdist to do not replace - with _ or RPM build will fail
     # - sed -i "s/canonicalize_name(name).replace('-', '_')/canonicalize_name(name)/g" /usr/lib64/python3/site-packages/setuptools/_distutils/dist.py
-    - sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" /usr/lib64/python3/site-packages/setuptools/_core_metadata.py
+    - |
+      for f in /usr/lib64/python3/site-packages/setuptools/_core_metadata.py \
+               /usr/lib/python3/site-packages/setuptools/_core_metadata.py; do
+        if [ -f "${f}" ]; then
+          sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" "${f}"
+        fi
+      done
 
     # make .rpm package
     # make only spec before building RPM
@@ -187,7 +193,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-k8s-await-election-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 git:
@@ -206,7 +212,7 @@ git:
         - "**/*"
 shell:
   setup:
-    - apk add --no-cache git make
+    - pm install git make
     - cd /usr/local/go/k8s-await-election
     # apply git patches to upstream's code
     - |
@@ -219,7 +225,7 @@ shell:
 ---
 # main image based on AltLinux for now because we need bash and other tools
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 git:
   - add: /images/{{ $.ImageName }}
     to: /utils

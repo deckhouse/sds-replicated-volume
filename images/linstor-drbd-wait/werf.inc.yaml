@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-src-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -21,7 +21,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 import:
@@ -47,7 +47,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALT }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 shell:
   beforeInstall:
@@ -68,7 +68,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ $.Root.BASE_SCRATCH }}
+from: {{ index $.Images "builder/scratch" }}
 final: false
 import:
   - image: {{ $.ImageName }}-distroless-artifact
