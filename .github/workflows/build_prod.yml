@@ -11,7 +11,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v1.0.51"
+  BASE_IMAGES_VERSION: "v1.1.10"
 on:
   push:
     tags:
