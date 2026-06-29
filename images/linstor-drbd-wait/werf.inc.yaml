@@ -79,7 +79,7 @@ import:
 
 ---
 image: {{ $.ImageName }}
-fromImage: base/distroless
+from: {{ index $.Images "base/distroless" }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
