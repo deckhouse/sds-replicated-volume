@@ -78,11 +78,12 @@ type Framework struct {
 	prefix       string // "e2e-{runID}"
 	controlPlane ControlPlane
 
-	nsCache      map[string]*TestNS
-	rscCache     map[rscCacheKey]*TestRSC
-	podCacheMu   sync.Mutex
-	podNameCache map[podCacheKey]string
-	specCounters map[any]int
+	nsCache            map[string]*TestNS
+	rscCache           map[rscCacheKey]*TestRSC
+	podCacheMu         sync.Mutex
+	podNameCache       map[podCacheKey]string
+	nsenterBinResolved string // protected by podCacheMu; resolved lazily by resolveNsenterBin
+	specCounters       map[any]int
 }
 
 // Setup creates an empty Framework and registers Ginkgo lifecycle hooks.
