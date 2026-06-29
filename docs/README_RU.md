@@ -299,6 +299,7 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
+
 ```
 
 - Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
