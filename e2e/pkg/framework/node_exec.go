@@ -71,10 +71,16 @@ var (
 	}
 )
 
-const (
-	nsenterBin = "/opt/deckhouse/sds/bin/nsenter.static"
-	lvmBin     = "/opt/deckhouse/sds/bin/lvm.static"
-)
+// nsenterCandidates lists the host-entry binary paths that sds-node-configurator
+// has shipped inside its pod. Newer builds dropped the ".static" suffix
+// (nsenter.static -> nsenter); resolveNsenterBin probes these in order so the
+// suite works against either node-configurator version.
+var nsenterCandidates = []string{
+	"/opt/deckhouse/sds/bin/nsenter",
+	"/opt/deckhouse/sds/bin/nsenter.static",
+}
+
+const lvmBin = "/opt/deckhouse/sds/bin/lvm.static"
 
 // Drbdsetup executes `drbdsetup <args>` inside the agent pod running on
 // nodeName and returns the result. Transport errors are returned as err;
@@ -89,9 +95,42 @@ func (f *Framework) Drbdsetup(ctx context.Context, nodeName string, args ...stri
 // inside the sds-node-configurator pod and returns the result.
 // Goroutine-safe.
 func (f *Framework) LVM(ctx context.Context, nodeName string, args ...string) (ExecResult, error) {
-	cmd := []string{nsenterBin, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", lvmBin}
+	nsenter, err := f.resolveNsenterBin(ctx, nodeName)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	cmd := []string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", lvmBin}
 	cmd = append(cmd, args...)
 	return f.execOnNode(ctx, sncTarget, nodeName, cmd, "lvm "+strings.Join(args, " "))
+}
+
+// resolveNsenterBin returns the nsenter binary path present in the
+// sds-node-configurator pod on nodeName, caching the result. It probes
+// nsenterCandidates in order — a binary that runs (any exit code) is treated
+// as present, while a transport error means it is absent — so the suite
+// tolerates node-configurator builds with or without the ".static" suffix.
+// Goroutine-safe (uses podCacheMu).
+func (f *Framework) resolveNsenterBin(ctx context.Context, nodeName string) (string, error) {
+	f.podCacheMu.Lock()
+	cached := f.nsenterBinResolved
+	f.podCacheMu.Unlock()
+	if cached != "" {
+		return cached, nil
+	}
+
+	var lastErr error
+	for _, cand := range nsenterCandidates {
+		_, err := f.execOnNode(ctx, sncTarget, nodeName, []string{cand, "--version"}, "probe "+cand)
+		if err == nil {
+			f.podCacheMu.Lock()
+			f.nsenterBinResolved = cand
+			f.podCacheMu.Unlock()
+			return cand, nil
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("no nsenter binary found in %s pod on node %q (tried %v): %w",
+		sncTarget.container, nodeName, nsenterCandidates, lastErr)
 }
 
 // execOnNode discovers the pod matching target on nodeName, executes cmd
