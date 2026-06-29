@@ -1,7 +1,7 @@
 ---
 # build drbd-utils .deb packages
 image: {{ $.ImageName }}-utils-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -109,7 +109,7 @@ shell:
 ---
 # build drbd-reactor .rpm packages
 image: {{ $.ImageName }}-reactor-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
@@ -166,7 +166,7 @@ shell:
 ---
 # main almost distroless image
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 import:
   - image: {{ $.ImageName }}-utils-artifact
     add: /

@@ -1,0 +1,211 @@
+x-extend:
+  schema: config-values.yaml
+type: object
+properties:
+  internal:
+    type: object
+    default: {}
+    x-required-for-helm:
+    - httpsClientCert
+    - httpsControllerCert
+    - sslControllerCert
+    - sslNodeCert
+    - drbdVersion
+    - dataNodesChecksum
+    - controlPlaneMigration
+    - newControlPlane
+    properties:
+      drbdVersion:
+        type: string
+        default: "9.2.18-flant.5"
+      dataNodesChecksum:
+        type: string
+        default: "default_data_nodes_checksum"
+      controlPlaneMigration:
+        type: string
+        default: "not_started"
+      newControlPlane:
+        type: boolean
+        default: false
+        description: |
+          Internal value determining whether to use the new control plane.
+      masterPassphrase:
+        type: string
+      csiMigrationHook:
+        type: object
+        default: {}
+        properties:
+          completed:
+            type: boolean
+            default: false
+          affectedPVsHash:
+            type: string
+            default: ""
+            description: |
+              Hash of affected PVs. Used to determine if bashible migration step should be forced to run.
+      httpsClientCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      httpsControllerCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      sslControllerCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      sslNodeCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      spaasCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      webhookCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      customWebhookCert:
+        type: object
+        default: {}
+        x-required-for-helm:
+        - crt
+        - key
+        - ca
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          ca:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      storageClassLabelIgnoredPrefixesSystem:
+        type: array
+        description: |
+          System list of label-key prefixes that MUST NOT be propagated from
+          a ReplicatedStorageClass to the managed Kubernetes StorageClass.
+          This list is hardcoded and cannot be changed by users.
+        default:
+          - app.kubernetes.io/managed-by
+          - app.kubernetes.io/instance
+          - kubernetes.io/
+          - k8s.io/
+          - storage.deckhouse.io/managed-by
+        items:
+          type: string
+      pvcRwxAllowedUsernames:
+        type: array
+        default: ["system:serviceaccount:d8-virtualization:d8-cdi-sa", "system:serviceaccount:d8-virtualization:cdi-sa", "system:serviceaccount:d8-virtualization:virtualization-controller", "system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller"]
+        items:
+          type: string
+        description: |
+          Allowed admission usernames that can create RWX PVCs using StorageClasses
+          with provisioner `replicated.csi.storage.deckhouse.io`.
+      pvcRwxAllowedGroups:
+        type: array
+        default: []
+        items:
+          type: string
+        description: |
+          Allowed admission groups that can create RWX PVCs using StorageClasses
+          with provisioner `replicated.csi.storage.deckhouse.io`.
+      customSchedulerExtenderCert:
+         type: object
+         default: {}
+         x-required-for-helm:
+           - crt
+           - key
+           - ca
+         properties:
+           crt:
+             type: string
+             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+           key:
+             type: string
+             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+           ca:
+             type: string
+             x-examples: ["YjY0ZW5jX3N0cmluZwo="]

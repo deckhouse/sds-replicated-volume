@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-fromImage: builder/alt
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 git:
   - add: /images/{{ $.ImageName }}/scripts
@@ -38,7 +38,7 @@ shell:
     - rm -rf .git
 ---
 image: {{ $.ImageName }}
-fromImage: base/distroless
+from: {{ index $.Images "builder/distroless" }}
 
 import:
   - image: {{ $.ImageName }}-artifact
