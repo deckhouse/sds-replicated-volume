@@ -804,34 +804,55 @@ DRBD uses the network for data replication. When using NAS, network load will in
 
 ## How to manually trigger the certificate renewal process?
 
-Although the certificate renewal process is automated, manual renewal might still be necessary because it can be performed during a convenient maintenance window when it is acceptable to restart the module's objects. The automated renewal does not restart any objects.
-
-To manually trigger the certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: manualcertrenewal-trigger
-  namespace: d8-sds-replicated-volume
-```
-
-The system will stop all necessary module objects, update the certificates, and then restart them.
-
-You can check the operation status using the following command:
+To check for expiring certificates in the module, inspect the certificate expiration dates stored in the secrets:
 
 ```shell
-kubectl -n d8-sds-replicated-volume get cm manualcertrenewal-trigger -ojsonpath='{.data.step}'
+kubectl -n d8-sds-replicated-volume get secrets | grep 'cert' | grep -v 'webhooks' | awk '{ print "echo "$1" && kubectl -n d8-sds-replicated-volume get secrets "$1" -ojson | jq -r '\''.data.\"ca.crt\"'\'' | base64 -d | openssl x509 -text -noout | grep \"Not After\"" }' | bash
 ```
-  - `Prepared` — health checks have passed successfully, and the downtime window has started.
-  - `TurnedOffAndRenewedCerts` — the system has been stopped and certificates have been renewed.
-  - `TurnedOn` — the system has been restarted.
-  - `Done` — the operation is complete and ready to be repeated.
+
+Example output:
+
+```console
+linstor-client-https-cert
+            Not After : Feb 17 14:16:46 2026 GMT
+linstor-controller-https-cert
+            Not After : Feb 17 14:16:46 2026 GMT
+linstor-controller-ssl-cert
+            Not After : Feb 17 14:16:46 2026 GMT
+linstor-node-ssl-cert
+            Not After : Feb 17 14:16:46 2026 GMT
+linstor-scheduler-admission-certs
+            Not After : Oct 29 18:14:58 2025 GMT
+linstor-scheduler-extender-https-certs
+            Not After : Feb 17 14:16:50 2026 GMT
+spaas-certs
+            Not After : Oct 21 10:38:05 2025 GMT
+```
+
+If any of them is close to expiration, delete it:
+
+```shell
+kubectl -n d8-sds-replicated-volume delete secret <secret names>
+```
+
+Restart Deckhouse:
+
+```shell
+kubectl -n d8-system rollout restart deployment deckhouse
+```
+
+Wait until it becomes `Ready` and the queue is empty:
+
+```shell
+kubectl -n d8-system exec -ti deployments/deckhouse -- deckhouse-controller queue main
+# Queue 'main': length 0, status: 'waiting for task 16s'
+```
+
+Restart all module pods:
+
+```shell
+kubectl -n d8-sds-replicated-volume rollout restart deployment
+kubectl -n d8-sds-replicated-volume rollout restart daemonset
+```
 
 Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `D8LinstorCertificateExpiringIn30d` alert).
-
-To repeat the operation, simply remove the label from the trigger using the following command:
-
-```shell
-kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
-```
