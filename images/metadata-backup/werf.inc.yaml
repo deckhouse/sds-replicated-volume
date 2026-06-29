@@ -1,6 +1,6 @@
 ---
 image: metadata-backup
-fromImage: builder/alt
+from: {{ index $.Images "builder/golang-alt" }}
 git:
   - add: /images/metadata-backup/backup.py
     to: /backup.py

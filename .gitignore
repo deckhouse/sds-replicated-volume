@@ -39,6 +39,7 @@ hack.sh
 .secret
 images/**/Makefile
 .env.json
+base_images.yml
 
 # local caches (Cursor/Go/direnv, etc.)
 .cache/
@@ -48,4 +49,3 @@ images/**/Makefile
 # test data
 images/agent/pkg/drbdconf/testdata/out/
 test*.log
-.env.json

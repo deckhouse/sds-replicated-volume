@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/saas
@@ -27,7 +27,7 @@ shell:
 ---
 image: {{ $.ImageName }}
 # we must base on ALTLinux because SPAAS generates kernel patches for DRBD. So we need same kernel as in DRBD image and some build tools
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ index $.Images "builder/golang-alt" }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact

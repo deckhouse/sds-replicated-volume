@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-fromImage: builder/alpine
+from: {{ index $.Images "builder/alpine" }}
 final: false
 
 git:
@@ -15,7 +15,7 @@ shell:
     - mv semver-tool-{{ include "get_oss_version_by_id" (list "SEMVER_TOOL" $.Root) }}/src/semver /d8-semver
 ---
 image: {{ $.ImageName }}
-fromImage: base/distroless
+from: {{ index $.Images "builder/distroless" }}
 
 import:
   - image: {{ $.ImageName }}-artifact

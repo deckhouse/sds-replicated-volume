@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 git:

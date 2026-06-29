@@ -2,7 +2,15 @@
 {{- $Root := . }}
 
 {{- range $path, $content := $ImagesBuildFiles  }}
-  {{- $ctx := dict "ImageName" ($path | split "/")._1 "Root" $Root "Versions" $Root.VERSIONS "Files" $Root.Files "SOURCE_REPO" $Root.SOURCE_REPO "GOPROXY" $Root.GOPROXY "DistroPackagesProxy" $Root.DistroPackagesProxy }}
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "ImageName" ($path | split "/")._1 }}
+  {{- $_ := set $ctx "Images" $.Images }}
+  {{- $_ := set $ctx "Root" $Root }}
+  {{- $_ := set $ctx "SOURCE_REPO" $Root.SOURCE_REPO }}
+  {{- $_ := set $ctx "GOPROXY" $Root.GOPROXY }}
+  {{- $_ := set $ctx "DistroPackagesProxy" $Root.DistroPackagesProxy }}
+  {{- $_ := set $ctx "Versions" $Root.VERSIONS }}
+  {{- $_ := set $ctx "Files" $Root.Files }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}
