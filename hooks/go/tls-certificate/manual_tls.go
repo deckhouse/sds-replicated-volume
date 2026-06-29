@@ -140,7 +140,6 @@ func GenerateNewSelfSignedTLSGroup(
 	input *pkg.HookInput,
 	confGroup GenSelfSignedTLSGroupHookConf,
 ) ([]*certificate.Certificate, error) {
-
 	var res []*certificate.Certificate
 
 	caConf := confGroup[0]

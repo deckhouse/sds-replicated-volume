@@ -1,0 +1,25 @@
+go 1.25.10
+
+// The ./e2e/linstor-migrator module is intentionally not listed below: it requires
+// Go >= 1.26.0 (storage-e2e and its go.mod), while the repository currently uses
+// Go 1.25.x for builds and CI. Add ./e2e/linstor-migrator here once go.work is
+// upgraded to Go 1.26+ consistently across the repo.
+
+use (
+	./api
+	./e2e/agent
+	./e2e/full
+	./e2e/pkg/debug
+	./e2e/pkg/framework
+	./hooks/go
+	./images/agent
+	./images/controller
+	./images/csi-driver
+	./images/linstor-drbd-wait
+	./images/linstor-migrator
+	./images/megatest
+	./images/oldcontroller
+	./images/webhooks
+	./lib/go/common
+	./lib/go/testkit
+)

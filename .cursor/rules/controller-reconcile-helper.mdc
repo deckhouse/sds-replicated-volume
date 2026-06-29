@@ -1,0 +1,218 @@
+---
+description: Common rules for ReconcileHelper functions/methods in reconciler.go: naming-by-category, signatures, determinism, aliasing, and I/O boundaries. Apply when implementing or reviewing reconcile helper functions in reconciler*.go, and when deciding helper categories or allowed side effects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/**/reconciler*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+# ReconcileHelper functions/methods
+
+This document defines naming and contracts for **ReconcileHelper** functions/methods.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
+- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*InSync*`, `apply*`, `ensure*`, `get*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
+- Every ReconcileHelper has explicit dependencies: if it takes `ctx`, it is first; if it operates on a Kubernetes object, `obj` is the first arg after `ctx`; all other inputs come **after `obj`**.
+- ReconcileHelpers are **deterministic**: never rely on map iteration order; sort when order matters; avoid “equivalent but different” outputs/states that cause patch churn.
+- ReconcileHelpers treat inputs as **read-only** except for the explicitly allowed mutation target(s); never mutate through map/slice aliasing — **clone before editing**.
+- **I/O** is **explicitly bounded by category**:
+  - **Compute / Construction / IsInSync / Apply / Ensure**: strictly **non-I/O**.
+  - **Get**: allowed **I/O**, but **at most one API read** per helper (`Get` or `List`).
+  - **Create / Delete / Patch**: allowed **I/O**, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
+
+---
+
+## Terminology
+
+- **Reconcile methods**: the controller-runtime `Reconcile(...)` method and any other function/method whose name matches `reconcile*` / `Reconcile*` (see `controller-file-structure.mdc`).
+- **ReconcileHelper functions/methods**: any helper function/method used by **Reconcile methods**, implemented in `reconciler.go`, whose name matches one of the **ReconcileHelper categories** below.
+  - When referring to *any* helper from these categories, use **ReconcileHelper**.
+  - When referring to a *specific kind* of helper, use the corresponding category name below.
+
+### ReconcileHelper categories
+
+These categories are naming categories/patterns (see also `controller-file-structure.mdc`):
+
+- **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`).
+- **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`).
+- **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`).
+- **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`).
+- **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`).
+- **GetReconcileHelper**: `get*` / `Get*` (see `controller-reconcile-helper-get.mdc`).
+- **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`).
+- **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`).
+- **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`).
+
+---
+
+## Scope
+
+This document defines **common** conventions for all **ReconcileHelper categories**.
+
+Category-specific conventions are defined in dedicated documents referenced in **“ReconcileHelper categories”** above.
+
+---
+
+## Any ReconcileHelper
+
+### Signatures
+
+- If a **ReconcileHelper** creates a **phase** or writes logs, it MUST accept `ctx context.Context`.
+- A function operating on an **object** MUST take a pointer to the root object as:
+  - the **first argument** if the function does not accept `ctx`;
+  - the **first argument after `ctx`** if the function accepts `ctx`.
+  (root object = the full API object (`*<Kind>`), not `Spec`/`Status` or other sub-structs)
+- Additional inputs (computed flags, outputs of previous compute steps) MUST appear **after `obj`** to keep dependencies explicit.
+- If a **ReconcileHelper** returns **EnsureOutcome** (in code: `flow.EnsureOutcome`), it MUST be the **last return value**.
+  - It SHOULD be the only return value for convenience, unless additional return values are clearly justified.
+
+### Flow phase scopes
+
+- **Phase scope** usage (`flow.BeginEnsure` / `flow.BeginStep`) is **strictly limited**:
+  - **All `ensure*`**: MUST create an **ensure phase scope**.
+  - **Large `compute*`**: MAY create a **step phase scope** **only when it improves structure or diagnostics**.
+  - **All other Helper categories** (`apply*`, `is*InSync*`, `get*`, `create*`, `delete*`, `patch*`) MUST NOT create **phase scopes**.
+- If a helper uses a **phase scope**, it MUST follow `controller-reconciliation-flow.mdc` (one scope per function; scope on first line; no scopes inside loops).
+
+### Visibility and receivers
+
+ - **ReconcileHelpers** SHOULD be unexported (private) by default. Export a **ReconcileHelper** only with an explicit, documented reason.
+ - **ReconcileHelpers** SHOULD be plain functions when they do not need any data from `Reconciler`.
+  - If a **ReconcileHelper** needs data from `Reconciler`, it SHOULD be a method on `Reconciler`.
+
+### Naming
+
+- If a **ReconcileHelper** name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`):
+  - when `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`);
+  - otherwise, `<Kind>` MAY be either:
+    - a short, codebase-established name (preferred in examples), or
+    - the full kind name.
+- If a short kind name is used, it MUST be an established name in this codebase (do not invent new abbreviations ad-hoc).
+  - Examples (illustrative): `createSKN(...)` (or `createSomeKindName(...)`), `patchSKN(...)` (or `patchSomeKindName(...)`).
+
+### Determinism contract
+
+Any **ReconcileHelper** MUST be **deterministic** given its explicit inputs and allowed **mutation target**s / **I/O** boundaries.
+
+In particular:
+- Never rely on map iteration order: if output order matters, MUST sort it.
+- If you build ordered slices from maps/sets (finalizers/ownerRefs/conditions/etc.), MUST make ordering stable (`slices.Sort`, sort by key, etc.).
+- Avoid producing “equivalent but different” object states or intermediate representations across runs (e.g., writing the same elements in different order).
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+### Read-only contract
+
+Any **ReconcileHelper** MUST treat all **read-only inputs** except explicitly allowed **mutation target**s as read-only.
+
+In particular:
+- It MUST NOT mutate inputs other than the allowed **mutation target**(s).
+- It MUST NOT perform in-place modifications through aliases to **read-only inputs**.
+
+**Important Go aliasing rule (MUST):**
+- `map` / `[]T` values are reference-like. If you copy them from a read-only input and then mutate them, you may be mutating the original input through aliasing.
+- Therefore, if you need to modify a map/slice derived from a read-only input, you MUST clone/copy it first.
+
+Examples (illustrative):
+
+✅ GOOD: clone before normalizing/editing (derived from `obj`)
+```go
+labels := maps.Clone(obj.GetLabels())
+labels["some/ephemeral"] = "" // edit on a clone
+```
+
+❌ BAD: mutates input through alias
+```go
+labels := obj.GetLabels()
+labels["some/ephemeral"] = "" // mutates obj
+```
+
+✅ GOOD: clone slice before editing
+```go
+in := obj.Spec.SomeSlice
+out := slices.Clone(in) // or append([]T(nil), in...)
+out = append(out, "new")
+```
+
+✅ GOOD: clone desired map before setting on `obj`
+```go
+labels := maps.Clone(desired.Labels)
+obj.SetLabels(labels)
+```
+
+❌ BAD: shares map with desired (and future edits may mutate desired)
+```go
+obj.SetLabels(desired.Labels) // aliasing
+```
+
+Note: the same cloning rule applies to any other read-only inputs (e.g., shared templates/dependencies or patch bases).
+
+### Error handling
+
+- **ReconcileHelpers** SHOULD generally return errors as-is. Do not enrich errors “for the outside world” in helpers.
+- **Hard ban (MUST NOT)**: a **ReconcileHelper** error MUST NOT include **object identity** (e.g. `namespace/name`, UID, object key).
+  - Rationale: **object identity** and action-level context belong to the calling **Reconcile method**, which owns orchestration and **phases**.
+- If a **ReconcileHelper** creates its own local validation error, it MAY include the **problematic field/constraint** (purely local, non-identity) to keep the error actionable.
+- If additional context is needed to disambiguate multiple *different* error sources within the same **Reconcile method**, this is allowed only where the category doc explicitly permits it (notably `compute*` / `ensure*`), and the added context MUST remain local and non-identifying.
+- Do **not** log and also return an error for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
+
+---
+
+## When to create helpers (SHOULD/MUST NOT)
+
+This section is **not** about what helpers are *allowed* to do (see the category docs). This section is about **when extracting a helper is worth it** vs when it is unnecessary indirection.
+
+### General guidance
+
+- Prefer **locality**: keep logic close to its only call site unless extraction clearly improves reuse or readability.
+- Prefer **category purity** over “nice structure”: do not create helpers that *almost* fit a category. If it needs orchestration or mixes domains, keep it in a Reconcile method (or split into multiple helpers in correct categories).
+- Extract when it helps you enforce **determinism** or **domain separation** (main vs status), especially when doing it inline would be error-prone.
+
+### CreateReconcileHelper (`create*`) / PatchReconcileHelper (`patch*`) / DeleteReconcileHelper (`delete*`) (I/O helpers)
+
+- SHOULD create these helpers **only when they have 2+ call sites** (within the same controller package).
+- SHOULD NOT create them “for symmetry” if the helper would only hide a one-off, standard I/O action (even when that action is usually written as a small boilerplate block in Reconcile methods).
+
+### ApplyReconcileHelper (`apply*`) / IsInSyncReconcileHelper (`is*InSync*`) (small pure helpers)
+
+- SHOULD create these helpers only when the logic cannot be expressed as **one obvious action** at the call site.
+  - Examples of “one obvious action” (inline instead of helper): a single `obju.*` call; a single simple assignment; a single `meta` / `metav1` helper call.
+- SHOULD create these helpers when:
+  - the call site would otherwise contain multiple coordinated field writes/comparisons for the same patch domain;
+  - the logic requires deterministic normalization (sorting/canonicalization) that you want to keep consistent between “compute“, “check” and “apply”.
+
+### ComputeReconcileHelper (`compute*`) / EnsureReconcileHelper (`ensure*`) (core of reconciliation logic)
+
+- If reconciliation needs to compute **intended**, observe **actual**, decide **target**, and/or publish a **report**, there SHOULD be at least one explicit step that performs this work as either:
+  - a ComputeReconcileHelper (`computeIntended*`, `computeActual*`, `computeTarget*`, and/or `compute*Report`), or
+  - an EnsureReconcileHelper (`ensure*`) that derives and applies corrections in-place (for a single **patch domain**).
+  The intent is to keep **Reconcile methods** focused on orchestration and to make “where decisions live” reviewable.
+  - Cache-like deterministic components (memoization of derived values) MAY be used inside **ComputeReconcileHelper** / **EnsureReconcileHelper**, but stateful allocators / ID pools (e.g., device minor / ordinal allocation) MUST NOT be hidden inside them (keep the allocation decision explicit in **Reconcile methods** together with persistence as **controller-owned state**).
+
+#### Splitting / nesting guidelines
+
+- SHOULD NOT split trivial logic into **ComputeReconcileHelper** (`compute*`) + **EnsureReconcileHelper** (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
+- MAY create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsInSyncReconcileHelper** (`is*InSync*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
+  - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **target**/**report**-driven pipeline.
+- If an **EnsureReconcileHelper** (`ensure*`) is small and readable, keep it monolithic:
+  - SHOULD NOT extract a separate **ComputeReconcileHelper** (`compute*`) just to compute a couple of booleans or a tiny struct.
+- If an **EnsureReconcileHelper** (`ensure*`) becomes complex:
+  - MAY split it into multiple sub-**EnsureReconcileHelper** (`ensure*`) helpers (same domain; explicit dependencies after `obj`).
+  - MAY extract sub-**ComputeReconcileHelper** (`compute*`) helpers for non-trivial derived values used by **EnsureReconcileHelper**, keeping them pure and **deterministic**.
+- If a **ComputeReconcileHelper** (`compute*`) becomes complex:
+  - MAY split it into smaller **ComputeReconcileHelper** (`compute*`) helpers (pure composition) with explicit data flow via parameters/return values.
+  - SHOULD keep each compute focused on a single artifact (e.g., **intended** normalization, **actual** snapshot shaping, **target** decisions for one domain/artifact, **report** artifacts), rather than a “compute everything” blob.
+
+### ConstructionReconcileHelper (`new*` / `build*` / `make*` / `compose*`)
+
+- SHOULD use **ConstructionReconcileHelpers** to extract pure object/value construction that is:
+  - reused across multiple compute/apply/ensure steps, or
+  - non-trivial enough that inline construction would be error-prone (ordering/canonicalization/aliasing).
+- SHOULD NOT use **ConstructionReconcileHelpers** as a substitute for **ComputeReconcileHelpers** when the output is conceptually **intended**/**actual**/**target**/**report**.
+  Use the `compute*` family for reconciliation pipeline artifacts; use **ConstructionReconcileHelpers** for sub-artifacts and building blocks.

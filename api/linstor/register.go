@@ -56,6 +56,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LayerStorageVolumesList{},
 		&ResourceDefinitions{},
 		&ResourceDefinitionsList{},
+		&LayerResourceIds{},
+		&LayerResourceIdsList{},
+		&LayerDrbdResources{},
+		&LayerDrbdResourcesList{},
+		&NodeNetInterfaces{},
+		&NodeNetInterfacesList{},
+		&NodeStorPool{},
+		&NodeStorPoolList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

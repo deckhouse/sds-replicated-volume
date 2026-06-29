@@ -1,0 +1,39 @@
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: control-plane-migrator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 6 }}
+    spec:
+      serviceAccountName: control-plane-migrator
+      restartPolicy: Never
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node") | nindent 6 }}
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
+      containers:
+      - name: migrator
+        image: {{ include "helm_lib_module_image" (list . "linstorMigrator") }}
+        imagePullPolicy: IfNotPresent
+        args:
+          - --log-level
+          - debug
+        volumeMounts:
+          - name: deckhouse-tmp
+            mountPath: /opt/deckhouse/tmp
+      volumes:
+        - name: deckhouse-tmp
+          hostPath:
+            path: /opt/deckhouse/tmp
+            type: Directory
+{{- end }}
+{{- end }}

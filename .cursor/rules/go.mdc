@@ -1,0 +1,7 @@
+---
+description: Go formatting requirement: run gofmt/go fmt on modified Go files. Apply when editing Go code, and when deciding how to format/structure Go changes. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+alwaysApply: true
+---
+
+- Formatting (MUST):
+  - After making changes to Go code, run `gofmt` (or `go fmt`) on the modified files before finalizing the change.

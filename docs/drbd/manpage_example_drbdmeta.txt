@@ -1,0 +1,125 @@
+DRBDMETA(8)                                                                                      System Administration                                                                                     DRBDMETA(8)
+
+NAME
+       drbdmeta - Manipulate the DRBD on-disk metadata
+
+SYNOPSIS
+
+       drbdmeta [--force] [--ignore-sanity-checks] {device} {v06 minor | v07 meta_dev index | v08 meta_dev index | v09 meta_dev index} {command} [cmd args...]
+
+DESCRIPTION
+       The drbdmeta utility is used for creating, displaying, and modifying DRBD's on-disk metadata. Users usually interact with the drbdadm utility, which provides a more high-level interface to DRBD than
+       drbdmeta. (See drbdadm's --dry-run option to see how drbdadm uses drbdmeta.)
+
+       This utility can only be used on devices which are not currently in use by the kernel.
+
+       The first argument (device) specifies the drbd device associated with a volume, or “-” if no device is associated with that volume. If the drbd device is specified, the drbdmeta utility makes sure that the
+       drbd device does not currently have a volume attached to prevent meta-data of an active volume from being destroyed.
+
+       The second argument specifies the metadata version to use (v06, v07, v08, v09). In most metadata versions, the third argument (meta_dev) specifies the device which contains the metadata; this argument can be
+       the same as device. The fourth argument (index) can be one of the keywords internal (for internal metadata), flex-internal (in v07 for variable-sized metadata; v07 otherwise defaults to fixed-size internal
+       metadata), flex-external (for variable-sized external metadata), or a numeric matadata index (for fixed-size external metadata). See the meta-disk parameter in drbd.conf(5).
+
+OPTIONS
+       --force
+
+           Assume yes as the answer to all questions drbdmeta would ask.
+
+       --ignore-sanity-checks
+
+           Normally, drbdmeta performs some sanity checks before writing to the metadata device: for example, if the device appears to contain a file system, it refuses to destroy the file system by writing into
+           it. Use this option to ignore these checks.
+
+COMMANDS
+       create-md [--peer-max-bio-size=val] (metadata versions v06, v07, and v08),
+       create-md {number-of-bitmap-slots} [--peer-max-bio-size=val] [--initialize-bitmap={automatic|zeroout|pwrite|skip}] [--al-stripes=val] [--al-stripe-size-kB=val] (metadata version v09)
+       [--bitmap-block-size=val]
+
+           Initialize the metadata. This is necessary before a DRBD resource can be attached. If drbdmeta finds an older version of DRBD metadata on the device, it asks if the format should be converted.
+
+           When drbdadm calls drbdmeta's create-md command for a device, it sets the number-of-bitmap-slots argument to the number of peers in the resource. To reserve additional bitmap slots (which allows to add
+           more peers in the future), call drbdmeta directly instead.
+
+           When a device is used before being connected to its peers the first time, DRBD assumes that peers can only handle 4 KiB requests by default. The --peer-max-bio-size option allows to set more optimistic
+           values; use this if the versions of DRBD that this device will connect to are known. DRBD supports a maximum bio size of 32 KiB since version 8.3.8, of 128 KiB since version 8.3.9, and of 1 MiB since
+           version 8.4.0.
+
+           By default, we explicitly initialize the bitmap area to all zero. With --initialize-bitmap you can chose to only try the fast method (zeroout, try ioctl BLKZEROOUT only), only use explicit pwrite calls,
+           or skip this bitmap initialization phase completely. If you intend to do an initial full sync anyways, you can use skip to leave the bitmap initialization to the kernel. This can make a noticable
+           difference when initializing huge volumes. Default is automatic, which is zeroout with an implicit fallback to pwrite.
+
+           If you want to use more than 6433 activity log extents, or live on top of a spriped RAID, you may specify the number of stripes (--al-stripes, default 1), and the stripe size (--al-stripe-size-kB,
+           default 32). To just use a larger linear on-disk ring-buffer, leave the number of stripes at 1, and increase the size only:
+
+           drbdmeta 0 v08 /dev/vg23/lv42 internal create-md --al-stripe-size 1M
+
+           To avoid a single "spindle" from becoming a bottleneck, increase the number of stripes, to achieve an interleaved layout of the on-disk activity-log transactions. What you give as "stripe-size" should be
+           what is a.k.a. "chunk size" or "granularity" or "strip unit": the minimum skip to the next "spindle".
+
+           drbdmeta 0 v08 /dev/vg23/lv42 internal create-md --al-stripes 7 --al-stripe-size 64
+
+           With the --bitmap-block-size option you can change the change-tracking bitmap's granularity from 4KiB to another value. Allowed values are: 4k, 8k, 16k, 32k, 64k, 128k, 256k, 512k, 1M. The benefit of a
+           larger block size is a reduced bitmap size and a smaller memory footprint for the DRBD volume. The disadvantage is a higher resync volume if the workload writes to the DRBD devices at a finer
+           granularity, since drbd rounds each modified block up to a complete bitmap block for change tracking, and later resync.
+
+       get-gi [--node-id=id]
+
+           Show the data generation identifiers for a device on a particular connection. DRBD version 9.0.0 and beyond support multiple peers; use the node-id option to define which peer's data generation
+           identifiers to show.
+
+       show-gi [--node-id=id]
+
+           Similar to get-gi, but with explanatory information.
+
+       dump-md
+
+           Dump the metadata of a device in text form, including the bitmap and activity log.
+
+       outdate
+           Mark the data on a lower-level device as outdated. See drbdsetup(8) for details.
+
+       dstate
+           Show the current disk state of a lower-level device.
+
+       check-resize
+
+           Examine the device size of a lower-level device and its last known device size (saved in /var/lib/drbd/drbd-minor-minor.lkbd by drbdsetup check-resize). For internal metadata, if the size of the
+           lower-level device has changed and the metadata can be found at the previous position, move the metadata to the new position at the end of the block device.
+
+       apply-al
+
+           Apply the activity log of the specified device. This is necessary before the device can be attached by the kernel again.
+
+       repair-md [--tentative]
+
+           Repair known problems in metadata. Only problems that can be automatically fixed in a safe manner will be repaired. When --tentative is set, the metadata will only be checked, it will not be changed.
+
+EXPERT COMMANDS
+       The drbdmeta utility can be used to fine tune metdata. Please note that this can lead to destroyed metadata or even silent data corruption; use with great care only.
+
+       set-gi gi [--node-id=id]
+
+           Set the generation identifiers. The gi argument is a generation counter for the v06 and v07 formats, and a set of UUIDs for v08 and beyond. Accepts the same syntax as in the get-gi output. DRBD version
+           9.0.0 and beyond support multiple peers; use the --node-id option to define which peer's data generation identifiers to set.
+
+       restore-md dump_file
+
+           Replace the metadata on the device with the contents of dump_file. The dump file format is defined by the output of the dump-md command.
+
+VERSION
+       This document was revised for version 9.0.0 of the DRBD distribution.
+
+AUTHOR
+       Written by Philipp Reisner <philipp.reisner@linbit.com> and Lars Ellenberg <lars.ellenberg@linbit.com>.
+
+REPORTING BUGS
+       Report bugs to <drbd-user@lists.linbit.com>.
+
+COPYRIGHT
+       Copyright 2001-2008,2012 LINBIT Information Technologies, Philipp Reisner, Lars Ellenberg. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or
+       FITNESS FOR A PARTICULAR PURPOSE.
+
+SEE ALSO
+       drbdadm(8) drbd.conf(5)
+
+DRBD 9.0.0                                                                                          6 December 2012                                                                                        DRBDMETA(8)

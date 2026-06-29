@@ -1,0 +1,188 @@
+---
+description: Rules for controller package entrypoint wiring in controller.go (builder chain, options, predicates wiring) and strict separation from reconciliation business logic. Apply when editing images/controller/internal/controllers/**/controller*.go, and when deciding what belongs in controller.go vs reconciler.go. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/**/controller*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+- TL;DR:
+  - **`controller.go`** = **Wiring-only** **Entrypoint**.
+  - **Entrypoint** = `BuildController(mgr manager.Manager) error`.
+  - **builder chain** = single fluent chain, ends with `.Complete(rec)`.
+  - **predicates**/**filters**:
+    - are **mechanical** change detection (no **I/O**, no **domain/business** decisions),
+    - live in **`predicates.go`**,
+    - MUST NOT be implemented in **`controller.go`**.
+  - All **Reconciliation business logic** = **`reconciler.go`**.
+  - **controller name** string values are `kebab-case` (see **Controller terminology**).
+
+- **`controller.go`** purpose (MUST):
+  - **`controller.go`** is the **Wiring-only** **Entrypoint** of a **controller package**.
+  - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
+  - If the controller needs event filtering, **`controller.go`** wires predicates by calling
+    `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  - It MUST NOT contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
+
+- ALLOW (in **`controller.go`**):
+  - controller-runtime builder wiring:
+    - `.ControllerManagedBy(mgr).Named(...)`
+    - `.For(...)`, `.Owns(...)`, `.Watches(...)`
+    - `.WithOptions(...)`, `.Complete(...)`
+  - wiring **predicates**/**filters** by calling `builder.WithPredicates(<kind>Predicates()...)`
+    (where `<kind>Predicates()` is implemented in **`predicates.go`**).
+  - **Manager-owned dependencies** (wiring-only) from the **manager**:
+    - `mgr.GetClient()`, `mgr.GetScheme()`, `mgr.GetCache()`, `mgr.GetEventRecorderFor(...)`
+  - registering **runnables**/**sources** on the **manager** (wiring-only), e.g. `mgr.Add(...)`, indexes, **sources**.
+
+- DENY (in **`controller.go`**):
+  - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
+  - implementing controller-runtime **predicates**/**filters**:
+    - **`controller.go`** MUST NOT define `predicate.Funcs{...}` (or any other predicate implementation) inline.
+    - All predicate implementations MUST live in **`predicates.go`** (see: `controller-predicate.mdc`).
+  - reading/modifying `.Spec` / `.Status` (except **mechanical** access in wiring callbacks):
+    - **`controller.go`** MUST NOT read or write `.Spec` / `.Status` as part of business logic.
+    - **mechanical** reads are allowed only inside **watch** mapping functions whose only job is pure request mapping (`obj -> []reconcile.Request`).
+    - **`controller.go`** MUST NOT write `.Spec` / `.Status` anywhere.
+  - any multi-step decisions (state machines, placement, scheduling, condition computation).
+  - any **Kubernetes API I/O** beyond **manager** wiring (`Get/List/Create/Update/Patch/Delete`).
+
+- **`controller.go`** layout (MUST):
+  - `const <ControllerName> = "<name>"` (stable **controller name**).
+    - The `<name>` value MUST follow **Controller terminology** (**controller name** conventions): `kebab-case`, no `.`, no `_`, stable, unique.
+    - The suffix "-controller" MAY be appended; it SHOULD be appended only when needed to avoid ambiguity/collisions (see **Controller terminology**).
+  - **Entrypoint**: `BuildController(mgr manager.Manager) error`.
+  - **predicates**/**filters** are optional.
+    - If the controller uses any **predicates**/**filters**, the **controller package** MUST include **`predicates.go`**.
+    - Predicate implementation is done in **`predicates.go`**; **`controller.go`** wires it via `builder.WithPredicates(...)`.
+
+- What belongs in `BuildController` (MUST):
+  - Take **Manager-owned dependencies** from the **manager**:
+    - `cl := mgr.GetClient()`
+    - other manager-owned deps when needed (scheme, cache, recorder, etc.).
+  - Register required **runnables**/**sources** on the **manager** (if any):
+    - example: cache initializers added via `mgr.Add(...)` (often after leader election).
+  - Construct the reconciler (composition root for the package):
+    - `rec := NewReconciler(cl, <otherDeps...>)`
+  - Wire controller-runtime builder in a single fluent chain:
+    - `.ControllerManagedBy(mgr).Named(<ControllerName>)`
+    - `.For(&<apiObject>{} /*, <forOptions>... */)`
+    - `.Watches(...)` when the controller reacts to additional objects/events
+    - `.WithOptions(controller.Options{MaxConcurrentReconciles: 10, RateLimiter: controlleroptions.DefaultRateLimiter[reconcile.Request]()})` by default
+    - `.Complete(rec)`
+
+  Example: minimal `BuildController` skeleton (illustrative)
+
+  ```go
+  package examplecontroller
+
+  import (
+      "sigs.k8s.io/controller-runtime/pkg/builder"
+      "sigs.k8s.io/controller-runtime/pkg/controller"
+      "sigs.k8s.io/controller-runtime/pkg/manager"
+
+      "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+      "example.com/api/v1alpha1"
+      "example.com/images/<app>/internal/controllers/controlleroptions"
+  )
+
+  const ExampleControllerName = "example-controller"
+
+  func BuildController(mgr manager.Manager) error {
+      cl := mgr.GetClient()
+
+      // Optional wiring-only dependencies/runnables:
+      // src := NewSomethingInitializer(mgr)
+      // if err := mgr.Add(src); err != nil { return fmt.Errorf("adding initializer: %w", err) }
+
+      rec := NewReconciler(cl /*, src */)
+
+      return builder.ControllerManagedBy(mgr).
+          Named(ExampleControllerName).
+          For(&v1alpha1.Example{}, builder.WithPredicates(
+              examplePredicates()...,
+          )).
+          WithOptions(controller.Options{
+              MaxConcurrentReconciles: 10,
+              RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+          }).
+          Complete(rec)
+  }
+  ```
+
+- Predicate implementation rules:
+  - **predicates**/**filters** MUST be implemented in **`predicates.go`**.
+  - **`controller.go`** MUST NOT contain predicate implementation code.
+  - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  - See: `controller-predicate.mdc`.
+
+- MaxConcurrentReconciles (MUST):
+  - Configure `MaxConcurrentReconciles: 10` in `.WithOptions(...)` unless there is a strong, explicit reason not to.
+  - If deviating from 10, document the reason near the options.
+
+- RateLimiter (MUST):
+  - Every controller MUST set `RateLimiter` in `.WithOptions(...)` to the shared factory: `controlleroptions.DefaultRateLimiter[reconcile.Request]()` (or the appropriate request type `T` for typed controllers).
+  - The shared factory lives in `<app>/internal/controllers/controlleroptions/options.go` (package `controlleroptions` or `agentcontrolleroptions` depending on the application).
+  - `DefaultRateLimiter[T comparable]()` returns a `workqueue.TypedRateLimiter[T]` combining:
+    - Per-item exponential backoff: baseDelay 5 ms, maxDelay 1 minute.
+    - Global token bucket: 100 QPS, burst 500.
+  - Controllers MUST NOT construct their own rate limiter inline; they MUST call the shared factory.
+  - If a rate limiter parameter needs to change, update the single factory function rather than each controller.
+
+- Watching child resources (MUST):
+  - Watch **child resources** either:
+    - by owner reference (when this controller is the owner/controller of the child objects), or
+    - by an explicit field/index (when children may be created by others: another controller or a user).
+  - If it is not obvious which model applies for a given child object:
+    - default to the safest *correctness* choice (prefer being conservative and reconciling more over missing important events), and
+    - add a short comment explaining why this watch strategy was chosen (and what would justify switching to the alternative).
+
+  Example: watch child objects by owner reference (controller is the owner)
+  ```go
+  builder.ControllerManagedBy(mgr).
+      Named(ExampleControllerName).
+      For(&v1alpha1.Example{}, builder.WithPredicates(examplePredicates()...)).
+      Owns(
+          &v1alpha1.ExampleChild{},
+          builder.WithPredicates(exampleChildPredicates()...),
+      ). // ownerRef-based mapping
+      WithOptions(controller.Options{
+          MaxConcurrentReconciles: 10,
+          RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+      }).
+      Complete(rec)
+  ```
+
+  Example: watch child objects by explicit field/index (children may be created by others)
+  ```go
+  builder.ControllerManagedBy(mgr).
+      Named(ExampleControllerName).
+      For(&v1alpha1.Example{}, builder.WithPredicates(examplePredicates()...)).
+      Watches(
+          &v1alpha1.ExampleChild{},
+          handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+              ch, ok := obj.(*v1alpha1.ExampleChild)
+              if !ok || ch == nil {
+                  return nil
+              }
+              return []reconcile.Request{{NamespacedName: types.NamespacedName{
+                  Namespace: ch.Namespace,
+                  Name:      ch.Spec.ParentName,
+              }}}
+          }),
+          builder.WithPredicates(exampleChildPredicates()...),
+      ).
+      WithOptions(controller.Options{
+          MaxConcurrentReconciles: 10,
+          RateLimiter:             controlleroptions.DefaultRateLimiter[reconcile.Request](),
+      }).
+      Complete(rec)
+  ```
+
+- What MUST NOT be in `controller.go`:
+  - any `Reconcile(...)` implementation;
+  - any Kubernetes API I/O beyond manager wiring (`Get/List/Create/Update/Patch/Delete`);
+  - any non-trivial domain/business decisions (placement/scheduling/state machines/condition computation).

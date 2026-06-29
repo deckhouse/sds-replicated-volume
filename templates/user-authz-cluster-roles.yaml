@@ -10,8 +10,15 @@ rules:
 - apiGroups:
   - storage.deckhouse.io
   resources:
+  - drbdmappers
+  - drbdnodeoperations
+  - drbdresourceoperations
+  - drbdresources
   - replicatedstorageclasses
   - replicatedstoragepools
+  - replicatedvolumeattachments
+  - replicatedvolumereplicas
+  - replicatedvolumes
   verbs:
   - get
   - list
@@ -28,8 +35,15 @@ rules:
 - apiGroups:
   - storage.deckhouse.io
   resources:
+  - drbdmappers
+  - drbdnodeoperations
+  - drbdresourceoperations
+  - drbdresources
   - replicatedstorageclasses
   - replicatedstoragepools
+  - replicatedvolumeattachments
+  - replicatedvolumereplicas
+  - replicatedvolumes
   verbs:
   - create
   - delete

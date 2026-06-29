@@ -1,0 +1,163 @@
+---
+description: RFC-style writing conventions for .mdc rule files: normative keywords (MUST/SHOULD/MAY per BCP 14), term emphasis, Cursor frontmatter requirements (description required; include when-to-apply incl. decision-making; globs discouraged), language and style guidelines (CMOS-based), literals, examples, and section drafting checklist. Apply when writing, editing, or reviewing .cursor/rules/*.mdc files, and when deciding how to phrase/structure rule requirements. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+alwaysApply: false
+---
+
+# RFC-style English and structure for .mdc
+
+This section defines repository-wide constraints that every Cursor `.mdc` rule file must follow.
+
+Write clear, reviewable technical prose.
+
+
+## 1. Normative keywords
+
+Use BCP 14 key words (RFC 2119 / RFC 8174) only when you intend normative meaning. Per BCP 14 (RFC 2119 / RFC 8174), these key words have the meanings specified below only when they appear in all capitals.
+
+1. MUST
+   This word, or the terms "REQUIRED" or "SHALL", mean that the definition is an absolute requirement of the specification.
+
+2. MUST NOT
+   This phrase, or the phrase "SHALL NOT", mean that the definition is an absolute prohibition of the specification.
+
+3. SHOULD
+   This word, or the adjective "RECOMMENDED", mean that there may exist valid reasons in particular circumstances to ignore a particular item, but the full implications must be understood and carefully weighed before choosing a different course.
+
+4. SHOULD NOT
+   This phrase, or the phrase "NOT RECOMMENDED", mean that there may exist valid reasons in particular circumstances when the particular behavior is acceptable or even useful, but the full implications should be understood and the case carefully weighed before implementing any behavior described with this label.
+
+5. MAY
+   This word, or the adjective "OPTIONAL", mean that an item is truly optional.
+
+- Use these keywords only when you intend normative meaning.
+- Use them only when they appear in all capitals, as shown above.
+- Do not apply emphasis to normative keywords: no bold, no italics, and no inline code.
+
+### 1.1. Centralized normative keyword declaration
+
+- This file is the only place where normative keywords are declared.
+- All other `.mdc` files MUST NOT repeat the keyword list, synonyms, or keyword definitions.
+- All other `.mdc` files MUST start with a link to this file, and the link text MUST say that normative keywords are defined here.
+
+
+## 2. Terms and emphasis
+
+- Terms (words/phrases with a defined meaning in a Terminology / Definitions / Glossary section) MUST be written in italics on every mention.
+- Terms MUST NOT be bolded.
+- Terms MUST NOT be left unformatted when used with their defined meaning.
+- If a term contains a literal token, keep the literal in inline code and italicize the term as a whole (for example: *`controller.go`*).
+
+##  3. Cursor frontmatter
+
+Frontmatter MUST be present, valid YAML, and start at the first line of the file (delimited by `---`).
+
+### 3.1. `description` (required, always)
+
+Every `.mdc` file MUST set a non-empty `description`. This repository relies on `description` for rule discovery and relevance.
+
+`description` MUST be detailed enough for the model to decide, without guesswork, that the rules in this file should be loaded for the current task. Vague or generic descriptions (for example, "Go rules", "Controller guidelines") SHOULD be treated as incorrect.
+
+`description` MUST explicitly state *when to apply* the rule (i.e., what tasks/files/areas trigger it). You SHOULD include a literal phrase like "Apply when ..." (or equivalent wording) so the model can reliably match it to the current work.
+
+`description` MUST cover both:
+- direct work on matching files (editing/creating/reviewing), and
+- cases where the assistant is reasoning, planning, or answering questions in a way that could be influenced by this rule (even if the matching files are not currently open).
+
+When you change the contents of an `.mdc` file, you MUST update its `description` to reflect the full, updated contents of the file, so that the requirement above remains true.
+
+### 3.2. `globs` (discouraged; prefer `description`)
+
+`globs` MAY be set, but `globs` matching is unreliable in practice (it can work poorly or not work at all depending on Cursor version and context-loading behavior). Therefore:
+
+- You SHOULD prefer `description`-driven loading over `globs`.
+- You MUST NOT rely on `globs` as the only way to make a rule apply.
+- If a rule is critical for a task, you SHOULD reference it explicitly via `@` to force-load it.
+- If `globs` is already set in an existing `.mdc` file, you MUST NOT remove it automatically as a "cleanup"; keep it unless you intentionally change the rule attachment scope.
+
+### 3.3. `globs` format (when used)
+
+If you set `globs`, it MUST follow the Cursor `.mdc` frontmatter format documented by Cursor:
+
+- `globs` MUST be a single scalar string value (not a YAML array).
+- Multiple patterns MUST be written as a single comma-separated string with no whitespace around commas (for example, `**/*.go,**/*.yaml`).
+- Each pattern SHOULD be a workspace-relative glob (for example, `api/**/*.go`, `images/controller/**/controller*.go`).
+- `globs` SHOULD NOT be surrounded by quotes (prefer a plain scalar like `globs: **/*.go,**/*.yaml`), because quoted values have been reported to break matching in some Cursor versions.
+
+Examples:
+
+```yaml
+---
+description: Go controller rules for reconciler helpers and predicates; apply when editing any controller implementation files under images/controller/internal/controllers/.
+globs: images/controller/internal/controllers/**/*.go
+alwaysApply: false
+---
+```
+
+```yaml
+---
+description: API coding conventions and Kubebuilder marker requirements; apply when editing versioned API types and related helpers under api/.
+globs: api/v*/**/*.go,api/v*/**/*_types.go,api/v*/**/common_types.go
+alwaysApply: false
+---
+```
+
+## 4. Language and Style
+### 4.1. Authority and precedence
+
+- Follow The Chicago Manual of Style (CMOS) for English grammar, punctuation, capitalization, and general editorial decisions, unless overridden by an explicit requirement in the current document.
+- If a stylistic convention conflicts with an explicit requirement, the requirement takes precedence.
+- Do not make "stylistic" edits that change technical meaning, scope, or applicability.
+
+### 4.2. Literals and exactness
+
+- Preserve the spelling and casing of: identifiers, commands/flags, file and package names, stable constants, and any other literal tokens where a change would alter meaning.
+- Preserve the original spelling of proper names and quoted material.
+- Put literal tokens in inline code (backticks) and keep surrounding punctuation outside the literal.
+- When quoting literal text (exact strings to match, exact tokens), punctuation MUST be outside quotation marks so the quoted literal remains exact.
+- When quoting general prose (not a literal), punctuation SHOULD follow normal CMOS conventions. Prefer block quotes for longer quotations.
+
+### 4.3. Editing discipline
+
+- Aim for clarity, consistency, and readability; fix internal inconsistencies (terminology, capitalization, duplicated text).
+- If a passage is unclear in a way that could affect interpretation, flag it explicitly rather than guessing.
+- Treat editing as distinct from technical review: suggest rewrites for clarity, but never optimize typography over correctness.
+- If you cannot confidently choose the CMOS-preferred option for a purely stylistic change, and the change is not required for correctness or clarity, avoid making the change.
+
+### 4.4. Style conventions
+
+- Use American English spelling by default; keep spelling consistent within the document.
+- Use the serial (Oxford) comma where it improves clarity.
+- Avoid ambiguous pronouns ("it/this/that") when the referent could be unclear; prefer explicit subjects.
+- Prefer short, declarative sentences for requirements; make conditions explicit (split sentences or use structured lists).
+- Use parallel structure in lists and sublists; avoid burying critical conditions in parenthetical asides.
+- Keep capitalization consistent within the document and, when applicable, across closely related documents.
+- For section titles, prefer CMOS title case unless a full-sentence title is clearer; be consistent.
+
+#### 4.4.1 Citations, references, and cross-references
+
+- Ensure every citation has a corresponding reference entry, and every reference entry is cited.
+- Do not rely on page numbers; prefer stable locations (section titles/numbers, anchors, or explicit URLs).
+- When citing RFCs/BCPs or other specs, use a stable label scheme (e.g., [RFC2119], [RFC8174]) and define labels in a References section.
+
+#### 4.4.2 Examples and placeholder safety
+
+- Prefer fenced code blocks for multi-line literals and examples. Do not "pretty up" examples if that risks breaking reproducibility.
+- Use reserved example domains (e.g., example.com / example.net / example.org) for generic DNS/URI examples; avoid real production domains as "generic examples".
+- Clearly distinguish placeholders (e.g., <placeholder>) from literal values.
+- Keep examples minimal, accurate, and resilient to staleness.
+
+#### 4.4.3 Abbreviations
+
+- Expand abbreviations in titles and on first use: "full expansion (ABBR)".
+- Use one expansion consistently when multiple expansions are possible.
+
+## 5. Section drafting checklist (apply to any heading level)
+
+- Does this section need a short intro/abstract?
+- Does it need background/context, or can it stand alone?
+- Are there any terms that must be defined to remove ambiguity?
+- Where are the requirements, and can a reviewer find them quickly?
+- Do we need rationale (why) to explain trade-offs or non-obvious choices?
+- Do we need examples, and are they clearly marked as examples (not requirements)?
+- Mixing requirements/rationale/definitions/examples is allowed, but requirements must remain easy to locate.
+- For short, obvious sections, one tight paragraph may be enough; do not create subsections just to satisfy structure.
