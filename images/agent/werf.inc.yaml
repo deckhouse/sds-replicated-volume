@@ -1,7 +1,7 @@
 ---
 # do not remove this image: used in external audits (DKP CSE)
 image: {{ .ImageName }}-src-artifact
-fromImage: builder/src
+from: {{ index $.Images "builder/src" }}
 final: false
 git:
   - add: /
@@ -29,7 +29,7 @@ shell:
 ---
 {{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf /usr/sbin/dmsetup /usr/sbin/dmstats" }}
 image: {{ .ImageName }}-binaries-artifact
-fromImage: builder/alt
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 import:
   - image: {{ .ImageName }}-src-artifact
@@ -76,7 +76,7 @@ shell:
 
 ---
 image: {{ .ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+from: {{ index $.Images "builder/golang-alpine" }}
 final: false
 import:
   - image: {{ .ImageName }}-src-artifact
@@ -96,7 +96,7 @@ shell:
 
 ---
 image: {{ .ImageName }}
-fromImage: base/distroless
+from: {{ index $.Images "base/distroless" }}
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
