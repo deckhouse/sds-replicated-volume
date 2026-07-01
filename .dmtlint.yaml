@@ -157,6 +157,7 @@ linters-settings:
           - id: LINSTOR_COMMON
           - id: LINSTOR_CSI
           - id: LINSTOR_SERVER_PIRAEUS
+          - id: LVM2
   no-cyrillic:
     exclude-rules:
       directories:
