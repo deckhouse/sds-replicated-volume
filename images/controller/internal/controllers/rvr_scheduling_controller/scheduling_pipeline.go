@@ -254,7 +254,7 @@ func FilteredAndScoredBySchedulerExtender(
 	size int64,
 	logger logr.Logger,
 ) (SchedulingPipeline, error) {
-	// TODO Прочитать, что тут написано!!!!!
+	// TODO: review what is written here
 
 	// 1. Collect all upstream entries and build the LVG query list.
 	// Candidates are already unique (LVG, thinpool) tuples, so no dedup needed.
@@ -365,7 +365,7 @@ func FilteredAndScoredBySchedulerExtender(
 		i++
 	}
 
-	// TODO: отсортировать в стандартный порядок
+	// TODO: sort into the standard order
 
 	return &ScoringStep{
 		upstream: upstream,
