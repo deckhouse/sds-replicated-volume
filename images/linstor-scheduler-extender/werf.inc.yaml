@@ -2,7 +2,6 @@
 image: {{ $.ImageName }}-golang-artifact
 from: {{ index $.Images "builder/golang" }}
 final: false
-
 git:
   - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
     add: /
