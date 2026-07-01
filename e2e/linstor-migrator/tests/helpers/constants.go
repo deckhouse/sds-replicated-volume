@@ -90,7 +90,6 @@ const (
 
 	// NewAgentDaemonSet is the daemonset name for the new control plane agent.
 	newAgentDaemonSet = "agent"
-
 )
 
 // IsTestDebugEnabled returns true when TEST_DEBUG is set to a non-empty value.
