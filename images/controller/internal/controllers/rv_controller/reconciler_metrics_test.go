@@ -86,7 +86,7 @@ func TestComputeDatameshMetricObservations(t *testing.T) {
 			metrics.LabelStorageClass: "sc-a",
 			metrics.LabelNode:         "global",
 			metrics.LabelType:         string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
-		}, 1, 20)
+		}, 20)
 		assertCounterSample(t, metrics.DatameshTransitionsCompleted, map[string]string{
 			metrics.LabelStorageClass: "sc-a",
 			metrics.LabelNode:         "global",
@@ -97,7 +97,7 @@ func TestComputeDatameshMetricObservations(t *testing.T) {
 			metrics.LabelNode:         "global",
 			metrics.LabelType:         string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
 			metrics.LabelStep:         "Formation",
-		}, 1, 10)
+		}, 10)
 	})
 
 	t.Run("completed active step records only step duration", func(t *testing.T) {
@@ -122,7 +122,7 @@ func TestComputeDatameshMetricObservations(t *testing.T) {
 			metrics.LabelNode:         "global",
 			metrics.LabelType:         string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
 			metrics.LabelStep:         "Formation",
-		}, 1, 10)
+		}, 10)
 	})
 }
 
@@ -157,7 +157,7 @@ func TestComputeRVInitialFormationMetricObservations(t *testing.T) {
 
 	assertHistogramSample(t, metrics.RVInitialFormationDuration, map[string]string{
 		metrics.LabelStorageClass: "sc-a",
-	}, 1, 30)
+	}, 30)
 }
 
 func TestComputeRVAPhaseChangeMetricObservations(t *testing.T) {
@@ -186,7 +186,7 @@ func TestComputeRVAPhaseChangeMetricObservations(t *testing.T) {
 
 	assertHistogramSample(t, metrics.RVAReadyDuration, map[string]string{
 		metrics.LabelNode: "node-a",
-	}, 1, 15)
+	}, 15)
 }
 
 func TestDatameshMetricLabels(t *testing.T) {
@@ -311,9 +311,10 @@ func findPrometheusSample(samples []prometheusSample, labels map[string]string) 
 	return prometheusSample{}, false
 }
 
-func assertHistogramSample(t *testing.T, collector prometheus.Collector, labels map[string]string, count uint64, sum float64) {
+func assertHistogramSample(t *testing.T, collector prometheus.Collector, labels map[string]string, sum float64) {
 	t.Helper()
 
+	const count uint64 = 1
 	sample, ok := findPrometheusSample(collectPrometheusSamples(t, collector), labels)
 	if !ok {
 		t.Fatalf("expected histogram sample with labels %#v", labels)

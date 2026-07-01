@@ -121,7 +121,7 @@ func TestReconcileCreateNewUUID_DRBDResourceMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected reconcile error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.Requeue || res.RequeueAfter != 0 { //nolint:staticcheck // Requeue field is set by flow.ToCtrl on transient errors
 		t.Errorf("expected no requeue when DRBDResource is missing, got %+v", res)
 	}
 
