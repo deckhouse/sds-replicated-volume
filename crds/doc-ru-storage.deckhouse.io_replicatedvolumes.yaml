@@ -1,0 +1,274 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            ReplicatedVolume описывает реплицируемый том: его размер, способ конфигурации (из ReplicatedStorageClass или заданный вручную) и наблюдаемое состояние репликации (datamesh, реплики, кворум, подключения).
+          properties:
+            spec:
+              properties:
+                configurationMode:
+                  description: |
+                    Способ определения конфигурации тома. Может быть:
+                    - Auto (по умолчанию) — конфигурация берётся из указанного ReplicatedStorageClass (поле 'replicatedStorageClassName').
+                    - Manual — конфигурация задаётся напрямую в поле 'manualConfiguration'.
+                manualConfiguration:
+                  description: |
+                    Конфигурация тома, заданная напрямую. Обязательна, когда 'configurationMode' равен Manual, и должна быть пустой, когда 'configurationMode' равен Auto.
+                  properties:
+                    failuresToTolerate:
+                      description: |
+                        Число одновременных отказов узлов, которые том должен переносить (FTT).
+                    guaranteedMinimumDataRedundancy:
+                      description: |
+                        Гарантированная минимальная избыточность данных (GMDR) — число копий данных, которое гарантированно сохраняется.
+                    replicatedStoragePoolName:
+                      description: |
+                        Имя ресурса ReplicatedStoragePool, из которого выделяется место под том.
+                    topology:
+                      description: |
+                        Топология размещения реплик. Может быть:
+                        - TransZonal (реплики распределяются между зонами)
+                        - Zonal (реплики размещаются в одной зоне)
+                        - Ignored (топология не учитывается).
+                    volumeAccess:
+                      description: |
+                        Режим доступа к тому. Может быть: Local, EventuallyLocal, PreferablyLocal, Any.
+                maxAttachments:
+                  description: |
+                    Максимальное число узлов, к которым том может быть подключён одновременно.
+
+                    > Внимание: значения больше 1 включают режим множественного подключения (multi-attach), в котором блочное устройство доступно на запись одновременно с нескольких узлов. Потребляющее приложение обязано гарантировать отсутствие одновременных записей в одни и те же области диска с разных узлов. В частности, монтирование тома как обычной файловой системы (ext4, xfs и т.п.) более чем с одного узла небезопасно, если только все монтирования не выполнены в режиме только для чтения; используйте кластерную файловую систему (например, GFS2, OCFS2) или координацию на уровне приложения. Используйте на свой риск и с полным пониманием последствий.
+                replicatedStorageClassName:
+                  description: |
+                    Имя ReplicatedStorageClass, предоставляющего конфигурацию тома. Обязательно, когда 'configurationMode' равен Auto, и должно быть пустым, когда 'configurationMode' равен Manual.
+                size:
+                  description: |
+                    Запрошенный размер тома.
+            status:
+              properties:
+                actuallyAttachedTo:
+                  description: |
+                    Список узлов, к которым том фактически подключён в данный момент.
+                baselineGuaranteedMinimumDataRedundancy:
+                  description: |
+                    Уровень GMDR, которого datamesh достиг и который обязуется поддерживать. Вычисляется как min(qmr-1, config.GMDR): растёт по мере добавления участников и подтверждения qmr, не превышает целевого уровня конфигурации и снижается при уменьшении GMDR в конфигурации.
+                conditions:
+                  description: |
+                    Условия, отражающие текущее состояние тома.
+                configuration:
+                  description: |
+                    Снимок желаемой конфигурации тома.
+                  properties:
+                    failuresToTolerate:
+                      description: |
+                        Итоговое значение FTT (число переносимых отказов).
+                    guaranteedMinimumDataRedundancy:
+                      description: |
+                        Итоговое значение GMDR (гарантированная минимальная избыточность данных).
+                    replicatedStoragePoolName:
+                      description: |
+                        Имя ресурса ReplicatedStoragePool.
+                    topology:
+                      description: |
+                        Итоговая топология размещения. Может быть: TransZonal, Zonal, Ignored.
+                    volumeAccess:
+                      description: |
+                        Итоговый режим доступа к тому. Может быть: Local, EventuallyLocal, PreferablyLocal, Any.
+                configurationGeneration:
+                  description: |
+                    Поколение (generation) ReplicatedStorageClass, из которого была взята конфигурация.
+                configurationObservedGeneration:
+                  description: |
+                    Поколение ReplicatedStorageClass на момент последнего наблюдения/подтверждения конфигурации.
+                datamesh:
+                  description: |
+                    Вычисленная конфигурация datamesh (сети репликации) тома.
+                  properties:
+                    members:
+                      description: |
+                        Список участников (реплик) datamesh.
+                      items:
+                        properties:
+                          addresses:
+                            description: |
+                              Список сетевых адресов DRBD данного участника.
+                          attached:
+                            description: |
+                              Должен ли участник быть подключён (в терминах DRBD — Primary).
+                          lvmVolumeGroupName:
+                            description: |
+                              Имя ресурса LVMVolumeGroup, в котором должна быть размещена реплика.
+                          lvmVolumeGroupThinPoolName:
+                            description: |
+                              Имя Thin-pool (для Storage Pool типа LVMThin).
+                          name:
+                            description: |
+                              Имя участника (используется как ключ элемента списка). Имеет формат "prefix-N", где N от 0 до 31.
+                          nodeName:
+                            description: |
+                              Имя узла Kubernetes, на котором расположен участник.
+                          type:
+                            description: |
+                              Тип участника. Может быть: Diskful, LiminalDiskful, ShadowDiskful, LiminalShadowDiskful, TieBreaker, Access.
+                          zone:
+                            description: |
+                              Зона, в которой расположен участник.
+                    multiattach:
+                      description: |
+                        Включён ли режим множественного подключения (multiattach) для datamesh.
+                    quorum:
+                      description: |
+                        Значение кворума для datamesh.
+                    quorumMinimumRedundancy:
+                      description: |
+                        Минимальная избыточность, необходимая для кворума.
+                    sharedSecret:
+                      description: |
+                        Общий секрет для аутентификации соединений DRBD.
+                    sharedSecretAlg:
+                      description: |
+                        Алгоритм хеширования для общего секрета. Может быть: SHA256, SHA1, DummyForTest.
+                    size:
+                      description: |
+                        Желаемый размер тома.
+                    systemNetworkNames:
+                      description: |
+                        Список имён системных сетей, используемых для взаимодействия DRBD.
+                datameshReplicaRequests:
+                  description: |
+                    Список ожидающих обработки запросов на изменение членства, поступивших от реплик.
+                  items:
+                    properties:
+                      firstObservedAt:
+                        description: |
+                          Время, когда запрос был впервые замечен.
+                      message:
+                        description: |
+                          Необязательное человекочитаемое сообщение о состоянии и ходе выполнения запроса.
+                      name:
+                        description: |
+                          Имя реплики. Имеет формат "prefix-N", где N от 0 до 31.
+                      request:
+                        description: |
+                          Детали запроса на изменение членства от реплики.
+                        properties:
+                          lvmVolumeGroupName:
+                            description: |
+                              Имя ресурса LVMVolumeGroup для Diskful-реплик.
+                          operation:
+                            description: |
+                              Тип запрашиваемого изменения членства. Может быть: Join, Leave, ForceLeave, ForceDetach, ChangeRole, ChangeBackingVolume.
+                          thinPoolName:
+                            description: |
+                              Имя Thin-pool (необязательно, для Storage Pool типа LVMThin).
+                          type:
+                            description: |
+                              Целевой тип реплики. Обязателен для операций Join и ChangeRole. Может быть: Diskful, Access, TieBreaker.
+                datameshRevision:
+                  description: |
+                    Счётчик, увеличиваемый при каждом изменении конфигурации datamesh.
+                datameshTransitions:
+                  description: |
+                    Список активных переходов (transitions) datamesh. Каждый переход имеет упорядоченный список шагов, объявляемых при создании и выполняемых последовательно.
+                  items:
+                    properties:
+                      fromReplicaType:
+                        description: |
+                          Исходный тип реплики для переходов ChangeReplicaType. Обязателен для ChangeReplicaType и не задаётся для других типов.
+                      fromSystemNetworkNames:
+                        description: |
+                          Исходный набор имён системных сетей для переходов ChangeSystemNetworks.
+                      group:
+                        description: |
+                          Группа параллелизма перехода. Задаётся контроллером при создании перехода и предназначена для наблюдаемости (объясняет, почему переход может ожидать). Может быть: Attachment, Emergency, Formation, Multiattach, Network, NonVotingMembership, Quorum, Resize, VotingMembership.
+                      planID:
+                        description: |
+                          Идентификатор плана перехода, используемого для создания данного перехода.
+                      replicaName:
+                        description: |
+                          Имя реплики, к которой применяется переход. Обязателен для переходов AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
+                      replicaType:
+                        description: |
+                          Целевой тип реплики для переходов AddReplica, RemoveReplica, ForceRemoveReplica. Может быть: Diskful, Access, TieBreaker, ShadowDiskful.
+                      steps:
+                        description: |
+                          Упорядоченный список шагов перехода. Шаги выполняются последовательно — активным одновременно может быть только один шаг.
+                        items:
+                          properties:
+                            completedAt:
+                              description: |
+                                Время завершения шага (переход из Active в Completed).
+                            datameshRevision:
+                              description: |
+                                Ревизия datamesh, назначенная при активации шага (0, если шаг ещё не активирован или не изменяет ревизию).
+                            message:
+                              description: |
+                                Сообщение о ходе выполнения или об ошибке для данного шага.
+                            name:
+                              description: |
+                                Человекочитаемое имя шага.
+                            startedAt:
+                              description: |
+                                Время начала выполнения шага (переход из Pending в Active).
+                            status:
+                              description: |
+                                Текущий статус шага. Может быть: Pending, Active, Completed.
+                      toReplicaType:
+                        description: |
+                          Целевой тип реплики для переходов ChangeReplicaType. Обязателен для ChangeReplicaType и не задаётся для других типов.
+                      toSystemNetworkNames:
+                        description: |
+                          Целевой набор имён системных сетей для переходов ChangeSystemNetworks.
+                      type:
+                        description: |
+                          Тип перехода. Может быть: AddReplica, Attach, ChangeQuorum, ChangeReplicaType, ChangeSystemNetworks, Detach, DisableMultiattach, EnableMultiattach, ForceDetach, ForceRemoveReplica, Formation, RemoveReplica, RepairNetworkAddresses, ResizeVolume.
+                effectiveLayout:
+                  description: |
+                    Описывает реальный (в текущий момент) уровень защиты и здоровья datamesh на основе наблюдаемого состояния кластера.
+                  properties:
+                    failuresToTolerate:
+                      description: |
+                        Эффективный уровень FTT. Положительное значение — можно перенести столько отказов узлов; ноль — кворум есть, но любой отказ приведёт к его потере; отрицательное — кворум потерян, требуется столько дополнительных голосующих участников; не задано — определить невозможно.
+                    guaranteedMinimumDataRedundancy:
+                      description: |
+                        Эффективный уровень GMDR. Положительное значение — можно потерять столько дисков без потери данных; ноль — ввод-вывод работает, но потеря диска угрожает данным; отрицательное — ввод-вывод заблокирован, требуется столько дополнительных актуальных реплик; не задано — определить невозможно.
+                    message:
+                      description: |
+                        Человекочитаемое описание состояния эффективного layout'а.
+                    reachableTieBreakers:
+                      description: |
+                        Число TieBreaker'ов, подтверждённо доступных (агент готов или соединение видно пирами как Connected).
+                    reachableVoters:
+                      description: |
+                        Число голосующих участников, подтверждённо доступных (собственный Quorum=true или соединение видно пирами как Connected).
+                    staleAgents:
+                      description: |
+                        Число участников с устаревшими данными агента (AgentNotReady или кворум ещё не сообщён). Такие участники по возможности реконструируются из наблюдений пиров.
+                    totalTieBreakers:
+                      description: |
+                        Общее число участников типа TieBreaker.
+                    totalVoters:
+                      description: |
+                        Общее число голосующих участников (Diskful и его liminal-варианты).
+                    upToDateVoters:
+                      description: |
+                        Число голосующих участников с актуальным (UpToDate) нижележащим томом.
+                eligibleNodesViolations:
+                  description: |
+                    Список реплик, размещённых на узлах, не удовлетворяющих ограничениям подходящих (eligible) узлов.
+                  items:
+                    properties:
+                      nodeName:
+                        description: |
+                          Узел, на котором размещена реплика.
+                      reason:
+                        description: |
+                          Причина, по которой данное размещение нарушает ограничения подходящих узлов.
+                      replicaName:
+                        description: |
+                          Имя ресурса ReplicatedVolumeReplica.
+                size:
+                  description: |
+                    Фактическая полезная ёмкость тома в байтах. Не задаётся, когда у тома нет готовых реплик.

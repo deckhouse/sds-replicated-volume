@@ -1,0 +1,205 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            Низкоуровневое представление DRBD-ресурса на конкретном узле кластера. Ресурс управляется агентом и описывает желаемую и фактическую конфигурацию DRBD-устройства, его пиров и репликации. Не предназначен для ручного создания и редактирования.
+          properties:
+            spec:
+              properties:
+                actualNameOnTheNode:
+                  description: |
+                    Фактическое имя DRBD-ресурса на узле.
+                allowTwoPrimaries:
+                  description: |
+                    Разрешить одновременное присутствие двух ролей Primary (режим dual-primary).
+                lvmLogicalVolumeName:
+                  description: |
+                    Имя LVMLogicalVolume, используемого в качестве нижележащего (backing) устройства. Обязательно, когда 'type' равен Diskful, и должно быть пустым, когда 'type' равен Diskless.
+                maintenance:
+                  description: |
+                    Режим обслуживания. Когда задан, согласование (reconciliation) ресурса приостанавливается, но статус продолжает обновляться. Может быть:
+                    - NoResourceReconciliation (согласование ресурса не выполняется).
+                nodeID:
+                  description: |
+                    Числовой идентификатор узла в DRBD (от 0 до 31).
+
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+                nodeName:
+                  description: |
+                    Имя узла, на котором расположен DRBD-ресурс.
+
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+                nonVoting:
+                  description: |
+                    Когда включено, диск не участвует в голосовании за кворум, но продолжает нормально реплицировать данные. Допустимо только для ресурсов типа Diskful.
+                peers:
+                  description: |
+                    Список пиров (соседних узлов), с которыми реплицируется DRBD-ресурс.
+                  items:
+                    properties:
+                      allowRemoteRead:
+                        description: |
+                          Разрешить чтение данных с этого пира.
+                      name:
+                        description: |
+                          Имя узла-пира. Неизменяемо, используется как ключ элемента списка.
+                      nodeID:
+                        description: |
+                          Числовой идентификатор пира в DRBD (от 0 до 31).
+                      paths:
+                        description: |
+                          Список сетевых путей до пира.
+                        items:
+                          properties:
+                            address:
+                              description: |
+                                Сетевой адрес (IPv4 и порт) для соединения с пиром.
+                            systemNetworkName:
+                              description: |
+                                Имя системной сети. Неизменяемо, используется как ключ элемента списка.
+                      pauseSync:
+                        description: |
+                          Приостановить синхронизацию с этим пиром.
+                      protocol:
+                        description: |
+                          Протокол репликации DRBD. Может быть:
+                          - A (асинхронная репликация)
+                          - B (полусинхронная репликация)
+                          - C (синхронная репликация).
+
+                          > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+                      sharedSecret:
+                        description: |
+                          Общий секрет для аутентификации соединения с пиром.
+                      sharedSecretAlg:
+                        description: |
+                          Алгоритм хеширования для общего секрета DRBD. Может быть: SHA256, SHA1, DummyForTest.
+                      type:
+                        description: |
+                          Тип пира. Может быть: Diskful (с диском) или Diskless (без диска).
+                quorum:
+                  description: |
+                    Требуемое число голосов для наличия кворума.
+                quorumMinimumRedundancy:
+                  description: |
+                    Минимальная избыточность (число актуальных реплик), необходимая для сохранения кворума.
+                role:
+                  description: |
+                    Желаемая роль DRBD-ресурса. Может быть: Primary или Secondary.
+                size:
+                  description: |
+                    Размер устройства. Обязательно, когда 'type' равен Diskful, и должно быть пустым, когда 'type' равен Diskless.
+                state:
+                  description: |
+                    Желаемое состояние DRBD-ресурса. Может быть: Up (поднят) или Down (опущен).
+                systemNetworks:
+                  description: |
+                    Список имён системных сетей, которые используются для соединений DRBD.
+                type:
+                  description: |
+                    Тип DRBD-ресурса. Может быть: Diskful (с диском) или Diskless (без диска).
+            status:
+              properties:
+                activeConfiguration:
+                  description: |
+                    Текущая активная (фактически применённая) конфигурация DRBD-ресурса.
+                  properties:
+                    allowTwoPrimaries:
+                      description: |
+                        Разрешён ли режим двух Primary в активной конфигурации.
+                    llvFinalizersToRelease:
+                      description: |
+                        Список имён LVMLogicalVolume, с которых должен быть снят финализатор агента. Заполняется перед добавлением финализатора и очищается после его успешного снятия, чтобы агент не потерял информацию о ресурсах, требующих очистки.
+                    lvmLogicalVolumeName:
+                      description: |
+                        Имя LVMLogicalVolume, фактически сконфигурированного в DRBD. Отражает реально используемое backing-устройство, а не желаемое значение из spec.
+                    nonVoting:
+                      description: |
+                        Участвует ли диск в голосовании за кворум в активной конфигурации.
+                    quorum:
+                      description: |
+                        Требуемое число голосов для кворума в активной конфигурации.
+                    quorumMinimumRedundancy:
+                      description: |
+                        Минимальная избыточность в активной конфигурации.
+                    role:
+                      description: |
+                        Роль DRBD-ресурса в активной конфигурации. Может быть: Primary или Secondary.
+                    state:
+                      description: |
+                        Состояние DRBD-ресурса в активной конфигурации. Может быть: Up или Down.
+                    type:
+                      description: |
+                        Текущий эффективный тип конфигурации DRBD (Diskful или Diskless). Отражает то, как сконфигурирован DRBD, а не переходное состояние диска.
+                addresses:
+                  description: |
+                    Фактические сетевые адреса, используемые DRBD-ресурсом.
+                conditions:
+                  description: |
+                    Условия, отражающие текущее состояние DRBD-ресурса.
+                device:
+                  description: |
+                    Стабильный путь-симлинк к блочному устройству DRBD (например, /dev/sdsrv/<resourceName>), указывающий на /dev/drbd<minor>. Присутствует только когда ресурс поднят (Up) и имеет выделенный minor-номер.
+                deviceIOSuspended:
+                  description: |
+                    Признак того, что ввод-вывод на устройстве приостановлен. Присутствует только на узле с ролью Primary.
+                deviceOpen:
+                  description: |
+                    Признак того, что блочное устройство в данный момент открыто каким-либо процессом. Присутствует только на узле с ролью Primary; при значении true понижение роли до Secondary завершится ошибкой.
+                deviceUUID:
+                  description: |
+                    16-значный шестнадцатеричный идентификатор (в верхнем регистре), связывающий данный DRBDResource с конкретными метаданными DRBD на backing-устройстве. Устанавливается один раз после создания или принятия метаданных и далее неизменяем.
+                diskState:
+                  description: |
+                    Состояние нижележащего диска DRBD. Отражает статус синхронизации и определяет, может ли ввод-вывод приложения обслуживаться локально или требует участия пиров.
+                peers:
+                  description: |
+                    Фактическое состояние пиров DRBD-ресурса.
+                  items:
+                    properties:
+                      allowRemoteRead:
+                        description: |
+                          Разрешено ли чтение данных с этого пира.
+                      connectionState:
+                        description: |
+                          Состояние соединения с пиром.
+                      diskState:
+                        description: |
+                          Состояние диска пира.
+                      name:
+                        description: |
+                          Имя узла-пира.
+                      nodeID:
+                        description: |
+                          Числовой идентификатор пира в DRBD.
+                      paths:
+                        description: |
+                          Фактические сетевые пути до пира.
+                        items:
+                          properties:
+                            address:
+                              description: |
+                                Сетевой адрес (IPv4 и порт) соединения с пиром.
+                            established:
+                              description: |
+                                Установлено ли соединение по данному пути.
+                            systemNetworkName:
+                              description: |
+                                Имя системной сети данного пути.
+                      replicationState:
+                        description: |
+                          Состояние репликации DRBD с этим пиром.
+                      role:
+                        description: |
+                          Роль пира в DRBD. Может быть: Primary или Secondary.
+                      type:
+                        description: |
+                          Тип пира. Может быть: Diskful или Diskless.
+                quorum:
+                  description: |
+                    Признак наличия кворума у DRBD-ресурса.
+                size:
+                  description: |
+                    Полезная ёмкость верхнего устройства DRBD в байтах. Меньше значения spec.size, так как часть backing-устройства занята внутренними метаданными DRBD. Не задаётся, когда ресурс diskless или опущен (Down).
