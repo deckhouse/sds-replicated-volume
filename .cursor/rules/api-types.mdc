@@ -1,0 +1,156 @@
+---
+description: API type rules: type-centric layout, enums/constants, status/conditions requirements, naming, and what helpers may live in *_types.go vs custom-logic files. Apply when editing api/v*/**/*_types.go or api/v*/**/common_types.go, and when deciding API type layout or helper placement. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/*_types.go,api/v*/**/common_types.go
+alwaysApply: false
+---
+
+## Code layout: type-centric blocks (MUST)
+
+- **Type-centric blocks** MUST be used to organize code:
+  - Each type MUST be readable without scrolling across the file (keep related declarations together).
+  - Code from different types MUST NOT be interleaved.
+
+- **API object file layout** (MUST):
+  - This applies to typical files containing one API root object (`type <Obj> struct`) plus its `Spec`/`Status`/`List`.
+  - The main flow MUST read top-to-bottom without jumping:
+    - Root object: `type <Obj> struct { ... }`
+    - `type <Obj>List struct { ... }` (see List rule below)
+    - `type <Obj>Spec struct { ... }`
+    - Spec-local types/enums/constants/interfaces/helpers used by `Spec`
+    - `type <Obj>Status struct { ... }`
+    - Status-local types/enums/constants/interfaces/helpers used by `Status`
+    - Secondary/helper types referenced by the above (pseudo-DFS), keeping each type block contiguous
+    - Shared helpers (if any) at the very end
+
+- **Block structure** for each type MUST follow this strict order:
+  - `type <TypeName> struct { ... }`
+  - Enums and constants belonging to this type (incl. tightly-coupled sub-enums)
+  - Interfaces tightly coupled to the type
+  - Public methods of the type
+  - Private helpers of the type
+
+- **Block ordering in a file** MUST be a human-oriented dependency order (pseudo-DFS), not alphabetical:
+  - Main (primary) type of the file
+  - Types directly referenced by the main type
+  - Secondary/helper types
+
+- **List types** (MUST):
+  - `<Obj>List` SHOULD be placed immediately after `<Obj>` (right under the root object), to make navigation consistent and fast.
+  - `<Obj>List` MUST NOT split the `Spec`/`Status` flow (i.e. do not put it between `Spec` and spec-local enums/helpers, or between `Status` and status-local enums/helpers).
+  - If there is a strong reason (rare), `<Obj>List` MAY be placed after `Status`/secondary types, but keep it as a single contiguous block (no interleaving).
+
+- **Locality rule for enums/constants/helpers** (MUST):
+  - If an enum/const/helper is primarily used by `Spec`, it MUST be placed in the Spec-local section (right after `type <Obj>Spec ...` and its methods).
+  - If an enum/const/helper is primarily used by `Status`, it MUST be placed in the Status-local section (right after `type <Obj>Status ...` and its methods).
+  - If an enum/const/helper is used by both `Spec` and `Status`, it SHOULD be placed with the `Spec` section (earlier) unless that hurts readability; do NOT duplicate it.
+
+- **Shared helpers**:
+  - Avoid generic helpers without a clear owning type.
+  - If a helper is used by multiple types, it MUST be placed after all type blocks (or moved to `common_helpers.go` if shared broadly).
+
+- Enums (MUST):
+  - If a field has a finite set of constant values, model it as an enum:
+    - `type EnumType string`
+    - `const ( EnumTypeValue1 EnumType = "Value1" ... )`
+  - Enum declaration order MUST be contiguous:
+    - `type EnumType string`
+    - `const (...)` with all enum values
+    - enum helpers (if any) — right after the const block
+  - Enums MUST provide `String()` method:
+    - `func (e EnumType) String() string { return string(e) }`
+  - Keep enum values documented (short English comment per value or a short block comment).
+  - Do NOT create separate wrapper types for arbitrary string/number/bool fields unless there is a strong, confirmed need.
+  - Common enums (MUST):
+    - If the same enum is used by multiple API objects, it MUST be moved to `common_types.go`.
+    - Do NOT move enums to `common_types.go` if they are only used by a single API object.
+
+- Status (MUST):
+  - `Spec` and `Status` structs MUST be embedded as values on the root object (e.g. `Spec TSpec`, `Status TStatus`), not `*TStatus`.
+  - Every API object `Status` MUST expose `.conditions` as `[]metav1.Condition`:
+    - Field name MUST be `Conditions []metav1.Condition`.
+    - Use the standard markers for conditions list:
+      - `// +listType=map`
+      - `// +listMapKey=type`
+      - `// +optional`
+      - JSON tag: ``json:"conditions,omitempty"``.
+    - MUST NOT use `+patchMergeKey`/`+patchStrategy` or their struct tags -- SMP does not apply to CRDs (see `api-list-types.mdc`).
+    - Condition Type/Reason constants are defined in `<objprefix>_conditions.go` only when they become standardized/used (see `conditions_rules.mdc`).
+  - Every API **root object** that exposes `.status.conditions` MUST provide adapter methods to satisfy `api/objutilv1.StatusConditionObject`:
+    - `GetStatusConditions() []metav1.Condition` (returns `o.Status.Conditions`)
+    - `SetStatusConditions([]metav1.Condition)` (sets `o.Status.Conditions`)
+
+- Type naming (MUST):
+  - This section applies to ALL API types (including enums).
+  - Names MUST be unique within the API package.
+  - Names MUST NOT start with short object prefixes like `RV`, `RVR`, `RVA`, `RSC`, `RSP`.
+  - Usually, names MUST NOT start with the full object name if the type is not generic and is unlikely to clash:
+    - Good: `ReplicaType`, `DiskState`
+    - Prefer full object name only for generic/repeated concepts (below).
+  - If the type name is generic and likely to be repeated across objects (e.g. `Phase`, `Type`), it MUST start with the full object name:
+    - Examples: `ReplicatedStoragePoolPhase`, `ReplicatedStoragePoolType`, `ReplicatedVolumeAttachmentPhase`
+  - Structural type name (e.g. `Spec`, `Status`) MUST be prefixed by the full object name:
+    - Examples: `ReplicatedVolumeSpec`, `ReplicatedVolumeStatus`, `ReplicatedStorageClassSpec`, `ReplicatedStorageClassStatus`
+
+- Optional scalar fields (optional `*T`) (MUST):
+  - This section applies to Kubernetes API fields that are semantically optional (tagged `json:",omitempty"`), but whose underlying value type is a scalar `T` (non-nil-able, e.g. `bool`, numbers, `string`, structs).
+  - To preserve the distinction between "unset" and "set to the zero value", such API fields MUST be represented as pointers (`*T`) in Go API types.
+  - Example (illustrative): if `TimeoutSeconds` is optional, use `*int32` (not `int32`) and tag it with `json:"timeoutSeconds,omitempty"`.
+
+## Helpers vs custom_logic_that_should_not_be_here (MUST)
+
+Write helpers in `*_types.go`. If a function does **not** fit the rules below, it MUST go to `*_custom_logic_that_should_not_be_here.go`.
+
+## What belongs in `*_types.go` (MUST)
+
+Helpers are **pure**, **local**, **context-free** building blocks.
+
+- **Pure / deterministic**:
+  - Same input → same output.
+  - No reads of current time, random, env vars, filesystem, network, Kubernetes API, shell commands.
+  - No goroutines, channels, retries, backoff, sleeping, polling.
+
+- **No external context**:
+  - Do not require `context.Context`, `*runtime.Scheme`, `client.Client`, informers, listers, recorders, loggers.
+  - Do not require controller-runtime utilities (e.g. `controllerutil.*`).
+
+- **Allowed operations**:
+  - Field reads/writes on in-memory structs and maps/slices.
+  - Simple validation and parsing/formatting that is deterministic.
+  - Nil-guards and trivial branching.
+  - Returning `(value, ok)` / `(changed bool)` patterns.
+
+- **Typical helper shapes (examples)**:
+  - `HasX() bool`, `GetX() (T, bool)`, `SetX(v T) (changed bool)`, `ClearX() (changed bool)`
+  - `IsXEqual(...) bool`, `XEquals(...) bool`
+  - `ParseX(string) X` / `FormatX(...) string` (no I/O, no time, no external lookups)
+
+## What MUST NOT be in `*_types.go` (MUST NOT)
+
+If any of these are present, the code belongs in `*_custom_logic_that_should_not_be_here.go`.
+
+- **Business / orchestration logic**:
+  - Decisions that interpret cluster state, desired/actual reconciliation, phase machines, progress tracking.
+  - Anything that “synchronizes” different parts of an object (spec ↔ status, spec ↔ labels/annotations, cross-object references).
+
+- **Conditions/status mutation logic**:
+  - Creating/updating `metav1.Condition` / using `meta.SetStatusCondition` / computing reason/message based on multi-step state.
+  - Anything that sets `.status.phase`, `.status.reason`, counters, aggregates, etc. based on logic.
+
+- **Controller/Kubernetes integration**:
+  - `controllerutil.SetControllerReference`, finalizer management with external expectations, scheme usage.
+  - Any reads/writes via API clients (even if “simple”).
+
+- **I/O and side effects**:
+  - File/network access, exec/shell, OS calls, time-based logic (`time.Now`, `time.Since`), randomness.
+
+- **Non-trivial control flow**:
+  - Complex `if/switch` trees, multi-branch logic tied to domain semantics.
+  - Loops that encode placement/selection/scheduling decisions.
+
+## Kubebuilder generation hygiene for non-API types (MUST)
+
+- **Non-Kubernetes API types** (MUST):
+  - Avoid placing non-API types (e.g. `error` implementations, internal helper structs) in `api/` packages.
+  - If a non-API type must live in `api/` (for locality/type-safety), it MUST be explicitly excluded from kubebuilder object/deepcopy generation:
+    - Add `// +kubebuilder:object:generate=false` on the type.
+  - Rationale: `controller-gen object` may generate DeepCopy methods for any struct type in the API package, which pollutes `zz_generated.deepcopy.go` with irrelevant helpers/errors.

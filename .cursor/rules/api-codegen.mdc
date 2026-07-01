@@ -1,0 +1,17 @@
+---
+description: API codegen rules for kubebuilder/controller-gen and generated files hygiene. Apply when adding/modifying API types or kubebuilder markers under api/v*/, and when deciding whether regeneration is required. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: api/v*/**/*.go
+alwaysApply: false
+---
+
+- Kubebuilder markers & API changes (MUST):
+  - If I add a new API object/type or modify an existing one in `api/` (especially changes to `// +kubebuilder:*` markers, validation markers, printcolumns, subresources, etc.), I MUST run code generation and include the regenerated outputs in the same change.
+  - In this repo, run generation from the repository root:
+    - `bash hack/generate_code.sh`
+  - If I am intentionally doing an **API-only refactor stage** where changes outside `api/` are temporarily forbidden/undesired (e.g. the rest of the repo is not yet refactored and will not compile), then:
+    - It is acceptable to **defer CRD regeneration** (outputs under `crds/`) until the stage when cross-repo refactor is allowed.
+    - I MUST still keep `api/v1alpha1` internally consistent and compilable; prefer running **object/deepcopy generation only** when possible, instead of editing generated files by hand.
+
+- Generated files (MUST NOT edit by hand):
+  - Do NOT edit `zz_generated*` files (e.g. `api/v1alpha1/zz_generated.deepcopy.go`) manually.
+  - If a generated file needs to change, update the source types/markers and re-run generation instead.

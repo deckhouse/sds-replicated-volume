@@ -30,7 +30,6 @@ import (
 
 func RegisterWebhookCertsHook() {
 	tlscertificate.RegisterManualTLSHookEM(WebhookCertConfigs())
-
 }
 
 func WebhookCertConfigs() tlscertificate.GenSelfSignedTLSGroupHookConf {

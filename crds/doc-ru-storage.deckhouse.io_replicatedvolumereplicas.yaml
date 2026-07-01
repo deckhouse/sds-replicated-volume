@@ -1,0 +1,183 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            ReplicatedVolumeReplica описывает отдельную реплику ReplicatedVolume: её размещение на узле, тип и наблюдаемое состояние репликации.
+          properties:
+            spec:
+              properties:
+                lvmVolumeGroupName:
+                  description: |
+                    Имя ресурса LVMVolumeGroup, в котором должна быть размещена данная реплика.
+                lvmVolumeGroupThinPoolName:
+                  description: |
+                    Имя Thin-pool в рамках указанного LVMVolumeGroup (для Storage Pool типа LVMThin).
+                nodeName:
+                  description: |
+                    Имя узла, на котором размещается реплика.
+
+                    > Важно: это поле является неизменяемым после первоначальной установки.
+                replicatedVolumeName:
+                  description: |
+                    Имя ReplicatedVolume, которому принадлежит данная реплика.
+
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+                type:
+                  description: |
+                    Тип реплики. Может быть:
+                    - Diskful (реплика с локальным диском и данными)
+                    - ShadowDiskful (временная теневая реплика с диском, используемая при переносе/добавлении диска)
+                    - Access (бездисковая реплика для доступа к данным, не хранит данные локально)
+                    - TieBreaker (бездисковая реплика-арбитр для обеспечения кворума).
+            status:
+              properties:
+                addresses:
+                  description: |
+                    Сетевые адреса реплики, используемые для соединений DRBD.
+                attachment:
+                  description: |
+                    Информация о состоянии подключения устройства. Задаётся только когда реплика подключена на узле.
+                  properties:
+                    devicePath:
+                      description: |
+                        Путь к блочному устройству, когда реплика подключена. Пример: /dev/drbd10012.
+                    inUse:
+                      description: |
+                        Признак того, что блочное устройство реплики в данный момент используется каким-либо процессом.
+                    ioSuspended:
+                      description: |
+                        Признак того, что ввод-вывод на устройстве приостановлен.
+                backingVolume:
+                  description: |
+                    Информация о нижележащем LVM logical volume. Задаётся только для реплик типа Diskful.
+                  properties:
+                    lvmVolumeGroupName:
+                      description: |
+                        Имя LVM volume group нижележащего тома.
+                    lvmVolumeGroupThinPoolName:
+                      description: |
+                        Имя Thin-pool в рамках LVM volume group. Пусто, если нижележащий том не размещён в Thin-pool.
+                    size:
+                      description: |
+                        Размер нижележащего LVM logical volume.
+                    state:
+                      description: |
+                        Локальное состояние нижележащего тома.
+                conditions:
+                  description: |
+                    Условия, отражающие текущее состояние реплики.
+                datameshRequest:
+                  description: |
+                    Ожидающий запрос на изменение членства реплики в datamesh. Запрос устанавливается контроллером только после выполнения всех предварительных условий (например, для операции Join должны быть заполнены и проверены поля spec.nodeName, spec.lvmVolumeGroupName и spec.lvmVolumeGroupThinPoolName).
+                  properties:
+                    lvmVolumeGroupName:
+                      description: |
+                        Имя ресурса LVMVolumeGroup для Diskful-реплик.
+                    operation:
+                      description: |
+                        Тип запрашиваемого изменения членства. Может быть:
+                        - Join (присоединение реплики к datamesh)
+                        - Leave (выход реплики из datamesh)
+                        - ForceLeave (принудительный выход)
+                        - ForceDetach (принудительное отключение)
+                        - ChangeRole (смена типа/роли реплики)
+                        - ChangeBackingVolume (смена нижележащего тома).
+                    thinPoolName:
+                      description: |
+                        Имя Thin-pool (необязательно, для Storage Pool типа LVMThin).
+                    type:
+                      description: |
+                        Целевой тип реплики. Обязателен для операций Join и ChangeRole. Может быть: Diskful, Access, TieBreaker.
+                datameshRevision:
+                  description: |
+                    Ревизия datamesh, для которой реплика была полностью сконфигурирована (DRBD настроен согласно целевому состоянию, нижележащий том для Diskful создан, готов и совпадает с целевым, а агент подтвердил успешную конфигурацию). Не означает установленных соединений DRBD и завершённой синхронизации данных.
+                datameshRevisionObservedByAgent:
+                  description: |
+                    Ревизия datamesh, для которой агент обработал spec ресурса DRBDResource. В отличие от datameshRevision, устанавливается независимо от того, сообщил ли агент об успехе, ошибке или режиме обслуживания.
+                drbdrReconciliationCache:
+                  description: |
+                    Кэшированные значения для оптимизации согласования (reconciliation) ресурса DRBDResource.
+                  properties:
+                    datameshRevision:
+                      description: |
+                        Ревизия datamesh, для которой в последний раз вычислялся spec ресурса DRBDResource.
+                    drbdrGeneration:
+                      description: |
+                        Поколение (generation) DRBDResource на момент последнего вычисления его spec.
+                    targetType:
+                      description: |
+                        Целевой тип, для которого в последний раз вычислялся spec DRBDResource.
+                message:
+                  description: |
+                    Человекочитаемое описание текущего состояния реплики.
+                peers:
+                  description: |
+                    Состояние соединений с пирами-репликами.
+                  items:
+                    properties:
+                      attached:
+                        description: |
+                          Признак того, что пир подключён на своём узле (имеет блочное устройство).
+                      backingVolumeState:
+                        description: |
+                          Состояние нижележащего тома пира.
+                      connectionEstablishedOn:
+                        description: |
+                          Список имён системных сетей, в которых установлено соединение с этим пиром.
+                      connectionState:
+                        description: |
+                          Состояние соединения DRBD с этим пиром.
+                      name:
+                        description: |
+                          Имя пира-реплики (ReplicatedVolumeReplica). Имеет формат "prefix-N", где N от 0 до 31.
+                      replicationState:
+                        description: |
+                          Состояние репликации DRBD с этим пиром.
+                      type:
+                        description: |
+                          Тип реплики-пира. Может быть: Diskful, Access, TieBreaker.
+                phase:
+                  description: |
+                    Краткая сводка операционного состояния реплики. Может быть:
+                    - Pending (ожидание обработки)
+                    - Provisioning (выделение ресурсов)
+                    - Configuring (настройка)
+                    - WaitingForDatamesh (ожидание datamesh)
+                    - Synchronizing (синхронизация данных)
+                    - Healthy (реплика в норме)
+                    - PartiallyDegraded (частичная деградация)
+                    - Degraded (деградация)
+                    - Critical (критическое состояние)
+                    - Progressing (выполняется переход)
+                    - AgentNotReady (агент недоступен)
+                    - Terminating (реплика удаляется).
+                quorum:
+                  description: |
+                    Признак наличия кворума у данной реплики.
+                quorumSummary:
+                  description: |
+                    Подробная информация о кворуме реплики.
+                  properties:
+                    connectedDiskfulPeers:
+                      description: |
+                        Число подключённых Diskful-пиров с установленным соединением.
+                    connectedTieBreakerPeers:
+                      description: |
+                        Число подключённых TieBreaker-пиров с установленным соединением. TieBreaker'ы учитываются в кворуме только при определённых граничных условиях.
+                    connectedUpToDatePeers:
+                      description: |
+                        Число подключённых пиров с установленным соединением и актуальным (UpToDate) диском.
+                    quorum:
+                      description: |
+                        Требуемый порог кворума.
+                    quorumMinimumRedundancy:
+                      description: |
+                        Число diskful-пиров с актуальными данными (включая саму реплику), необходимое для кворума.
+                size:
+                  description: |
+                    Полезная ёмкость DRBD-устройства в байтах. Не задаётся, когда реплика diskless или опущена (Down).
+                type:
+                  description: |
+                    Наблюдаемый в данный момент тип конфигурации DRBD (из активной конфигурации DRBDResource). Может быть: Diskful или Diskless. Access и TieBreaker отображаются здесь как Diskless, так как неразличимы по собственному статусу реплики.

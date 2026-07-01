@@ -26,7 +26,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -78,14 +77,14 @@ func (s step) String() string { return s.Name }
 
 type stateMachine struct {
 	ctx     context.Context
-	trigger *v1.ConfigMap
+	trigger *corev1.ConfigMap
 	cl      client.Client
 	log     pkg.Logger
 
 	currentStepIdx int
 	steps          []step
 
-	cachedSecrets     map[string]*v1.Secret
+	cachedSecrets     map[string]*corev1.Secret
 	cachedDaemonSets  map[string]*appsv1.DaemonSet
 	cachedDeployments map[string]*appsv1.Deployment
 
@@ -96,7 +95,7 @@ func newStateMachine(
 	ctx context.Context,
 	cl client.Client,
 	log pkg.Logger,
-	trigger *v1.ConfigMap,
+	trigger *corev1.ConfigMap,
 	hookInput *pkg.HookInput,
 ) *stateMachine {
 	s := &stateMachine{}
@@ -342,10 +341,10 @@ func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 
 	// turn off
 	patch := client.MergeFrom(ds.DeepCopy())
-	ds.Spec.Template.Spec.Affinity = &v1.Affinity{
-		NodeAffinity: &v1.NodeAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
-				NodeSelectorTerms: []v1.NodeSelectorTerm{
+	ds.Spec.Template.Spec.Affinity = &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
 					{}, // match no objects
 				},
 			},

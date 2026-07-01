@@ -1,0 +1,197 @@
+---
+description: Rules for controller-runtime predicates/filters in predicates*.go: mechanical change detection only, no I/O, no domain logic, no mutations. Apply when editing images/controller/internal/controllers/**/predicates*.go, and when deciding whether logic belongs in predicates vs reconciliation. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+globs: images/controller/internal/controllers/**/predicates*.go
+alwaysApply: false
+---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
+- TL;DR:
+  - **`predicates.go`** contains controller-runtime **predicate**/**filter** implementations for a **controller package**.
+  - **predicates**/**filters** are **mechanical** change detection only:
+    - no **I/O**,
+    - no **domain/business** decisions,
+    - no mutation of observed objects.
+  - **`controller.go`** wires predicates into the **builder chain**:
+    - by calling `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
+    - Predicate implementation still lives in **`predicates.go`**.
+    - When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  - **`reconciler.go`** MUST NOT contain **predicates**/**filters**.
+
+- Scope (MUST):
+  - This document applies only to **`predicates.go`**.
+  - It defines what is allowed inside controller-runtime **predicates**/**filters** and how to structure them.
+
+- What is allowed in **`predicates.go`** (MUST):
+  - Definitions of predicate sets as **functions** (no package-level `var` predicates).
+    Predicate-set function naming (MUST) follows this convention:
+    - `func <Kind>Predicates() []predicate.Predicate { ... }`
+    - `<Kind>` MUST either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
+    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+    - Each such function returns **all** predicates needed for that `<Kind>` at the watch site where it is used.
+  - Pure, **mechanical** comparisons of object fields to decide whether to enqueue a **reconcile request**.
+  - Typed events (preferred): `event.TypedUpdateEvent[client.Object]`, etc.
+  - **`predicates.go`** MUST NOT define controller-runtime builder wiring helpers:
+    - no `*ForOptions` / `*OwnsOptions` / `*WatchesOptions` functions,
+    - no `builder.*` imports.
+
+- What is forbidden in **`predicates.go`** (MUST NOT):
+  - any **Kubernetes API I/O** (`Get/List/Create/Update/Patch/Delete`) or controller-runtime client usage;
+  - any multi-step **domain/business** logic (validation rules, placement/scheduling decisions, state machines);
+  - any mutation of the event objects (no writes to `.Spec`, `.Status`, metadata, conditions, maps/slices);
+  - any “hidden I/O” (time/random/env/network);
+  - direct `.Status.Conditions` access (use **`obju`** for condition comparisons).
+
+- Naming and shape (SHOULD):
+  - Predicate symbols SHOULD be unexported unless another package must reuse them.
+  - Use names that reflect the filtered object kind:
+    - `<Kind>Predicates` (returns `[]predicate.Predicate`)
+    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` SHOULD use the **short kind name**.
+  - Avoid generic prefixes like `primary*` in concrete controllers; prefer naming by the actual watched kind.
+
+- Multiple predicate sets for the same kind (MAY):
+  - If you need distinct predicate sets for the same `<Kind>` (for example, different watches), you MAY add a short suffix **before** `Predicates`:
+    - `<Kind><Scope>Predicates`
+  - `<Scope>` MUST be a short, stable identifier in `PascalCase` and MUST NOT repeat `<Kind>`.
+  - Typical scopes (illustrative): `Status`, `Spec`, `Child`, `Owner`, `Cast`.
+  - Prefer one canonical set per kind; introduce multiple sets only when it improves clarity at the watch site.
+
+- Rules for predicate behavior (MUST):
+  - Keep predicates lightweight and **mechanical** (no multi-step reasoning).
+  - If a handler would only `return true`, omit it (do not generate noop handlers).
+  - Performance matters: predicates are hot-path; avoid allocations, reflection, and heavy comparisons.
+  - Be conservative on uncertainty:
+    - if a type assertion fails or the event is not classifiable, return `true` (allow reconcile).
+
+- Change detection guidance (MUST):
+  - If **Reconciliation business logic** uses `.status.conditions` (or any condition-driven logic),
+    **predicate** MUST react to **`metadata.generation`** (**Generation**) changes.
+    - For CRDs, **Generation** usually bumps on spec changes.
+    - **Metadata-only changes** (labels/annotations/finalizers/ownerRefs) may not bump **Generation**.
+      If the controller must react to them, compare them explicitly via `client.Object` getters.
+
+- **object** access in **predicates** (MUST):
+  - Priority order:
+    - `client.Object` getters
+    - **`obju`** for conditions
+    - API **mechanical** helper methods
+    - direct field reads (last resort)
+  - If a field is available via `client.Object` methods, you MUST use those methods:
+    - `GetGeneration()`, `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`, etc.
+
+  Example: functions returning predicate sets (predicates.go style)
+  (requires Go 1.21+ for `maps`/`slices`; and `k8s.io/apimachinery/pkg/api/equality` for `apiequality`)
+
+  ```go
+  package examplecontroller
+
+  import (
+      "maps"
+      "slices"
+
+      apiequality "k8s.io/apimachinery/pkg/api/equality"
+      "sigs.k8s.io/controller-runtime/pkg/client"
+      "sigs.k8s.io/controller-runtime/pkg/event"
+      "sigs.k8s.io/controller-runtime/pkg/predicate"
+  )
+
+  func examplePredicates() []predicate.Predicate {
+      return []predicate.Predicate{
+          predicate.Funcs{
+              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+                  // React to spec-driven updates.
+                  if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
+                      return true
+                  }
+
+                  // React to metadata-only changes only when reconciliation depends on them.
+                  if !maps.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels()) {
+                      return true
+                  }
+                  if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
+                      return true
+                  }
+                  if !apiequality.Semantic.DeepEqual(e.ObjectNew.GetOwnerReferences(), e.ObjectOld.GetOwnerReferences()) {
+                      return true
+                  }
+
+                  // Ignore pure status updates to avoid reconcile loops.
+                  return false
+              },
+          },
+      }
+  }
+  ```
+
+- Condition comparisons (MUST):
+  - If you need to compare **condition**(s) in **predicates**, you MUST use **`obju`** (do not open-code `.status.conditions` access).
+  - Prefer:
+    - `obju.AreConditionsSemanticallyEqual(...)` when you need Type/Status/Reason/Message/ObservedGeneration semantics.
+    - `obju.AreConditionsEqualByStatus(...)` when only Type+Status matter.
+
+  Example: compare condition(s) via **`obju`** (predicates.go style)
+
+  ```go
+  package examplecontroller
+
+  import (
+      "sigs.k8s.io/controller-runtime/pkg/client"
+      "sigs.k8s.io/controller-runtime/pkg/event"
+      "sigs.k8s.io/controller-runtime/pkg/predicate"
+
+      obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
+  )
+
+  func exampleStatusPredicates() []predicate.Predicate {
+      return []predicate.Predicate{
+          predicate.Funcs{
+              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+                  newObj, okNew := e.ObjectNew.(obju.StatusConditionObject)
+                  oldObj, okOld := e.ObjectOld.(obju.StatusConditionObject)
+                  if !okNew || !okOld || newObj == nil || oldObj == nil {
+                      // Be conservative if we cannot type-assert.
+                      return true
+                  }
+
+                  return !obju.AreConditionsSemanticallyEqual(newObj, oldObj /* condition types... */)
+              },
+          },
+      }
+  }
+  ```
+
+- Type assertions/casts (MUST):
+  - Cast to a concrete API type only when `client.Object` methods are not enough.
+  - If you cast and the assertion fails / is nil, return `true` (allow reconcile).
+
+  Example: safe cast (predicates.go style)
+
+  ```go
+  package examplecontroller
+
+  import (
+      "sigs.k8s.io/controller-runtime/pkg/client"
+      "sigs.k8s.io/controller-runtime/pkg/event"
+      "sigs.k8s.io/controller-runtime/pkg/predicate"
+
+      "example.com/api/v1alpha1"
+  )
+
+  func exampleCastPredicates() []predicate.Predicate {
+      return []predicate.Predicate{
+          predicate.Funcs{
+              UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+                  oldObj, okOld := e.ObjectOld.(*v1alpha1.Example)
+                  newObj, okNew := e.ObjectNew.(*v1alpha1.Example)
+                  if !okOld || !okNew || oldObj == nil || newObj == nil {
+                      return true
+                  }
+
+                  // Field-level mechanical comparison (keep it small and explicit).
+                  return newObj.Spec.Replicas != oldObj.Spec.Replicas
+              },
+          },
+      }
+  }
+  ```
+

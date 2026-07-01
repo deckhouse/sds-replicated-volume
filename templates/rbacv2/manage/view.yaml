@@ -10,12 +10,19 @@ metadata:
     rbac.deckhouse.io/namespace: d8-sds-replicated-volume
   name: d8:manage:permission:module:sds-replicated-volume:view
 rules:
-  - apiGroups:
-      - storage.deckhouse.io
-    resources:
-      - replicatedstorageclasses
-      - replicatedstoragepools
-    verbs:
-      - get
-      - list
-      - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - drbdmappers
+  - drbdnodeoperations
+  - drbdresourceoperations
+  - drbdresources
+  - replicatedstorageclasses
+  - replicatedstoragepools
+  - replicatedvolumeattachments
+  - replicatedvolumereplicas
+  - replicatedvolumes
+  verbs:
+  - get
+  - list
+  - watch
