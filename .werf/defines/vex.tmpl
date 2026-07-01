@@ -1,7 +1,32 @@
+# put image with vex mitigations to registry.
+# Mitigations can be found in the known_vulnerabilities.vex file in the image directory
+# input parameters:
+# list of $ and image name.
+# list ($ "common/kubernetes")
 {{- define "vex mitigation" }}
-  {{- $ctx := index . 0 }}
+  {{- $context := index . 0 }}
   {{- $imageName := index . 1 }}
-  {{- $isVault := (all $ctx.CosignVaultAdress $ctx.CosignVaultToken $ctx.CosignVaultKey $ctx.CosignTransitSecret $ctx.ActionsIdTokenRequestUrl $ctx.ActionsIdTokenRequestToken) }}
+  {{- $knownVulnPath := "" }}
+  {{- $isVault := false }}
+  {{- if eq $imageName "dev" }}
+    {{- $knownVulnPath = "/deckhouse-controller/known_vulnerabilities.vex" }}
+  {{- else if eq $imageName "dev/install" }}
+    {{- $knownVulnPath = "/dhctl/known_vulnerabilities.vex" }}
+  {{- else if eq $imageName "bundle" }}
+    {{- $knownVulnPath = "/known_vulnerabilities.vex" }}
+  {{- else if hasKey $context "ModulePriority" }}
+    {{- $knownVulnPath = (printf "/%smodules/%s-%s/images/%s/known_vulnerabilities.vex" $context.ModulePath $context.ModulePriority $context.ModuleName $context.ImageName) }}
+  {{- else }}
+    {{- $knownVulnPath = (printf "/images/%s/known_vulnerabilities.vex" $imageName) }}
+  {{- end }}
+  {{- $vexFile := false }}
+  {{- if eq (len ($context.Files.Glob $knownVulnPath)) 1 }}
+    {{- $vexFile = true }}
+  {{- end }}
+  {{- if or (ne (env "WERF_SIGN_KEY" "") "") (ne (env "VAULT_ID_TOKEN" "") "") (ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "") (ne (env "COSIGN_VAULT_ADDRESS" "") "") }}
+    {{- $isVault = true }}
+  {{- end }}
+  {{- if $vexFile }}
 ---
 image: {{ $imageName }}-vex-artifact
 fromImage: base/vex
@@ -11,22 +36,38 @@ secrets:
   env: REGISTRY_USER
 - id: REGISTRY_PASSWORD
   env: REGISTRY_PASSWORD
-{{- if $isVault }}
-- id: COSIGN_VAULT_ADDRESS
+{{- if ne (env "WERF_SIGN_KEY" "") "" }}
+- id: VAULT_ADDR
+  env: VAULT_ADDR
+- id: VAULT_KEY
+  env: WERF_SIGN_KEY
+- id: TRANSIT_SECRET_ENGINE_PATH
+  env: TRANSIT_SECRET_ENGINE_PATH
+- id: VAULT_ROLE
+  env: WERF_VAULT_AUTH_ROLE
+- id: VAULT_JWT
+  env: WERF_VAULT_AUTH_JWT
+{{- else if $isVault }}
+- id: VAULT_ADDR
   env: COSIGN_VAULT_ADDRESS
-- id: COSIGN_VAULT_KEY
+- id: VAULT_KEY
   env: COSIGN_VAULT_KEY
-- id: COSIGN_AUTH_ROLE
+- id: VAULT_ROLE
   env: COSIGN_AUTH_ROLE
-- id: COSIGN_TRANSIT_SECRET_ENGINE_PATH
+- id: TRANSIT_SECRET_ENGINE_PATH
   env: COSIGN_TRANSIT_SECRET_ENGINE_PATH
+{{- if ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "" }}
 - id: ACTIONS_ID_TOKEN_REQUEST_TOKEN
   env: ACTIONS_ID_TOKEN_REQUEST_TOKEN
 - id: ACTIONS_ID_TOKEN_REQUEST_URL
   env: ACTIONS_ID_TOKEN_REQUEST_URL
+{{- else }}
+- id: VAULT_JWT
+  env: VAULT_ID_TOKEN
+{{- end }}
 {{- end }}
 git:
-- add: /images/{{ $imageName }}/known_vulnerabilities.vex
+- add: {{ $knownVulnPath }}
   to: /known_vulnerabilities.vex
   stageDependencies:
     install:
@@ -41,28 +82,45 @@ dependencies:
     targetEnv: IMAGE_REPO
 shell:
   install:
+  - export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
+  - export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
+{{- if $isVault }}
+  - export VAULT_ADDR="$(cat /run/secrets/VAULT_ADDR)"
+  - export VAULT_ROLE="$(cat /run/secrets/VAULT_ROLE)"
+  - export TRANSIT_SECRET_ENGINE_PATH="$(cat /run/secrets/TRANSIT_SECRET_ENGINE_PATH)"
+  - export VAULT_AUTH_PATH="fox"
+{{- if ne (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") "" }}
+  - export ACTIONS_ID_TOKEN_REQUEST_TOKEN="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_TOKEN)"
+  - export ACTIONS_ID_TOKEN_REQUEST_URL="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_URL)"
+  - export VAULT_AUTH_PATH="github"
+  - >
+    export VAULT_JWT=$(jq -r .value <<< $(curl -fsH "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=github-access-aud" ))
+  - >
+    if [ -n "${VAULT_JWT}" ]; then
+      echo "Received Actions token";
+    else
+      echo "Actions token empty";
+    fi
+{{- else }}
+  - export VAULT_KEY="hashivault://$(cat /run/secrets/VAULT_KEY | sed 's|hashivault://||')"
+  - export VAULT_JWT="$(cat /run/secrets/VAULT_JWT)"
+{{- end }}
+  - >
+    export VAULT_TOKEN="$(curl -fX POST "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login" -d '{"role":"'${VAULT_ROLE}'","jwt":"'${VAULT_JWT}'"}' | jq -r '.auth.client_token')"
+  - >
+    if [ -n "${VAULT_TOKEN}" ]; then
+      echo "Received Vault token";
+    else
+      echo "Vault token empty";
+    fi
+  - echo "Using predicate known_vulnerabilities.vex"
+{{- else }}
   - |
-    echo -e "\033[0;33m[WARNING]: Not enough data to sign attestation using vault. Fallback to local generated keys.\033[0m"
-    export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
-    export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
-  {{- if $isVault }}
-  - |
-    export VAULT_ADDR="$(cat /run/secrets/COSIGN_VAULT_ADDRESS)"
-    export COSIGN_VAULT_KEY="$(cat /run/secrets/COSIGN_VAULT_KEY)"
-    export COSIGN_AUTH_ROLE="$(cat /run/secrets/COSIGN_AUTH_ROLE)"
-    export TRANSIT_SECRET_ENGINE_PATH="$(cat /run/secrets/COSIGN_TRANSIT_SECRET_ENGINE_PATH)"
-    export ACTIONS_ID_TOKEN_REQUEST_TOKEN="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_TOKEN)"
-    export ACTIONS_ID_TOKEN_REQUEST_URL="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_URL)"
-    ACTIONS_ID_TOKEN=$(jq -r .value <<< $(curl -fsH "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=github-access-aud" )) \
-    VAULT_TOKEN="$(curl -X POST "${VAULT_ADDR}/v1/auth/github/login" -d '{"role":"'${COSIGN_AUTH_ROLE}'","jwt":"'${ACTIONS_ID_TOKEN}'"}' | jq -r '.auth.client_token')" \
-    export KEY="hashivault://${COSIGN_VAULT_KEY}"
-  {{- else }}
-  - |
-    echo -e "\033[33mWARNING!!! Cosign will sign attestation with self-generated key pair! Some or all required env variables are missing!\033[0m"
+    echo -e "\033[33mWARNING!!! Cosign will sign attestation with self-generated key pair!\033[0m"
     export COSIGN_PASSWORD=""
     cosign generate-key-pair
-    export KEY="cosign.key"
-  {{- end }}
+    export VAULT_KEY="cosign.key"
+{{- end }}
   - |
     cosign attest \
       --replace \
@@ -70,8 +128,9 @@ shell:
       --registry-password="${REGISTRY_PASSWORD}" \
       --predicate /known_vulnerabilities.vex \
       --type openvex \
-      --key ${KEY} \
+      --key ${VAULT_KEY} \
       --tlog-upload=false \
-      -y \
+      -y -d \
       "${IMAGE_REPO}@${IMAGE_DIGEST}"
+  {{- end }}
 {{- end }}
