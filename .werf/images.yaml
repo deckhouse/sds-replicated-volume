@@ -14,6 +14,8 @@
   # cosign
   {{- $_ := set $ctx "RegistryUser" (env "REGISTRY_USER" "") }}
   {{- $_ := set $ctx "RegistryPassword" (env "REGISTRY_PASSWORD" "") }}
+  {{- $_ := set $ctx "ActionsIdTokenRequestToken" (env "ACTIONS_ID_TOKEN_REQUEST_TOKEN" "") }}
+  {{- $_ := set $ctx "ActionsIdTokenRequestUrl" (env "ACTIONS_ID_TOKEN_REQUEST_URL" "") }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}
