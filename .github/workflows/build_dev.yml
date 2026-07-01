@@ -125,12 +125,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fcontainer-base%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@vex-attestations
+      - uses: deckhouse/modules-actions/build@v15
         with:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
