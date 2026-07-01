@@ -1,25 +1,7 @@
 ---
 image: base/vex
-fromImage: tools/coreutils
+fromImage: builder/distroless
 final: false
-import:
-- image: builder/alpine
-  add: /etc/ssl/certs/ca-certificates.crt
-  to: /etc/ssl/certs/ca-certificates.crt
-  before: install
-- image: tools/cosign
-  add: /usr/bin/cosign
-  to: /usr/bin/cosign
-  before: install
-- image: tools/jq
-  add: /usr/bin/jq
-  to: /usr/bin/jq
-  before: install
-- image: tools/curl
-  add: /usr/bin/curl-static
-  to: /usr/bin/curl
-  before: install
-- image: tools/bash
-  add: /usr/bin/bash
-  to: /bin/bash
-  before: install
+shell:
+  install:
+    - pm install coreutils ca-certificates cosign=2.6.3 jq curl bash
