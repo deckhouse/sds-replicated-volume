@@ -11,6 +11,9 @@ config:
       - SOURCE_REPO
       - DISTRO_PACKAGES_PROXY
       - SOURCE_REPO_TAG
+      - /COSIGN_.+/
+      - REGISTRY_USER
+      - REGISTRY_PASSWORD
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:

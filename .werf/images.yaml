@@ -11,6 +11,9 @@
   {{- $_ := set $ctx "DistroPackagesProxy" $Root.DistroPackagesProxy }}
   {{- $_ := set $ctx "Versions" $Root.VERSIONS }}
   {{- $_ := set $ctx "Files" $Root.Files }}
+  # cosign
+  {{- $_ := set $ctx "RegistryUser" (env "REGISTRY_USER" "") }}
+  {{- $_ := set $ctx "RegistryPassword" (env "REGISTRY_PASSWORD" "") }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}
