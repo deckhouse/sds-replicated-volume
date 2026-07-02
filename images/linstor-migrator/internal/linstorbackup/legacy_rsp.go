@@ -52,6 +52,29 @@ func IsLegacyReplicatedStoragePoolCandidate(poolName string) bool {
 	return true
 }
 
+// WriteLegacyRSPBackupFromCluster lists all ReplicatedStoragePool objects, backs up those that pass
+// IsLegacyReplicatedStoragePoolCandidate to legacy-rsp.gz, and returns names to delete.
+func WriteLegacyRSPBackupFromCluster(
+	ctx context.Context,
+	kClient client.Client,
+	log *slog.Logger,
+	dir string,
+) ([]string, error) {
+	var list srvv1alpha1.ReplicatedStoragePoolList
+	if err := kClient.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("list ReplicatedStoragePool: %w", err)
+	}
+
+	names := make([]string, 0, len(list.Items))
+	for i := range list.Items {
+		name := list.Items[i].Name
+		if IsLegacyReplicatedStoragePoolCandidate(name) {
+			names = append(names, name)
+		}
+	}
+	return WriteLegacyRSPBackup(ctx, kClient, log, dir, names)
+}
+
 // WriteLegacyRSPBackup loads legacy ReplicatedStoragePool objects by name, writes legacy-rsp.gz
 // when at least one exists, and returns the names that were backed up (for a subsequent delete pass).
 // No file is created when nothing is found.

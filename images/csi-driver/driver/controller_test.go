@@ -33,7 +33,6 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -72,7 +71,7 @@ func TestControllerUnpublishVolume_WaitsForRVADeletion(t *testing.T) {
 
 	volumeID := "vol-x"
 	nodeID := "node-1"
-	rvaName := utils.BuildRVAName(volumeID, nodeID)
+	rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeID, nodeID)
 
 	cl := newTestFakeClient()
 
@@ -139,7 +138,7 @@ func TestControllerUnpublishVolume_ReturnsDeadlineExceededIfRVAStuck(t *testing.
 
 	volumeID := "vol-x"
 	nodeID := "node-1"
-	rvaName := utils.BuildRVAName(volumeID, nodeID)
+	rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeID, nodeID)
 
 	cl := newTestFakeClient()
 

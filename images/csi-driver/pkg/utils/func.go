@@ -18,11 +18,8 @@ package utils //nolint:revive // legacy package name
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -318,49 +315,8 @@ func BuildReplicatedVolumeSpec(
 	}
 }
 
-func BuildRVAName(volumeName, nodeName string) string {
-	base := "csi-" + volumeName + "-" + nodeName
-	if len(base) <= 253 {
-		return base
-	}
-
-	sum := sha1.Sum([]byte(base))
-	hash := hex.EncodeToString(sum[:])[:8]
-
-	// "csi-" + vol + "-" + node + "-" + hash
-	const prefixLen = 4 // len("csi-")
-	const sepCount = 2  // "-" between parts + "-" before hash
-	const hashLen = 8
-	maxPartsLen := 253 - prefixLen - sepCount - hashLen
-	if maxPartsLen < 2 {
-		// Should never happen, but keep a valid, bounded name.
-		return "csi-" + hash
-	}
-
-	volMax := maxPartsLen / 2
-	nodeMax := maxPartsLen - volMax
-
-	volPart := truncateString(volumeName, volMax)
-	nodePart := truncateString(nodeName, nodeMax)
-	return "csi-" + volPart + "-" + nodePart + "-" + hash
-}
-
-func truncateString(s string, maxLen int) string {
-	if maxLen <= 0 {
-		return ""
-	}
-	if len(s) <= maxLen {
-		return s
-	}
-	// Make the truncation stable and avoid trailing '-' (purely cosmetic, but improves readability).
-	out := s[:maxLen]
-	out = strings.TrimSuffix(out, "-")
-	out = strings.TrimSuffix(out, ".")
-	return out
-}
-
 func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nodeName string) (string, error) {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	rva := &srv.ReplicatedVolumeAttachment{}
 	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
@@ -374,7 +330,7 @@ func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nod
 // createRVA creates a fresh ReplicatedVolumeAttachment with the CSI finalizer.
 // Treats AlreadyExists as success (another caller won the race).
 func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 	rva := &srv.ReplicatedVolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -398,7 +354,7 @@ func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 }
 
 func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 	existing := &srv.ReplicatedVolumeAttachment{}
 	err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, existing)
@@ -439,7 +395,7 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 }
 
 func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	rva := &srv.ReplicatedVolumeAttachment{}
 	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 		if client.IgnoreNotFound(err) == nil {
@@ -546,7 +502,7 @@ func WaitForRVAReady(
 	log *logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	var attemptCounter int
 	var lastReadyCond *metav1.Condition
 	var lastAttachedCond *metav1.Condition
@@ -664,7 +620,7 @@ func WaitForRVADeleted(
 	log *logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
-	rvaName := BuildRVAName(volumeName, nodeName)
+	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	var attemptCounter int
 	var lastFinalizers []string
 	var lastPhase string

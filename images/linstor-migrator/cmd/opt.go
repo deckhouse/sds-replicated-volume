@@ -29,9 +29,9 @@ import (
 
 // Opt holds the CLI options for the migrator.
 type Opt struct {
-	LogLevel           string
-	Stage2PollInterval time.Duration
-	Stage2WorkerCount  int
+	LogLevel          string
+	RetryInterval     time.Duration
+	Stage2WorkerCount int
 }
 
 // Parse parses CLI flags using cobra.
@@ -41,8 +41,8 @@ func (o *Opt) Parse() {
 			if !regexp.MustCompile(`^debug$|^info$|^warn$|^error$`).MatchString(o.LogLevel) {
 				return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
 			}
-			if o.Stage2PollInterval <= 0 {
-				return errors.New("stage2-poll-interval must be positive")
+			if o.RetryInterval <= 0 {
+				return errors.New("retry-interval must be positive")
 			}
 			if o.Stage2WorkerCount < 1 {
 				return errors.New("stage2-worker-count must be at least 1")
@@ -59,7 +59,7 @@ func (o *Opt) Parse() {
 	})
 
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
-	rootCmd.Flags().DurationVar(&o.Stage2PollInterval, "stage2-poll-interval", migrator.DefaultStage2PollInterval, "Interval between stage 2 polling rounds (adopt exit-maintenance)")
+	rootCmd.Flags().DurationVar(&o.RetryInterval, "retry-interval", migrator.DefaultRetryInterval, "Interval between ConfigMap state update retries and stage 2 polling rounds")
 	rootCmd.Flags().IntVar(&o.Stage2WorkerCount, "stage2-worker-count", migrator.DefaultStage2WorkerCount, "Number of parallel workers for stage 2")
 	if err := rootCmd.Execute(); err != nil {
 		// Error is already logged by cobra.
