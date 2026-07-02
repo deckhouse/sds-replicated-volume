@@ -106,17 +106,17 @@ func NewReplicatedStoragePool(
 				return
 			}
 
-			if e.ObjectOld.Spec.Type != e.ObjectNew.Spec.Type {
-				errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", e.ObjectOld.Spec.Type, e.ObjectNew.Spec.Type)
-				log.Error(nil, errMessage)
-				e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-				e.ObjectNew.Status.Message = errMessage
-				err := UpdateReplicatedStoragePool(ctx, cl, e.ObjectNew)
-				if err != nil {
-					log.Error(err, "error UpdateReplicatedStoragePool")
-				}
-				return
+		if e.ObjectOld.Spec.Type != e.ObjectNew.Spec.Type {
+			errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", e.ObjectOld.Spec.Type, e.ObjectNew.Spec.Type)
+			log.Error(nil, errMessage)
+			e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+			e.ObjectNew.Status.Message = errMessage
+			err := UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
+			if err != nil {
+				log.Error(err, "error UpdateReplicatedStoragePoolStatus")
 			}
+			return
+		}
 
 			config, err := rest.InClusterConfig()
 			if err != nil {
@@ -150,15 +150,15 @@ func NewReplicatedStoragePool(
 					}
 					for _, lvgNode := range lvg.Status.Nodes {
 						if slices.Contains(ephemeralNodesList, lvgNode.Name) {
-							errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
-							log.Error(nil, errMessage)
-							e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-							e.ObjectNew.Status.Message = errMessage
-							err = UpdateReplicatedStoragePool(ctx, cl, e.ObjectNew)
-							if err != nil {
-								log.Error(err, "error UpdateReplicatedStoragePool")
-							}
-							return
+						errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
+						log.Error(nil, errMessage)
+						e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+						e.ObjectNew.Status.Message = errMessage
+						err = UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
+						if err != nil {
+							log.Error(err, "error UpdateReplicatedStoragePoolStatus")
+						}
+						return
 						}
 					}
 				}
@@ -200,9 +200,9 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 	if !ok {
 		replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
 		replicatedSP.Status.Message = msg
-		err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
+		err := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
 		if err != nil {
-			return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
+			return fmt.Errorf("error UpdateReplicatedStoragePoolStatus: %s", err.Error())
 		}
 		return fmt.Errorf("unable to reconcile the Replicated Storage Pool %s, reason: %s", replicatedSP.Name, msg)
 	}
@@ -258,13 +258,13 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 						log.Error(delErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to delete LINSTOR Storage Pool %s on node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
 					}
 
-					replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-					replicatedSP.Status.Message = createErr.Error()
-					updErr := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
-					if updErr != nil {
-						log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
-					}
-					return createErr
+				replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+				replicatedSP.Status.Message = createErr.Error()
+				updErr := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
+				if updErr != nil {
+					log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
+				}
+				return createErr
 				}
 
 				log.Info(fmt.Sprintf("Storage Pool %s was successfully created on the node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
@@ -297,7 +297,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 	if !isSuccessful {
 		replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
 		replicatedSP.Status.Message = failedMsgBuilder.String()
-		err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
+		err := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
 			return err
@@ -307,7 +307,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 	replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseReady
 	replicatedSP.Status.Message = "pool creation completed"
-	err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
+	err := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
 		return err
@@ -318,6 +318,17 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 func UpdateReplicatedStoragePool(ctx context.Context, cl client.Client, replicatedSP *srv.ReplicatedStoragePool) error {
 	err := cl.Update(ctx, replicatedSP)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateReplicatedStoragePoolStatus writes only the .status field of a ReplicatedStoragePool via the status subresource.
+// The CRD enables the status subresource (subresources.status: {}), so a plain client.Update silently drops .status changes;
+// Status().Update is the only way to persist phase/message on a real apiserver.
+func UpdateReplicatedStoragePoolStatus(ctx context.Context, cl client.Client, replicatedSP *srv.ReplicatedStoragePool) error {
+	err := cl.Status().Update(ctx, replicatedSP)
 	if err != nil {
 		return err
 	}
