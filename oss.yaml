@@ -12,6 +12,13 @@
   description: DRBD, developed by LINBIT, provides networked RAID 1 functionality for GNU/Linux. It is designed for high availability clusters and software defined storage.
   license: GPL-2.0
 
+- id: DRBD_LEGACY
+  version: "9.2.18"
+  name: DRBD
+  link: https://github.com/LINBIT/drbd
+  description: DRBD kernel module for the legacy LINSTOR control plane. Kept as a separate version slot so legacy and agent paths can diverge safely.
+  license: GPL-2.0
+
 - id: DRBD_REACTOR
   version: "1.8.0"
   name: drbd-reactor
@@ -24,6 +31,13 @@
   name: drbd-utils
   link: https://github.com/LINBIT/drbd-utils
   description: DRBD userspace utilities for DRBD 9.x (and 8.4, 8.3). User-space tools and daemons for managing and configuring DRBD resources.
+  license: GPL-2.0
+
+- id: DRBD_UTILS_LEGACY
+  version: "9.30.0"
+  name: drbd-utils
+  link: https://github.com/LINBIT/drbd-utils
+  description: DRBD userspace utilities for the legacy LINSTOR control plane. Kept as a separate version slot so legacy and agent paths can diverge safely.
   license: GPL-2.0
 
 - id: LVM2
