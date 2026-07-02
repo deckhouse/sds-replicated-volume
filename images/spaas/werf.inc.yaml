@@ -40,6 +40,11 @@ import:
     to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
     before: setup
 
+  - image: drbd-legacy-artifact
+    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD_LEGACY" $.Root) }}.tar.gz
+    to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD_LEGACY" $.Root) }}.tar.gz
+    before: setup
+
 shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
