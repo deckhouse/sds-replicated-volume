@@ -1,5 +1,7 @@
 name: sds-replicated-volume
 stage: "Preview"
+subsystems:
+  - storage
 descriptions:
   en: "Manages replicated block storage based on DRBD."
   ru: "Управляет реплицируемым блочным хранилищем на базе DRBD."
