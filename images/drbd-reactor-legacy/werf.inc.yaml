@@ -103,7 +103,7 @@ git:
       setup:
         - "**/*"
 
-  - add: /images/drbd-reactor-legacy/patches
+  - add: /images/{{ $.ImageName }}/patches
     to: /patches
 shell:
   beforeInstall:
