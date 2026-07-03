@@ -109,6 +109,7 @@ spec:
       {{- else }}
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}"
       {{- end }}
+      current_version_regex='^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$'
 
       # We expect the loaded DRBD module to be version 9.
       # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
@@ -126,7 +127,9 @@ spec:
       bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
-      if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
+      if [ -z "$current_version" ] || [[ ! "$current_version" =~ $current_version_regex ]]; then
+        bb-log-info "DRBD needs to be rebuilt"
+      elif [ "$(d8-semver compare "$current_version" "$desired_version")" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
       else
         if [ -e "/etc/modules" ]; then
@@ -226,7 +229,12 @@ spec:
 
     if [ -e "/proc/drbd" ]; then
       current_version="$(cat /proc/drbd | grep 'version:' | awk '{print $2}')"
+      {{- if $.Values.sdsReplicatedVolume.internal.newControlPlane }}
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
+      {{- else }}
+      desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}"
+      {{- end }}
+      current_version_regex='^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$'
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
@@ -234,8 +242,8 @@ spec:
       bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
-      if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
-        bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired minimum "$desired_version"), setting reboot flag"
+      if [ -z "$current_version" ] || [[ ! "$current_version" =~ $current_version_regex ]] || [ "$(d8-semver compare "$current_version" "$desired_version")" == "-1" ]; then
+        bb-log-info "Non-actual version of drbd is loaded (now $current_version, desired minimum $desired_version), setting reboot flag"
         bb-flag-set reboot
       fi
     fi

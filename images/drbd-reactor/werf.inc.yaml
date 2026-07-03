@@ -191,6 +191,8 @@ shell:
       apt-get update \
       && apt-get -y install libkeyutils kmod sysklogd
     - {{ $.Root.ALT_CLEANUP_CMD }}
+    # Remove build-only static analysis tooling inherited from the builder base.
+    - {{ $.Root.SVACE_CLEANUP_CMD }}
   setup:
     - ls -la /packages
     - |
