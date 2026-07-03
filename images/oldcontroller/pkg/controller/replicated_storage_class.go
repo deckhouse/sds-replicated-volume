@@ -334,14 +334,23 @@ func ReconcileReplicatedStorageClass(
 
 	replicatedSC.Status.Phase = Created
 	replicatedSC.Status.Message = "ReplicatedStorageClass and StorageClass are equal."
+	// Persist status via the status subresource first: plain Update would silently drop .status changes
+	// because the ReplicatedStorageClass CRD enables subresources.status.
+	log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass status %+v", replicatedSC))
+	if err = UpdateReplicatedStorageClassStatus(ctx, cl, replicatedSC); err != nil {
+		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClassStatus: %w", err)
+		return true, err
+	}
+
 	if !slices.Contains(replicatedSC.Finalizers, ReplicatedStorageClassFinalizerName) {
 		replicatedSC.Finalizers = append(replicatedSC.Finalizers,
 			ReplicatedStorageClassFinalizerName)
-	}
-	log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass %+v", replicatedSC))
-	if err = UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %w", err)
-		return true, err
+		// Finalizer is metadata, so it must go through the regular Update (not the status subresource).
+		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass finalizers %+v", replicatedSC))
+		if err = UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
+			err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %w", err)
+			return true, err
+		}
 	}
 
 	return false, nil
@@ -465,6 +474,17 @@ func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zo
 
 func UpdateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) error {
 	err := cl.Update(ctx, replicatedSC)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateReplicatedStorageClassStatus writes only the .status field of a ReplicatedStorageClass via the status subresource.
+// The CRD enables the status subresource (subresources.status: {}), so a plain client.Update silently drops .status changes;
+// Status().Update is the only way to persist phase/message on a real apiserver.
+func UpdateReplicatedStorageClassStatus(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) error {
+	err := cl.Status().Update(ctx, replicatedSC)
 	if err != nil {
 		return err
 	}
@@ -846,7 +866,7 @@ func updateReplicatedStorageClassStatus(
 	replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhase(phase)
 	replicatedSC.Status.Message = reason
 	log.Trace(fmt.Sprintf("[updateReplicatedStorageClassStatus] update ReplicatedStorageClass %+v", replicatedSC))
-	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
+	return UpdateReplicatedStorageClassStatus(ctx, cl, replicatedSC)
 }
 
 func updateMap(dst, src map[string]string) {

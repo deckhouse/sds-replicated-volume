@@ -41,7 +41,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 	var (
 		ctx    = context.Background()
-		cl     = newFakeClient()
+		cl     = newFakeClientWithStatusSubresource()
 		log, _ = logger.NewLogger("2")
 		lc, _  = lapi.NewClient(lapi.Log(log))
 
@@ -79,6 +79,62 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		updatedreplicatedSP, _ := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, testName)
 		Expect(updatedreplicatedSP.Labels[testLblKey]).To(Equal(testLblValue))
+	})
+
+	It("UpdateReplicatedStoragePoolStatus writes status via the status subresource", func() {
+		// A client built with WithStatusSubresource emulates a real apiserver where the status
+		// subresource is enabled: plain Update no longer persists .status. This test reproduces the
+		// original bug (status silently dropped) and verifies the Status().Update-based helper fixes it.
+		clStatus := newFakeClientWithStatusSubresource()
+
+		rsp := &srv.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "status-subresource-rsp",
+				Namespace: testNameSpace,
+			},
+		}
+		Expect(clStatus.Create(ctx, rsp)).To(Succeed())
+
+		rsp.Status.Phase = srv.ReplicatedStoragePoolPhaseReady
+		rsp.Status.Message = "pool creation completed"
+
+		Expect(controller.UpdateReplicatedStoragePoolStatus(ctx, clStatus, rsp)).To(Succeed())
+
+		persisted, err := controller.GetReplicatedStoragePool(ctx, clStatus, testNameSpace, "status-subresource-rsp")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(persisted.Status.Phase).To(Equal(srv.ReplicatedStoragePoolPhaseReady))
+		Expect(persisted.Status.Message).To(Equal("pool creation completed"))
+	})
+
+	It("UpdateReplicatedStoragePool does not overwrite status when the status subresource is enabled", func() {
+		// Regression guard: with the status subresource enabled, updating labels via the regular
+		// Update helper must not clear an already-written status (this is exactly what a real apiserver does).
+		clStatus := newFakeClientWithStatusSubresource()
+
+		rsp := &srv.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "status-guard-rsp",
+				Namespace: testNameSpace,
+			},
+		}
+		Expect(clStatus.Create(ctx, rsp)).To(Succeed())
+
+		// Seed status through the status-aware helper.
+		rsp.Status.Phase = srv.ReplicatedStoragePoolPhaseReady
+		rsp.Status.Message = "pool creation completed"
+		Expect(controller.UpdateReplicatedStoragePoolStatus(ctx, clStatus, rsp)).To(Succeed())
+
+		// Mutate a non-status field via the plain Update helper.
+		rsp.Labels = map[string]string{"updated": "true"}
+		Expect(controller.UpdateReplicatedStoragePool(ctx, clStatus, rsp)).To(Succeed())
+
+		persisted, err := controller.GetReplicatedStoragePool(ctx, clStatus, testNameSpace, "status-guard-rsp")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(persisted.Labels["updated"]).To(Equal("true"))
+		// Status must survive the regular Update: if this assertion ever fails, the controller is again
+		// relying on cl.Update to write status, which the status subresource silently discards.
+		Expect(persisted.Status.Phase).To(Equal(srv.ReplicatedStoragePoolPhaseReady))
+		Expect(persisted.Status.Message).To(Equal("pool creation completed"))
 	})
 
 	It("UpdateMapValue", func() {

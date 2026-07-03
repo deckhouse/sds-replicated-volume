@@ -79,7 +79,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 	)
 
 	BeforeEach(func() {
-		cl = newFakeClient()
+		cl = newFakeClientWithStatusSubresource()
 	})
 
 	It("GenerateStorageClassFromReplicatedStorageClass_Generates_expected_StorageClass", func() {
@@ -222,7 +222,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(sc.Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("UpdateReplicatedStorageClass_Updates_resource", func() {
+	It("UpdateReplicatedStorageClass_persists_metadata_and_does_not_clobber_status", func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -244,14 +244,18 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		oldResource := resources[testName]
 		Expect(oldResource.Name).To(Equal(testName))
 		Expect(oldResource.Namespace).To(Equal(testNamespaceConst))
+		// Create persists the initial status even with the status subresource enabled.
 		Expect(oldResource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 
+		// Seed a status through the status-aware helper so we can detect whether the regular Update clobbers it.
 		oldResource.Status.Phase = srv.ReplicatedStorageClassPhaseInvalidConfiguration
 		updatedMessage := "new message"
 		oldResource.Status.Message = updatedMessage
+		Expect(controller.UpdateReplicatedStorageClassStatus(ctx, cl, &oldResource)).To(Succeed())
 
-		err = controller.UpdateReplicatedStorageClass(ctx, cl, &oldResource)
-		Expect(err).NotTo(HaveOccurred())
+		// Mutate a non-status field via the plain Update helper.
+		oldResource.Labels = map[string]string{"updated": "true"}
+		Expect(controller.UpdateReplicatedStorageClass(ctx, cl, &oldResource)).To(Succeed())
 
 		resources, err = getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -259,8 +263,39 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		updatedResource := resources[testName]
 		Expect(updatedResource.Name).To(Equal(testName))
 		Expect(updatedResource.Namespace).To(Equal(testNamespaceConst))
+		Expect(updatedResource.Labels["updated"]).To(Equal("true"))
+		// Status must survive the regular Update: with the status subresource enabled, plain Update
+		// does not touch .status. If this assertion ever fails, the controller is again relying on
+		// cl.Update to write status, which the status subresource silently discards.
 		Expect(updatedResource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseInvalidConfiguration))
 		Expect(updatedResource.Status.Message).To(Equal(updatedMessage))
+	})
+
+	It("UpdateReplicatedStorageClassStatus_writes_status_via_the_status_subresource", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+
+		Expect(cl.Create(ctx, &replicatedSC)).To(Succeed())
+		defer func() {
+			if err := cl.Delete(ctx, &replicatedSC); err != nil && !errors.IsNotFound(err) {
+				fmt.Println(err.Error())
+			}
+		}()
+
+		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
+		replicatedSC.Status.Message = "ReplicatedStorageClass and StorageClass are equal."
+		// A client built with WithStatusSubresource emulates a real apiserver where the status
+		// subresource is enabled: plain Update no longer persists .status. This test reproduces the
+		// original bug (status silently dropped) and verifies the Status().Update-based helper fixes it.
+		Expect(controller.UpdateReplicatedStorageClassStatus(ctx, cl, &replicatedSC)).To(Succeed())
+
+		resources, err := getTestAPIStorageClasses(ctx, cl)
+		Expect(err).NotTo(HaveOccurred())
+
+		persisted := resources[testName]
+		Expect(persisted.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
+		Expect(persisted.Status.Message).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
 	})
 
 	It("RemoveString_removes_correct_one", func() {

@@ -59,6 +59,25 @@ func newFakeClient() client.WithWatch {
 	return cl
 }
 
+// newFakeClientWithStatusSubresource mirrors a real apiserver that has the status subresource enabled
+// (subresources.status: {}) for ReplicatedStoragePool. With this builder, plain Update calls no longer
+// persist .status changes, so controllers must use Status().Update — just like against a real cluster.
+// Tests using this client catch the original bug where UpdateReplicatedStoragePool used cl.Update and
+// silently failed to write phase/message.
+func newFakeClientWithStatusSubresource() client.WithWatch {
+	s := scheme.Scheme
+	_ = metav1.AddMetaToScheme(s)
+	_ = srv.AddToScheme(s)
+	_ = snc.AddToScheme(s)
+
+	builder := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&srv.ReplicatedStoragePool{}, &srv.ReplicatedStorageClass{})
+
+	cl := builder.Build()
+	return cl
+}
+
 func getTestAPIStorageClasses(ctx context.Context, cl client.Client) (map[string]srv.ReplicatedStorageClass, error) {
 	resources := &srv.ReplicatedStorageClassList{
 		TypeMeta: metav1.TypeMeta{
