@@ -81,7 +81,7 @@ var _ = Describe("replicated-storage-class-controller label filtering", Ordered,
 	)
 
 	BeforeAll(func() {
-		cl = newFakeClient()
+		cl = newFakeClientWithStatusSubresource()
 
 		for _, zone := range validZones {
 			node := &corev1.Node{

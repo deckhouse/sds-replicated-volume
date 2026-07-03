@@ -72,7 +72,7 @@ func newFakeClientWithStatusSubresource() client.WithWatch {
 
 	builder := fake.NewClientBuilder().
 		WithScheme(s).
-		WithStatusSubresource(&srv.ReplicatedStoragePool{})
+		WithStatusSubresource(&srv.ReplicatedStoragePool{}, &srv.ReplicatedStorageClass{})
 
 	cl := builder.Build()
 	return cl

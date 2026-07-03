@@ -106,17 +106,17 @@ func NewReplicatedStoragePool(
 				return
 			}
 
-		if e.ObjectOld.Spec.Type != e.ObjectNew.Spec.Type {
-			errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", e.ObjectOld.Spec.Type, e.ObjectNew.Spec.Type)
-			log.Error(nil, errMessage)
-			e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-			e.ObjectNew.Status.Message = errMessage
-			err := UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
-			if err != nil {
-				log.Error(err, "error UpdateReplicatedStoragePoolStatus")
+			if e.ObjectOld.Spec.Type != e.ObjectNew.Spec.Type {
+				errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", e.ObjectOld.Spec.Type, e.ObjectNew.Spec.Type)
+				log.Error(nil, errMessage)
+				e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+				e.ObjectNew.Status.Message = errMessage
+				err := UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
+				if err != nil {
+					log.Error(err, "error UpdateReplicatedStoragePoolStatus")
+				}
+				return
 			}
-			return
-		}
 
 			config, err := rest.InClusterConfig()
 			if err != nil {
@@ -150,15 +150,15 @@ func NewReplicatedStoragePool(
 					}
 					for _, lvgNode := range lvg.Status.Nodes {
 						if slices.Contains(ephemeralNodesList, lvgNode.Name) {
-						errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
-						log.Error(nil, errMessage)
-						e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-						e.ObjectNew.Status.Message = errMessage
-						err = UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
-						if err != nil {
-							log.Error(err, "error UpdateReplicatedStoragePoolStatus")
-						}
-						return
+							errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
+							log.Error(nil, errMessage)
+							e.ObjectNew.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+							e.ObjectNew.Status.Message = errMessage
+							err = UpdateReplicatedStoragePoolStatus(ctx, cl, e.ObjectNew)
+							if err != nil {
+								log.Error(err, "error UpdateReplicatedStoragePoolStatus")
+							}
+							return
 						}
 					}
 				}
@@ -258,13 +258,13 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 						log.Error(delErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to delete LINSTOR Storage Pool %s on node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
 					}
 
-				replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
-				replicatedSP.Status.Message = createErr.Error()
-				updErr := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
-				if updErr != nil {
-					log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
-				}
-				return createErr
+					replicatedSP.Status.Phase = srv.ReplicatedStoragePoolPhaseInvalidConfiguration
+					replicatedSP.Status.Message = createErr.Error()
+					updErr := UpdateReplicatedStoragePoolStatus(ctx, cl, replicatedSP)
+					if updErr != nil {
+						log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
+					}
+					return createErr
 				}
 
 				log.Info(fmt.Sprintf("Storage Pool %s was successfully created on the node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
