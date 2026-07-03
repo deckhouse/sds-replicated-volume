@@ -190,6 +190,8 @@ shell:
     - apt-get -y install libkeyutils kmod sysklogd
     - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
+    # Remove build-only static analysis tooling inherited from the builder base.
+    - {{ $.Root.SVACE_CLEANUP_CMD }}
   setup:
     - ls -la /packages
     - |
