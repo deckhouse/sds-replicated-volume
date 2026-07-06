@@ -70,6 +70,11 @@ func TestDRBDResource(t *testing.T) {
 		suite.SetupDeleteDiskfulInMaintenance(e, cl, nodeExec, cluster.Nodes[0].Name, drbdr, llv)
 	})
 
+	e.Run("DeleteBackingLLVWhileAttached", func(e envtesting.E) {
+		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "db", 0)
+		suite.SetupDeleteBackingLLVWhileAttached(e, cl, nodeExec, cluster.Nodes[0].Name, drbdr, llv)
+	})
+
 	e.Run("LLVFinalizer", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "lf", 0)
 

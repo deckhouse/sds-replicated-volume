@@ -58,6 +58,20 @@ TestDRBDResource
 │       (Phase 6) without releasing the LLV finalizer (Step 3), orphaning the
 │       backing volume.
 │
+├── DeleteBackingLLVWhileAttached — deleting the backing LLV keeps the disk
+│       Creates a diskful DRBDResource with an LLV (same setup as R1). Deletes
+│       the backing LLV while the DRBDResource is still Up+Diskful. The agent
+│       finalizer keeps the LLV object alive (DeletionTimestamp set). Asserts
+│       that for a sustained window the DRBDResource keeps the disk attached —
+│       Configured=True with status.size populated — and the LLV lingers with
+│       its agent finalizer. Then deletes the DRBDResource and asserts a clean
+│       teardown: the DRBDResource is removed only after the agent releases the
+│       LLV finalizer, and the LLV is finally GC'd. Guards against the deletion
+│       deadlock where a deleting backing LLV, by itself, made the agent report
+│       Configured=False (reason BackingVolumeDeleting) — or detach the disk —
+│       so the resource never looked healthy enough for its finalizers to be
+│       released and the whole delete chain wedged.
+│
 ├── LLVFinalizer — LLV finalizer behavior across state/spec transitions
 │   │   Creates a diskful DRBDResource with an LLV (same setup as R1).
 │   │   Exercises sequences of state and spec changes, asserting the
@@ -248,6 +262,17 @@ Every subtest's cleanup exercises a teardown path:
   LLV agent finalizers if a regression left them stuck (only acceptable because
   these are the resources under test); the parent cleanup then deletes the
   DRBDResource and LLV.
+
+- **DeleteBackingLLVWhileAttached**: deletes the backing LLV while the
+  DRBDResource is still Up+Diskful, then deletes the DRBDResource. Verifies the
+  agent keeps the disk attached (Configured=True, status.size populated) while
+  the backing LLV lingers — a deleting LLV object must not, by itself, detach the
+  disk or wedge the resource — and that the delete chain then completes cleanly
+  (agent releases the LLV finalizer, both objects GC). Cleanup downs any leftover
+  DRBD resource on the node and force-releases the DRBDResource and LLV agent
+  finalizers if a regression left them stuck (only acceptable because these are
+  the resources under test); the parent cleanup tolerates the already-deleted
+  objects.
 
 - **OrphanCleanup**: force-deletes a DRBDResource (bypassing agent
   finalizer flow), then re-creates it. Verifies the agent tears down the
