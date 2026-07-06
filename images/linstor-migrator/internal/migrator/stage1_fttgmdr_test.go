@@ -43,7 +43,6 @@ func TestComputeMigrationFTTGMDR(t *testing.T) {
 
 	for diskful := 0; diskful <= 3; diskful++ {
 		for tieBreaker := 0; tieBreaker <= 2; tieBreaker++ {
-			diskful, tieBreaker := diskful, tieBreaker
 			t.Run(fmt.Sprintf("diskful=%d,tieBreaker=%d", diskful, tieBreaker), func(t *testing.T) {
 				t.Parallel()
 				key := [2]int{diskful, tieBreaker}

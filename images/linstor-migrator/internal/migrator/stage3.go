@@ -115,6 +115,7 @@ func (m *Migrator) deleteLegacyReplicatedStoragePool(ctx context.Context, poolNa
 		return fmt.Errorf("delete legacy ReplicatedStoragePool %q: %w", poolName, err)
 	}
 	if alreadyGone {
+		m.log.Debug("legacy ReplicatedStoragePool already gone, skipping", "name", poolName)
 		return nil
 	}
 
