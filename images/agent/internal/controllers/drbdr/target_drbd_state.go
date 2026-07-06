@@ -225,12 +225,18 @@ func computeAttachActions(aState ActualNonAttachedDiskMetadata, statusUUID strin
 	return actions
 }
 
+// actualBackingDisk returns the backing disk path currently attached to DRBD in
+// the observed actual state, or empty when no disk is attached.
+func actualBackingDisk(aState ActualDRBDState) string {
+	if aState.IsZero() || len(aState.Volumes()) == 0 {
+		return ""
+	}
+	return aState.Volumes()[0].BackingDisk()
+}
+
 // computeDiskActions handles all disk-related actions: detach, attach, and options.
 func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
-	actualDisk := ""
-	if len(aState.Volumes()) > 0 {
-		actualDisk = aState.Volumes()[0].BackingDisk()
-	}
+	actualDisk := actualBackingDisk(aState)
 	intendedDisk := iState.BackingDisk()
 
 	if actualDisk != "" && actualDisk != intendedDisk {

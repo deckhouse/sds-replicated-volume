@@ -202,11 +202,14 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 5: Add our finalizer to the LLV we are about to attach (Up +
-	// Diskful, outside maintenance). It is already tracked by Phase 4.
+	// Diskful, outside maintenance). It is already tracked by Phase 4. The
+	// currently attached disk is passed so a deleting LLV we already hold
+	// attached stays the intended disk (no spurious detach); teardown is driven
+	// by spec, observed here as upAndNotInCleanup=false or Type=Diskless.
 	var intendedDisk string
 	var llvErr error
 	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
-		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName)
+		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName, actualBackingDisk(aState))
 	}
 
 	// Phase 6: Converge the on-node DRBD state to the intended state, then
@@ -416,27 +419,45 @@ func (r *Reconciler) patchLLV(ctx context.Context, obj, base *snc.LVMLogicalVolu
 }
 
 // reconcileLLVFinalizerAdd adds AgentFinalizer to an LLV and returns its disk path.
-func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName string) (diskPath string, err error) {
+//
+// attachedDisk is the backing disk currently attached to DRBD (empty when none).
+// It matters only for the deleting-LLV case: while we still intend to be Diskful
+// with this LLV (Up + Diskful spec), a deletionTimestamp on the LLV object must
+// not, by itself, trigger a detach. If the disk is already attached we keep it
+// as the intended disk (so the diff engine leaves it in place) and return no
+// error, so Configured stays True and the controller can proceed to command the
+// real teardown via spec (Type=Diskless / State=Down / DRBDResource deletion).
+// Only when nothing is attached yet do we return an error, since a deleting LLV
+// cannot be attached.
+func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName string, attachedDisk string) (diskPath string, err error) {
 	if llvName == "" {
 		return "", nil
 	}
 
-	llv, err := r.getLVMLogicalVolume(ctx, llvName)
+	llv, err := r.getRequiredLLV(ctx, llvName)
 	if err != nil {
-		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-	}
-	if llv == nil {
-		return "", ConfiguredReasonError(
-			fmt.Errorf("LVMLogicalVolume %q not found", llvName),
-			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
-		)
+		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeUnavailable)
 	}
 
-	// Do not add finalizer to a deleting LLV — treat it as unavailable.
+	// The LLV object is being deleted. We do not add our finalizer to a
+	// deleting object, and we must not conflate "LLV object deleting" with
+	// "backing device gone".
 	if llv.DeletionTimestamp != nil {
+		// Disk already attached: keep it as the intended disk (no detach) and
+		// report success. Configured must stay True so the controller can drive
+		// the real teardown via spec; surfacing an error here would wedge the
+		// resource at Configured=False and deadlock cleanup. The finalizer we
+		// added while the LLV was live is still present and is released by the
+		// normal teardown path (Phase 7).
+		if attachedDisk != "" {
+			return attachedDisk, nil
+		}
+		// Nothing attached to keep and the LLV is already deleting: it cannot be
+		// attached. Surface an error so we keep reconciling until teardown via
+		// spec resolves it.
 		return "", ConfiguredReasonError(
 			fmt.Errorf("LVMLogicalVolume %q is being deleted", llvName),
-			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
+			v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeDeleting,
 		)
 	}
 
@@ -450,15 +471,9 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	}
 
 	// Compute disk path
-	lvg, err := r.getLVMVolumeGroup(ctx, llv.Spec.LVMVolumeGroupName)
+	lvg, err := r.getRequiredLVG(ctx, llv.Spec.LVMVolumeGroupName)
 	if err != nil {
-		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
-	}
-	if lvg == nil {
-		return "", ConfiguredReasonError(
-			fmt.Errorf("LVMVolumeGroup %q not found", llv.Spec.LVMVolumeGroupName),
-			v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed,
-		)
+		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeUnavailable)
 	}
 
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil

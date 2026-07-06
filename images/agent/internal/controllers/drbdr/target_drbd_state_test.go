@@ -20,9 +20,62 @@ import (
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 func boolPtr(v bool) *bool { return &v }
+
+// TestComputeDiskActions_DetachDrivenByIntendedDisk pins the invariant the LLV
+// deletion fix relies on: a detach is emitted only when the intended disk
+// diverges from the attached one. Keeping the attached disk as intended (what a
+// deleting LLV now does) must not detach; clearing it (the controller-driven
+// teardown) must.
+func TestComputeDiskActions_DetachDrivenByIntendedDisk(t *testing.T) {
+	const backingDisk = "/dev/test-vg/test-lv"
+
+	attached := func() *actualState {
+		return &actualState{
+			status: &drbdutils.Resource{
+				Name:    "sdsrv-x",
+				Devices: []drbdutils.Device{{Volume: 0, Minor: 1000, DiskState: "UpToDate"}},
+			},
+			show: &drbdutils.ShowResource{
+				Resource: "sdsrv-x",
+				ThisHost: drbdutils.ShowThisHost{
+					Volumes: []drbdutils.ShowVolume{{VolumeNr: 0, DeviceMinor: 1000, BackingDisk: backingDisk}},
+				},
+			},
+		}
+	}
+
+	diskful := &v1alpha1.DRBDResource{Spec: v1alpha1.DRBDResourceSpec{Type: v1alpha1.DRBDResourceTypeDiskful}}
+	minor := uint(1000)
+
+	t.Run("intended disk equals attached - no detach", func(t *testing.T) {
+		iState := computeIntendedDRBDState(diskful, backingDisk, true)
+		actions := computeDiskActions(&minor, iState, attached())
+		if hasDetachAction(actions) {
+			t.Errorf("unexpected DetachAction when intended disk matches attached: %v", actions)
+		}
+	})
+
+	t.Run("intended disk empty while attached - detaches", func(t *testing.T) {
+		iState := computeIntendedDRBDState(diskful, "", true)
+		actions := computeDiskActions(&minor, iState, attached())
+		if !hasDetachAction(actions) {
+			t.Errorf("expected DetachAction when intended disk is empty but disk is attached: %v", actions)
+		}
+	})
+}
+
+func hasDetachAction(actions DRBDActions) bool {
+	for _, a := range actions {
+		if _, ok := a.(DetachAction); ok {
+			return true
+		}
+	}
+	return false
+}
 
 type stubIntendedPeer struct {
 	name     string

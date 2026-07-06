@@ -18,6 +18,7 @@ package drbdr
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,6 +81,20 @@ func (r *Reconciler) getLVMLogicalVolume(ctx context.Context, name string) (*snc
 	return llv, nil
 }
 
+// getRequiredLLV gets the LVMLogicalVolume by name, returning an error when it
+// does not exist. Use when the LLV is required (e.g., the backing volume of a
+// Diskful resource); use getLVMLogicalVolume when absence is acceptable.
+func (r *Reconciler) getRequiredLLV(ctx context.Context, name string) (*snc.LVMLogicalVolume, error) {
+	llv, err := r.getLVMLogicalVolume(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if llv == nil {
+		return nil, fmt.Errorf("LVMLogicalVolume %q not found", name)
+	}
+	return llv, nil
+}
+
 // getLVMVolumeGroup gets the LVMVolumeGroup by name.
 // Returns (nil, nil) if not found.
 func (r *Reconciler) getLVMVolumeGroup(ctx context.Context, name string) (*snc.LVMVolumeGroup, error) {
@@ -92,6 +107,20 @@ func (r *Reconciler) getLVMVolumeGroup(ctx context.Context, name string) (*snc.L
 			return nil, nil
 		}
 		return nil, flow.Wrapf(err, "getting LVMVolumeGroup %q", name)
+	}
+	return lvg, nil
+}
+
+// getRequiredLVG gets the LVMVolumeGroup by name, returning an error when it
+// does not exist. Use when the LVG is required; use getLVMVolumeGroup when
+// absence is acceptable.
+func (r *Reconciler) getRequiredLVG(ctx context.Context, name string) (*snc.LVMVolumeGroup, error) {
+	lvg, err := r.getLVMVolumeGroup(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if lvg == nil {
+		return nil, fmt.Errorf("LVMVolumeGroup %q not found", name)
 	}
 	return lvg, nil
 }
