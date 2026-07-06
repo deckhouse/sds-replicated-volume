@@ -122,6 +122,9 @@ func newLogger(level slog.Level) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(config.MigratorHostDir, 0o755); err != nil {
 		return nil, nil, fmt.Errorf("create migrator host directory %q: %w", config.MigratorHostDir, err)
 	}
+	if err := os.Chmod(config.MigratorHostDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("set permissions on migrator host directory %q: %w", config.MigratorHostDir, err)
+	}
 	logPath := filepath.Join(config.MigratorHostDir, config.MigratorLogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
