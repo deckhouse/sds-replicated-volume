@@ -22,6 +22,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
@@ -61,19 +62,40 @@ func (m *Migrator) runStage3(ctx context.Context) error {
 		return fmt.Errorf("backup legacy ReplicatedStoragePool objects: %w", err)
 	}
 	for _, poolName := range toDelete {
-		rsp := &srvv1alpha1.ReplicatedStoragePool{
-			ObjectMeta: metav1.ObjectMeta{Name: poolName},
+		if err := m.deleteLegacyReplicatedStoragePool(ctx, poolName); err != nil {
+			return err
 		}
-		if err := m.client.Delete(ctx, rsp); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return fmt.Errorf("delete legacy ReplicatedStoragePool %q: %w", poolName, err)
-		}
-		m.log.Info("deleted legacy ReplicatedStoragePool", "name", poolName)
 	}
 
 	return m.updateMigrationStateAllCompleted(ctx)
+}
+
+// deleteLegacyReplicatedStoragePool issues Delete for a legacy RSP and verifies the object is gone.
+// If the object is stuck in Terminating (finalizers), a warning is logged; stage 3 still continues.
+func (m *Migrator) deleteLegacyReplicatedStoragePool(ctx context.Context, poolName string) error {
+	rsp := &srvv1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: poolName},
+	}
+	if err := m.client.Delete(ctx, rsp); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("delete legacy ReplicatedStoragePool %q: %w", poolName, err)
+	}
+
+	got := &srvv1alpha1.ReplicatedStoragePool{}
+	err := m.client.Get(ctx, types.NamespacedName{Name: poolName}, got)
+	switch {
+	case apierrors.IsNotFound(err):
+		m.log.Info("deleted legacy ReplicatedStoragePool", "name", poolName)
+	case err == nil && got.DeletionTimestamp != nil:
+		m.log.Warn("legacy ReplicatedStoragePool stuck terminating",
+			"name", poolName, "finalizers", got.Finalizers)
+	case err != nil:
+		return fmt.Errorf("verify deletion of legacy ReplicatedStoragePool %q: %w", poolName, err)
+	}
+
+	return nil
 }
 
 func (m *Migrator) updateMigrationStateAllCompleted(ctx context.Context) error {
