@@ -182,15 +182,25 @@ func (m *Migrator) updateMigrationState(ctx context.Context, state string) error
 
 // updateMigrationStateRetrying patches ConfigMap state, retrying transient API errors.
 func (m *Migrator) updateMigrationStateRetrying(ctx context.Context, state string) error {
+	return m.retryTransient(ctx, "update migration state", func() error {
+		if err := m.updateMigrationState(ctx, state); err != nil {
+			return fmt.Errorf("failed to update migration state to %q: %w", state, err)
+		}
+		return nil
+	})
+}
+
+// retryTransient runs fn until it succeeds or returns a non-transient error.
+func (m *Migrator) retryTransient(ctx context.Context, label string, fn func() error) error {
 	for {
-		err := m.updateMigrationState(ctx, state)
+		err := fn()
 		if err == nil {
 			return nil
 		}
 		if !isTransientAPIError(err) {
-			return fmt.Errorf("failed to update migration state to %q: %w", state, err)
+			return err
 		}
-		m.log.Warn("transient error updating migration state, retrying", "state", state, "err", err)
+		m.log.Warn("transient error, retrying", "step", label, "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
