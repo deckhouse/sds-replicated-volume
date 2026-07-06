@@ -436,7 +436,7 @@ func (m *Migrator) migrateResource(
 			tieBreakerReplicas++
 		}
 	}
-	ftt, gmdr := m.computeMigrationFTTGMDR(log, resName, diskfulReplicas, tieBreakerReplicas)
+	ftt, gmdr := m.computeMigrationFTTGMDR(diskfulReplicas, tieBreakerReplicas)
 
 	// Create RV with adopt annotations (RVR + optional shared secret from LINSTOR).
 	if err := m.createRV(ctx, log, resName, size, sharedSecret, pv != nil, rvCreateOptions{
@@ -742,38 +742,25 @@ func (m *Migrator) ensureMigrationRSP(
 	return rsp, nil
 }
 
-// computeMigrationFTTGMDR derives failuresToTolerate and guaranteedMinimumDataRedundancy from replica counts,
-// caps both at 1, and maps (0,1) Consistency to (1,0) Availability (not representable from legacy LINSTOR).
-func (m *Migrator) computeMigrationFTTGMDR(log *slog.Logger, resName string, diskful, tieBreaker int) (ftt, gmdr byte) {
-	var pf, pg int
+// computeMigrationFTTGMDR derives failuresToTolerate and guaranteedMinimumDataRedundancy from legacy replica counts.
+//
+// NOTE: The new control-plane v1 Manual configuration currently caps FTT and GMDR at 1.
+// Legacy volumes that include TieBreaker replicas cannot be mapped to their true layout yet
+// (e.g. Availability 2D+1TB is FTT=1, GMDR=0); the default branch coerces them to (1, 1).
+//
+// TODO: When the RV controller gains full TieBreaker-aware layout support, replace this heuristic
+// with the mapping from diskful/TieBreaker counts to (FTT, GMDR) per
+// images/controller/internal/controllers/rv_controller/datamesh/README.md#legacy-replication-parameter
+// (and the layout formulas in the same document: D = FTT + GMDR + 1, TB placement rules).
+func (m *Migrator) computeMigrationFTTGMDR(diskful, tieBreaker int) (ftt, gmdr byte) {
 	switch {
 	case diskful <= 1 && tieBreaker == 0:
-		pf, pg = 0, 0
+		return 0, 0
 	case diskful == 2 && tieBreaker == 0:
-		pf, pg = 1, 0
+		return 1, 0
 	default:
-		pf, pg = 1, 1
+		return 1, 1
 	}
-	if pf > 1 {
-		pf = 1
-	}
-	if pg > 1 {
-		pg = 1
-	}
-	ftt, gmdr = byte(pf), byte(pg)
-	if ftt == 0 && gmdr == 1 {
-		// TODO: Revisit heuristics when (FTT=0,GMDR=1) appears; LINSTOR legacy replication did not expose Consistency-style policy.
-		log.Warn("normalized inconsistent legacy FTT/GMDR: mapping (0,1) Consistency to (1,0) Availability",
-			"resource", resName, "diskfulReplicas", diskful, "tieBreakerReplicas", tieBreaker)
-		ftt, gmdr = 1, 0
-	}
-	if ftt > gmdr+1 {
-		ftt = gmdr + 1
-	}
-	if gmdr > ftt+1 {
-		gmdr = ftt + 1
-	}
-	return ftt, gmdr
 }
 
 type rvCreateOptions struct {
