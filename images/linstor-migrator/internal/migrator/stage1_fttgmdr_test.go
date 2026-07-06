@@ -18,6 +18,7 @@ package migrator
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 )
 
@@ -47,7 +48,7 @@ func TestComputeMigrationFTTGMDR(t *testing.T) {
 				t.Parallel()
 				key := [2]int{diskful, tieBreaker}
 				expected := want[key]
-				gotFTT, gotGMDR := m.computeMigrationFTTGMDR(diskful, tieBreaker)
+				gotFTT, gotGMDR := m.computeMigrationFTTGMDR(slog.Default(), "test", diskful, tieBreaker)
 				if gotFTT != expected[0] || gotGMDR != expected[1] {
 					t.Fatalf("computeMigrationFTTGMDR(%d, %d) = (%d, %d), want (%d, %d)",
 						diskful, tieBreaker, gotFTT, gotGMDR, expected[0], expected[1])

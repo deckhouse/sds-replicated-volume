@@ -436,7 +436,7 @@ func (m *Migrator) migrateResource(
 			tieBreakerReplicas++
 		}
 	}
-	ftt, gmdr := m.computeMigrationFTTGMDR(diskfulReplicas, tieBreakerReplicas)
+	ftt, gmdr := m.computeMigrationFTTGMDR(log, resName, diskfulReplicas, tieBreakerReplicas)
 
 	// Create RV with adopt annotations (RVR + optional shared secret from LINSTOR).
 	if err := m.createRV(ctx, log, resName, size, sharedSecret, pv != nil, rvCreateOptions{
@@ -752,15 +752,30 @@ func (m *Migrator) ensureMigrationRSP(
 // with the mapping from diskful/TieBreaker counts to (FTT, GMDR) per
 // images/controller/internal/controllers/rv_controller/datamesh/README.md#legacy-replication-parameter
 // (and the layout formulas in the same document: D = FTT + GMDR + 1, TB placement rules).
-func (m *Migrator) computeMigrationFTTGMDR(diskful, tieBreaker int) (ftt, gmdr byte) {
+func (m *Migrator) computeMigrationFTTGMDR(log *slog.Logger, resName string, diskful, tieBreaker int) (ftt, gmdr byte) {
 	switch {
 	case diskful <= 1 && tieBreaker == 0:
-		return 0, 0
+		ftt, gmdr = 0, 0
 	case diskful == 2 && tieBreaker == 0:
-		return 1, 0
+		ftt, gmdr = 1, 0
 	default:
-		return 1, 1
+		if diskful > 3 || tieBreaker > 1 {
+			log.Warn("legacy replica count exceeds v1 expressiveness; capping FTT/GMDR=(1,1)",
+				"resource", resName,
+				"diskfulReplicas", diskful,
+				"tieBreakerReplicas", tieBreaker,
+			)
+		}
+		ftt, gmdr = 1, 1
 	}
+	log.Debug("computed migration FTT/GMDR",
+		"resource", resName,
+		"diskfulReplicas", diskful,
+		"tieBreakerReplicas", tieBreaker,
+		"failuresToTolerate", ftt,
+		"guaranteedMinimumDataRedundancy", gmdr,
+	)
+	return ftt, gmdr
 }
 
 type rvCreateOptions struct {
