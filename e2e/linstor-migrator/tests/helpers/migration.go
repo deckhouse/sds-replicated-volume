@@ -379,17 +379,24 @@ done
 			continue
 		}
 
-		findCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", findScript,
+		const (
+			sncNamespace = "d8-sds-node-configurator"
+			sncContainer = "sds-node-configurator-agent"
+		)
+		nsenter, err := resolveNsenterBin(ctx, clientset, restConfig, agentPodName, sncNamespace, sncContainer)
+		if err != nil {
+			slog.Info(fmt.Sprintf("Failed to resolve nsenter on node %s via pod %s: %v", nodeName, agentPodName, err))
+			continue
 		}
+
+		findCmd := nsenterHostCommand(nsenter, "sh", "-ec", findScript)
 		out, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			findCmd,
 		)
 		if err != nil {
@@ -401,17 +408,14 @@ done
 			continue
 		}
 
-		checkCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", checkScript,
-		}
+		checkCmd := nsenterHostCommand(nsenter, "sh", "-ec", checkScript)
 		if _, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			checkCmd,
 		); err != nil {
 			return []error{fmt.Errorf(
@@ -420,17 +424,14 @@ done
 			)}
 		}
 
-		viewerCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", viewerScript,
-		}
+		viewerCmd := nsenterHostCommand(nsenter, "sh", "-ec", viewerScript)
 		if _, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			viewerCmd,
 		); err != nil {
 			return []error{fmt.Errorf(
