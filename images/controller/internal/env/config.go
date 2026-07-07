@@ -17,9 +17,13 @@ limitations under the License.
 package env
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+
+	"k8s.io/apimachinery/pkg/labels"
 
 	commonenv "github.com/deckhouse/sds-replicated-volume/lib/go/common/env"
 )
@@ -27,6 +31,10 @@ import (
 const (
 	PodNamespaceEnvVar         = "POD_NAMESPACE"
 	SchedulerExtenderURLEnvVar = "SCHEDULER_EXTENDER_URL"
+	// DataNodeSelectorEnvVar holds the module-wide data-node label selector
+	// (sdsReplicatedVolume.dataNodes.nodeSelector) serialized as a JSON object
+	// of string labels. An empty/unset value means "match all nodes".
+	DataNodeSelectorEnvVar = "DATA_NODE_SELECTOR"
 
 	// defaults are different for each app, do not merge them
 	DefaultHealthProbeBindAddress = ":4271"
@@ -37,6 +45,7 @@ type Config struct {
 	commonenv.CommonConfig
 	podNamespace         string
 	schedulerExtenderURL string
+	dataNodeSelector     labels.Set
 }
 
 func (c *Config) PodNamespace() string {
@@ -47,9 +56,17 @@ func (c *Config) SchedulerExtenderURL() string {
 	return c.schedulerExtenderURL
 }
 
+// DataNodeSelector returns the module-wide data-node label selector
+// (from sdsReplicatedVolume.dataNodes.nodeSelector). A nil/empty set means
+// "match all nodes".
+func (c *Config) DataNodeSelector() labels.Set {
+	return c.dataNodeSelector
+}
+
 type ConfigProvider interface {
 	PodNamespace() string
 	SchedulerExtenderURL() string
+	DataNodeSelector() labels.Set
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 	IsControllerEnabled(name string) bool
@@ -86,7 +103,43 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("%w: %s is required", commonenv.ErrInvalidConfig, SchedulerExtenderURLEnvVar)
 	}
 
+	// Data-node selector (optional): restricts which nodes may become data nodes.
+	dataNodeSelector, err := parseDataNodeSelector(os.Getenv(DataNodeSelectorEnvVar))
+	if err != nil {
+		return nil, err
+	}
+	cfg.dataNodeSelector = dataNodeSelector
+
 	cfg.Load(DefaultHealthProbeBindAddress, DefaultMetricsBindAddress)
 
 	return cfg, nil
+}
+
+// parseDataNodeSelector parses the DATA_NODE_SELECTOR env var, a JSON object of
+// string labels (e.g. `{"kubernetes.io/os":"linux"}`). An empty, "{}" or "null"
+// value yields a nil set, which callers treat as "match all nodes". The label
+// keys and values are validated so that a malformed selector fails fast at
+// startup instead of silently selecting nothing.
+func parseDataNodeSelector(raw string) (labels.Set, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || raw == "null" {
+		return nil, nil
+	}
+
+	m := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, fmt.Errorf("%w: %s must be a JSON object of string labels: %w",
+			commonenv.ErrInvalidConfig, DataNodeSelectorEnvVar, err)
+	}
+	if len(m) == 0 {
+		return nil, nil
+	}
+
+	set := labels.Set(m)
+	if _, err := labels.ValidatedSelectorFromSet(set); err != nil {
+		return nil, fmt.Errorf("%w: %s is not a valid label selector: %w",
+			commonenv.ErrInvalidConfig, DataNodeSelectorEnvVar, err)
+	}
+
+	return set, nil
 }

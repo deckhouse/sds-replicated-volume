@@ -50,17 +50,23 @@ type Reconciler struct {
 	cl                client.Client
 	log               logr.Logger
 	agentPodNamespace string
+	// dataNodeSelector is the module-wide data-node label selector
+	// (sdsReplicatedVolume.dataNodes.nodeSelector). Only nodes matching it may
+	// become eligible nodes. A nil/empty set means "match all nodes".
+	dataNodeSelector labels.Set
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 // NewReconciler creates a new RSP reconciler.
 // agentPodNamespace is the namespace where agent pods are deployed (used for AgentReady status).
-func NewReconciler(cl client.Client, log logr.Logger, agentPodNamespace string) *Reconciler {
+// dataNodeSelector restricts which nodes may become eligible; a nil/empty set matches all nodes.
+func NewReconciler(cl client.Client, log logr.Logger, agentPodNamespace string, dataNodeSelector labels.Set) *Reconciler {
 	return &Reconciler{
 		cl:                cl,
 		log:               log,
 		agentPodNamespace: agentPodNamespace,
+		dataNodeSelector:  dataNodeSelector,
 	}
 }
 
@@ -121,7 +127,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Done().ToCtrl()
 	}
 
-	nodeSelector := labels.Everything()
+	// Start from the module-wide data-node selector (sdsReplicatedVolume.dataNodes.nodeSelector):
+	// only nodes matching it may become eligible. An empty set matches all nodes.
+	nodeSelector := labels.SelectorFromValidatedSet(r.dataNodeSelector)
 
 	// Validate NodeLabelSelector if present.
 	if rsp.Spec.NodeLabelSelector != nil {

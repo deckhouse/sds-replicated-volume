@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -773,7 +774,7 @@ var _ = Describe("Reconciler", func() {
 	Describe("Reconcile", func() {
 		It("does nothing when RSP is not found", func() {
 			cl = fake.NewClientBuilder().WithScheme(scheme).Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-not-found"},
@@ -801,7 +802,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -844,7 +845,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp, lvg).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -901,7 +902,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp, lvg).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -961,7 +962,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp, lvg, node).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -981,6 +982,71 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRSP.Status.EligibleNodesRevision).To(BeNumerically(">", 0))
 			Expect(updatedRSP.Status.Phase).To(Equal(v1alpha1.ReplicatedStoragePoolPhaseReady))
 			Expect(updatedRSP.Status.Message).To(ContainSubstring("1 nodes"))
+		})
+
+		It("excludes nodes that do not match the module-wide dataNodes selector", func() {
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+					},
+					EligibleNodesPolicy: v1alpha1.ReplicatedStoragePoolEligibleNodesPolicy{
+						NotReadyGracePeriod: metav1.Duration{Duration: testGracePeriod},
+					},
+				},
+			}
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-data"},
+				},
+				Status: snc.LVMVolumeGroupStatus{
+					Conditions: []metav1.Condition{
+						{Type: "Ready", Status: metav1.ConditionTrue},
+					},
+				},
+			}
+			// node-data carries the data-node label; node-other does not.
+			nodeData := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "node-data",
+					Labels: map[string]string{"storage.example.com/role": "data"},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			nodeOther := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-other"},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsp, lvg, nodeData, nodeOther).
+				WithStatusSubresource(rsp).
+				Build()
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace",
+				labels.Set{"storage.example.com/role": "data"})
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsp-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSP v1alpha1.ReplicatedStoragePool
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsp-1"}, &updatedRSP)).To(Succeed())
+			Expect(updatedRSP.Status.EligibleNodes).To(HaveLen(1))
+			Expect(updatedRSP.Status.EligibleNodes[0].NodeName).To(Equal("node-data"))
 		})
 
 		It("increments EligibleNodesRevision when nodes change", func() {
@@ -1026,7 +1092,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp, lvg, node).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -1082,7 +1148,7 @@ var _ = Describe("Reconciler", func() {
 				WithObjects(rsp, lvg, node).
 				WithStatusSubresource(rsp).
 				Build()
-			rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+			rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "rsp-1"},
@@ -1111,7 +1177,7 @@ var _ = Describe("getLVGsByRSP", func() {
 
 	It("returns nil for nil RSP", func() {
 		cl = fake.NewClientBuilder().WithScheme(scheme).Build()
-		rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+		rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 		lvgs, notFoundErr, err := rec.getLVGsByRSP(context.Background(), nil)
 
@@ -1129,7 +1195,7 @@ var _ = Describe("getLVGsByRSP", func() {
 			},
 		}
 		cl = fake.NewClientBuilder().WithScheme(scheme).Build()
-		rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+		rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 		lvgs, notFoundErr, err := rec.getLVGsByRSP(context.Background(), rsp)
 
@@ -1159,7 +1225,7 @@ var _ = Describe("getLVGsByRSP", func() {
 			WithScheme(scheme).
 			WithObjects(lvg1, lvg2).
 			Build()
-		rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+		rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 		lvgs, notFoundErr, err := rec.getLVGsByRSP(context.Background(), rsp)
 
@@ -1195,7 +1261,7 @@ var _ = Describe("getLVGsByRSP", func() {
 			WithScheme(scheme).
 			WithObjects(lvg1, lvg2).
 			Build()
-		rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+		rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 		lvgs, notFoundErr, err := rec.getLVGsByRSP(context.Background(), rsp)
 
@@ -1233,7 +1299,7 @@ var _ = Describe("getLVGsByRSP", func() {
 			WithScheme(scheme).
 			WithObjects(lvgC, lvgA, lvgB).
 			Build()
-		rec = NewReconciler(cl, logr.Discard(), "test-namespace")
+		rec = NewReconciler(cl, logr.Discard(), "test-namespace", nil)
 
 		lvgs, notFoundErr, err := rec.getLVGsByRSP(context.Background(), rsp)
 

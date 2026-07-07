@@ -51,7 +51,7 @@ func BuildController(mgr manager.Manager) error {
 
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace)
+	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace, cfg.DataNodeSelector())
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSPControllerName).
