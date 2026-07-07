@@ -378,8 +378,17 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 			return rf.Fail(statusErr)
 		}
 		if len(status) == 0 {
-			// Neither old nor new name exists - error
-			return rf.Failf(err, "DRBD resource not found: oldName=%s, newName=%s", oldName, newName)
+			// Neither the adopted (old) name nor the canonical (new) name
+			// exists on the node. DRBD state is volatile and is wiped on
+			// reboot, so a node reboot before adoption completes leaves
+			// nothing to adopt or rename. Getting stuck here would block the
+			// resource forever; instead we drop the now-impossible adoption by
+			// clearing ActualNameOnTheNode and let the normal flow bring the
+			// resource up under its canonical name.
+			rf.Log().Info("Adopted DRBD resource not found on the node (node likely rebooted, losing DRBD state); clearing actualNameOnTheNode and bringing the resource up under its canonical name",
+				"oldName", oldName, "newName", newName)
+			outcome = r.reconcileClearActualName(rf.Ctx(), drbdr)
+			return
 		}
 		// New name exists - rename succeeded previously, clear ActualNameOnTheNode
 		rf.Log().Info("DRBD resource already renamed", "newName", newName)
