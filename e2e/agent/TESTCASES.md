@@ -140,6 +140,17 @@ TestDRBDResource
 │       the DRBD resource on the node still has the custom name.
 │       Cleanup reverts actualNameOnTheNode, renames DRBD back on the
 │       node, then clears maintenance mode.
+│
+├── RenameMissingResource — adoption target missing after reboot
+│       Creates a diskless DRBDResource whose spec.actualNameOnTheNode
+│       points at a DRBD resource that does not exist on the node, with
+│       no DRBD resource under the canonical sdsrv-{name} either. Models
+│       a node that rebooted before adoption completed, wiping volatile
+│       DRBD state. Asserts the agent does not get stuck looking for the
+│       missing resource: it clears actualNameOnTheNode and brings the
+│       resource up under its canonical name, reaching Configured=True.
+│       Guards against the bug where a missing adoption target wedged the
+│       resource at Configured=False with "DRBD resource not found".
 ├── DeviceUUID — DRBD metadata protection (parallel)
 │   │   Covers device-uuid decision table: never overwrite existing metadata (G1),
 │   │   never attach a foreign disk (G2).
@@ -299,6 +310,10 @@ Every subtest's cleanup exercises a teardown path:
   renames the DRBD resource back to the standard name on the node,
   then clears maintenance mode. The agent reconciles normally and
   reaches Configured=True.
+
+- **RenameMissingResource cleanup**: deletes the DRBDResource normally
+  (via SetupResource cleanup). The resource was brought up under its
+  canonical name, so teardown is a normal DRBD down + finalizer release.
 - **ForeignDisk cleanup**: restores the correct device-uuid on disk after
   writing a fake UUID. Verifies the agent recovers from the error.
 

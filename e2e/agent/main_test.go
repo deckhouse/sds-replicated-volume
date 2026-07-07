@@ -118,6 +118,10 @@ func TestDRBDResource(t *testing.T) {
 		})
 	})
 
+	e.Run("RenameMissingResource", func(e envtesting.E) {
+		suite.SetupRenameMissingResource(e, cl, cluster, "rnm", 0)
+	})
+
 	e.Run("DeviceUUID", func(e envtesting.E) {
 		e.Parallel()
 		if len(cluster.Nodes) < 2 {

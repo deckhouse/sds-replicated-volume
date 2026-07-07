@@ -330,6 +330,33 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 
+		// Custom DRBD resource name, but neither the old nor the canonical
+		// name exists on the node (e.g. the node rebooted and lost its DRBD
+		// state before adoption completed). The agent must not get stuck: it
+		// warns, clears ActualNameOnTheNode, and lets the next reconcile bring
+		// the resource up under its canonical name.
+		{
+			name:  "custom drbd resource name, neither name exists - clears actualNameOnTheNode",
+			drbdr: drbdrWithCustomName(testNodeName, testCustomDRBDName),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				// Rename fails: old name unknown (exit 10, "(158)").
+				renameUnknownResourceCmd(testCustomDRBDName, testDRBDResName),
+				// Canonical name does not exist either (exit 10, No such resource).
+				statusNoSuchResourceCmd(testDRBDResName),
+				// No further actions: ActualNameOnTheNode is cleared and the
+				// reconcile returns (the spec patch requeues).
+			},
+			postCheck: func(t *testing.T, cl client.Client) {
+				dr := &v1alpha1.DRBDResource{}
+				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, dr); err != nil {
+					t.Fatalf("failed to get DRBDResource: %v", err)
+				}
+				if dr.Spec.ActualNameOnTheNode != "" {
+					t.Errorf("spec.actualNameOnTheNode = %q, want empty (cleared)", dr.Spec.ActualNameOnTheNode)
+				}
+			},
+		},
+
 		// Error cases - use State=Down to avoid action generation
 		{
 			name:  "status command error - returns error",
@@ -692,6 +719,28 @@ func renameCmd(oldName, newName string) *fakedrbdutils.ExpectedCmd {
 		Args:         drbdutils.RenameArgs(oldName, newName),
 		ResultOutput: []byte{},
 		ResultErr:    nil,
+	}
+}
+
+// renameUnknownResourceCmd fakes a rename that fails because the old resource
+// does not exist on the node (drbdsetup exit code 10, error "(158)").
+func renameUnknownResourceCmd(oldName, newName string) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.RenameArgs(oldName, newName),
+		ResultOutput: []byte(oldName + ": Unknown resource (158)\n"),
+		ResultErr:    fakedrbdutils.ExitErr{Code: 10},
+	}
+}
+
+// statusNoSuchResourceCmd fakes a status query for a resource that does not
+// exist on the node (drbdsetup exit code 10, "No such resource").
+func statusNoSuchResourceCmd(resourceName string) *fakedrbdutils.ExpectedCmd {
+	return &fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.StatusArgs(resourceName),
+		ResultOutput: []byte(resourceName + ": No such resource\n"),
+		ResultErr:    fakedrbdutils.ExitErr{Code: 10},
 	}
 }
 
