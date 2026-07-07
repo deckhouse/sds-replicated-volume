@@ -280,3 +280,35 @@ func execInPodWithOutputInContainer(
 
 	return stdout.String(), nil
 }
+
+// nsenterCandidates lists host-entry binary paths shipped in sds-node-configurator.
+// Older builds use nsenter.static; newer builds dropped the suffix.
+var nsenterCandidates = []string{
+	"/opt/deckhouse/sds/bin/nsenter.static",
+	"/opt/deckhouse/sds/bin/nsenter",
+}
+
+// resolveNsenterBin returns the nsenter binary path present in the given pod container.
+// It probes nsenterCandidates in order; a binary that runs (any exit code) is treated
+// as present, while a transport error means it is absent.
+func resolveNsenterBin(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	restConfig *rest.Config,
+	podName, namespace, container string,
+) (string, error) {
+	var lastErr error
+	for _, cand := range nsenterCandidates {
+		_, err := execInPodWithOutputInContainer(ctx, clientset, restConfig, podName, namespace, container, []string{cand, "--version"})
+		if err == nil {
+			return cand, nil
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("no nsenter binary found in pod %s (tried %v): %w", podName, nsenterCandidates, lastErr)
+}
+
+// nsenterHostCommand prefixes cmd to run on the host PID 1 namespaces via nsenter.
+func nsenterHostCommand(nsenter string, cmd ...string) []string {
+	return append([]string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--"}, cmd...)
+}

@@ -61,6 +61,10 @@ const (
 	// created automatically by the migrator from LINSTOR data.
 	AutoReplicatedStoragePoolNamePrefix = "linstor-auto-"
 
+	// AutoReplicatedStoragePoolNameSlugMaxLen is the maximum length of the slugified LINSTOR pool
+	// name segment in a migration ReplicatedStoragePool name (prefix excluded).
+	AutoReplicatedStoragePoolNameSlugMaxLen = 50
+
 	// AutoReplicatedStoragePoolRSCNamePrefix is the name prefix for ReplicatedStoragePool objects
 	// created by the RSC controller (computeTargetStoragePool in images/controller/internal/controllers/rsc_controller/reconciler.go).
 	AutoReplicatedStoragePoolRSCNamePrefix = "auto-rsp-"
@@ -72,5 +76,7 @@ const (
 	StateStage1Started   = "stage1_started"
 	StateStage1Completed = "stage1_completed"
 	StateStage2Started   = "stage2_started"
+	StateStage2Completed = "stage2_completed"
+	StateStage3Started   = "stage3_started"
 	StateAllCompleted    = "all_completed"
 )

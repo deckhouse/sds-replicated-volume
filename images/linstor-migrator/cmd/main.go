@@ -104,8 +104,8 @@ func run() int {
 	}
 
 	m := migrator.New(kClient, dynClient, log, migrator.MigratorOptions{
-		Stage2PollInterval: opt.Stage2PollInterval,
-		Stage2WorkerCount:  opt.Stage2WorkerCount,
+		RetryInterval:     opt.RetryInterval,
+		Stage2WorkerCount: opt.Stage2WorkerCount,
 	})
 	if err := m.Run(ctx); err != nil {
 		log.Error("linstor-migrator exited with error", "err", err)
@@ -121,6 +121,9 @@ func run() int {
 func newLogger(level slog.Level) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(config.MigratorHostDir, 0o755); err != nil {
 		return nil, nil, fmt.Errorf("create migrator host directory %q: %w", config.MigratorHostDir, err)
+	}
+	if err := os.Chmod(config.MigratorHostDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("set permissions on migrator host directory %q: %w", config.MigratorHostDir, err)
 	}
 	logPath := filepath.Join(config.MigratorHostDir, config.MigratorLogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

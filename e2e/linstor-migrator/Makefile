@@ -15,17 +15,17 @@ deps: ## Download dependencies
 	go mod tidy
 
 .PHONY: test-scenario
-test-scenario: ## Run a specific scenario by label (make test-scenario LABEL="Auto")
+test-scenario: ## Run a specific scenario by label (make test-scenario LABEL="Manual")
 	@if [ -z "$(LABEL)" ]; then \
-		echo "Error: specify LABEL=<scenario label> (Auto, Manual, Mixed)"; \
+		echo "Error: specify LABEL=<scenario label> (Manual, WithoutPV)"; \
 		exit 1; \
 	fi
 	go test -v -count=1 -timeout 60m ./tests/ -run "TestLinstorMigrator" -ginkgo.label-filter="$(LABEL)"
 
 .PHONY: test-scenario-it
-test-scenario-it: ## Run a focused It block within a scenario (make test-scenario-it LABEL="Mixed" FOCUS="RV resource checks")
+test-scenario-it: ## Run a focused It block within a scenario (make test-scenario-it LABEL="Manual" FOCUS="RV resource checks")
 	@if [ -z "$(LABEL)" ]; then \
-		echo "Error: specify LABEL=<scenario label> (Auto, Manual, Mixed)"; \
+		echo "Error: specify LABEL=<scenario label> (Manual, WithoutPV)"; \
 		exit 1; \
 	fi
 	@if [ -z "$(FOCUS)" ]; then \

@@ -16,7 +16,13 @@ limitations under the License.
 
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"strings"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // ReplicatedVolumeAttachment is a Kubernetes Custom Resource that represents an attachment intent/state
 // of a ReplicatedVolume to a specific node.
@@ -136,3 +142,47 @@ const (
 )
 
 func (p ReplicatedVolumeAttachmentPhase) String() string { return string(p) }
+
+// FormatReplicatedVolumeAttachmentName returns the RVA name for the given ReplicatedVolume name and node name.
+// The node name is used as provided (callers should pass the same casing stored in spec.nodeName, typically lower-case).
+// Names longer than 253 characters are truncated and suffixed with a stable hash.
+func FormatReplicatedVolumeAttachmentName(replicatedVolumeName, nodeName string) string {
+	base := "csi-" + replicatedVolumeName + "-" + nodeName
+	if len(base) <= 253 {
+		return base
+	}
+
+	sum := sha1.Sum([]byte(base))
+	hash := hex.EncodeToString(sum[:])[:8]
+
+	// "csi-" + vol + "-" + node + "-" + hash
+	const prefixLen = 4 // len("csi-")
+	const sepCount = 2  // "-" between parts + "-" before hash
+	const hashLen = 8
+	maxPartsLen := 253 - prefixLen - sepCount - hashLen
+	if maxPartsLen < 2 {
+		// Should never happen, but keep a valid, bounded name.
+		return "csi-" + hash
+	}
+
+	volMax := maxPartsLen / 2
+	nodeMax := maxPartsLen - volMax
+
+	volPart := truncateReplicatedVolumeAttachmentNamePart(replicatedVolumeName, volMax)
+	nodePart := truncateReplicatedVolumeAttachmentNamePart(nodeName, nodeMax)
+	return "csi-" + volPart + "-" + nodePart + "-" + hash
+}
+
+func truncateReplicatedVolumeAttachmentNamePart(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	// Make the truncation stable and avoid trailing '-' (purely cosmetic, but improves readability).
+	out := s[:maxLen]
+	out = strings.TrimSuffix(out, "-")
+	out = strings.TrimSuffix(out, ".")
+	return out
+}

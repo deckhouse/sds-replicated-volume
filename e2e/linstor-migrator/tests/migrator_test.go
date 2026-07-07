@@ -38,7 +38,12 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 )
 
-func buildMigratorScenario(scenarioName string, label string, mode helpers.ScenarioMode) bool {
+// Register migrator scenarios at package init (side effect: Ginkgo Describe).
+func init() {
+	buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual")
+}
+
+func buildMigratorScenario(scenarioName string, label string) {
 	var _ = Describe(scenarioName, Ordered, Label(label), func() {
 		// Shared variables for all tests in the suite
 		var (
@@ -50,12 +55,11 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 			runID          string
 
 			// State tracking
-			linstorBefore  *helpers.LinstorState
-			fileChecksums  map[string]string // podName -> checksum
-			oldRSPs        []helpers.RSPBaseline
-			podNames       []string
-			autoExpected   []string
-			manualExpected []string
+			linstorBefore    *helpers.LinstorState
+			fileChecksums    map[string]string // podName -> checksum
+			oldRSPs          []helpers.RSPBaseline
+			podNames         []string
+			migratedExpected []string
 		)
 
 		BeforeAll(func() {
@@ -106,7 +110,6 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 						RunID:            runID,
 						StorageClassName: storageClassName,
 						Namespace:        helpers.TestNamespace,
-						Mode:             mode,
 					},
 					PreviousRunID:  previousRunID,
 					RequireFocused: true,
@@ -119,8 +122,7 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 			linstorBefore = setupResult.LinstorBefore
 			oldRSPs = append([]helpers.RSPBaseline(nil), setupResult.OldRSPs...)
 			podNames = append([]string(nil), setupResult.PodNames...)
-			autoExpected = append([]string(nil), setupResult.AutoResources...)
-			manualExpected = append([]string(nil), setupResult.ManualResources...)
+			migratedExpected = append([]string(nil), setupResult.MigratedResources...)
 
 			if previousRunID == "" {
 				// Temporary helper: remove this once linstor-migrator is merged into main branch of this repository.
@@ -228,26 +230,23 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 					Expect(errs).To(BeEmpty(), "RV maxAttachments check failed")
 				})
 
-				It("should set proper configuration mode for each RV", func() {
-					errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot, autoExpected, manualExpected)
+				It("should set configuration mode Manual for each RV", func() {
+					errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot)
 					Expect(errs).To(BeEmpty(), "RV configuration mode check failed")
 				})
 
-				It("should set RV replicatedStorageClassName from PV storageClassName", func() {
-					errs := helpers.CheckRVReplicatedStorageClassMatchesPVFromSnapshot(rvSnapshot, autoExpected, manualExpected)
+				It("should leave replicatedStorageClassName empty for each RV", func() {
+					errs := helpers.CheckRVReplicatedStorageClassNameEmptyFromSnapshot(rvSnapshot)
 					Expect(errs).To(BeEmpty(), "RV replicatedStorageClassName check failed")
 				})
 
-				It("should set proper manualConfiguration for each RV", func() {
-					errs := helpers.CheckRVManualConfigurationFromSnapshot(rvSnapshot, autoExpected, manualExpected)
+				It("should set manualConfiguration for each RV", func() {
+					errs := helpers.CheckRVManualConfigurationFromSnapshot(rvSnapshot)
 					Expect(errs).To(BeEmpty(), "RV manualConfiguration check failed")
 				})
 
-				It("should set correct manualConfiguration fields for Manual RVs", func() {
-					if len(manualExpected) == 0 {
-						Skip("No manual resources to check")
-					}
-					errs := helpers.CheckRVManualConfigurationFieldsFromSnapshot(rvSnapshot, manualExpected)
+				It("should set correct manualConfiguration fields for each RV", func() {
+					errs := helpers.CheckRVManualConfigurationFieldsFromSnapshot(rvSnapshot, migratedExpected)
 					Expect(errs).To(BeEmpty(), "RV manualConfiguration fields check failed")
 				})
 
@@ -437,12 +436,7 @@ func buildMigratorScenario(scenarioName string, label string, mode helpers.Scena
 			})
 		})
 	})
-	return true
 }
-
-var _ = buildMigratorScenario("All RVs are created with ConfigurationMode: Auto", "Auto", helpers.ScenarioModeAutoOnly)
-var _ = buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual", helpers.ScenarioModeManualOnly)
-var _ = buildMigratorScenario("RVs are created with mixed ConfigurationMode (Auto and Manual)", "Mixed", helpers.ScenarioModeMixed)
 
 var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), func() {
 	var (
@@ -454,11 +448,10 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 		runID          string
 
 		// State tracking
-		linstorBefore  *helpers.LinstorState
-		oldRSPs        []helpers.RSPBaseline
-		podNames       []string
-		autoExpected   []string
-		manualExpected []string
+		linstorBefore    *helpers.LinstorState
+		oldRSPs          []helpers.RSPBaseline
+		podNames         []string
+		migratedExpected []string
 	)
 
 	BeforeAll(func() {
@@ -506,7 +499,6 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 					RunID:            runID,
 					StorageClassName: storageClassName,
 					Namespace:        helpers.TestNamespace,
-					Mode:             helpers.ScenarioModeManualOnly,
 				},
 				PreviousRunID:  previousRunID,
 				RequireFocused: true,
@@ -518,8 +510,7 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 		linstorBefore = setupResult.LinstorBefore
 		oldRSPs = append([]helpers.RSPBaseline(nil), setupResult.OldRSPs...)
 		podNames = append([]string(nil), setupResult.PodNames...)
-		autoExpected = append([]string(nil), setupResult.AutoResources...)
-		manualExpected = append([]string(nil), setupResult.ManualResources...)
+		migratedExpected = append([]string(nil), setupResult.MigratedResources...)
 
 		if previousRunID == "" {
 			err = helpers.UpdateModulePullOverrideAndWait(ctx, k8sClient, migratorImageTag)
@@ -597,26 +588,23 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 				Expect(errs).To(BeEmpty(), "RV maxAttachments check failed")
 			})
 
-			It("should set proper configuration mode for each RV", func() {
-				errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot, autoExpected, manualExpected)
+			It("should set configuration mode Manual for each RV", func() {
+				errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot)
 				Expect(errs).To(BeEmpty(), "RV configuration mode check failed")
 			})
 
-			It("should set RV replicatedStorageClassName from pool name (without PV)", func() {
-				errs := helpers.CheckRVReplicatedStorageClassWithoutPVSnapshot(rvSnapshot, autoExpected, manualExpected)
+			It("should leave replicatedStorageClassName empty for each RV", func() {
+				errs := helpers.CheckRVReplicatedStorageClassNameEmptyFromSnapshot(rvSnapshot)
 				Expect(errs).To(BeEmpty(), "RV replicatedStorageClassName check failed")
 			})
 
-			It("should set proper manualConfiguration for each RV", func() {
-				errs := helpers.CheckRVManualConfigurationFromSnapshot(rvSnapshot, autoExpected, manualExpected)
+			It("should set manualConfiguration for each RV", func() {
+				errs := helpers.CheckRVManualConfigurationFromSnapshot(rvSnapshot)
 				Expect(errs).To(BeEmpty(), "RV manualConfiguration check failed")
 			})
 
-			It("should set correct manualConfiguration fields for Manual RVs", func() {
-				if len(manualExpected) == 0 {
-					Skip("No manual resources to check")
-				}
-				errs := helpers.CheckRVManualConfigurationFieldsFromSnapshot(rvSnapshot, manualExpected)
+			It("should set correct manualConfiguration fields for each RV", func() {
+				errs := helpers.CheckRVManualConfigurationFieldsFromSnapshot(rvSnapshot, migratedExpected)
 				Expect(errs).To(BeEmpty(), "RV manualConfiguration fields check failed")
 			})
 

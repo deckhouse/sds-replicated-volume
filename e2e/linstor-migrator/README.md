@@ -13,10 +13,8 @@ The testing lifecycle looks like this:
 3. Run the next scenario on the cleaned cluster.
 
 ### Implemented Scenarios (Describe blocks):
-* **`All RVs are created with ConfigurationMode: Auto`** (Label: `"Auto"`): The base flow where all Linstor resources have associated RSCs before migration starts.
-* **`All RVs are created with ConfigurationMode: Manual`** (Label: `"Manual"`): Emulates a situation where all RSCs were deleted before migration starts.
-* **`RVs are created with mixed ConfigurationMode (Auto and Manual)`** (Label: `"Mixed"`): A hybrid scenario where some resources have RSCs and some do not.
-* **`Linstor resources without PV`** (Label: `"WithoutPV"`): Emulates a situation where PVCs and PVs are lost before migration to verify correct handling of orphaned ReplicatedVolumes (setting the `no-persistent-volume` label and resolving `replicatedStorageClassName`).
+* **`All RVs are created with ConfigurationMode: Manual`** (Label: `"Manual"`): After migration every RV must use Manual configuration pointing at `linstor-auto-*` pools.
+* **`Linstor resources without PV`** (Label: `"WithoutPV"`): Emulates a situation where PVCs and PVs are lost before migration to verify correct handling of orphaned ReplicatedVolumes (Manual configuration and the `no-persistent-volume` label).
 
 ## Environment Setup (Variables)
 
@@ -76,7 +74,7 @@ export SSH_HOST=10.211.1.6
 export SSH_USER=cloud
 
 # ID of previously saved state (only if you want to run post-checks without re-migration)
-# Example: make test-scenario-it LABEL="Auto" FOCUS="RV resource checks"
+# Example: make test-scenario-it LABEL="Manual" FOCUS="RV resource checks"
 # Do not set if you don't know why it's needed!
 # export TEST_PREVIOUS_RUNID=5a6eaefb
 ```
@@ -86,17 +84,17 @@ export SSH_USER=cloud
 Due to the need to isolate scenarios, the standard `make test` command has been removed.
 Use `make test-scenario` and `make test-scenario-it`:
 
-- **`LABEL`** — Ginkgo label for the scenario (`Auto`, `Manual`, `Mixed`, `WithoutPV`).
+- **`LABEL`** — Ginkgo label for the scenario (`Manual`, `WithoutPV`).
 - **`FOCUS`** — argument for `-ginkgo.focus` (regular expression matching the `Describe` / `It` chain in Ginkgo).
 
 Run entire scenario by label (migration and all nested checks):
 ```bash
-make test-scenario LABEL="Auto"
+make test-scenario LABEL="Manual"
 ```
 
 Run specific check inside a scenario:
 ```bash
-make test-scenario-it LABEL="Auto" FOCUS="RV resource checks"
+make test-scenario-it LABEL="Manual" FOCUS="RV resource checks"
 ```
 
 ## Cleanup

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	. "github.com/onsi/ginkgo/v2"
 	"log/slog"
 	"slices"
 	"sort"
@@ -29,7 +28,6 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -381,17 +379,24 @@ done
 			continue
 		}
 
-		findCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", findScript,
+		const (
+			sncNamespace = "d8-sds-node-configurator"
+			sncContainer = "sds-node-configurator-agent"
+		)
+		nsenter, err := resolveNsenterBin(ctx, clientset, restConfig, agentPodName, sncNamespace, sncContainer)
+		if err != nil {
+			slog.Info(fmt.Sprintf("Failed to resolve nsenter on node %s via pod %s: %v", nodeName, agentPodName, err))
+			continue
 		}
+
+		findCmd := nsenterHostCommand(nsenter, "sh", "-ec", findScript)
 		out, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			findCmd,
 		)
 		if err != nil {
@@ -403,17 +408,14 @@ done
 			continue
 		}
 
-		checkCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", checkScript,
-		}
+		checkCmd := nsenterHostCommand(nsenter, "sh", "-ec", checkScript)
 		if _, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			checkCmd,
 		); err != nil {
 			return []error{fmt.Errorf(
@@ -422,17 +424,14 @@ done
 			)}
 		}
 
-		viewerCmd := []string{
-			"/opt/deckhouse/sds/bin/nsenter.static", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
-			"sh", "-ec", viewerScript,
-		}
+		viewerCmd := nsenterHostCommand(nsenter, "sh", "-ec", viewerScript)
 		if _, err := execInPodWithOutputInContainer(
 			ctx,
 			clientset,
 			restConfig,
 			agentPodName,
-			"d8-sds-node-configurator",
-			"sds-node-configurator-agent",
+			sncNamespace,
+			sncContainer,
 			viewerCmd,
 		); err != nil {
 			return []error{fmt.Errorf(
@@ -669,7 +668,8 @@ func CompareReplicatedVolumeAttachmentsWithLinstor(ctx context.Context, c client
 		key := normalizeAttachmentPairKey(rva.Spec.ReplicatedVolumeName, rva.Spec.NodeName)
 		currentPairs[key] = true
 
-		expectedRVAName := fmt.Sprintf("csi-%s-%s", rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
+		expectedRVAName := srvv1.FormatReplicatedVolumeAttachmentName(
+			rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
 		if rva.Name != expectedRVAName {
 			errors = append(errors, fmt.Errorf(
 				"RVA name %s does not match expected pattern csi-<replicatedVolumeName>-<lower(nodeName)> (expected %s)",
@@ -796,134 +796,14 @@ func CheckRVANamePatternFromSnapshot(snapshot *RVASnapshot) []error {
 	}
 	var errors []error
 	for _, rva := range snapshot.CurrentRVAs {
-		expectedRVAName := fmt.Sprintf("csi-%s-%s", rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
+		expectedRVAName := srvv1.FormatReplicatedVolumeAttachmentName(
+			rva.Spec.ReplicatedVolumeName, strings.ToLower(rva.Spec.NodeName))
 		if rva.Name != expectedRVAName {
 			errors = append(errors, fmt.Errorf(
 				"RVA name %s does not match expected pattern csi-<replicatedVolumeName>-<lower(nodeName)> (expected %s)",
 				rva.Name, expectedRVAName,
 			))
 		}
-	}
-	return errors
-}
-
-// CompareReplicatedVolumesWithLinstor compares RV resources with Linstor state.
-func CompareReplicatedVolumesWithLinstor(ctx context.Context, c client.Client, linstorState *LinstorState) []error {
-	slog.Debug("CHECK: Comparing RV resources with Linstor state")
-	var errors []error
-
-	var rvList srvv1.ReplicatedVolumeList
-	if err := c.List(ctx, &rvList); err != nil {
-		return []error{fmt.Errorf("failed to list RVs: %w", err)}
-	}
-
-	uniqueResourceNames := make(map[string]bool)
-	for _, linstorRes := range linstorState.Resources {
-		if linstorRes.Name == "" {
-			continue
-		}
-		uniqueResourceNames[linstorRes.Name] = true
-	}
-
-	if len(rvList.Items) != len(uniqueResourceNames) {
-		errors = append(errors, fmt.Errorf(
-			"RV count mismatch: got %d, expected %d (unique linstor resource names)",
-			len(rvList.Items), len(uniqueResourceNames),
-		))
-	}
-
-	expectedSizeByResource := make(map[string]int64)
-	pvByResource := make(map[string]*corev1.PersistentVolume)
-	for resourceName := range uniqueResourceNames {
-		// This scenario validates only PV-backed resources.
-		// Expected RV size must match PV.spec.capacity.storage.
-		var pv corev1.PersistentVolume
-		err := c.Get(ctx, client.ObjectKey{Name: resourceName}, &pv)
-		if err == nil {
-			pvCopy := pv
-			pvByResource[resourceName] = &pvCopy
-			if qty, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok && !qty.IsZero() {
-				expectedSizeByResource[resourceName] = qty.Value()
-				continue
-			}
-			errors = append(errors, fmt.Errorf("PV %s has empty spec.capacity.storage", resourceName))
-			continue
-		}
-		if apierrors.IsNotFound(err) {
-			errors = append(errors, fmt.Errorf("PV %s not found: this scenario expects PV-backed RVs only", resourceName))
-			continue
-		}
-		errors = append(errors, fmt.Errorf("failed to get PV %s for checks: %w", resourceName, err))
-	}
-
-	rvsByName := make(map[string]srvv1.ReplicatedVolume, len(rvList.Items))
-	for _, rv := range rvList.Items {
-		rvsByName[rv.Name] = rv
-		if !uniqueResourceNames[rv.Name] {
-			errors = append(errors, fmt.Errorf("unexpected RV %s exists but is absent in linstor resources", rv.Name))
-		}
-	}
-
-	for resourceName := range uniqueResourceNames {
-		rv, ok := rvsByName[resourceName]
-		if !ok {
-			errors = append(errors, fmt.Errorf("RV %s not found for linstor resource", resourceName))
-			continue
-		}
-
-		if rv.Name != resourceName {
-			errors = append(errors, fmt.Errorf("RV name mismatch: got %s, expected %s", rv.Name, resourceName))
-		}
-
-		if rv.Spec.MaxAttachments == nil || *rv.Spec.MaxAttachments != 2 {
-			actual := "<nil>"
-			if rv.Spec.MaxAttachments != nil {
-				actual = fmt.Sprintf("%d", *rv.Spec.MaxAttachments)
-			}
-			errors = append(errors, fmt.Errorf("RV %s has spec.maxAttachments=%s, expected 2", resourceName, actual))
-		}
-
-		if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeAuto {
-			errors = append(errors, fmt.Errorf(
-				"RV %s has unsupported spec.configurationMode=%q (this scenario expects Auto)",
-				resourceName, rv.Spec.ConfigurationMode,
-			))
-		}
-		pv := pvByResource[resourceName]
-		if pv == nil {
-			errors = append(errors, fmt.Errorf("PV %s is missing for Auto mode checks", resourceName))
-		} else {
-			if pv.Spec.StorageClassName == "" {
-				errors = append(errors, fmt.Errorf("PV %s has empty spec.storageClassName", resourceName))
-			} else if rv.Spec.ReplicatedStorageClassName != pv.Spec.StorageClassName {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has spec.replicatedStorageClassName=%q, expected PV.spec.storageClassName=%q",
-					resourceName, rv.Spec.ReplicatedStorageClassName, pv.Spec.StorageClassName,
-				))
-			}
-		}
-		if rv.Spec.ManualConfiguration != nil {
-			errors = append(errors, fmt.Errorf("RV %s has non-nil spec.manualConfiguration in Auto scenario", resourceName))
-		}
-
-		expectedSizeRaw, hasSize := expectedSizeByResource[resourceName]
-		if !hasSize {
-			errors = append(errors, fmt.Errorf("RV %s size check failed: expected size was not determined", resourceName))
-			continue
-		}
-
-		actualSize := rv.Spec.Size.Value()
-		if actualSize != expectedSizeRaw {
-			errors = append(errors, fmt.Errorf(
-				"RV %s has spec.size=%d bytes, expected %d bytes",
-				resourceName, actualSize, expectedSizeRaw,
-			))
-		}
-	}
-
-	slog.Info(fmt.Sprintf("RV comparison: %d RVs vs %d unique Linstor resources", len(rvList.Items), len(uniqueResourceNames)))
-	if len(errors) == 0 {
-		slog.Debug("PASS: RV resources match Linstor state")
 	}
 	return errors
 }
@@ -1024,104 +904,50 @@ func CheckRVMaxAttachmentsFromSnapshot(snapshot *RVSnapshot) []error {
 	return errors
 }
 
-func CheckRVConfigurationModeFromSnapshot(snapshot *RVSnapshot, autoExpected, manualExpected []string) []error {
+func CheckRVConfigurationModeFromSnapshot(snapshot *RVSnapshot) []error {
 	var errors []error
 	for resourceName := range snapshot.UniqueResourceNames {
 		rv, ok := snapshot.RVsByName[resourceName]
 		if !ok {
 			continue
 		}
-
-		if stringInSlice(resourceName, autoExpected) {
-			if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeAuto {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has spec.configurationMode=%q (expected Auto)",
-					resourceName, rv.Spec.ConfigurationMode,
-				))
-			}
-		} else if stringInSlice(resourceName, manualExpected) {
-			if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeManual {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has spec.configurationMode=%q (expected Manual)",
-					resourceName, rv.Spec.ConfigurationMode,
-				))
-			}
-		} else {
+		if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeManual {
 			errors = append(errors, fmt.Errorf(
-				"RV %s is not expected in auto or manual resource lists",
-				resourceName,
+				"RV %s has spec.configurationMode=%q (expected Manual)",
+				resourceName, rv.Spec.ConfigurationMode,
 			))
 		}
 	}
 	return errors
 }
 
-func CheckRVReplicatedStorageClassMatchesPVFromSnapshot(snapshot *RVSnapshot, autoExpected, manualExpected []string) []error {
+func CheckRVReplicatedStorageClassNameEmptyFromSnapshot(snapshot *RVSnapshot) []error {
 	var errors []error
 	for resourceName := range snapshot.UniqueResourceNames {
 		rv, ok := snapshot.RVsByName[resourceName]
 		if !ok {
 			continue
 		}
-
-		if stringInSlice(resourceName, autoExpected) {
-			pv := snapshot.PVsByResource[resourceName]
-			if pv == nil {
-				errors = append(errors, fmt.Errorf("PV %s not found: this scenario expects PV-backed RVs only", resourceName))
-				continue
-			}
-			if pv.Spec.StorageClassName == "" {
-				errors = append(errors, fmt.Errorf("PV %s has empty spec.storageClassName", resourceName))
-				continue
-			}
-			if rv.Spec.ReplicatedStorageClassName != pv.Spec.StorageClassName {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has spec.replicatedStorageClassName=%q, expected PV.spec.storageClassName=%q",
-					resourceName, rv.Spec.ReplicatedStorageClassName, pv.Spec.StorageClassName,
-				))
-			}
-		} else if stringInSlice(resourceName, manualExpected) {
-			if rv.Spec.ReplicatedStorageClassName != "" {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
-					resourceName, rv.Spec.ReplicatedStorageClassName,
-				))
-			}
-		} else {
+		if rv.Spec.ReplicatedStorageClassName != "" {
 			errors = append(errors, fmt.Errorf(
-				"RV %s is not expected in auto or manual resource lists",
-				resourceName,
+				"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
+				resourceName, rv.Spec.ReplicatedStorageClassName,
 			))
 		}
 	}
 	return errors
 }
 
-func CheckRVManualConfigurationFromSnapshot(snapshot *RVSnapshot, autoExpected, manualExpected []string) []error {
+func CheckRVManualConfigurationFromSnapshot(snapshot *RVSnapshot) []error {
 	var errors []error
 	for resourceName := range snapshot.UniqueResourceNames {
 		rv, ok := snapshot.RVsByName[resourceName]
 		if !ok {
 			continue
 		}
-
-		if stringInSlice(resourceName, autoExpected) {
-			if rv.Spec.ManualConfiguration != nil {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has non-nil spec.manualConfiguration (expected nil for Auto-configured resource)",
-					resourceName,
-				))
-			}
-		} else if stringInSlice(resourceName, manualExpected) {
-			if rv.Spec.ManualConfiguration == nil {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has nil spec.manualConfiguration (expected non-nil for Manual-configured resource)",
-					resourceName,
-				))
-			}
-		} else {
+		if rv.Spec.ManualConfiguration == nil {
 			errors = append(errors, fmt.Errorf(
-				"RV %s is not expected in auto or manual resource lists",
+				"RV %s has nil spec.manualConfiguration (expected non-nil for Manual-configured resource)",
 				resourceName,
 			))
 		}
@@ -1265,43 +1091,6 @@ func CheckRVNoPersistentVolumeLabelFromSnapshot(snapshot *RVSnapshot) []error {
 			errors = append(errors, fmt.Errorf(
 				"RV %s has label %q=%q, expected %q",
 				resourceName, noPersistentVolumeLabelAffirmativeKey, value, "true",
-			))
-		}
-	}
-	return errors
-}
-
-// CheckRVReplicatedStorageClassWithoutPVSnapshot verifies RV replicatedStorageClassName
-// without relying on PV storageClassName (PVs may be absent).
-// For autoExpected resources, the migrator must have resolved a non-empty
-// replicatedStorageClassName from the pool name.
-// For manualExpected resources, replicatedStorageClassName must be empty.
-func CheckRVReplicatedStorageClassWithoutPVSnapshot(snapshot *RVSnapshot, autoExpected, manualExpected []string) []error {
-	var errors []error
-	for resourceName := range snapshot.UniqueResourceNames {
-		rv, ok := snapshot.RVsByName[resourceName]
-		if !ok {
-			continue
-		}
-
-		if stringInSlice(resourceName, autoExpected) {
-			if rv.Spec.ReplicatedStorageClassName == "" {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has empty spec.replicatedStorageClassName (expected non-empty, migrator should resolve RSC by pool name)",
-					resourceName,
-				))
-			}
-		} else if stringInSlice(resourceName, manualExpected) {
-			if rv.Spec.ReplicatedStorageClassName != "" {
-				errors = append(errors, fmt.Errorf(
-					"RV %s has non-empty spec.replicatedStorageClassName=%q (expected empty for Manual-configured resource)",
-					resourceName, rv.Spec.ReplicatedStorageClassName,
-				))
-			}
-		} else {
-			errors = append(errors, fmt.Errorf(
-				"RV %s is not expected in auto or manual resource lists",
-				resourceName,
 			))
 		}
 	}
