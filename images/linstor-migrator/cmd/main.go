@@ -66,6 +66,19 @@ func run() int {
 		logLevel = slog.LevelInfo
 	}
 
+	if opt.Mode == ModeCreateDirectoryForYourself {
+		// In this mode the migrator host directory does not exist yet (that is what
+		// this mode creates), so the file logger cannot be used. Log to stdout only.
+		log := newStdoutLogger(logLevel)
+		slog.SetDefault(log)
+		log.Info("linstor-migrator started in create-directory-for-yourself mode")
+		if err := runCreateDirectoryForYourselfMode(log); err != nil {
+			log.Error("create-directory-for-yourself mode failed", "err", err)
+			return 1
+		}
+		return 0
+	}
+
 	log, logCleanup, err := newLogger(logLevel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "linstor-migrator: %v\n", err)
@@ -118,13 +131,9 @@ func run() int {
 
 // newLogger returns a slog.Logger that writes the same log lines to stdout and to
 // config.MigratorHostDir/config.MigratorLogFileName in append mode. logCleanup syncs and closes the file.
+// The migrator host directory is expected to already exist (created by the Job init
+// container in create-directory-for-yourself mode); newLogger does not create it.
 func newLogger(level slog.Level) (*slog.Logger, func(), error) {
-	if err := os.MkdirAll(config.MigratorHostDir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("create migrator host directory %q: %w", config.MigratorHostDir, err)
-	}
-	if err := os.Chmod(config.MigratorHostDir, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("set permissions on migrator host directory %q: %w", config.MigratorHostDir, err)
-	}
 	logPath := filepath.Join(config.MigratorHostDir, config.MigratorLogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -140,6 +149,16 @@ func newLogger(level slog.Level) (*slog.Logger, func(), error) {
 		AddSource: false,
 	})
 	return slog.New(h), cleanup, nil
+}
+
+// newStdoutLogger returns a slog.Logger that writes to stdout only. It is used by
+// modes that run before the migrator host directory (and thus the log file) exists.
+func newStdoutLogger(level slog.Level) *slog.Logger {
+	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     level,
+		AddSource: false,
+	})
+	return slog.New(h)
 }
 
 // newScheme creates a runtime.Scheme with all required types registered.

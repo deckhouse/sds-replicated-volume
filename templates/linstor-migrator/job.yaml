@@ -18,8 +18,38 @@ spec:
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "any-node") | nindent 6 }}
+      {{- include "helm_lib_module_pod_security_context_run_as_user_deckhouse" . | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
+      initContainers:
+      - name: create-migrator-directory
+        image: {{ include "helm_lib_module_image" (list . "linstorMigrator") }}
+        imagePullPolicy: IfNotPresent
+        args:
+          - --mode=create-directory-for-yourself
+          - --log-level
+          - info
+        env:
+          - name: DECKHOUSE_UID
+            # Deckhouse user UID (see .werf/consts.yaml DECKHOUSE_UID_GID and
+            # helm_lib_module_pod_security_context_run_as_user_deckhouse).
+            value: "64535"
+          - name: DECKHOUSE_GID
+            value: "64535"
+        securityContext:
+          runAsNonRoot: false
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+          - name: deckhouse-tmp
+            mountPath: /opt/deckhouse/tmp
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
       containers:
       - name: migrator
         image: {{ include "helm_lib_module_image" (list . "linstorMigrator") }}
@@ -27,6 +57,7 @@ spec:
         args:
           - --log-level
           - debug
+        {{- include "helm_lib_module_container_security_context_run_as_user_deckhouse_pss_restricted" . | nindent 8 }}
         volumeMounts:
           - name: deckhouse-tmp
             mountPath: /opt/deckhouse/tmp
