@@ -334,6 +334,10 @@ test -s "${BASE}/linstor-backup-db/linstor-viewer"
 test -s "${BASE}/linstor-backup-db/readme.txt"
 test -s "${BASE}/linstor-migrator.log"
 test -x "${BASE}/linstor-backup-db/linstor-viewer"
+OWNER="$(stat -c '%u:%g' "${BASE}")"
+[ "${OWNER}" = "64535:64535" ] || { echo "expected owner 64535:64535 for ${BASE}, got ${OWNER}" >&2; exit 1; }
+MODE="$(stat -c '%a' "${BASE}")"
+[ "${MODE}" = "700" ] || { echo "expected mode 700 for ${BASE}, got ${MODE}" >&2; exit 1; }
 `
 
 	viewerScript := `

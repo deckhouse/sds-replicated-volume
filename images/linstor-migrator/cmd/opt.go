@@ -18,6 +18,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"time"
@@ -30,9 +31,15 @@ import (
 // Opt holds the CLI options for the migrator.
 type Opt struct {
 	LogLevel          string
+	Mode              string
 	RetryInterval     time.Duration
 	Stage2WorkerCount int
 }
+
+// ModeCreateDirectoryForYourself is the --mode value that makes the migrator only
+// create its host directory (config.MigratorHostDir) with the deckhouse owner and
+// 0700 permissions, then exit. It is meant to run in an init container as root.
+const ModeCreateDirectoryForYourself = "create-directory-for-yourself"
 
 // Parse parses CLI flags using cobra.
 func (o *Opt) Parse() {
@@ -41,13 +48,19 @@ func (o *Opt) Parse() {
 			if !regexp.MustCompile(`^debug$|^info$|^warn$|^error$`).MatchString(o.LogLevel) {
 				return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
 			}
-			if o.RetryInterval <= 0 {
-				return errors.New("retry-interval must be positive")
+			switch o.Mode {
+			case "", ModeCreateDirectoryForYourself:
+			default:
+				return fmt.Errorf("invalid 'mode' (allowed values: %s)", ModeCreateDirectoryForYourself)
 			}
-			if o.Stage2WorkerCount < 1 {
-				return errors.New("stage2-worker-count must be at least 1")
+			if o.Mode == "" {
+				if o.RetryInterval <= 0 {
+					return errors.New("retry-interval must be positive")
+				}
+				if o.Stage2WorkerCount < 1 {
+					return errors.New("stage2-worker-count must be at least 1")
+				}
 			}
-
 			return nil
 		},
 	}
@@ -59,6 +72,7 @@ func (o *Opt) Parse() {
 	})
 
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
+	rootCmd.Flags().StringVar(&o.Mode, "mode", "", "Migrator mode. Empty means the normal migration flow. "+ModeCreateDirectoryForYourself+" only creates the migrator host directory (owned by the deckhouse user, mode 0700) and exits; it is meant to run as root in the Job init container.")
 	rootCmd.Flags().DurationVar(&o.RetryInterval, "retry-interval", migrator.DefaultRetryInterval, "Interval between ConfigMap state update retries and stage 2 polling rounds")
 	rootCmd.Flags().IntVar(&o.Stage2WorkerCount, "stage2-worker-count", migrator.DefaultStage2WorkerCount, "Number of parallel workers for stage 2")
 	if err := rootCmd.Execute(); err != nil {
