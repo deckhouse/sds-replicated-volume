@@ -28,7 +28,7 @@ spec:
   attachRequired: true
   fsGroupPolicy: ReadWriteOnceWithFSType
   podInfoOnMount: true
-  requiresRepublish: true
+  requiresRepublish: false
   seLinuxMount: true
   storageCapacity: false
   volumeLifecycleModes:
