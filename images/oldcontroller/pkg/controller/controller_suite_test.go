@@ -229,7 +229,7 @@ func getAndValidateReconciledRSC(ctx context.Context, cl client.Client, testName
 	replicatedSC, err := getRSC(ctx, cl, testName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(replicatedSC.Name).To(Equal(testName))
-	Expect(replicatedSC.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+	Expect(replicatedSC.Finalizers).To(ContainElement(srv.RSCControllerFinalizerLegacy))
 	Expect(replicatedSC.Status).NotTo(BeNil())
 
 	return replicatedSC
