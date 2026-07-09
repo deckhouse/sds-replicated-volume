@@ -325,7 +325,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
+		replicatedSC.Finalizers = []string{srv.RSCControllerFinalizerLegacy}
 		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		request := reconcile.Request{
@@ -355,7 +355,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}, &replicatedSCafterDelete)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
-		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(srv.RSCControllerFinalizerLegacy))
 		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
 
 		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -371,7 +371,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
+		replicatedSC.Finalizers = []string{srv.RSCControllerFinalizerLegacy}
 		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseReady
 
 		request := reconcile.Request{
@@ -413,7 +413,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}, &replicatedSCafterDelete)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
-		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(srv.RSCControllerFinalizerLegacy))
 		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
 
 		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -434,7 +434,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
+		replicatedSC.Finalizers = []string{srv.RSCControllerFinalizerLegacy}
 		replicatedSC.Status.Phase = srv.ReplicatedStorageClassPhaseInvalidConfiguration
 
 		request := reconcile.Request{
@@ -468,7 +468,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}, &replicatedSCafterDelete)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
-		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(srv.RSCControllerFinalizerLegacy))
 		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
 
 		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -740,7 +740,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(resource.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
 		Expect(resource.Status.Message).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
 
-		Expect(slices.Contains(resource.Finalizers, controller.ReplicatedStorageClassFinalizerName)).To(BeTrue())
+		Expect(slices.Contains(resource.Finalizers, srv.RSCControllerFinalizerLegacy)).To(BeTrue())
 
 		storageClass, err = controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
@@ -805,7 +805,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(resource.Status.Message).To(Equal("ReplicatedStorageClass and StorageClass are equal."))
 
 		resFinalizers := strings.Join(resource.Finalizers, "")
-		Expect(strings.Contains(resFinalizers, controller.ReplicatedStorageClassFinalizerName))
+		Expect(strings.Contains(resFinalizers, srv.RSCControllerFinalizerLegacy))
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())

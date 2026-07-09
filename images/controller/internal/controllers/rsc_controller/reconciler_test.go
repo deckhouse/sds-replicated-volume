@@ -1452,6 +1452,37 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(client.IgnoreNotFound(err)).To(BeNil())
 		})
+
+		It("migrates legacy finalizer to current finalizer on existing RSCs", func() {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rsc-1",
+					Finalizers: []string{v1alpha1.RSCControllerFinalizerLegacy},
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc).
+				WithStatusSubresource(rsc).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileMetadata(ctx, rsc)
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// Legacy finalizer should be removed.
+			Expect(rsc.Finalizers).NotTo(ContainElement(v1alpha1.RSCControllerFinalizerLegacy))
+			// Current finalizer should be set.
+			Expect(rsc.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+
+			// Changes should be persisted.
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
+			Expect(updatedRSC.Finalizers).NotTo(ContainElement(v1alpha1.RSCControllerFinalizerLegacy))
+			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+		})
 	})
 
 	Describe("reconcileDeletion", func() {
@@ -1569,6 +1600,65 @@ var _ = Describe("Reconciler", func() {
 			outcome := rec.reconcileDeletion(ctx, "rsc-gone", nil, nil)
 
 			Expect(outcome.Error()).To(BeNil())
+		})
+
+		It("removes legacy finalizer when RSC has only legacy finalizer", func() {
+			now := metav1.Now()
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rsc-1",
+					Finalizers:        []string{v1alpha1.RSCControllerFinalizerLegacy},
+					DeletionTimestamp: &now,
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc).
+				WithStatusSubresource(rsc).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, nil)
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// RSC should be deleted (legacy finalizer removed).
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			err := cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
+			Expect(err).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(err)).To(BeNil())
+		})
+
+		It("removes both legacy and current finalizers when present", func() {
+			now := metav1.Now()
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rsc-1",
+					Finalizers: []string{
+						v1alpha1.RSCControllerFinalizerLegacy,
+						v1alpha1.RSCControllerFinalizer,
+					},
+					DeletionTimestamp: &now,
+				},
+			}
+			cl = fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc).
+				WithStatusSubresource(rsc).
+				Build()
+			rec = NewReconciler(cl)
+
+			ctx := flow.BeginRootReconcile(context.Background()).Ctx()
+			outcome := rec.reconcileDeletion(ctx, "rsc-1", rsc, nil)
+
+			Expect(outcome.Error()).To(BeNil())
+
+			// RSC should be deleted (both finalizers removed).
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			err := cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)
+			Expect(err).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(err)).To(BeNil())
 		})
 	})
 

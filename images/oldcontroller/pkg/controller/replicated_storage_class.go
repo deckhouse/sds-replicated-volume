@@ -49,8 +49,6 @@ import (
 const (
 	ReplicatedStorageClassControllerName = "replicated-storage-class-controller"
 	// TODO
-	ReplicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
-	// TODO
 	StorageClassFinalizerName = "storage.deckhouse.io/sds-replicated-volume"
 	StorageClassProvisioner   = "replicated.csi.storage.deckhouse.io"
 	StorageClassKind          = "StorageClass"
@@ -342,9 +340,9 @@ func ReconcileReplicatedStorageClass(
 		return true, err
 	}
 
-	if !slices.Contains(replicatedSC.Finalizers, ReplicatedStorageClassFinalizerName) {
+	if !slices.Contains(replicatedSC.Finalizers, srv.RSCControllerFinalizerLegacy) {
 		replicatedSC.Finalizers = append(replicatedSC.Finalizers,
-			ReplicatedStorageClassFinalizerName)
+			srv.RSCControllerFinalizerLegacy)
 		// Finalizer is metadata, so it must go through the regular Update (not the status subresource).
 		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass finalizers %+v", replicatedSC))
 		if err = UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
@@ -387,7 +385,7 @@ func ReconcileDeleteReplicatedStorageClass(
 		replicatedSC.Name)
 
 	replicatedSC.Finalizers = RemoveString(replicatedSC.Finalizers,
-		ReplicatedStorageClassFinalizerName)
+		srv.RSCControllerFinalizerLegacy)
 	if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
 		return true, fmt.Errorf("error UpdateReplicatedStorageClass after removing finalizer: %w", err)
 	}

@@ -20,6 +20,8 @@ const AgentFinalizer = "sds-replicated-volume.deckhouse.io/agent"
 
 const RSCControllerFinalizer = "sds-replicated-volume.deckhouse.io/rsc-controller"
 
+const RSCControllerFinalizerLegacy = "replicatedstorageclass.storage.deckhouse.io"
+
 const RVControllerFinalizer = "sds-replicated-volume.deckhouse.io/rv-controller"
 
 const RVRControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvr-controller"
