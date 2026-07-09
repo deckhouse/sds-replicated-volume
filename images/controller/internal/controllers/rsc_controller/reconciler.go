@@ -217,12 +217,21 @@ func (r *Reconciler) reconcileDeletion(
 		return merged
 	}
 
-	// All RSPs released. Remove finalizer (if RSC still exists).
-	if rsc != nil && objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer) {
-		base := rsc.DeepCopy()
-		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
-		if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
-			return rf.Fail(err)
+	// All RSPs released. Remove finalizers (including legacy from old controller).
+	if rsc != nil {
+		hasFinalizer := objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+		hasLegacyFinalizer := objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizerLegacy)
+		if hasFinalizer || hasLegacyFinalizer {
+			base := rsc.DeepCopy()
+			if hasFinalizer {
+				objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+			}
+			if hasLegacyFinalizer {
+				objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizerLegacy)
+			}
+			if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+				return rf.Fail(err)
+			}
 		}
 	}
 
@@ -408,12 +417,24 @@ func (r *Reconciler) reconcileMetadata(
 	rf := flow.BeginReconcile(ctx, "metadata")
 	defer rf.OnEnd(&outcome)
 
-	if objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer) {
-		return rf.Continue()
+	needsPatch := false
+	base := rsc.DeepCopy()
+
+	// Migrate legacy finalizer from the old controller to the new one.
+	if objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizerLegacy) {
+		objutilv1.RemoveFinalizer(rsc, v1alpha1.RSCControllerFinalizerLegacy)
+		needsPatch = true
 	}
 
-	base := rsc.DeepCopy()
-	objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+	// Ensure the current controller finalizer is set.
+	if !objutilv1.HasFinalizer(rsc, v1alpha1.RSCControllerFinalizer) {
+		objutilv1.AddFinalizer(rsc, v1alpha1.RSCControllerFinalizer)
+		needsPatch = true
+	}
+
+	if !needsPatch {
+		return rf.Continue()
+	}
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
 		return rf.Fail(err)
