@@ -13,7 +13,7 @@
   license: GPL-2.0
 
 - id: DRBD_LEGACY
-  version: "9.2.18"
+  version: "9.2.16"
   name: DRBD
   link: https://github.com/LINBIT/drbd
   description: DRBD kernel module for the legacy LINSTOR control plane. Kept as a separate version slot so legacy and agent paths can diverge safely.
