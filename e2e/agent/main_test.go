@@ -192,6 +192,10 @@ func TestDRBDResource(t *testing.T) {
 			})
 
 			if tc.n == 2 {
+				e.Run("CachedStatusReport", func(e envtesting.E) {
+					suite.SetupCachedStatusReport(e, cl, drbdrs)
+				})
+
 				e.Run("RemovePeer", func(e envtesting.E) {
 					suite.SetupRemovePeer(e, cl, drbdrs[0])
 				})

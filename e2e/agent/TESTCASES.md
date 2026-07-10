@@ -196,6 +196,20 @@ TestDRBDResource
 │   │       Configured=True and activeConfiguration.role=Secondary.
 │   │       Cleanup reverts to Primary; agent promotes again.
 │   │
+│   ├── CachedStatusReport
+│   │   Verifies the agent reports DRBD runtime state sourced from the
+│   │   cached drbdsetup status/show output, whose freshness is driven by
+│   │   the events2 invalidation signal. Puts replica 0 into maintenance
+│   │   mode, which makes the reconciler observe from the status/show
+│   │   caches and skip all convergence actions and the post-convergence
+│   │   status refresh — so the reported status is derived entirely from
+│   │   the cached drbdsetup output. Asserts the maintenance report still
+│   │   carries accurate state: Configured=False/InMaintenance, local
+│   │   diskState=UpToDate and status.size populated, and the peer reported
+│   │   Connected/UpToDate (from the status connections/peer-devices).
+│   │   Cleanup reverts maintenance; the agent resumes and returns to
+│   │   Configured=True.
+│   │
 │   └── RemovePeer
 │       Patches replica 0 to spec.peers=[]. Asserts Configured=True
 │       and status.peers is empty (agent disconnected and forgot the
@@ -247,6 +261,9 @@ Every subtest's cleanup exercises a teardown path:
 - **StateDown cleanup**: reverts state back to Up. Verifies the agent
   can bring a downed resource fully back up (re-add both DRBDR and LLV
   finalizers, re-create DRBD resource, re-attach disk).
+
+- **CachedStatusReport cleanup**: reverts the maintenance-mode patch. The
+  agent resumes reconciliation and returns the resource to Configured=True.
 
 - **RemovePeer cleanup**: restores the peer list. Verifies the agent
   can re-add a previously forgotten peer.
