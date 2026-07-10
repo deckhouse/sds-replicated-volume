@@ -825,31 +825,26 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-// observeActualDRBDState retrieves the DRBD resource state by querying
-// drbdsetup status and drbdsetup show. It does NOT probe disk metadata;
-// call observeActualDiskState separately when disk information is needed.
-func observeActualDRBDState(ctx context.Context, drbdResName string) (*actualState, error) {
+// observeActualDRBDState reads the on-node DRBD resource state from the cached
+// drbdsetup status and show outputs. It does not probe disk metadata; call
+// observeActualDiskState separately.
+func observeActualDRBDState(ctx context.Context, drbdResName string, caches *Caches) (*actualState, error) {
 	state := &actualState{}
 
-	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
+	status, err := caches.Status(ctx, drbdResName)
 	if err != nil {
-		return nil, fmt.Errorf("executing drbdsetup status: %w", err)
+		return nil, fmt.Errorf("getting status data: %w", err)
 	}
-
-	if len(statusResult) == 1 {
-		state.status = &statusResult[0]
-
-		showResults, err := drbdutils.ExecuteShow(ctx, drbdResName, true)
-		if err != nil {
-			return nil, fmt.Errorf("executing drbdsetup show: %w", err)
-		}
-		for i := range showResults {
-			if showResults[i].Resource == drbdResName {
-				state.show = &showResults[i]
-				break
-			}
-		}
+	if status == nil {
+		return state, nil
 	}
+	state.status = status
+
+	show, err := caches.Show(ctx, drbdResName)
+	if err != nil {
+		return nil, fmt.Errorf("getting show data: %w", err)
+	}
+	state.show = show
 
 	return state, nil
 }

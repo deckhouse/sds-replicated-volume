@@ -51,7 +51,7 @@ func TestReconcileLLVFinalizerAdd(t *testing.T) {
 
 	newReconciler := func(objs ...client.Object) *Reconciler {
 		cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
-		return NewReconciler(cl, "test-node", nil)
+		return NewReconciler(cl, "test-node", nil, nil)
 	}
 
 	lvg := &snc.LVMVolumeGroup{

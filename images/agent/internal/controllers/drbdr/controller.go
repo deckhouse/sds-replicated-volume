@@ -86,8 +86,11 @@ func BuildController(mgr manager.Manager) error {
 	// Create DRBD port cache (scanner-maintained, will be used by PortRegistry later)
 	drbdPortCache := NewDRBDPortCache()
 
-	// Create scanner with port cache
-	scanner := NewScanner(requestCh, drbdPortCache)
+	caches := GetCaches()
+
+	// Create scanner: it maintains the port cache and uses events2 as an
+	// invalidation signal for the shared status/show caches.
+	scanner := NewScanner(requestCh, drbdPortCache, caches)
 	if err := mgr.Add(scanner); err != nil {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
@@ -96,7 +99,7 @@ func BuildController(mgr manager.Manager) error {
 	portRegistry := NewPortRegistry(cl, nodeName, drbdPortCache, cfg.DRBDMinPort(), cfg.DRBDMaxPort(), 10*time.Minute)
 
 	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
-	rec := NewReconciler(cl, nodeName, portRegistry)
+	rec := NewReconciler(cl, nodeName, portRegistry, caches)
 
 	// Build DRBD resource controller with TypedReconciler
 	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).

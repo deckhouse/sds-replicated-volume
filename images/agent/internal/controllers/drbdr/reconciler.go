@@ -43,16 +43,18 @@ type Reconciler struct {
 	cl           client.Client
 	nodeName     string
 	portRegistry *PortRegistry
+	caches       *Caches
 }
 
 var _ reconcile.TypedReconciler[DRBDReconcileRequest] = (*Reconciler)(nil)
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry) *Reconciler {
+func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry, caches *Caches) *Reconciler {
 	return &Reconciler{
 		cl:           cl,
 		nodeName:     nodeName,
 		portRegistry: portRegistry,
+		caches:       caches,
 	}
 }
 
@@ -172,7 +174,7 @@ func (r *Reconciler) reconcileDRBDR(
 
 	// Observe the on-node DRBD state; reused by Phases 3 and 6.
 	drbdResName := DRBDResourceNameOnTheNode(drbdr)
-	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName)
+	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName, r.caches)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Phase 3: Persist allocated addresses before any destructive DRBD action,
@@ -227,7 +229,9 @@ func (r *Reconciler) reconcileDRBDR(
 
 	var aErr2 error
 	if refreshNeeded {
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName)
+		// Convergence changed on-node state; re-observe from fresh output.
+		r.caches.Invalidate(drbdResName)
+		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName, r.caches)
 		if aErr2 == nil {
 			aErr2 = observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID)
 		}
@@ -329,11 +333,15 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
 	defer rf.OnEnd(&outcome)
 
-	status, err := drbdutils.ExecuteStatus(rf.Ctx(), drbdName)
+	// Check whether the resource actually exists on the node. On a cache miss
+	// this runs drbdsetup status directly, so there is no empty-store race to
+	// guard against: a missing entry means the command genuinely reported no
+	// such resource.
+	status, err := r.caches.Status(rf.Ctx(), drbdName)
 	if err != nil {
 		return rf.Fail(err)
 	}
-	if len(status) == 0 {
+	if status == nil {
 		return rf.Done()
 	}
 
@@ -372,12 +380,15 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 		return
 
 	case errors.Is(err, drbdutils.ErrRenameUnknownResource):
-		// Old name doesn't exist - check if new name exists (rename might have succeeded before)
-		status, statusErr := drbdutils.ExecuteStatus(rf.Ctx(), newName)
-		if statusErr != nil {
-			return rf.Fail(statusErr)
+		// Old name doesn't exist - check if new name exists (rename might have
+		// succeeded before). On a cache miss this runs drbdsetup status
+		// directly, so a nil result means the canonical name genuinely does not
+		// exist on the node.
+		status, existErr := r.caches.Status(rf.Ctx(), newName)
+		if existErr != nil {
+			return rf.Fail(existErr)
 		}
-		if len(status) == 0 {
+		if status == nil {
 			// Neither the adopted (old) name nor the canonical (new) name
 			// exists on the node. DRBD state is volatile and is wiped on
 			// reboot, so a node reboot before adoption completes leaves
