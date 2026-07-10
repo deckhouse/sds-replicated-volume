@@ -147,11 +147,19 @@ spec:
       exit 0
     fi
 
-    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+    # Registry-package may skip install when the digest marker matches even if
+    # /opt/deckhouse/drbd is stale. Remove only when on-disk sources do not match.
+    desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
+    drbd_config="/opt/deckhouse/drbd/drbd/linux/drbd_config.h"
+    sources_version=""
+    if [ -f "$drbd_config" ]; then
+      sources_version="$(sed -ne '/^#define REL_VERSION/{s/^[^"]*"\([^ "]*\).*/\1/;p;q;}' "$drbd_config")"
+    fi
+    if [ -z "$sources_version" ] || [ "$sources_version" != "$desired_version" ]; then
+      bb-log-info "DRBD sources missing or stale (have '${sources_version:-none}', want '${desired_version}'), forcing package reinstall"
+      bb-package-remove "drbd"
+    fi
     bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
-    {{- else }}
-    bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
-    {{- end }}
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
