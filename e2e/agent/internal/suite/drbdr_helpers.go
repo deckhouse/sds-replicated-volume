@@ -143,3 +143,26 @@ func assertDRBDRSizeNil(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
 			drbdr.Name, drbdr.Status.Size.String())
 	}
 }
+
+// assertPeerConnectedUpToDate asserts that drbdr reports the peer identified by
+// peerName (or peerNodeID) as Connected with DiskState=UpToDate. The peer entry
+// is matched by name first, falling back to nodeID.
+func assertPeerConnectedUpToDate(e envtesting.E, drbdr *v1alpha1.DRBDResource, peerName string, peerNodeID uint8) {
+	e.Helper()
+	for i := range drbdr.Status.Peers {
+		p := &drbdr.Status.Peers[i]
+		if p.Name != peerName && p.NodeID != uint(peerNodeID) {
+			continue
+		}
+		if p.ConnectionState != v1alpha1.ConnectionStateConnected {
+			e.Fatalf("DRBDResource %q peer %q connectionState is %q, want %q",
+				drbdr.Name, peerName, p.ConnectionState, v1alpha1.ConnectionStateConnected)
+		}
+		if p.DiskState != v1alpha1.DiskStateUpToDate {
+			e.Fatalf("DRBDResource %q peer %q diskState is %q, want %q",
+				drbdr.Name, peerName, p.DiskState, v1alpha1.DiskStateUpToDate)
+		}
+		return
+	}
+	e.Fatalf("DRBDResource %q has no peer entry for %q (nodeID=%d)", drbdr.Name, peerName, peerNodeID)
+}

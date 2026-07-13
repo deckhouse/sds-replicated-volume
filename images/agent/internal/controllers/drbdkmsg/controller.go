@@ -24,6 +24,8 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 )
 
 // ControllerName is the stable name used by the controller registry to
@@ -35,7 +37,7 @@ const ControllerName = "drbdkmsg-controller"
 // is opened lazily inside Start so a missing or inaccessible /dev/kmsg
 // does not abort agent startup.
 func BuildController(mgr manager.Manager) error {
-	fwd := NewForwarder()
+	fwd := NewForwarder(drbdr.GetCaches())
 	if err := mgr.Add(fwd); err != nil {
 		return fmt.Errorf("adding drbdkmsg forwarder runnable: %w", err)
 	}

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"os"
 	"time"
+	"unsafe"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -31,6 +32,73 @@ import (
 
 // Look for messages starting with "drbd"
 var drbdMatch = []byte(";drbd")
+
+// CacheInvalidator is the subset of the drbdsetup status/show cache that the
+// forwarder drives. State-change kernel messages invalidate a single resource;
+// messages that match the state-change filter but whose resource name cannot be
+// parsed fall back to invalidating everything.
+type CacheInvalidator interface {
+	Invalidate(resourceName string)
+	InvalidateAll()
+}
+
+// kmsgResourcePrefix precedes the DRBD resource name in every /dev/kmsg record
+// emitted by the DRBD kernel module: "<hdr>;drbd <name>[/vol drbdN] [peer]: ...".
+var kmsgResourcePrefix = []byte(";drbd ")
+
+// unregisteredPrefix is inserted between "drbd " and the resource name while a
+// resource/connection is being torn down (see the kernel's polymorph printk).
+var unregisteredPrefix = []byte("/unregistered/")
+
+// stateChangeMarkers are substrings identifying a DRBD kernel message that
+// reports a state transition changing what drbdsetup status/show return, so the
+// affected resource's cached output must be dropped. They are the transition
+// tags emitted by the kernel's print_state_change plus split-brain detection.
+var stateChangeMarkers = [][]byte{
+	[]byte("role( "),
+	[]byte("susp-io( "),
+	[]byte("force-io-failures( "),
+	[]byte("conn( "),
+	[]byte("peer( "),
+	[]byte("disk( "),
+	[]byte("quorum( "),
+	[]byte("pdsk( "),
+	[]byte("repl( "),
+	[]byte("resync-susp( "),
+	[]byte("Split-Brain"),
+}
+
+// isStateChangeMessage reports whether line is a DRBD state-transition message
+// whose occurrence means the cached status/show output is stale.
+func isStateChangeMessage(line []byte) bool {
+	for _, m := range stateChangeMarkers {
+		if bytes.Contains(line, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseResourceName extracts the DRBD resource name from a /dev/kmsg record.
+// The name is the token after "drbd " (minus an optional "/unregistered/"
+// prefix), terminated by a space, '/', or ':'. Returns false when the record
+// carries no resource name (e.g. module-level "drbd:" messages).
+//
+// The returned string is a zero-copy view into line and is valid only until the
+// next kmsg read; callers must not retain it.
+func parseResourceName(line []byte) (string, bool) {
+	_, after, ok := bytes.Cut(line, kmsgResourcePrefix)
+	if !ok {
+		return "", false
+	}
+	rest := bytes.TrimPrefix(after, unregisteredPrefix)
+	end := bytes.IndexAny(rest, " /:")
+	if end <= 0 {
+		return "", false
+	}
+	name := rest[:end]
+	return unsafe.String(unsafe.SliceData(name), len(name)), true
+}
 
 // benignKernelMessages are substrings of DRBD kernel messages that the kernel
 // emits at warning/error severity but which are expected and harmless (normal
@@ -74,8 +142,14 @@ const (
 )
 
 // Forwarder is a manager.Runnable that follows /dev/kmsg and emits
-// DRBD-tagged kernel messages through the controller-runtime logger.
+// DRBD-tagged kernel messages through the controller-runtime logger. It also
+// serves as a secondary cache-invalidation signal: state-transition messages
+// drop the affected resource's cached drbdsetup output.
 type Forwarder struct {
+	// inv receives cache-invalidation calls for state-change kernel
+	// messages. May be nil, in which case invalidation is skipped.
+	inv CacheInvalidator
+
 	// retryDelay is the current backoff between failed kmsg.Open
 	// attempts and follow restarts. It doubles up to retryMaxDelay
 	// after each failure and is reset to retryBaseDelay every time
@@ -83,8 +157,24 @@ type Forwarder struct {
 	retryDelay time.Duration
 }
 
-func NewForwarder() *Forwarder {
-	return &Forwarder{}
+func NewForwarder(inv CacheInvalidator) *Forwarder {
+	return &Forwarder{inv: inv}
+}
+
+// invalidateForKernelMessage drops cached status/show output when line reports
+// a DRBD state transition (see isStateChangeMessage). It invalidates just the
+// named resource, falling back to InvalidateAll when the name cannot be parsed.
+func (f *Forwarder) invalidateForKernelMessage(logger logr.Logger, line []byte) {
+	if f.inv == nil || !isStateChangeMessage(line) {
+		return
+	}
+	if name, ok := parseResourceName(line); ok {
+		logger.V(1).Info("invalidating DRBD caches for kernel state change", "resource", name)
+		f.inv.Invalidate(name)
+		return
+	}
+	logger.V(1).Info("invalidating all DRBD caches for unparseable kernel state change")
+	f.inv.InvalidateAll()
 }
 
 // Start runs the kmsg follow loop until ctx is canceled. It never
@@ -161,6 +251,10 @@ func (f *Forwarder) follow(ctx context.Context, logger logr.Logger, buf []byte) 
 		}
 		sev := parseSeverity(line)
 		line = bytes.TrimSpace(line)
+
+		// Use the message as a secondary cache-invalidation signal before
+		// forwarding it for observability.
+		f.invalidateForKernelMessage(logger, line)
 
 		const event = "DRBD kernel message"
 		switch {
