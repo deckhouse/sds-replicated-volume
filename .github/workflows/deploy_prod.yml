@@ -74,7 +74,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -108,7 +108,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -142,7 +142,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -176,7 +176,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
@@ -210,7 +210,7 @@ jobs:
         run: |
           echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@v15
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}

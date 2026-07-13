@@ -11,9 +11,22 @@ config:
       - SOURCE_REPO
       - DISTRO_PACKAGES_PROXY
       - SOURCE_REPO_TAG
+      - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      - VAULT_KEY
+      - WERF_SIGN_KEY
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:
+    allowEnvVariables:
+      - REGISTRY_USER
+      - REGISTRY_PASSWORD
+      - VAULT_ADDR
+      - WERF_SIGN_KEY
+      - WERF_VAULT_AUTH_ROLE
+      - WERF_VAULT_AUTH_JWT
+      - TRANSIT_SECRET_ENGINE_PATH
+      - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      - ACTIONS_ID_TOKEN_REQUEST_URL
     allowValueIds:
       - GOPROXY
       - SOURCE_REPO

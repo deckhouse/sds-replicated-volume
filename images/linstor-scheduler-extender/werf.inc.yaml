@@ -2,7 +2,6 @@
 image: {{ $.ImageName }}-golang-artifact
 from: {{ index $.Images "builder/golang" }}
 final: false
-
 git:
   - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
     add: /
@@ -71,3 +70,4 @@ docker:
     version: all
     linstor-scheduler-extender: {{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}
 ---
+{{- include "vex mitigation" (list $ $.ImageName) }}
