@@ -153,9 +153,12 @@ shell:
     {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root)) }}
     {{- $_ := set $ctx "spec" "dist/python-linstor.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
-    # fix error: python3(distutils.version) < 0 is needed by python-linstor-1.19.0-1.noarch when installing this package
-    {{- $_ := set $ctx "rpmbuild_args" "--define \\'_python3_req_skip distutils.version\\'" }}
-    {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' python-linstor.spec" }}
+    # The Alt python3 RPM dependency generator emits a Requires for every stdlib
+    # module the package imports (python3(os), python3(ssl), python3(json), ...),
+    # none of which base-images v1.3.2's python3 provides. They are all stdlib and
+    # always present in the target image, so disable automatic Requires for this
+    # pure-Python package rather than chasing an ever-growing skip list.
+    {{- $_ := set $ctx "spec_patch" "sed -i -e 's/python3-setuptools/python3-module-setuptools/g' -e '/^Name:/a AutoReq: no' python-linstor.spec" }}
 
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
@@ -184,7 +187,13 @@ shell:
     {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root)) }}
     {{- $_ := set $ctx "spec" "dist/linstor-client.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
-    {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' linstor-client.spec" }}
+    # same stdlib auto-requires issue as python-linstor above
+    {{- $_ := set $ctx "spec_patch" "sed -i -e 's/python3-setuptools/python3-module-setuptools/g' -e '/^Name:/a AutoReq: no' linstor-client.spec" }}
+    # The prior `rpm -ihv python-linstor` leaves the base-images v1.3.2 rpmdb in a
+    # state where the BuildRequires check spuriously fails ("db4 DB_PAGE_NOTFOUND";
+    # python3-module-setuptools is in fact apt-installed). --rebuilddb does not heal
+    # it, so skip the dependency check — the build deps are present in the image.
+    {{- $_ := set $ctx "rpmbuild_args" "--nodeps" }}
     # make release-no-doc because doc generation fail in some reasons
     {{- $_ := set $ctx "tarball_cmd" "make release-no-doc" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -396,3 +405,4 @@ docker:
     k8s-await-election: {{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" $.Root) }}
     piraeus-entry: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" $.Root) }}
 ---
+{{- include "vex mitigation" (list $ $.ImageName) }}
