@@ -103,6 +103,8 @@ spec:
       bb-dnf-remove $packages_to_remove
     fi
 
+    current_version_regex='{{ include "drbd_current_version_regex" . }}'
+
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
 
@@ -112,8 +114,6 @@ spec:
       {{- else }}
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}"
       {{- end }}
-      current_version_regex='^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$'
-
       # We expect the loaded DRBD module to be version 9.
       # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
       # (For example, this can happen due to drbd-utils installed on the host, which should not occur in standard scenarios).
@@ -235,8 +235,6 @@ spec:
       {{- else }}
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}"
       {{- end }}
-      current_version_regex='^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$'
-
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}

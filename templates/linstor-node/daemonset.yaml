@@ -13,6 +13,10 @@ cpu: 50m
 memory: 25Mi
 {{- end }}
 
+{{- define "drbd_current_version_regex" -}}
+^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$
+{{- end }}
+
 {{- define "linstor_resources_cleaner" }}
 cpu: 50m
 memory: 150Mi
