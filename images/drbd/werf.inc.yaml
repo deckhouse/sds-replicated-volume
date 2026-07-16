@@ -27,6 +27,9 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
+    # cache-bust: tag drbd-9.2.19-flant.11 was force-moved to the RACEDBG commit
+    # 3f20955ab; this echo changes the setup-stage digest so werf re-clones it.
+    - echo "drbd-ref 3f20955ab RACEDBG flant.11 (re-clone moved tag)"
     - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd.git  /drbd
     - cd /drbd
     - git submodule update --init --recursive
