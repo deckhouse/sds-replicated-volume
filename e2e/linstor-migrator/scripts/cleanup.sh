@@ -208,7 +208,7 @@ cleanup_thin_pools_on_nodes() {
             [ -n "${thin}" ] || continue
             while true; do
                 lv_list_raw="$(kubectl -n d8-sds-node-configurator exec "${agent_pod}" -c sds-node-configurator-agent -- \
-                    /opt/deckhouse/sds/bin/nsenter.static -t 1 -m -u -i -n -p -- \
+                    /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p -- \
                     /opt/deckhouse/sds/bin/lvm.static lvs --noheadings -o lv_name "${vg}" 2>/dev/null || true)"
 
                 echo -e "${YELLOW}Current LVs in VG ${vg} on node ${node}:${NC}"
@@ -238,10 +238,58 @@ cleanup_thin_pools_on_nodes() {
 
             echo -e "${YELLOW}Deleting thin pool ${vg}/${thin} on node ${node}...${NC}"
             kubectl -n d8-sds-node-configurator exec "${agent_pod}" -c sds-node-configurator-agent -- \
-                /opt/deckhouse/sds/bin/nsenter.static -t 1 -m -u -i -n -p -- \
+                /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p -- \
                 /opt/deckhouse/sds/bin/lvm.static lvremove -y "${vg}/${thin}" || true
         done
     done <<< "${targets}"
+}
+
+# After thin-pool removal, LVGs can finish terminating. Wait until they are gone before
+# wiping leftover device nodes, otherwise LVM may recreate /dev/migrator* entries.
+wait_for_migrator_lvgs_removed() {
+    echo -e "${YELLOW}Waiting for migrator-e2e LVMVolumeGroups to be fully removed...${NC}"
+    while true; do
+        local remaining
+        remaining="$(kubectl get lvmvolumegroups.storage.deckhouse.io -l migrator-e2e --no-headers 2>/dev/null || true)"
+        if [ -z "${remaining}" ]; then
+            break
+        fi
+
+        echo -e "${YELLOW}Waiting for LVG cleanup (expecting no migrator-e2e LVGs, poll every 2s)...${NC}"
+        printf '%s\n' "${remaining}"
+        sleep 2
+    done
+}
+
+# Remove leftover migrator device nodes that can stick after LVM thin-pool/LVG cleanup.
+cleanup_migrator_devices_on_nodes() {
+    echo -e "${YELLOW}Removing leftover /dev/migrator* and /dev/mapper/migrator* on all test-cluster nodes...${NC}"
+
+    local node_names
+    node_names="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+    if [ -z "${node_names}" ]; then
+        echo -e "${RED}Error: no nodes found in test cluster${NC}"
+        return 1
+    fi
+
+    while IFS= read -r node; do
+        [ -n "${node}" ] || continue
+
+        local agent_pod
+        agent_pod="$(kubectl -n d8-sds-node-configurator get pods \
+            --field-selector "spec.nodeName=${node},status.phase=Running" -o name | \
+            grep '^pod/sds-node-configurator' | head -n 1 | cut -d/ -f2)"
+
+        if [ -z "${agent_pod}" ]; then
+            echo -e "${YELLOW}Note: sds-node-configurator running pod not found on node ${node}; skipping migrator device cleanup${NC}"
+            continue
+        fi
+
+        echo -e "${YELLOW}Removing /dev/migrator* and /dev/mapper/migrator* on node ${node} via pod ${agent_pod}...${NC}"
+        kubectl -n d8-sds-node-configurator exec "${agent_pod}" -c sds-node-configurator-agent -- \
+            /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p -- \
+            sh -c 'rm -rf /dev/migrator* /dev/mapper/migrator*' || true
+    done <<< "${node_names}"
 }
 
 # Remove local migrator temp directory on all test-cluster nodes.
@@ -272,7 +320,7 @@ cleanup_migrator_tmp_dir_on_nodes() {
 
         echo -e "${YELLOW}Removing ${target_dir} on node ${node} via pod ${agent_pod}...${NC}"
         kubectl -n d8-sds-node-configurator exec "${agent_pod}" -c sds-node-configurator-agent -- \
-            /opt/deckhouse/sds/bin/nsenter.static -t 1 -m -u -i -n -p -- \
+            /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p -- \
             rm -rf "${target_dir}"
     done <<< "${node_names}"
 }
@@ -299,6 +347,8 @@ cleanup_linstor_storage_pools
 thin_pool_targets="$(collect_thin_pool_targets)"
 delete_cluster_resources "lvmvolumegroups.storage.deckhouse.io" "LVMVolumeGroups" "false"
 cleanup_thin_pools_on_nodes "${thin_pool_targets}"
+wait_for_migrator_lvgs_removed
+cleanup_migrator_devices_on_nodes
 delete_cluster_resources "blockdevices.storage.deckhouse.io" "BlockDevices"
 cleanup_migrator_tmp_dir_on_nodes
 
@@ -333,20 +383,10 @@ if [ "${new_control_plane_enabled}" = "true" ] || [ "${need_mpo_patch}" = "true"
     echo "Rollback to old control plane (TEST cluster)"
     echo "=========================================="
     echo ""
-    echo "# 1) Delete LINSTOR internal CRDs:"
-    echo "kubectl get crds -o name | sed 's#customresourcedefinition.apiextensions.k8s.io/##' | \\"
-    echo "  grep -E '.*\\.internal\\.linstor\\.linbit\\.com$' | \\"
-    echo "  xargs --no-run-if-empty kubectl delete crds"
-    echo ""
-    echo "# 2) Delete sds-replicated-volume CRDs:"
-    echo "kubectl get crds -o name | sed 's#customresourcedefinition.apiextensions.k8s.io/##' | \\"
-    echo "  grep -E '^(replicated|drbd).+\\.storage\\.deckhouse\\.io$' | \\"
-    echo "  xargs --no-run-if-empty kubectl delete crds"
-    echo ""
-    echo "# 3) Disable module:"
+    echo "# 1) Disable module:"
     echo "kubectl patch mc sds-replicated-volume --type=merge -p '{\"spec\":{\"enabled\":false}}'"
     echo ""
-    echo "# 4) Roll back ModulePullOverride to main (if needed):"
+    echo "# 2) Roll back ModulePullOverride to main (if needed):"
     if [ "${need_mpo_patch}" = "true" ]; then
         echo "# Current mpo/sds-replicated-volume imageTag: ${mpo_image_tag}"
         echo "kubectl patch mpo sds-replicated-volume --type=merge -p '{\"spec\":{\"imageTag\":\"main\"}}'"
@@ -354,7 +394,7 @@ if [ "${new_control_plane_enabled}" = "true" ] || [ "${need_mpo_patch}" = "true"
         echo "ModulePullOverride update is not required (imageTag is already main or mpo is absent)"
     fi
     echo ""
-    echo "# 5) Re-enable module with old control plane:"
+    echo "# 3) Re-enable module with old control plane:"
     echo "kubectl patch mc sds-replicated-volume --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/settings/newControlPlane\"}]'"
     echo "kubectl patch mc sds-replicated-volume --type=merge -p '{\"spec\":{\"enabled\":true}}'"
     echo ""
@@ -365,7 +405,7 @@ echo "Verify cleanup in TEST cluster"
 echo "=========================================="
 echo ""
 echo "kubectl get pods,pvc -A -l migrator-e2e"
-echo "kubectl get rva,rv,rvr,drbdr,rsp,rsc,llv,lvg,bd   # or kubectl get rsp,rsc,llv,lvg,bd"
+echo "kubectl get rva,rv,rvr,drbdr,rsp,rsc,llv,lvg,bd"
 echo "kubectl -n d8-sds-replicated-volume exec \$(kubectl -n d8-sds-replicated-volume get pods -l app=linstor-controller | grep Running | awk '{print \$1}' | head -1) -c linstor-controller -- originallinstor sp list"
 echo ""
 echo "# Remove finalizers from stuck resources:"
