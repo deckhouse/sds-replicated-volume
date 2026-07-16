@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/e2e/linstor-migrator
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
