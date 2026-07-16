@@ -205,8 +205,8 @@ const (
 	DefaultCPlanAhead   = "20"    // 2.0 s planning horizon
 	DefaultCDelayTarget = "1"     // 100 ms added latency target (minimum granularity)
 	DefaultCFillTarget  = "4096s" // 2 MB in-flight data (4096 sectors x 512 bytes)
-	DefaultCMaxRate     = "200k"  // RACEDBG: throttled to crawl so the reboot re-handshake lands mid-resync (done:X%) — see stress/problems/05. Prod value was 625000k.
-	DefaultCMinRate     = "25k"   // RACEDBG: lowered below c-max-rate. Prod value was 12500k.
+	DefaultCMaxRate     = "200k"  // RACEDBG throttle (prod 625000k)
+	DefaultCMinRate     = "25k"   // RACEDBG throttle (prod 12500k)
 )
 
 var _ IntendedDRBDState = (*intendedDRBDState)(nil)
