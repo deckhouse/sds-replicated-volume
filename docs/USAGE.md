@@ -12,7 +12,7 @@ Once the `sds-replicated-volume` module is enabled in the Deckhouse configuratio
 
 ## Configuring the module
 
-The configuration is performed by the `sds-replicated-volume-controller` using the custom resources [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) and [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass). To create a Storage Pool, the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) and an LVM Thin Pool must be preconfigured on the cluster nodes. LVM configuration is provided by the [`sds-node-configurator`](/modules/sds-node-configurator/) module.
+The configuration is performed by the `sds-replicated-volume-controller` using the custom resources [ReplicatedStoragePool](./cr.html#replicatedstoragepool) and [ReplicatedStorageClass](./cr.html#replicatedstorageclass). To create a Storage Pool, the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) and an LVM Thin Pool must be preconfigured on the cluster nodes. LVM configuration is provided by the [`sds-node-configurator`](/modules/sds-node-configurator/) module.
 
 ### Setting up LVM
 
@@ -21,6 +21,8 @@ Configuration examples can be found in the [sds-node-configurator](/modules/sds-
 ### Using ReplicatedStoragePool resources
 
 #### Creating a ReplicatedStoragePool resource
+
+To create a Storage Pool, follow these steps:
 
 - To create a `Storage Pool` the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources used.
 
@@ -59,7 +61,7 @@ Before working with the backend the controller will validate the provided config
 For all LVMVolumeGroup resources in the `spec` of the ReplicatedStoragePool resource the following rules must be met:
 
 - They must reside on different nodes. You may not refer to multiple LVMVolumeGroup resources located on the same node.
-- All nodes should be of type other than `CloudEphemeral` (see [Node types](https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
+- All nodes should be of type other than `CloudEphemeral` (see [Node types](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
 
 Information about the controller's progress and results is available in the `status` field of the created ReplicatedStoragePool resource.
 

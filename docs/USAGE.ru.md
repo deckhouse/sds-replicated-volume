@@ -4,15 +4,15 @@ description: "Использование и примеры работы sds-repl
 ---
 
 {{< alert level="warning" >}}
-Работоспособность модуля гарантируется только при соблюдении [требований](./readme.html#системные-требования-и-рекомендации).
-Работоспособность модуля в других условиях возможна, но не гарантируется.
+Работоспособность модуля гарантируется только при соблюдении [системных требований](./readme.html#системные-требования-и-рекомендации).
+Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
 {{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
 
 ## Конфигурация модуля
 
-Конфигурацию выполняет контроллер `sds-replicated-volume-controller` с использованием пользовательских ресурсов [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) и [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass). Для создания Storage Pool требуется, чтобы на узлах кластера были заранее настроены [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) и LVM Thin Pool. Настройку LVM обеспечивает модуль [`sds-node-configurator`](/modules/sds-node-configurator/).
+Конфигурацию выполняет контроллер `sds-replicated-volume-controller` с использованием пользовательских ресурсов [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и [ReplicatedStorageClass](./cr.html#replicatedstorageclass). Для создания Storage Pool требуется, чтобы на узлах кластера были заранее настроены [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) и LVM Thin Pool. Настройку LVM обеспечивает модуль [`sds-node-configurator`](/modules/sds-node-configurator/).
 
 ### Настройка LVM
 
@@ -22,7 +22,9 @@ description: "Использование и примеры работы sds-repl
 
 #### Создание ресурса ReplicatedStoragePool
 
-- Для создания `Storage Pool` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
+Чтобы создать Storage Pool, выполните следующие шаги:
+
+- Для создания `Storage Pool` пользователь создаёт ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
 
 Пример ресурса для классических LVM-томов (Thick):
 
@@ -59,7 +61,7 @@ spec:
 Для всех ресурсов LVMVolumeGroup, указанных в `spec` ресурса ReplicatedStoragePool должны быть соблюдены следующие правила:
 
 - Они должны быть на разных узлах. Запрещено указывать несколько ресурсов LVMVolumeGroup, которые расположены на одном и том же узле.
-- Все узлы должны иметь тип отличный от `CloudEphemeral` (см. [Типы узлов](https://deckhouse.ru/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2))
+- Все узлы должны иметь тип отличный от `CloudEphemeral` (см. [Типы узлов](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2))
 
 Результатом обработки ресурса `ReplicatedStoragePool` станет создание необходимого `Storage Pool` в бэкенде. Имя созданного `Storage Pool` будет соответствовать имени созданного ресурса `ReplicatedStoragePool`. Узлы, на которых будет создан `Storage Pool`, будут взяты из ресурсов LVMVolumeGroup.
 
@@ -77,13 +79,13 @@ spec:
 
 В настоящий момент `sds-replicated-volume-controller` никак не обрабатывает удаление ресурсов ReplicatedStoragePool.
 
-> Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде. Если пользователь воссоздаст удаленный ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`.
+> Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде. Если пользователь воссоздаст удалённый ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`.
 
 ### Работа с ресурсами ReplicatedStorageClass
 
 #### Создание ресурса ReplicatedStorageClass
 
-Для создания StorageClass в Kubernetes пользователь создает ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) и заполняет поле `spec`, указывая необходимые параметры. (Ручное создание StorageClass для CSI-драйвера replicated.csi.storage.deckhouse.io запрещено).
+Для создания StorageClass в Kubernetes пользователь создаёт ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) и заполняет поле `spec`, указывая необходимые параметры. (Ручное создание StorageClass для CSI-драйвера replicated.csi.storage.deckhouse.io запрещено).
 
 Пример ресурса для создания StorageClass c использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
 
@@ -105,7 +107,7 @@ spec:
 
 Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
 
-Пример ресурса для создания StorageClass c разрешенными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
+Пример ресурса для создания StorageClass c разрешёнными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1

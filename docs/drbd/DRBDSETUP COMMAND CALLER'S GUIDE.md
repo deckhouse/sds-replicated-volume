@@ -60,7 +60,7 @@ This directory is required by all commands that operate on a minor number
 (`new-minor`, `attach`, `detach`, `disk-options`, `resize`, `new-current-uuid`,
 etc.) and by all `drbdmeta` operations. Without it, these commands fail with
 exit code `20`:
-```
+```console
 open(/var/run/drbd/lock/drbd-147-<minor>): No such file or directory
 ```
 
@@ -165,7 +165,7 @@ consistency.
 **Required for:** `new-peer` command only
 
 **Error if omitted:** 
-```
+```console
 Failure: (126) UnknownMandatoryTag
 additional info from kernel:
 name missing

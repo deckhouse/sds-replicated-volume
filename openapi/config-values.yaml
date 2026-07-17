@@ -3,7 +3,10 @@ type: object
 properties:
   registryScheme:
     type: string
-    description: Deprecated parameter. Remove it from ModuleConfig for Deckhouse with version greater than 1.57.
+    description: |
+      Deprecated parameter.
+
+      Remove it from ModuleConfig for Deckhouse versions greater than 1.57.
     default: https
   logLevel:
     type: string
@@ -13,26 +16,29 @@ properties:
       - INFO
       - DEBUG
       - TRACE
-    description: Module log level
+    description: |
+      Log level for module components.
     default: INFO
   drbdPortRange:
     type: object
-    description: Settings for DRBD TCP ports
+    description: |
+      TCP port range used by DRBD for replication between nodes.
     default: {}
     properties:
       minPort:
         type: integer
         default: 7000
         description: |
-          DRBD ports range start
+          Lower bound of the DRBD TCP port range.
       maxPort:
         type: integer
         default: 7999
         description: |
-          DRBD ports range end
+          Upper bound of the DRBD TCP port range.
   dataNodes:
     type: object
-    description: Settings for Linstor on nodes with data
+    description: |
+      Placement settings for LINSTOR data nodes.
     default: {}
     properties:
       nodeSelector:
@@ -42,11 +48,11 @@ properties:
         additionalProperties:
           type: string
         description: |
-          The same as in the Pods `spec.nodeSelector` parameter in Kubernetes.
+          Node selector for LINSTOR data nodes. It uses the same semantics as a Pod `spec.nodeSelector` in Kubernetes.
 
-          If parameter is omitted, Linstor nodes will be placed on all nodes.
+          If the parameter is omitted, LINSTOR nodes are placed on all nodes.
 
-          **Caution!** Changing this parameter does not result in data redistribution. If node with data no longer matches the `nodeSelector`, data on that node will become inaccessible.
+          **Caution!** Changing this parameter does not redistribute existing data. If a node with data no longer matches the `nodeSelector`, data on that node becomes inaccessible.
   storageClassLabelIgnoredPrefixes:
     type: array
     default:
@@ -57,45 +63,39 @@ properties:
     items:
       type: string
     description: |
-      List of label-key prefixes that MUST NOT be propagated from a ReplicatedStorageClass
-      to the managed Kubernetes StorageClass.
+      Label-key prefixes that must not be propagated from a ReplicatedStorageClass to the managed Kubernetes StorageClass.
 
-      The controller treats this list as a complement to a built-in (system) list and
-      drops any ReplicatedStorageClass label whose key starts with any prefix from either list.
+      The controller treats this list as a complement to a built-in system list and drops any ReplicatedStorageClass label whose key starts with any prefix from either list.
 
-      Matching is literal `strings.HasPrefix` (Go semantics): an entry without a trailing
-      `/` matches by substring, NOT by full label key. For example, `team` would drop
-      every key starting with `team` (`team`, `team-id`, `team.example.com/...`).
-      To restrict matching to a specific subdomain, end the entry with `/`
-      (e.g. `argocd.argoproj.io/`). To target an exact label key, write the full key
-      and be aware it also matches keys whose name extends it
-      (e.g. `app.kubernetes.io/managed-by` also drops `app.kubernetes.io/managed-by-foo`).
+      Matching uses literal `strings.HasPrefix` (Go semantics): an entry without a trailing `/` matches by substring, not by a full label key. For example, `team` drops every key starting with `team` (`team`, `team-id`, `team.example.com/...`). To restrict matching to a specific subdomain, end the entry with `/` (for example, `argocd.argoproj.io/`). To target an exact label key, write the full key and keep in mind that it also matches keys that extend it (for example, `app.kubernetes.io/managed-by` also drops `app.kubernetes.io/managed-by-foo`).
 
-      Note that `kubernetes.io/` in the system list matches only labels whose key
-      literally starts with `kubernetes.io/`; reserved subdomains such as
-      `topology.kubernetes.io/zone` or `node.kubernetes.io/*` are NOT covered by
-      default — add them here explicitly if your environment requires it.
+      Note that `kubernetes.io/` in the system list matches only labels whose key literally starts with `kubernetes.io/`. Reserved subdomains such as `topology.kubernetes.io/zone` or `node.kubernetes.io/*` are not covered by default — add them here explicitly if your environment requires it.
 
-      The defaults cover labels typically added by GitOps tooling (Argo CD, Flux,
-      Rancher Fleet) so that their reconcilers do not fight the storage controller
-      over labels on the managed StorageClass.
+      Built-in defaults cover labels typically added by GitOps tooling (Argo CD, Flux, Rancher Fleet) so that their reconcilers do not fight the storage controller over labels on the managed StorageClass.
   backup:
     type: object
-    description: Module backup settings
+    description: |
+      Settings for module database backups.
     properties:
       enabled:
         type: boolean
         default: true
-        description: Module backup state
+        description: |
+          Enables or disables module database backups.
       retentionCount:
         type: integer
         default: 7
-        description: Number of backups to keep
+        description: |
+          Number of backups to retain.
       schedule:
         type: string
         default: "0 3 * * *"
-        description: Backup schedule
+        description: |
+          Cron schedule for creating backups.
   newControlPlane:
     type: boolean
     default: false
-    description: When true, use the new control-plane as a backend for the module. Once switched to true, reverting back to false is prohibited.
+    description: |
+      Switches the module to the new control-plane backend.
+
+      After you set this parameter to `true`, reverting it back to `false` is prohibited.

@@ -1,6 +1,7 @@
 ---
 title: "Module sds-replicated-volume: use cases"
 linkTitle: "Usage cases"
+description: "Zonal and trans-zonal StorageClass layouts for the sds-replicated-volume module."
 ---
 
 {{< alert level="warning" >}}
@@ -23,6 +24,8 @@ spec:
   reclaimPolicy: Delete
   topology: Zonal
 ```
+
+The StorageClass created from this resource has the following characteristics:
 
 - Parameters of the StorageClass to be created:
 
@@ -64,6 +67,8 @@ spec:
   - zone-b
   - zone-c
 ```
+
+The StorageClass created from this resource has the following characteristics:
 
 - Parameters of the StorageClass to be created:
 
