@@ -39,6 +39,7 @@ import (
 	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/linstordb"
 )
 
@@ -115,6 +116,10 @@ func (m *Migrator) waitForLinstorControllerRemoval(ctx context.Context) error {
 			}
 
 			if err != nil {
+				if kubeutils.IsTransientAPIError(err) {
+					m.log.Warn("transient error checking linstor-controller deployment, will retry on next tick", "err", err)
+					continue
+				}
 				return fmt.Errorf("failed to check linstor-controller deployment: %w", err)
 			}
 
@@ -139,20 +144,21 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	}
 
 	// 2. If LINSTOR CRDs are gone, skip the rest of stage 1.
-	if err := m.crdExists(ctx, config.LinstorCRDName); err != nil {
-		if apierrors.IsNotFound(err) {
-			m.log.Info("LINSTOR not found in cluster, no resource migration needed")
-			if err := m.updateMigrationStateRetrying(ctx, config.StateStage1Completed); err != nil {
-				return err
-			}
-			return nil
+	found, err := m.crdExistsWithRetry(ctx, config.LinstorCRDName, "LINSTOR")
+	if err != nil {
+		return err
+	}
+	if !found {
+		m.log.Info("LINSTOR not found in cluster, no resource migration needed")
+		if err := m.updateMigrationStateRetrying(ctx, config.StateStage1Completed); err != nil {
+			return err
 		}
-		return fmt.Errorf("failed to check LINSTOR CRD %q: %w", config.LinstorCRDName, err)
+		return nil
 	}
 	m.log.Debug("LINSTOR CRD found", "crd", config.LinstorCRDName)
 
 	// 3. Load LINSTOR database
-	db, err := linstordb.Init(ctx, m.client)
+	db, err := linstordb.Init(ctx, m.client, m.retryTransient)
 	if err != nil {
 		return fmt.Errorf("failed to initialize LINSTOR database: %w", err)
 	}
@@ -160,7 +166,9 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 
 	// 4. Load PVs for analysis
 	pvs := &corev1.PersistentVolumeList{}
-	if err := m.client.List(ctx, pvs); err != nil {
+	if err := m.retryTransient(ctx, "list PersistentVolumes", func() error {
+		return m.client.List(ctx, pvs)
+	}); err != nil {
 		return fmt.Errorf("failed to list PersistentVolumes: %w", err)
 	}
 
@@ -211,7 +219,9 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 
 	// 7. List VolumeAttachments, LVMVolumeGroups; ensure migration RSP per LINSTOR pool.
 	vaList := &storagev1.VolumeAttachmentList{}
-	if err := m.client.List(ctx, vaList); err != nil {
+	if err := m.retryTransient(ctx, "list VolumeAttachments", func() error {
+		return m.client.List(ctx, vaList)
+	}); err != nil {
 		return fmt.Errorf("failed to list VolumeAttachments: %w", err)
 	}
 	// Filter VolumeAttachments to only include those for our CSI driver.
@@ -224,7 +234,9 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 	m.log.Debug("replicated VolumeAttachments", "count", len(replicatedVAList))
 
 	lvgList := &sncv1alpha1.LVMVolumeGroupList{}
-	if err := m.client.List(ctx, lvgList); err != nil {
+	if err := m.retryTransient(ctx, "list LVMVolumeGroups", func() error {
+		return m.client.List(ctx, lvgList)
+	}); err != nil {
 		return fmt.Errorf("failed to list LVMVolumeGroups: %w", err)
 	}
 	lvgs := make(map[string]sncv1alpha1.LVMVolumeGroup, len(lvgList.Items))
@@ -498,7 +510,9 @@ func (m *Migrator) createRVR(
 		}
 	}
 
-	if err := m.createIfNotExists(ctx, opLog, rvr, "ReplicatedVolumeReplica"); err != nil {
+	if err := m.retryTransient(ctx, "create ReplicatedVolumeReplica", func() error {
+		return m.createIfNotExists(ctx, opLog, rvr, "ReplicatedVolumeReplica")
+	}); err != nil {
 		return "", err
 	}
 	return rvrName, nil
@@ -553,7 +567,9 @@ func (m *Migrator) createLLV(
 		}
 	}
 
-	return m.createIfNotExists(ctx, opLog, llv, "LVMLogicalVolume")
+	return m.retryTransient(ctx, "create LVMLogicalVolume", func() error {
+		return m.createIfNotExists(ctx, opLog, llv, "LVMLogicalVolume")
+	})
 }
 
 // createDRBDResource idempotently creates a DRBDResource.
@@ -610,7 +626,9 @@ func (m *Migrator) createDRBDResource(
 		drbdr.Spec.LVMLogicalVolumeName = computeLLVName(rvrName, lvgName, thinPoolName)
 	}
 
-	return m.createIfNotExists(ctx, opLog, drbdr, "DRBDResource")
+	return m.retryTransient(ctx, "create DRBDResource", func() error {
+		return m.createIfNotExists(ctx, opLog, drbdr, "DRBDResource")
+	})
 }
 
 // createRVAFromVolumeAttachments creates a ReplicatedVolumeAttachment if there is
@@ -643,7 +661,9 @@ func (m *Migrator) createRVAFromVolumeAttachments(
 		}
 
 		opLog := log.With("replicatedVolumeAttachment", rvaName, "node", rva.Spec.NodeName)
-		if err := m.createIfNotExists(ctx, opLog, rva, "ReplicatedVolumeAttachment"); err != nil {
+		if err := m.retryTransient(ctx, "create ReplicatedVolumeAttachment", func() error {
+			return m.createIfNotExists(ctx, opLog, rva, "ReplicatedVolumeAttachment")
+		}); err != nil {
 			return err
 		}
 	}
@@ -736,7 +756,9 @@ func (m *Migrator) ensureMigrationRSP(
 		},
 	}
 	log := m.log.With("linstorPool", linstorPoolName, "replicatedStoragePool", name)
-	if err := m.createIfNotExists(ctx, log, rsp, "ReplicatedStoragePool"); err != nil {
+	if err := m.retryTransient(ctx, "create ReplicatedStoragePool", func() error {
+		return m.createIfNotExists(ctx, log, rsp, "ReplicatedStoragePool")
+	}); err != nil {
 		return nil, err
 	}
 	return rsp, nil
@@ -852,81 +874,91 @@ func (m *Migrator) createRV(
 	}
 
 	rvLog := log.With("replicatedVolume", resName)
-	return m.createIfNotExists(ctx, rvLog, rv, "ReplicatedVolume")
+	return m.retryTransient(ctx, "create ReplicatedVolume", func() error {
+		return m.createIfNotExists(ctx, rvLog, rv, "ReplicatedVolume")
+	})
 }
 
 // setLLVOwnerRef sets ownerReference to RVR for LLV using controllerutil.SetControllerReference.
+// The entire Get->Modify->Patch sequence is wrapped in retryTransient so that a 409 conflict on
+// Patch triggers a full re-read of the object and retries the operation.
 func (m *Migrator) setLLVOwnerRef(ctx context.Context, log *slog.Logger, llvName, rvrName string) error {
-	llv := &sncv1alpha1.LVMLogicalVolume{}
-	if err := m.client.Get(ctx, types.NamespacedName{Name: llvName}, llv); err != nil {
-		return fmt.Errorf("failed to get LLV: %w", err)
-	}
-
-	// Check if ownerRef already set.
-	for _, ref := range llv.OwnerReferences {
-		if ref.Name == rvrName {
-			log.Debug("LLV already has ownerRef to RVR", "llv", llvName, "rvr", rvrName)
-			return nil
+	return m.retryTransient(ctx, "set LLV ownerRef", func() error {
+		llv := &sncv1alpha1.LVMLogicalVolume{}
+		if err := m.client.Get(ctx, types.NamespacedName{Name: llvName}, llv); err != nil {
+			return fmt.Errorf("failed to get LLV: %w", err)
 		}
-	}
 
-	// Save a copy of the original LLV for the patch.
-	oldLLV := llv.DeepCopy()
+		// Check if ownerRef already set.
+		for _, ref := range llv.OwnerReferences {
+			if ref.Name == rvrName {
+				log.Debug("LLV already has ownerRef to RVR", "llv", llvName, "rvr", rvrName)
+				return nil
+			}
+		}
 
-	// Get RVR to use as owner.
-	rvr := &srvv1alpha1.ReplicatedVolumeReplica{}
-	if err := m.client.Get(ctx, types.NamespacedName{Name: rvrName}, rvr); err != nil {
-		return fmt.Errorf("failed to get RVR for ownerRef: %w", err)
-	}
+		// Save a copy of the original LLV for the patch.
+		oldLLV := llv.DeepCopy()
 
-	// Set owner reference using controllerutil.
-	if err := controllerutil.SetControllerReference(rvr, llv, m.client.Scheme()); err != nil {
-		return fmt.Errorf("failed to set controller reference on LLV: %w", err)
-	}
+		// Get RVR to use as owner.
+		rvr := &srvv1alpha1.ReplicatedVolumeReplica{}
+		if err := m.client.Get(ctx, types.NamespacedName{Name: rvrName}, rvr); err != nil {
+			return fmt.Errorf("failed to get RVR for ownerRef: %w", err)
+		}
 
-	// Patch LLV using the saved copy.
-	if err := m.client.Patch(ctx, llv, kubecl.MergeFrom(oldLLV)); err != nil {
-		return fmt.Errorf("failed to patch LLV ownerRef: %w", err)
-	}
+		// Set owner reference using controllerutil.
+		if err := controllerutil.SetControllerReference(rvr, llv, m.client.Scheme()); err != nil {
+			return fmt.Errorf("failed to set controller reference on LLV: %w", err)
+		}
 
-	log.Debug("set ownerRef on LLV", "llv", llvName, "owner", rvrName)
-	return nil
+		// Patch LLV using the saved copy.
+		if err := m.client.Patch(ctx, llv, kubecl.MergeFrom(oldLLV)); err != nil {
+			return fmt.Errorf("failed to patch LLV ownerRef: %w", err)
+		}
+
+		log.Debug("set ownerRef on LLV", "llv", llvName, "owner", rvrName)
+		return nil
+	})
 }
 
 // setDRBDResourceOwnerRef sets ownerReference to RVR for DRBDResource using controllerutil.SetControllerReference.
+// The entire Get->Modify->Patch sequence is wrapped in retryTransient so that a 409 conflict on
+// Patch triggers a full re-read of the object and retries the operation.
 func (m *Migrator) setDRBDResourceOwnerRef(ctx context.Context, log *slog.Logger, drbdrName, rvrName string) error {
-	drbdr := &srvv1alpha1.DRBDResource{}
-	if err := m.client.Get(ctx, types.NamespacedName{Name: drbdrName}, drbdr); err != nil {
-		return fmt.Errorf("failed to get DRBDResource: %w", err)
-	}
-
-	// Check if ownerRef already set.
-	for _, ref := range drbdr.OwnerReferences {
-		if ref.Name == rvrName {
-			log.Debug("DRBDResource already has ownerRef to RVR", "drbdr", drbdrName, "rvr", rvrName)
-			return nil
+	return m.retryTransient(ctx, "set DRBDResource ownerRef", func() error {
+		drbdr := &srvv1alpha1.DRBDResource{}
+		if err := m.client.Get(ctx, types.NamespacedName{Name: drbdrName}, drbdr); err != nil {
+			return fmt.Errorf("failed to get DRBDResource: %w", err)
 		}
-	}
 
-	// Save a copy of the original DRBDResource for the patch.
-	oldDRBDR := drbdr.DeepCopy()
+		// Check if ownerRef already set.
+		for _, ref := range drbdr.OwnerReferences {
+			if ref.Name == rvrName {
+				log.Debug("DRBDResource already has ownerRef to RVR", "drbdr", drbdrName, "rvr", rvrName)
+				return nil
+			}
+		}
 
-	// Get RVR to use as owner.
-	rvr := &srvv1alpha1.ReplicatedVolumeReplica{}
-	if err := m.client.Get(ctx, types.NamespacedName{Name: rvrName}, rvr); err != nil {
-		return fmt.Errorf("failed to get RVR for ownerRef: %w", err)
-	}
+		// Save a copy of the original DRBDResource for the patch.
+		oldDRBDR := drbdr.DeepCopy()
 
-	// Set owner reference using controllerutil.
-	if err := controllerutil.SetControllerReference(rvr, drbdr, m.client.Scheme()); err != nil {
-		return fmt.Errorf("failed to set controller reference on DRBDResource: %w", err)
-	}
+		// Get RVR to use as owner.
+		rvr := &srvv1alpha1.ReplicatedVolumeReplica{}
+		if err := m.client.Get(ctx, types.NamespacedName{Name: rvrName}, rvr); err != nil {
+			return fmt.Errorf("failed to get RVR for ownerRef: %w", err)
+		}
 
-	// Patch DRBDResource using the saved copy.
-	if err := m.client.Patch(ctx, drbdr, kubecl.MergeFrom(oldDRBDR)); err != nil {
-		return fmt.Errorf("failed to patch DRBDResource ownerRef: %w", err)
-	}
+		// Set owner reference using controllerutil.
+		if err := controllerutil.SetControllerReference(rvr, drbdr, m.client.Scheme()); err != nil {
+			return fmt.Errorf("failed to set controller reference on DRBDResource: %w", err)
+		}
 
-	log.Debug("set ownerRef on DRBDResource", "drbdr", drbdrName, "owner", rvrName)
-	return nil
+		// Patch DRBDResource using the saved copy.
+		if err := m.client.Patch(ctx, drbdr, kubecl.MergeFrom(oldDRBDR)); err != nil {
+			return fmt.Errorf("failed to patch DRBDResource ownerRef: %w", err)
+		}
+
+		log.Debug("set ownerRef on DRBDResource", "drbdr", drbdrName, "owner", rvrName)
+		return nil
+	})
 }

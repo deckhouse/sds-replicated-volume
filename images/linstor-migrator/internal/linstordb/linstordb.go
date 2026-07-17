@@ -29,6 +29,10 @@ import (
 	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
 )
 
+// RetryFn retries fn on transient Kubernetes API errors. Implemented by
+// kubeutils.RetryTransient and Migrator.retryTransient.
+type RetryFn func(ctx context.Context, label string, fn func() error) error
+
 // LINSTOR resource flags.
 const (
 	ResourceFlagDiskful    = 0
@@ -75,11 +79,13 @@ type LinstorDB struct {
 }
 
 // Init fetches all required LINSTOR data from Kubernetes and returns a populated LinstorDB.
-func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
+func Init(ctx context.Context, kClient kubecl.Client, retryFn RetryFn) (*LinstorDB, error) {
 	db := &LinstorDB{}
 
 	volumeDefinitions := &srvlinstor.VolumeDefinitionsList{}
-	if err := kClient.List(ctx, volumeDefinitions); err != nil {
+	if err := retryFn(ctx, "list LINSTOR VolumeDefinitions", func() error {
+		return kClient.List(ctx, volumeDefinitions)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR VolumeDefinitions: %w", err)
 	}
 	db.VolumeDefinitions = make(map[string]srvlinstor.VolumeDefinitions, len(volumeDefinitions.Items))
@@ -88,7 +94,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	resourceDefinitions := &srvlinstor.ResourceDefinitionsList{}
-	if err := kClient.List(ctx, resourceDefinitions); err != nil {
+	if err := retryFn(ctx, "list LINSTOR ResourceDefinitions", func() error {
+		return kClient.List(ctx, resourceDefinitions)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR ResourceDefinitions: %w", err)
 	}
 	db.ResourceDefinitions = make(map[string]srvlinstor.ResourceDefinitions, len(resourceDefinitions.Items))
@@ -97,7 +105,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	resourceGroups := &srvlinstor.ResourceGroupsList{}
-	if err := kClient.List(ctx, resourceGroups); err != nil {
+	if err := retryFn(ctx, "list LINSTOR ResourceGroups", func() error {
+		return kClient.List(ctx, resourceGroups)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR ResourceGroups: %w", err)
 	}
 	db.ResourceGroups = make(map[string]srvlinstor.ResourceGroups, len(resourceGroups.Items))
@@ -106,7 +116,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	resources := &srvlinstor.ResourcesList{}
-	if err := kClient.List(ctx, resources); err != nil {
+	if err := retryFn(ctx, "list LINSTOR Resources", func() error {
+		return kClient.List(ctx, resources)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR Resources: %w", err)
 	}
 	db.Resources = make(map[string][]srvlinstor.Resources, len(resources.Items))
@@ -116,12 +128,16 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	db.LayerResourcesIds = &srvlinstor.LayerResourceIdsList{}
-	if err := kClient.List(ctx, db.LayerResourcesIds); err != nil {
+	if err := retryFn(ctx, "list LINSTOR LayerResourceIds", func() error {
+		return kClient.List(ctx, db.LayerResourcesIds)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR LayerResourceIds: %w", err)
 	}
 
 	layerDrbdResources := &srvlinstor.LayerDrbdResourcesList{}
-	if err := kClient.List(ctx, layerDrbdResources); err != nil {
+	if err := retryFn(ctx, "list LINSTOR LayerDrbdResources", func() error {
+		return kClient.List(ctx, layerDrbdResources)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR LayerDrbdResources: %w", err)
 	}
 	db.LayerDrbdResources = make(map[int]srvlinstor.LayerDrbdResources, len(layerDrbdResources.Items))
@@ -130,7 +146,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	layerDrbdResourceDefinitions := &srvlinstor.LayerDrbdResourceDefinitionsList{}
-	if err := kClient.List(ctx, layerDrbdResourceDefinitions); err != nil {
+	if err := retryFn(ctx, "list LINSTOR LayerDrbdResourceDefinitions", func() error {
+		return kClient.List(ctx, layerDrbdResourceDefinitions)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR LayerDrbdResourceDefinitions: %w", err)
 	}
 	db.LayerDrbdResourceDefinitions = make(map[string]srvlinstor.LayerDrbdResourceDefinitions, len(layerDrbdResourceDefinitions.Items))
@@ -139,7 +157,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	propsContainers := &srvlinstor.PropsContainersList{}
-	if err := kClient.List(ctx, propsContainers); err != nil {
+	if err := retryFn(ctx, "list LINSTOR PropsContainers", func() error {
+		return kClient.List(ctx, propsContainers)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR PropsContainers: %w", err)
 	}
 	db.StorPoolDriverStorPoolName = make(map[string]string, len(propsContainers.Items))
@@ -156,7 +176,9 @@ func Init(ctx context.Context, kClient kubecl.Client) (*LinstorDB, error) {
 	}
 
 	nodeStorPools := &srvlinstor.NodeStorPoolList{}
-	if err := kClient.List(ctx, nodeStorPools); err != nil {
+	if err := retryFn(ctx, "list LINSTOR NodeStorPool", func() error {
+		return kClient.List(ctx, nodeStorPools)
+	}); err != nil {
 		return nil, fmt.Errorf("failed to list LINSTOR NodeStorPool: %w", err)
 	}
 	for _, nsp := range nodeStorPools.Items {

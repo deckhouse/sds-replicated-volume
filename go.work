@@ -1,13 +1,10 @@
 go 1.26.5
 
-// The ./e2e/linstor-migrator module is intentionally not listed below: it pulls in
-// storage-e2e and its large dependency tree. Now that go.work is on Go 1.26+ it can
-// be added here as a separate change.
-
 use (
 	./api
 	./e2e/agent
 	./e2e/full
+	./e2e/linstor-migrator
 	./e2e/pkg/debug
 	./e2e/pkg/framework
 	./hooks/go
