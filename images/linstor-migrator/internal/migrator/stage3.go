@@ -26,6 +26,7 @@ import (
 
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/linstorbackup"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/metadatabackupcleanup"
 )
@@ -49,7 +50,7 @@ func (m *Migrator) runStage3(ctx context.Context) error {
 			linstorCRDGone = true
 			return nil
 		}
-		if isTransientAPIError(err) {
+		if kubeutils.IsTransientAPIError(err) {
 			return err
 		}
 		return fmt.Errorf("failed to check LINSTOR CRD %q: %w", config.LinstorCRDName, err)

@@ -18,11 +18,8 @@ package migrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,12 +27,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 )
 
 const (
@@ -45,10 +44,11 @@ const (
 	DefaultStage2WorkerCount = 5
 )
 
-// MigratorOptions configures optional migrator behavior. Zero values in RetryInterval
-// and Stage2WorkerCount are replaced with defaults when passed to New.
+// MigratorOptions configures optional migrator behavior. Zero values in RetryInterval,
+// RetryBackoff, and Stage2WorkerCount are replaced with defaults when passed to New.
 type MigratorOptions struct {
 	RetryInterval     time.Duration
+	RetryBackoff      wait.Backoff
 	Stage2WorkerCount int
 }
 
@@ -58,6 +58,7 @@ type Migrator struct {
 	dynamicClient     dynamic.Interface
 	log               *slog.Logger
 	retryInterval     time.Duration
+	retryBackoff      wait.Backoff
 	stage2WorkerCount int
 }
 
@@ -65,6 +66,9 @@ type Migrator struct {
 func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger, opts MigratorOptions) *Migrator {
 	if opts.RetryInterval <= 0 {
 		opts.RetryInterval = DefaultRetryInterval
+	}
+	if opts.RetryBackoff.Duration <= 0 {
+		opts.RetryBackoff = kubeutils.DefaultRetryBackoff
 	}
 	if opts.Stage2WorkerCount <= 0 {
 		opts.Stage2WorkerCount = DefaultStage2WorkerCount
@@ -74,6 +78,7 @@ func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger
 		dynamicClient:     dynamicClient,
 		log:               log,
 		retryInterval:     opts.RetryInterval,
+		retryBackoff:      opts.RetryBackoff,
 		stage2WorkerCount: opts.Stage2WorkerCount,
 	}
 }
@@ -85,11 +90,12 @@ func (m *Migrator) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := m.crdExists(ctx, config.NewControlPlaneCRDName); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("new control-plane CRD %q not found in cluster; ensure the new control-plane is installed before running migration", config.NewControlPlaneCRDName)
-		}
-		return fmt.Errorf("failed to check new control-plane CRD %q: %w", config.NewControlPlaneCRDName, err)
+	found, err := m.crdExistsWithRetry(ctx, config.NewControlPlaneCRDName, "new control-plane")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("new control-plane CRD %q not found in cluster; ensure the new control-plane is installed before running migration", config.NewControlPlaneCRDName)
 	}
 	m.log.Debug("new control-plane CRD found", "crd", config.NewControlPlaneCRDName)
 
@@ -126,45 +132,76 @@ func (m *Migrator) runFromStage2(ctx context.Context) error {
 }
 
 // ensureConfigMap creates the migration ConfigMap if it does not exist and returns the current state.
+// The entire ensure sequence is wrapped in retryTransient: a transient error on Get or Create is
+// retried by re-running the whole function. AlreadyExists (HTTP 409, classified as transient) and
+// NotFound are swallowed inside fn so they are not retried forever.
 func (m *Migrator) ensureConfigMap(ctx context.Context) (string, error) {
-	cm := &corev1.ConfigMap{}
-	err := m.client.Get(ctx, types.NamespacedName{
-		Namespace: config.ModuleNamespace,
-		Name:      config.MigrationConfigMapName,
-	}, cm)
-
-	if err == nil {
-		state := cm.Data["state"]
-		if state == "" {
-			state = config.StateNotStarted
-		}
-		m.log.Debug("migration ConfigMap exists", "state", state)
-		return state, nil
-	}
-
-	if !apierrors.IsNotFound(err) {
-		return "", fmt.Errorf("failed to get ConfigMap %s/%s: %w", config.ModuleNamespace, config.MigrationConfigMapName, err)
-	}
-
-	cm = &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.MigrationConfigMapName,
+	var currentState string
+	var created bool
+	err := m.retryTransient(ctx, "ensure migration ConfigMap", func() error {
+		cm := &corev1.ConfigMap{}
+		gerr := m.client.Get(ctx, types.NamespacedName{
 			Namespace: config.ModuleNamespace,
-		},
-		Data: map[string]string{
-			"state": config.StateNotStarted,
-		},
-	}
-	if err := m.client.Create(ctx, cm); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			m.log.Debug("migration ConfigMap was created by another instance")
-			return config.StateNotStarted, nil
-		}
-		return "", fmt.Errorf("failed to create ConfigMap %s/%s: %w", config.ModuleNamespace, config.MigrationConfigMapName, err)
-	}
+			Name:      config.MigrationConfigMapName,
+		}, cm)
 
-	m.log.Info("created migration ConfigMap", "namespace", config.ModuleNamespace, "name", config.MigrationConfigMapName)
-	return config.StateNotStarted, nil
+		if gerr == nil {
+			currentState = cm.Data["state"]
+			if currentState == "" {
+				currentState = config.StateNotStarted
+			}
+			created = false
+			return nil
+		}
+		if !apierrors.IsNotFound(gerr) {
+			return gerr
+		}
+
+		// NotFound: create the ConfigMap.
+		newCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.MigrationConfigMapName,
+				Namespace: config.ModuleNamespace,
+			},
+			Data: map[string]string{
+				"state": config.StateNotStarted,
+			},
+		}
+		cerr := m.client.Create(ctx, newCM)
+		if cerr != nil && apierrors.IsAlreadyExists(cerr) {
+			// Another instance created it concurrently, or the Create response was lost and
+			// retried. Re-Get the actual ConfigMap to recover the real migration state instead
+			// of assuming StateNotStarted — the existing object may hold advanced progress
+			// (e.g. stage2-completed) that must not be lost by re-entering stage 1.
+			if gerr2 := m.client.Get(ctx, types.NamespacedName{
+				Namespace: config.ModuleNamespace,
+				Name:      config.MigrationConfigMapName,
+			}, cm); gerr2 != nil {
+				return gerr2
+			}
+			currentState = cm.Data["state"]
+			if currentState == "" {
+				currentState = config.StateNotStarted
+			}
+			created = false
+			return nil
+		}
+		if cerr != nil {
+			return cerr
+		}
+		currentState = config.StateNotStarted
+		created = true
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure migration ConfigMap %s/%s: %w", config.ModuleNamespace, config.MigrationConfigMapName, err)
+	}
+	if created {
+		m.log.Info("created migration ConfigMap", "namespace", config.ModuleNamespace, "name", config.MigrationConfigMapName)
+	} else {
+		m.log.Debug("migration ConfigMap exists", "state", currentState)
+	}
+	return currentState, nil
 }
 
 // updateMigrationState patches the migration ConfigMap with the new state.
@@ -190,23 +227,12 @@ func (m *Migrator) updateMigrationStateRetrying(ctx context.Context, state strin
 	})
 }
 
-// retryTransient runs fn until it succeeds or returns a non-transient error.
+// retryTransient runs fn until it succeeds or returns a non-transient error, using exponential
+// backoff with jitter. It is the migrator-local wrapper around kubeutils.RetryTransient so all
+// stages share one retry strategy. The retry is unbounded: migration is expected to complete
+// eventually; cancellation is honoured via ctx.
 func (m *Migrator) retryTransient(ctx context.Context, label string, fn func() error) error {
-	for {
-		err := fn()
-		if err == nil {
-			return nil
-		}
-		if !isTransientAPIError(err) {
-			return err
-		}
-		m.log.Warn("transient error, retrying", "step", label, "err", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(m.retryInterval):
-		}
-	}
+	return kubeutils.RetryTransient(ctx, m.log, m.retryBackoff, label, fn)
 }
 
 // patchConfigMapState applies a merge patch to update the state field.
@@ -229,10 +255,36 @@ func (m *Migrator) crdExists(ctx context.Context, crdName string) error {
 	return m.client.Get(ctx, types.NamespacedName{Name: crdName}, crd)
 }
 
+// crdExistsWithRetry checks whether the named CRD exists, retrying transient API errors.
+// It returns (found, error): found=true means the CRD exists, found=false means it is NotFound.
+// NotFound is NOT a transient error in the classifier, so it is swallowed inside the closure
+// and reported via the bool rather than terminating the retry loop.
+// The label is used in retry-log lines and in the returned error message for identification.
+func (m *Migrator) crdExistsWithRetry(ctx context.Context, name, label string) (bool, error) {
+	var notFound bool
+	if err := m.retryTransient(ctx, "check "+label, func() error {
+		err := m.crdExists(ctx, name)
+		if err == nil {
+			notFound = false
+			return nil
+		}
+		if apierrors.IsNotFound(err) {
+			notFound = true
+			return nil
+		}
+		return err
+	}); err != nil {
+		return false, fmt.Errorf("failed to check %s CRD %q: %w", label, name, err)
+	}
+	return !notFound, nil
+}
+
 // checkNewControlPlaneEnabled verifies that newControlPlane is set to true in ModuleConfig.
 func (m *Migrator) checkNewControlPlaneEnabled(ctx context.Context) error {
 	mc := &d8commonapi.ModuleConfig{}
-	if err := m.client.Get(ctx, kubecl.ObjectKey{Name: config.ModuleName}, mc); err != nil {
+	if err := m.retryTransient(ctx, "check newControlPlane enabled", func() error {
+		return m.client.Get(ctx, kubecl.ObjectKey{Name: config.ModuleName}, mc)
+	}); err != nil {
 		return fmt.Errorf("failed to get ModuleConfig %q: %w", config.ModuleName, err)
 	}
 
@@ -263,43 +315,4 @@ func (m *Migrator) createIfNotExists(ctx context.Context, log *slog.Logger, obj 
 	}
 	log.Info("created resource", "kind", kind, "name", obj.GetName())
 	return nil
-}
-
-// isTransientAPIError reports errors that should not fail stage 2/3 retry loops (network blips, overload, etc.).
-func isTransientAPIError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-
-	var statusErr *apierrors.StatusError
-	if errors.As(err, &statusErr) {
-		code := int(statusErr.Status().Code)
-		switch code {
-		case http.StatusRequestTimeout, http.StatusTooManyRequests,
-			http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
-		}
-		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) {
-			return true
-		}
-		if code == http.StatusConflict {
-			return true
-		}
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-
-	// DNS / connection failures often surface as *net.OpError without Timeout().
-	var opErr *net.OpError
-	return errors.As(err, &opErr)
 }
