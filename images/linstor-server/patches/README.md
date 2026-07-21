@@ -28,3 +28,13 @@ which crashes `linstor-controller` during `DbK8sCrdInitializer`
 (`UnrecognizedPropertyException` → Database initialization error).
 
 Probe `LinstorVersion` resources instead; treat HTTP 404 as missing CRD.
+
+### 004-fix-fabric8-ignore-unknown-properties.patch
+
+Configure the controller fabric8 `KubernetesClient` with
+`FAIL_ON_UNKNOWN_PROPERTIES=false`.
+
+General defense: any typed deserialize of cluster objects (including foreign
+CRD OpenAPI schemas with vendor extensions) must not abort LINSTOR startup.
+Does not replace 003 — 003 removes the unnecessary all-CRD list; 004 hardens
+the client against unknown fields elsewhere.
