@@ -83,23 +83,23 @@ spec:
 
 There are two options:
 
-1. Through the Grafana dashboard:
+Option 1. Through the Grafana dashboard
 
-   Navigate to "Dashboards" → "Storage" → "LINSTOR/DRBD" in the Grafana interface. The current space usage in the cluster is displayed in the top-right corner of the dashboard.
+Navigate to "Dashboards" → "Storage" → "LINSTOR/DRBD" in the Grafana interface. The current space usage in the cluster is displayed in the top-right corner of the dashboard.
 
-   {{% alert level="warning" %}}
-   This information reflects the total available space in the cluster. If volumes need to be created in two replicas, divide these values by two to understand how many such volumes can be accommodated in the cluster.
-   {{% /alert %}}
+{{% alert level="warning" %}}
+This information reflects the total available space in the cluster. If volumes need to be created in two replicas, divide these values by two to understand how many such volumes can be accommodated in the cluster.
+{{% /alert %}}
 
-1. Using the command line:
+Option 2. Using the command line
 
-   ```shell
-   d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
-   ```
+```shell
+d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
+```
 
-   {{% alert level="warning" %}}
-   This information reflects the total available space in the cluster. When creating volumes with two replicas, these two replicas must fit entirely across two nodes of your cluster.
-   {{% /alert %}}
+{{% alert level="warning" %}}
+This information reflects the total available space in the cluster. When creating volumes with two replicas, these two replicas must fit entirely across two nodes of your cluster.
+{{% /alert %}}
 
 ## How do I set the default StorageClass?
 
