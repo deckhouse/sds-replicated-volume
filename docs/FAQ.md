@@ -175,9 +175,7 @@ To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow the
 To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
 
 {{% alert level="warning" %}}
-Changing the drbdPortRange minPort/maxPort will not affect existing DRBD resources; they will continue to operate on their original ports.
-
-After changing the drbdPortRange values, the linstor-controller needs to be restarted.
+After changing the `drbdPortRange` parameters (`minPort` / `maxPort`), restart the LINSTOR controller — the new settings take effect only after a restart. Existing DRBD resources will continue to use their previously assigned ports.
 {{% /alert %}}
 
 ## How to properly reboot a node with DRBD resources
