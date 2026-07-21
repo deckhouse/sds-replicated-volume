@@ -3,10 +3,10 @@ title: "The sds-replicated-volume module"
 description: "The sds-replicated-volume module: General Concepts and Principles."
 ---
 
-{{< alert level="warning" >}}
+{{% alert level="warning" %}}
 The module is only guaranteed to work if the ["system requirements"](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{{< /alert >}}
+{{% /alert %}}
 
 This module manages replicated block storage based on `DRBD`. Currently, `LINSTOR` is used as a control-plane/backend (without the possibility of direct user configuration).
 
@@ -14,18 +14,18 @@ The module allows you to create a `Storage Pool` as well as a `StorageClass` by 
 
 To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](/modules/sds-node-configurator/) module.
 
-{{< alert level="warning" >}}
+{{% alert level="warning" %}}
 Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 
 Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
 
 If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
 To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
-{{< /alert >}}
+{{% /alert %}}
 
-{{< alert level="info" >}}
+{{% alert level="info" %}}
 Supported access modes: RWO; RWX — only in DVP;
-{{< /alert >}}
+{{% /alert %}}
 
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
@@ -34,13 +34,13 @@ To ensure the proper functioning of the `sds-replicated-volume` module, follow t
 - Enable the [sds-node-configurator](/modules/sds-node-configurator/) module.  
   Ensure that the `sds-node-configurator` module is enabled **before** enabling the `sds-replicated-volume` module.
 
-{{< alert level="warning" >}}
+{{% alert level="warning" %}}
 Direct configuration of the LINSTOR backend by the user is prohibited.
-{{< /alert >}}
+{{% /alert %}}
 
-{{< alert level="info" >}}
+{{% alert level="info" %}}
 The [snapshot-controller](/modules/snapshot-controller/) module must be connected for this module to operate.
-{{< /alert >}}
+{{% /alert %}}
 
 - Configure LVMVolumeGroup.
   Before creating a StorageClass, create the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
@@ -98,7 +98,7 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
    
-   {{< alert level="warning" >}}
+   {{% alert level="warning" %}}
    The [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter is recommended to be specified when enabling the module.
    
    Already added labels `storage.deckhouse.io/sds-replicated-volume-*` are not removed automatically, as the current version of the control-plane does not have an automatic data eviction mechanism from cluster nodes.
@@ -116,7 +116,7 @@ Enabling the `sds-node-configurator` module:
       
       d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
-   {{< /alert >}}
+   {{% /alert %}}
    
 1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
@@ -317,21 +317,21 @@ d8 k get sc replicated-storage-class
 
 ### Requirements
 
-{{< alert level="info" >}}
-Applicable to both single-zone clusters and clusters using multiple availability zones.
-{{< /alert >}}
-
 The cluster must meet the following requirements:
+
+{{% alert level="info" %}}
+Applicable to both single-zone clusters and clusters using multiple availability zones.
+{{% /alert %}}
 
 - Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
 - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5 ms will cause serious performance issues.
 - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
 - For `DRBD` replication to work, communication between nodes on ports `7000–7999` using the `UDP` protocol must be enabled. For more details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If necessary, you can override the port range using the [`drbdPortRange` setting](configuration.html#parameters-drbdportrange) by specifying the desired `minPort` and `maxPort` values.
-  
-  {{< alert level="info" >}}
+
+  {{% alert level="info" %}}
   After changing the `drbdPortRange` settings, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources will retain their assigned ports.
-  {{< /alert >}}
+  {{% /alert %}}
 
 ### Recommendations
 

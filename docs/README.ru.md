@@ -3,10 +3,10 @@ title: "Модуль sds-replicated-volume"
 description: "Модуль sds-replicated-volume: общие концепции и положения."
 ---
 
-{{< alert level="warning" >}}
+{{% alert level="warning" %}}
 Работоспособность модуля гарантируется только при соблюдении [«системных требований»](./readme.html#системные-требования-и-рекомендации).
 Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
-{{< /alert >}}
+{{% /alert %}}
 
 Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control-plane/бэкенда используется `LINSTOR` (без возможности непосредственной настройки пользователем).
 
@@ -14,18 +14,18 @@ description: "Модуль sds-replicated-volume: общие концепции 
 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-{{< alert level="warning" >}}
+{{% alert level="warning" %}}
 Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 
 Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 
 Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
 Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
-{{< /alert >}}
+{{% /alert %}}
 
-{{< alert level="info" >}}
+{{% alert level="info" %}}
 Доступные режимы работы для модуля: RWO; RWX — только в DVP.
-{{< /alert >}}
+{{% /alert %}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
@@ -35,13 +35,13 @@ description: "Модуль sds-replicated-volume: общие концепции 
 
   Убедитесь, что модуль `sds-node-configurator` включен **до** включения модуля `sds-replicated-volume`.
 
-{{< alert level="warning" >}}
-Непосредственная конфигурация бэкенда LINSTOR пользователем запрещёна.
-{{< /alert >}}
+{{% alert level="warning" %}}
+Непосредственная конфигурация бэкенда LINSTOR пользователем запрещена.
+{{% /alert %}}
 
-{{< alert level="info" >}}
+{{% alert level="info" %}}
 Для работы модуля требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
-{{< /alert >}}
+{{% /alert %}}
 
 - Настройте LVMVolumeGroup.
   
@@ -100,7 +100,7 @@ description: "Модуль sds-replicated-volume: общие концепции 
    EOF
    ```
   
-   {{< alert level="warning" >}}
+   {{% alert level="warning" %}}
    Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
    
    Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
@@ -118,7 +118,7 @@ description: "Модуль sds-replicated-volume: общие концепции 
       
       d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
-   {{< /alert >}}
+   {{% /alert %}}
   
 1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
@@ -318,21 +318,21 @@ d8 k get sc replicated-storage-class
 
 ### Требования
 
-{{< alert level="info" >}}
-Применительно как к однозональным кластерам, так и к кластерам с использованием нескольких зон доступности.
-{{< /alert >}}
-
 Кластер должен соответствовать следующим требованиям:
+
+{{% alert level="info" %}}
+Применительно как к однозональным кластерам, так и к кластерам с использованием нескольких зон доступности.
+{{% /alert %}}
 
 - Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - Для сетевого соединения необходимо использовать инфраструктуру с пропускной способностью 10 Gbps или выше.
 - Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс. При задержках более 5 мс будут возникать серьёзные проблемы с производительностью.
 - Не используйте другой SDS (Software defined storage) для предоставления дисков SDS Deckhouse.
 - Чтобы работала репликация `DRBD`, должно быть разрешено взаимодействие между узлами по портам `7000‑7999` по протоколу `UDP`. Подробнее — в таблице [«Трафик между узлами»](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#трафик-между-узлами). При необходимости вы можете переопределить диапазон портов с помощью [настройки `drbdPortRange`](configuration.html#parameters-drbdportrange), указав нужные значения `minPort` и `maxPort`.
-  
-  {{< alert level="info" >}}
+
+  {{% alert level="info" %}}
   После изменения параметров `drbdPortRange` перезапустите контроллер LINSTOR, чтобы новые настройки вступили в силу. При этом существующие DRBD-ресурсы сохранят назначенные им порты.
-  {{< /alert >}}
+  {{% /alert %}}
 
 ### Рекомендации
 
