@@ -1,0 +1,45 @@
+From ec7ce2fba1638d6b488d78b9539b9abf8a492b6f Mon Sep 17 00:00:00 2001
+From: "v.oleynikov" <vasily.oleynikov@flant.com>
+Date: Tue, 21 Jul 2026 14:10:50 +0300
+Subject: [PATCH] Scope startup CRD lookup to LINSTOR's own CRD
+
+getDbVersion() listed every CustomResourceDefinition in the cluster and
+deserialized each full OpenAPI schema only to find the linstorversion CRD.
+Non-standard schema extensions added by other operators (e.g. Deckhouse's
+x-kubernetes-sensitive-data) are unknown to the bundled fabric8 model and
+raise UnrecognizedPropertyException, aborting controller startup with a
+spurious database initialization error (exit 20).
+
+Use a metadata.name field selector so the API server returns only the
+linstorversion CRD; foreign CRDs are never fetched or deserialized.
+
+Signed-off-by: v.oleynikov <vasily.oleynikov@flant.com>
+---
+ .../transaction/ControllerK8sCrdTransactionMgr.java    | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java b/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
+index e2b1e1b..77623c6 100644
+--- a/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
++++ b/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
+@@ -104,8 +104,16 @@ public class ControllerK8sCrdTransactionMgr implements TransactionMgrK8sCrd
+     public Integer getDbVersion()
+     {
+         Integer ret = null;
++        // Restrict the CRD list to LINSTOR's own linstorversion CRD via a metadata.name field
++        // selector. Listing all CRDs would deserialize every CRD schema in the cluster, which
++        // fails on non-standard OpenAPI extensions added by other operators (e.g. Deckhouse sets
++        // x-kubernetes-sensitive-data), unknown to the bundled fabric8 model, and would abort the
++        // controller startup with a spurious database initialization error.
+         CustomResourceDefinitionList list = k8sClient.apiextensions().v1().customResourceDefinitions()
+-            .list(new ListOptionsBuilder().build());
++            .list(new ListOptionsBuilder()
++                .withFieldSelector("metadata.name="
++                    + LinstorVersionCrd.LINSTOR_CRD_NAME + "." + LinstorVersionCrd.GROUP)
++                .build());
+         if (!list.getItems().isEmpty())
+         {
+             for (CustomResourceDefinition crd : list.getItems())
+-- 
+2.43.0
+
