@@ -3,10 +3,10 @@ title: "Модуль sds-replicated-volume"
 description: "Модуль sds-replicated-volume: общие концепции и положения."
 ---
 
-{{% alert level="warning" %}}
-Работоспособность модуля гарантируется только при соблюдении [«системных требований»](./readme.html#системные-требования-и-рекомендации).
+{{< alert level="warning" >}}
+Работоспособность модуля гарантируется только при соблюдении [системных требований](./readme.html#системные-требования-и-рекомендации).
 Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
-{{% /alert %}}
+{{< /alert >}}
 
 Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control-plane/бэкенда используется `LINSTOR` (без возможности непосредственной настройки пользователем).
 
@@ -14,18 +14,16 @@ description: "Модуль sds-replicated-volume: общие концепции 
 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
-
 Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-
 Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
 Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
-{{% /alert %}}
+{{< /alert >}}
 
-{{% alert level="info" %}}
+{{< alert level="info" >}}
 Доступные режимы работы для модуля: RWO; RWX — только в DVP.
-{{% /alert %}}
+{{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
@@ -35,13 +33,13 @@ description: "Модуль sds-replicated-volume: общие концепции 
 
   Убедитесь, что модуль `sds-node-configurator` включен **до** включения модуля `sds-replicated-volume`.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 Непосредственная конфигурация бэкенда LINSTOR пользователем запрещена.
-{{% /alert %}}
+{{< /alert >}}
 
-{{% alert level="info" %}}
+{{< alert level="info" >}}
 Для работы модуля требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
-{{% /alert %}}
+{{< /alert >}}
 
 - Настройте LVMVolumeGroup.
   
@@ -100,25 +98,20 @@ description: "Модуль sds-replicated-volume: общие концепции 
    EOF
    ```
   
-   {{% alert level="warning" %}}
+   {{< alert level="warning" >}}
    Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
-   
    Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
-   
    Если требуется убрать ресурсы модуля с узла не удаляя сам узел из кластера, то необходимо:
-   
    1. Вручную на любом из master-узлов запустить [скрипт эвакуации данных](./faq.html#%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%80%D0%B5%D1%81%D1%83%D1%80%D1%81%D0%BE%D0%B2-%D1%81-%D1%83%D0%B7%D0%BB%D0%B0-%D0%B1%D0%B5%D0%B7-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%81%D0%B0%D0%BC%D0%BE%D0%B3%D0%BE-%D1%83%D0%B7%D0%BB%D0%B0) `/opt/deckhouse/sbin/evict.sh` с параметром `--delete-resources-only`.
    1. После эвакуации даных удалить с узла лейблы и удалить ноду из LINSTOR:
       ```shell
       export NODE_NAME=<node-name>
-      
       d8 k get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
         d8 k label node $NODE_NAME "$label"-
       done
-      
       d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
-   {{% /alert %}}
+   {{< /alert >}}
   
 1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
@@ -320,9 +313,9 @@ d8 k get sc replicated-storage-class
 
 Кластер должен соответствовать следующим требованиям:
 
-{{% alert level="info" %}}
+{{< alert level="info" >}}
 Применительно как к однозональным кластерам, так и к кластерам с использованием нескольких зон доступности.
-{{% /alert %}}
+{{< /alert >}}
 
 - Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - Для сетевого соединения необходимо использовать инфраструктуру с пропускной способностью 10 Gbps или выше.
@@ -330,9 +323,9 @@ d8 k get sc replicated-storage-class
 - Не используйте другой SDS (Software defined storage) для предоставления дисков SDS Deckhouse.
 - Чтобы работала репликация `DRBD`, должно быть разрешено взаимодействие между узлами по портам `7000‑7999` по протоколу `UDP`. Подробнее — в таблице [«Трафик между узлами»](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#трафик-между-узлами). При необходимости вы можете переопределить диапазон портов с помощью [настройки `drbdPortRange`](configuration.html#parameters-drbdportrange), указав нужные значения `minPort` и `maxPort`.
 
-  {{% alert level="info" %}}
+  {{< alert level="info" >}}
   После изменения параметров `drbdPortRange` перезапустите контроллер LINSTOR, чтобы новые настройки вступили в силу. При этом существующие DRBD-ресурсы сохранят назначенные им порты.
-  {{% /alert %}}
+  {{< /alert >}}
 
 ### Рекомендации
 

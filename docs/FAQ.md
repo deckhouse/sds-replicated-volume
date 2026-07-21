@@ -3,10 +3,10 @@ title: "The sds-replicated-volume module: FAQ"
 description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? Performance and reliability notes, comparison to Ceph. How to add existing LVM or LVMThin pool. How to configure Prometheus to storing data. Controller's work-flow questions.
 ---
 
-{{% alert level="warning" %}}
-The module is only guaranteed to work if the ["system requirements"](./readme.html#system-requirements-and-recommendations) are met.
+{{< alert level="warning" >}}
+The module is only guaranteed to work if the [system requirements](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{{% /alert %}}
+{{< /alert >}}
 
 ## What is difference between LVM and LVMThin?
 
@@ -15,11 +15,10 @@ Compare the two storage options:
 - LVM is simpler and has high performance that is similar to that of native disk drives, but it does not support snapshots;
 - LVMThin allows for snapshots and overprovisioning; however, it is slower than LVM.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 Overprovisioning in LVMThin should be used with caution, monitoring the availability of free space in the pool (The cluster monitoring system generates separate events when the free space in the pool reaches 20%, 10%, 5%, and 1%).
-
 In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
-{{% /alert %}}
+{{< /alert >}}
 
 ## Supported disk configurations and performance
 
@@ -71,12 +70,10 @@ spec:
   volumeAccess: Local
 ```
 
-### When and Which Modes to Use?  
-
-- **None** – Suitable for test environments or clustered applications (e.g., if you deploy a multi-node cluster of RabbitMQ/MongoDB/MySQL/etc.).  
-- **Availability** – A compromise mode that ensures availability but, in case of network connectivity issues (one of the quorum replicas is diskless, and accessing data through it happens over the network), may lead to desynchronization and, optionally, data loss.  
-  Best suited for non-critical data and applications that require some level of high availability (e.g., when nodes periodically go into maintenance) but do not have strict reliability or data integrity requirements.  
-- **ConsistencyAndAvailability** – The most reliable replication mode, recommended for mission-critical applications, vital data, and deploying virtual machines in a DVP environment.  
+- **None** – Suitable for test environments or clustered applications (e.g., if you deploy a multi-node cluster of RabbitMQ/MongoDB/MySQL/etc.).
+- **Availability** – A compromise mode that ensures availability but, in case of network connectivity issues (one of the quorum replicas is diskless, and accessing data through it happens over the network), may lead to desynchronization and, optionally, data loss.
+  Best suited for non-critical data and applications that require some level of high availability (e.g., when nodes periodically go into maintenance) but do not have strict reliability or data integrity requirements.
+- **ConsistencyAndAvailability** – The most reliable replication mode, recommended for mission-critical applications, vital data, and deploying virtual machines in a DVP environment.
 
 
 ## How do I get info about the space used?
@@ -87,9 +84,9 @@ Option 1. Through the Grafana dashboard
 
 Navigate to "Dashboards" → "Storage" → "LINSTOR/DRBD" in the Grafana interface. The current space usage in the cluster is displayed in the top-right corner of the dashboard.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 This information reflects the total available space in the cluster. If volumes need to be created in two replicas, divide these values by two to understand how many such volumes can be accommodated in the cluster.
-{{% /alert %}}
+{{< /alert >}}
 
 Option 2. Using the command line
 
@@ -97,9 +94,9 @@ Option 2. Using the command line
 d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
 ```
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 This information reflects the total available space in the cluster. When creating volumes with two replicas, these two replicas must fit entirely across two nodes of your cluster.
-{{% /alert %}}
+{{< /alert >}}
 
 ## How do I set the default StorageClass?
 
@@ -132,7 +129,7 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
 
-1. Create new LVMVolumeGroup with [sds-node-configurator](/modules/sds-node-configurator/usage.html#creating-an-lvmvolumegroup-resource)
+1. Create new LVMVolumeGroup with [sds-node-configurator](/modules/sds-node-configurator/usage.html#creating-an-lvmvolumegroup-resource).
 
 1. Add the new Volume Group to the existing ReplicatedStoragePool by editing the resource:
 
@@ -174,15 +171,15 @@ To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow the
 
 To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 After changing the `drbdPortRange` parameters (`minPort` / `maxPort`), restart the LINSTOR controller — the new settings take effect only after a restart. Existing DRBD resources will continue to use their previously assigned ports.
-{{% /alert %}}
+{{< /alert >}}
 
 ## How to properly reboot a node with DRBD resources
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 For greater stability of the module, it is not recommended to reboot multiple nodes simultaneously.
-{{% /alert %}}
+{{< /alert >}}
 
 1. Drain the node.
 
@@ -210,9 +207,9 @@ For greater stability of the module, it is not recommended to reboot multiple no
 
 ## How do I free some space on storage pool by moving resources to another
 
-1. Check the storage pool: `d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
+1. Check the storage pool: `d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`.
 
-1. Check the volumes: `d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`
+1. Check the volumes: `d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`.
 
 1. Identify the resources you want to move:
 
@@ -245,22 +242,22 @@ To check the existence of the `replicas_manager.sh` script, run the following co
    ```
 
 Upon execution, the script performs the following actions:
-- Verifies the availability of the controller and connectivity to satellites
-- Identifies faulty or corrupted resources
-- Creates a backup of the database
-- Manages the number of disk replicas, adding new ones as needed
-- Configures TieBreaker for resources with two replicas
-- Logs all actions to a file named linstor_replicas_manager_<date_time>.log
-- Provides recommendations for resolving issues, such as stuck replicas
+- Verifies the availability of the controller and connectivity to satellites.
+- Identifies faulty or corrupted resources.
+- Creates a backup of the database.
+- Manages the number of disk replicas, adding new ones as needed.
+- Configures TieBreaker for resources with two replicas.
+- Logs all actions to a file named linstor_replicas_manager_<date_time>.log.
+- Provides recommendations for resolving issues, such as stuck replicas.
 
 Configuration variables for `replicas_manager.sh`:
-- NON_INTERACTIVE — enables non-interactive mode
-- TIMEOUT_SEC — timeout between attempts, in seconds (default: 10)
-- EXCLUDED_RESOURCES_FROM_CHECK — regular expression to exclude resources from checks
-- CHUNK_SIZE — chunk size for processing resources (default: 10)
-- NODE_FOR_EVICT — name of the node excluded from creating replicas
-- LINSTOR_NAMESPACE — Kubernetes namespace (default: d8-sds-replicated-volume)
-- DISKLESS_STORAGE_POOL — pool for diskless replicas (default: DfltDisklessStorPool)
+- NON_INTERACTIVE — enables non-interactive mode.
+- TIMEOUT_SEC — timeout between attempts, in seconds (default: 10).
+- EXCLUDED_RESOURCES_FROM_CHECK — regular expression to exclude resources from checks.
+- CHUNK_SIZE — chunk size for processing resources (default: 10).
+- NODE_FOR_EVICT — name of the node excluded from creating replicas.
+- LINSTOR_NAMESPACE — Kubernetes namespace (default: d8-sds-replicated-volume).
+- DISKLESS_STORAGE_POOL — pool for diskless replicas (default: DfltDisklessStorPool).
 
 ### How to evict DRBD resources from a node?
 
@@ -327,9 +324,9 @@ Example:
 /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
-{{% /alert %}}
+{{< /alert >}}
 
 1. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
@@ -602,9 +599,9 @@ If the information provided is not enough to identify the problem, refer to the 
 
 Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using its PV during the migration.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all volume management functionality).
-{{% /alert %}}
+{{< /alert >}}
 
 ### Migration steps
 
@@ -615,9 +612,9 @@ alias linstor='d8 k -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
 linstor resource list --faulty
 ```
 
-   {{% alert level="warning" %}}
+   {{< alert level="warning" >}}
    You should fix all LINSTOR resources before migrating.
-   {{% /alert %}}
+   {{< /alert >}}
 
 1. Disable the `linstor` module:
 
@@ -653,9 +650,9 @@ linstor resource list --faulty
 
 1. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   {{% alert level="warning" %}}
+   {{< alert level="warning" >}}
    Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
-   {{% /alert %}}
+   {{< /alert >}}
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -730,9 +727,9 @@ The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in th
 
 Note that the module control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using DRBD PV during the migration.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all module volume management functionality).
-{{% /alert %}}
+{{< /alert >}}
 
 ### Procedure for migration
 
@@ -743,9 +740,9 @@ User data will not be affected by the migration. Basically, the migration to a n
    linstor resource list --faulty
    ```
 
-   {{% alert level="warning" %}}
+   {{< alert level="warning" >}}
    You should fix all DRBD resources before migrating.
-   {{% /alert %}}
+   {{< /alert >}}
 
 1. Disable the `sds-drbd` module:
 
@@ -761,9 +758,9 @@ User data will not be affected by the migration. Basically, the migration to a n
 
 1. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   {{% alert level="warning" %}}
+   {{< alert level="warning" >}}
    Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
-   {{% /alert %}}
+   {{< /alert >}}
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -804,9 +801,9 @@ User data will not be affected by the migration. Basically, the migration to a n
 
 If there are no faulty resources, then the migration was successful.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any DRBDStoragePool or DRBDStorageClass left in cluster. If they exist after the migration, please inform our support team.
-{{% /alert %}}
+{{< /alert >}}
 
 ## Why is it not recommended to use RAID for disks that are used by the sds-replicated-volume module?
 

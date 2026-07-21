@@ -4,10 +4,10 @@ linkTitle: "Usage cases"
 description: "Zonal and trans-zonal StorageClass layouts for the sds-replicated-volume module."
 ---
 
-{{% alert level="warning" %}}
-The module is only guaranteed to work if the ["system requirements"](./readme.html#system-requirements-and-recommendations) are met.
+{{< alert level="warning" >}}
+The module is only guaranteed to work if the [system requirements](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{{% /alert %}}
+{{< /alert >}}
 
 ## Zonal StorageClass with prohibited access to data over the network and high data redundancy
 
@@ -46,9 +46,9 @@ The StorageClass created from this resource has the following characteristics:
 
   - This StorageClass is best suited for cases where high read speeds are essential, as the data is always on the local disk. This is achieved by the `volumeAccess` parameter set to `Local`, which prevents pods from being created on nodes with no local volume replica and data access over the network.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
-{{% /alert %}}
+{{< /alert >}}
 
 ## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
@@ -91,6 +91,6 @@ The StorageClass created from this resource has the following characteristics:
 
   - This StorageClass is recommended if high write rates are not considered a priority. The synchronous replication protocol used in DRBD treats a read operation as completed only after receiving confirmation from all replicas of a successful write to the local disk. With three replicas distributed across different zones, the write latency will be higher than with a zonal StorageClass. The exception to this is when the network parameters within a zone and between the zones are similar.
 
-{{% alert level="warning" %}}
+{{< alert level="warning" >}}
 Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in the spec.zones of the trans-zonal StorageClass configuration.
-{{% /alert %}}
+{{< /alert >}}
