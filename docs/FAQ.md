@@ -4,7 +4,7 @@ description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin
 ---
 
 {{< alert level="warning" >}}
-The module is only guaranteed to work if the [system requirements](./readme.html#system-requirements-and-recommendations) are met.
+The module is only guaranteed to work if the ["system requirements"](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
@@ -87,7 +87,9 @@ There are two options:
 
    Navigate to "Dashboards" → "Storage" → "LINSTOR/DRBD" in the Grafana interface. The current space usage in the cluster is displayed in the top-right corner of the dashboard.
 
-   > **Note.** This information reflects the total available space in the cluster. If volumes need to be created in two replicas, divide these values by two to understand how many such volumes can be accommodated in the cluster.
+   {{< alert level="warning" >}}
+   This information reflects the total available space in the cluster. If volumes need to be created in two replicas, divide these values by two to understand how many such volumes can be accommodated in the cluster.
+   {{< /alert >}}
 
 1. Using the command line:
 
@@ -95,7 +97,9 @@ There are two options:
    d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
    ```
 
-   >****Note.** This information reflects the total available space in the cluster. When creating volumes with two replicas, these two replicas must fit entirely across two nodes of your cluster.
+   {{< alert level="warning" >}}
+   This information reflects the total available space in the cluster. When creating volumes with two replicas, these two replicas must fit entirely across two nodes of your cluster.
+   {{< /alert >}}
 
 ## How do I set the default StorageClass?
 
@@ -325,7 +329,9 @@ Example:
 /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
-> **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
+{{< alert level="warning" >}}
+After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
+{{< /alert >}}
 
 1. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
@@ -598,7 +604,9 @@ If the information provided is not enough to identify the problem, refer to the 
 
 Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using its PV during the migration.
 
-> **Please note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all volume management functionality).
+{{< alert level="warning" >}}
+User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all volume management functionality).
+{{< /alert >}}
 
 ### Migration steps
 
@@ -609,9 +617,9 @@ alias linstor='d8 k -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
 linstor resource list --faulty
 ```
 
-> **Caution!** You should fix all resources before migrating.
-
-   > **Caution.** You should fix all LINSTOR resources before migrating.
+   {{< alert level="warning" >}}
+   You should fix all LINSTOR resources before migrating.
+   {{< /alert >}}
 
 1. Disable the `linstor` module:
 
@@ -647,7 +655,9 @@ linstor resource list --faulty
 
 1. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   {{< alert level="warning" >}}
+   Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   {{< /alert >}}
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -722,7 +732,9 @@ The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in th
 
 Note that the module control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using DRBD PV during the migration.
 
-> **Note.** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all module volume management functionality).
+{{< alert level="warning" >}}
+User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all module volume management functionality).
+{{< /alert >}}
 
 ### Procedure for migration
 
@@ -733,7 +745,9 @@ Note that the module control-plane and its CSI will be unavailable during the mi
    linstor resource list --faulty
    ```
 
-   > **Caution.** You should fix all DRBD resources before migrating.
+   {{< alert level="warning" >}}
+   You should fix all DRBD resources before migrating.
+   {{< /alert >}}
 
 1. Disable the `sds-drbd` module:
 
@@ -749,7 +763,9 @@ Note that the module control-plane and its CSI will be unavailable during the mi
 
 1. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   {{< alert level="warning" >}}
+   Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   {{< /alert >}}
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -790,7 +806,9 @@ Note that the module control-plane and its CSI will be unavailable during the mi
 
 If there are no faulty resources, then the migration was successful.
 
-> **Caution.** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any DRBDStoragePool or DRBDStorageClass left in cluster. If they exist after the migration, please inform our support team.
+{{< alert level="warning" >}}
+The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any DRBDStoragePool or DRBDStorageClass left in cluster. If they exist after the migration, please inform our support team.
+{{< /alert >}}
 
 ## Why is it not recommended to use RAID for disks that are used by the sds-replicated-volume module?
 

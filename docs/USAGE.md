@@ -4,7 +4,7 @@ description: The sds-replicated-volume controller usage and work-flow examples.
 ---
 
 {{< alert level="warning" >}}
-The module is only guaranteed to work if the [system requirements](./readme.html#system-requirements-and-recommendations) are met.
+The module is only guaranteed to work if the ["system requirements"](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
@@ -61,7 +61,7 @@ Before working with the backend the controller will validate the provided config
 For all LVMVolumeGroup resources in the `spec` of the ReplicatedStoragePool resource the following rules must be met:
 
 - They must reside on different nodes. You may not refer to multiple LVMVolumeGroup resources located on the same node.
-- All nodes should be of type other than `CloudEphemeral` (see [Node types](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
+- All nodes should be of type other than `CloudEphemeral` (see ["Node types"](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
 
 Information about the controller's progress and results is available in the `status` field of the created ReplicatedStoragePool resource.
 
@@ -73,9 +73,11 @@ You can add new LVMVolumeGroups to the `spec.lvmVolumeGroups` list (effectively 
 
 The `sds-replicated-volume-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the backend. The results of this operation will also be reflected in the `status` field of the `ReplicatedStoragePool` resource.
 
-> Note that the `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
->
-> The controller does not respond to changes made by the user in the `status` field of the resource.
+{{< alert level="warning" >}}
+The `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
+
+The controller does not respond to changes made by the user in the `status` field of the resource.
+{{< /alert >}}
 
 #### Deleting the ReplicatedStoragePool resource
 
@@ -133,7 +135,9 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that all fields of `spec` section of the ReplicatedStorageClass resource are **immutable**.
+{{< alert level="warning" >}}
+All fields of the `spec` section of the ReplicatedStorageClass resource are **immutable**.
+{{< /alert >}}
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
