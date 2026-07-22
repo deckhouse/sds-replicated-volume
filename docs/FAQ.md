@@ -175,7 +175,7 @@ To increase the limit on the number of DRBD devices / change the ports through w
 After changing the `drbdPortRange` parameters (`minPort` / `maxPort`), restart the LINSTOR controller — the new settings take effect only after a restart. Existing DRBD resources will continue to use their previously assigned ports.
 {{< /alert >}}
 
-## How to properly reboot a node with DRBD resources
+## How to properly reboot a node with DRBD resources?
 
 {{< alert level="warning" >}}
 For greater stability of the module, it is not recommended to reboot multiple nodes simultaneously.
@@ -205,7 +205,7 @@ For greater stability of the module, it is not recommended to reboot multiple no
    node/test-node-1 uncordoned
    ```
 
-## How do I free some space on storage pool by moving resources to another
+## How do I free some space on storage pool by moving resources to another node?
 
 1. Check the storage pool: `d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`.
 
@@ -231,7 +231,7 @@ For greater stability of the module, it is not recommended to reboot multiple no
    d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
    ```
 
-### Can I automate the management of replicas and monitoring of LINSTOR state?
+## Can I automate the management of replicas and monitoring of LINSTOR state?
 Replica management and state monitoring are automated in the `replicas_manager.sh` script. 
 It checks the availability of the LINSTOR controller, identifies faulty or corrupted resources, creates database backups, and manages disk replicas, including configuring TieBreaker for quorum.
 
@@ -259,7 +259,7 @@ Configuration variables for `replicas_manager.sh`:
 - LINSTOR_NAMESPACE — Kubernetes namespace (default: d8-sds-replicated-volume).
 - DISKLESS_STORAGE_POOL — pool for diskless replicas (default: DfltDisklessStorPool).
 
-### How to evict DRBD resources from a node?
+## How to evict DRBD resources from a node?
 
 Eviction of DRBD resources from a node is performed using the `evict.sh` script. It can operate in two modes:
 
@@ -325,7 +325,7 @@ Example:
 ```
 
 {{< alert level="warning" >}}
-After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
+After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing its scheduler from creating resources on this node.
 {{< /alert >}}
 
 1. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
@@ -526,7 +526,7 @@ Unpack the combined tar file to obtain the backup resources:
 
 ```shell
 mkdir -p "./backup"
-tar -xf "$COMBINED" -C "./backup --strip-components=2
+tar -xf "$COMBINED" -C "./backup" --strip-components=2
 ```
 
 Check the contents of the backup:
@@ -778,7 +778,7 @@ User data will not be affected by the migration. Basically, the migration to a n
 
    ```shell
    d8 k get moduleconfig sds-replicated-volume
-   ``
+   ```
 
 1. Check the `sds-replicated-volume` module settings.
 
