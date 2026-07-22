@@ -1,0 +1,54 @@
+From: Nikolay Demchuk <nikolay.demchuk@flant.com>
+Date: Tue, 21 Jul 2026 22:58:00 +1000
+Subject: [PATCH] Ignore unknown properties in fabric8 Kubernetes client
+
+Configure the controller KubernetesClient ObjectMapper with
+FAIL_ON_UNKNOWN_PROPERTIES=false so typed deserialization of cluster
+objects (including CustomResourceDefinition OpenAPI schemas) does not
+abort startup on vendor-specific extensions unknown to the bundled
+fabric8 model.
+
+Signed-off-by: Nikolay Demchuk <nikolay.demchuk@flant.com>
+
+diff --git a/controller/src/main/java/com/linbit/linstor/dbcp/k8s/crd/DbK8sCrd.java b/controller/src/main/java/com/linbit/linstor/dbcp/k8s/crd/DbK8sCrd.java
+index 83cb31f..3c0b687 100644
+--- a/controller/src/main/java/com/linbit/linstor/dbcp/k8s/crd/DbK8sCrd.java
++++ b/controller/src/main/java/com/linbit/linstor/dbcp/k8s/crd/DbK8sCrd.java
+@@ -33,6 +33,8 @@ import java.util.Set;
+ import java.util.TreeMap;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ 
++import com.fasterxml.jackson.databind.DeserializationFeature;
++import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.google.inject.Provider;
+ import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
+ import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinitionList;
+@@ -42,6 +44,7 @@ import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+ import io.fabric8.kubernetes.client.dsl.ApiextensionsAPIGroupDSL;
+ import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
+ import io.fabric8.kubernetes.client.dsl.Resource;
++import io.fabric8.kubernetes.client.utils.KubernetesSerialization;
+ 
+ @Singleton
+ public class DbK8sCrd implements ControllerK8sCrdDatabase
+@@ -328,8 +331,20 @@ public class DbK8sCrd implements ControllerK8sCrdDatabase
+             throw new SystemServiceStartException("Not configured for kubernetes connection!", true);
+         }
+ 
++        /*
++         * Ignore unknown JSON fields when deserializing Kubernetes API objects.
++         * Cluster CRD OpenAPI schemas may contain vendor extensions (e.g. Deckhouse
++         * x-kubernetes-sensitive-data) that the bundled fabric8 model does not know.
++         * Without this, any typed CRD list/get can abort controller startup with
++         * UnrecognizedPropertyException.
++         */
++        ObjectMapper mapper = new ObjectMapper();
++        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
++        KubernetesSerialization serialization = new KubernetesSerialization(mapper, true);
++
+         k8sClient = new KubernetesClientBuilder()
+             .withConfig(new ConfigBuilder().withRequestRetryBackoffLimit(ctrlCfg.getK8sRequestRetries()).build())
++            .withKubernetesSerialization(serialization)
+             .build();
+         k8sCachingClient = new HashMap<>();
+         atomicStarted.set(true);

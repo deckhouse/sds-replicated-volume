@@ -1,0 +1,66 @@
+From: Deckhouse SDS <sds@deckhouse.io>
+Date: Tue, 21 Jul 2026 12:00:00 +0000
+Subject: [PATCH] Avoid listing all CRDs in getDbVersion
+
+Listing CustomResourceDefinitionList forces fabric8 to deserialize every
+CRD schema in the cluster. Foreign CRDs may contain OpenAPI extensions
+unknown to the fabric8 model (e.g. Deckhouse x-kubernetes-sensitive-data),
+which causes UnrecognizedPropertyException and CrashLoopBackOff of
+linstor-controller during DbK8sCrdInitializer.
+
+Probe LinstorVersion resources instead; treat HTTP 404 as "CRD missing".
+
+diff --git a/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java b/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
+index e2b1e1b..3b2640e 100644
+--- a/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
++++ b/controller/src/main/java/com/linbit/linstor/transaction/ControllerK8sCrdTransactionMgr.java
+@@ -21,9 +21,6 @@ import java.util.function.Function;
+ import java.util.function.Supplier;
+ 
+ import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+-import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
+-import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
+-import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinitionList;
+ import io.fabric8.kubernetes.client.KubernetesClient;
+ import io.fabric8.kubernetes.client.KubernetesClientException;
+ import io.fabric8.kubernetes.client.dsl.MixedOperation;
+@@ -104,22 +101,25 @@ public class ControllerK8sCrdTransactionMgr implements TransactionMgrK8sCrd
+     public Integer getDbVersion()
+     {
+         Integer ret = null;
+-        CustomResourceDefinitionList list = k8sClient.apiextensions().v1().customResourceDefinitions()
+-            .list(new ListOptionsBuilder().build());
+-        if (!list.getItems().isEmpty())
++        try
++        {
++            /*
++             * Avoid listing all cluster CRDs. fabric8 typed deserialization fails on
++             * unknown OpenAPI extensions in foreign CRD schemas (e.g. Deckhouse
++             * x-kubernetes-sensitive-data). Probe our CRD by listing LinstorVersion
++             * instances instead; 404 means the CRD is not applied yet.
++             */
++            List<LinstorVersionCrd> linstorVersionList = linstorVersionClient.list().getItems();
++            if (linstorVersionList != null && !linstorVersionList.isEmpty())
++            {
++                ret = linstorVersionList.get(0).getSpec().version;
++            }
++        }
++        catch (KubernetesClientException exc)
+         {
+-            for (CustomResourceDefinition crd : list.getItems())
++            if (exc.getCode() != HttpURLConnection.HTTP_NOT_FOUND)
+             {
+-                if (crd.getStatus().getAcceptedNames().getPlural().equals(LinstorVersionCrd.LINSTOR_CRD_NAME))
+-                {
+-                    // k8s knows about the schema, we still need to get the actual linstorversion instance
+-                    List<LinstorVersionCrd> linstorVersionList = linstorVersionClient.list().getItems();
+-                    if (linstorVersionList != null && !linstorVersionList.isEmpty())
+-                    {
+-                        ret = linstorVersionList.get(0).getSpec().version;
+-                    }
+-                    break;
+-                }
++                throw exc;
+             }
+         }
+         return ret;
