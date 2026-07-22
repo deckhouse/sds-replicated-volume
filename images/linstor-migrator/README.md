@@ -20,13 +20,16 @@ Current state values:
 - `stage2_started`
 - `stage2_completed`
 - `stage3_started`
+- `stage3_completed`
+- `stage4_started`
 - `all_completed`
 
 The implementation uses these states as follows:
 
 - `stage1` performs the actual resource migration from LINSTOR to new control-plane CRs;
 - `stage2` polls adopt `ReplicatedVolume` objects, clears `DRBDResource` maintenance when adopt formation reaches the Exit maintenance step, removes adopt annotations, then sets `stage2_completed`;
-- `stage3` backs up and removes LINSTOR CRs, metadata backups, and legacy `ReplicatedStoragePool` objects, then sets `all_completed`.
+- `stage3` backs up and removes LINSTOR CRs, metadata backups, and legacy `ReplicatedStoragePool` objects, then sets `stage3_completed`;
+- `stage4` switches `ReplicatedVolume` objects that had a matching PersistentVolume from Manual to Auto configuration once their `ReplicatedStorageClass` reaches `phase=Ready`, creates temporary conversion `ReplicatedStoragePool` objects for RSC still using the deprecated `spec.storagePool` field, cleans them up after conversion, then sets `all_completed`.
 
 ```mermaid
 stateDiagram-v2
@@ -36,7 +39,9 @@ stateDiagram-v2
     stage1_completed --> stage2_started : begin stage 2 polling
     stage2_started --> stage2_completed : adopt exit-maintenance done
     stage2_completed --> stage3_started : begin cleanup
-    stage3_started --> all_completed : LINSTOR artifacts removed
+    stage3_started --> stage3_completed : LINSTOR artifacts removed
+    stage3_completed --> stage4_started : begin switch to Auto
+    stage4_started --> all_completed : all RVs switched to Auto
     all_completed --> [*]
 ```
 
@@ -85,7 +90,7 @@ Operationally this means:
 - enabling the new control plane removes the legacy LINSTOR-based components from templates immediately;
 - the migrator Job is expected to bridge the gap and populate new control-plane resources;
 - the new controller and agent are rendered as soon as `internal.newControlPlane` is true;
-- the new CSI stack is rendered after stage 1 completes (state past `stage1_completed`), while the Job may still be in stages 2–3 until `all_completed`.
+- the new CSI stack is rendered after stage 1 completes (state past `stage1_completed`), while the Job may still be in stages 2–4 until `all_completed`.
 
 ## Migrator Workflow
 
@@ -98,161 +103,54 @@ Optional flags (defaults match prior hard-coded behavior):
 | `--log-level` | `info` | `debug`, `info`, `warn`, or `error` |
 | `--retry-interval` | `2s` | Interval between ConfigMap state update retries and stage 2 polling rounds |
 | `--stage2-worker-count` | `5` | Parallel workers for stage 2 |
-
-### Pre-flight checks
-
-On startup the migrator:
-
-1. verifies that `ModuleConfig/sds-replicated-volume.spec.settings.newControlPlane == true`;
-2. verifies that the new control-plane CRD `replicatedvolumes.storage.deckhouse.io` exists;
-3. ensures `ConfigMap/control-plane-migration` exists.
-
-During **stage 1**, after `linstor-controller` is gone, if the LINSTOR CRD `nodes.internal.linstor.linbit.com` is missing, the migrator sets `stage1_completed` and skips the rest of stage 1. Stages 2 and 3 still run afterward.
-
-### Stage 1
-
-`stage1` performs the actual migration only.
-
-High-level flow:
-
-1. set state to `stage1_started`;
-2. wait until `Deployment/linstor-controller` disappears from `d8-sds-replicated-volume` (up to 10 minutes);
-3. if the LINSTOR CRD is missing, set `stage1_completed` and skip the rest of stage 1;
-4. load LINSTOR data from CRDs into an in-memory snapshot;
-5. list `PersistentVolume`, `VolumeAttachment`, and `LVMVolumeGroup` objects;
-6. classify LINSTOR resources into:
-   - resources with a matching replicated PV,
-   - resources without a PV,
-   - resources without a LINSTOR `ResourceDefinition` (these are skipped);
-7. create one migration `ReplicatedStoragePool` per distinct LINSTOR storage pool;
-8. migrate resources with PVs first, then resources without PVs;
-9. set state to `stage1_completed`.
-
-### Stage 2
-
-`stage2` waits until adopt formation is ready to lift maintenance on migrated volumes, then clears maintenance and adopt metadata:
-
-1. set state to `stage2_started` (retries on transient API errors);
-2. **list** all `ReplicatedVolume` objects and record names that still have the adopt-RVR annotation (presence-based);
-3. if that set is empty, set state to `stage2_completed` and exit;
-4. otherwise, every **2 seconds**, process the remaining names in parallel with **five** workers (`sync.WaitGroup` + mutex on the set): for each name, **get** the `ReplicatedVolume`; when `status.datameshTransitions` contains a **Formation** transition with `planID: adopt/v1`, exactly **three** steps, and the first two steps are **Completed** while the third is **Active** (Exit maintenance), then **list** `DRBDResource` objects with label `sds-replicated-volume.deckhouse.io/replicated-volume=<ReplicatedVolume name>` (as set by the RVR controller) and **patch** away `spec.maintenance` only if it is still set; then **patch** the `ReplicatedVolume` to remove adopt annotations (`adopt-rvr`, `adopt-shared-secret` if present);
-5. remove a volume from the set once adopt annotations are successfully removed; when the set is empty, set state to `stage2_completed` (retries on transient API errors).
-
-**Transient API errors** (timeouts, throttling, 503, common network failures, etc.) during the loop are logged and the next tick retries so the Job can wait a long time for the API and controllers without exiting. **Context cancellation** still stops the migrator. A **restart** of stage 2 is **idempotent**: the initial list only picks volumes that still carry the adopt annotation; patches are conditional where applicable.
-
-### Stage 3
-
-`stage3` removes legacy LINSTOR artifacts after adopt exit-maintenance completes:
-
-1. set state to `stage3_started` (retries on transient API errors);
-2. if the LINSTOR CRD still exists, discover every `CustomResourceDefinition` with `spec.group` `internal.linstor.linbit.com`, write their definitions to `crds.gz`, list all instances of each CRD and write them to `crs.gz`, install the `linstor-viewer` backup viewer binary, and write `readme.txt` under `MigratorHostDir/MigratorLinstorBackupDirName` (default subdirectory name `linstor-backup-db`); then delete every CRD in that group;
-3. delete all `ReplicatedStorageMetadataBackup` objects (cluster-held LINSTOR metadata backups);
-4. list all `ReplicatedStoragePool` objects, back up those that pass the legacy candidate filter (excludes `linstor-auto-*` and `auto-rsp-*`) to `legacy-rsp.gz` when any exist, then delete them;
-5. set state to `all_completed` (retries on transient API errors).
-
-If the LINSTOR CRD was already removed before stage 3, steps 2 (backup and CRD deletion) are skipped; metadata backup and legacy RSP cleanup still run.
-
+| `--stage4-max-iterations` | `500` | Maximum number of stage 4 polling iterations while waiting for ReplicatedStorageClasses to become Ready; exceeding it fails the migration with a clear error |
+| `--stage4-poll-interval` | `2s` | Interval between stage 4 polling iterations |
+ 
 ## How a LINSTOR Resource Is Migrated
 
-For each LINSTOR resource selected for migration, the migrator:
+For each LINSTOR resource selected for migration, the migrator creates the corresponding new control-plane CRs: `ReplicatedVolumeReplica` per replica, `LVMLogicalVolume` and `DRBDResource` per diskful replica, a single `ReplicatedVolume` in Manual mode, and `ReplicatedVolumeAttachment` objects from matching `VolumeAttachment` resources. The migrator computes FTT/GMDR heuristics from legacy replica counts and wires owner references so `LVMLogicalVolume` and `DRBDResource` are owned by their `ReplicatedVolumeReplica`.
 
-1. resolves the LINSTOR pool and the volume size;
-2. resolves the DRBD shared secret from LINSTOR metadata;
-3. creates per-replica resources:
-   - `LVMLogicalVolume` for diskful replicas only,
-   - `DRBDResource` for every replica,
-   - `ReplicatedVolumeReplica` for every replica;
-4. patches owner references so `LVMLogicalVolume` and `DRBDResource` are owned by their `ReplicatedVolumeReplica`;
-5. computes FTT/GMDR heuristics for manual configuration;
-6. creates `ReplicatedVolume` with `configurationMode=Manual` (always, even when a matching `ReplicatedStorageClass` exists);
-7. creates `ReplicatedVolumeAttachment` objects from matching `VolumeAttachment` objects when a PV exists.
+## Migration `ReplicatedStoragePool`
 
-Replica type mapping:
+In stage 1, the migrator creates one `ReplicatedStoragePool` (`linstor-auto-<slug>`) per distinct LINSTOR storage pool, with the pool type and `LVMVolumeGroup` references derived from LINSTOR data. These pools persist after migration.
 
-- LINSTOR `0` -> `Diskful`
-- LINSTOR `388` -> `TieBreaker`
-- LINSTOR `260` and everything else -> `Access`
+In stage 3, any legacy `ReplicatedStoragePool` (not `linstor-auto-*` or `auto-rsp-*`) is backed up and removed.
 
-DRBD resource type mapping:
-
-- `Diskful` replica -> DRBD diskful resource;
-- `TieBreaker` and `Access` replicas -> DRBD diskless resource.
-
-## Automatically Created `ReplicatedStoragePool`
-
-Before per-volume migration, the migrator creates one `ReplicatedStoragePool` for each distinct LINSTOR pool referenced by resources being migrated.
-
-Current behavior:
-
-- object name: `linstor-auto-<slugified-linstor-pool-name>`;
-- type is derived from LINSTOR `NodeStorPool.driverName`:
-  - `LVM` -> `ReplicatedStoragePoolTypeLVM`
-  - `LVM_THIN` -> `ReplicatedStoragePoolTypeLVMThin`
-- `lvmVolumeGroups` are resolved by matching:
-  - LINSTOR `PropsContainers` key `StorDriver/StorPoolName`,
-  - per-node LINSTOR `NodeStorPool`,
-  - cluster `LVMVolumeGroup` objects;
-- `systemNetworkNames` is hard-coded to `["Internal"]`;
-- `eligibleNodesPolicy.notReadyGracePeriod` is hard-coded to 10 minutes.
-
-If the migrator cannot resolve the corresponding `LVMVolumeGroup` or thin pool for a LINSTOR pool, it fails fast.
-
-During **stage 3**, any cluster `ReplicatedStoragePool` that passes the legacy candidate filter (typical for manually created pools on the old control plane) is written to `legacy-rsp.gz` in the backup directory (if present) and then removed. Pools created by this migrator (`linstor-auto-*`) or by the RSC controller (`auto-rsp-*`) are left in place. If no legacy pools exist, `legacy-rsp.gz` is not created.
+In stage 4, temporary conversion `ReplicatedStoragePool` objects may be created for RSC still using the deprecated `spec.storagePool` field (see Stage 4 above). They are labeled `sds-replicated-volume.deckhouse.io/migration-conversion-rsp=true` and deleted once the referencing RSC is converted. After stage 4, the cluster contains only `linstor-auto-*` (migrator) and `auto-rsp-*` (RSC controller) pools.
 
 ## Created Resources
 
-| Resource | Created when | Notes |
+| Resource | Created in | Notes |
 |---|---|---|
-| `ReplicatedStoragePool` | once per distinct LINSTOR pool | auto-created as `linstor-auto-*` |
-| `LVMLogicalVolume` | per diskful replica | object name is hash-based; `actualLVNameOnTheNode` stays `<resource>_00000` |
-| `DRBDResource` | per replica | name matches the replica name; `maintenance=NoResourceReconciliation` |
-| `ReplicatedVolumeReplica` | per replica | name is derived from resource name and DRBD node ID |
-| `ReplicatedVolume` | once per resource | `maxAttachments=2`, created with the adopt-RVR annotation |
-| `ReplicatedVolumeAttachment` | for resources with PVs and matching `VolumeAttachment` objects | one per matching node attachment |
+| `ReplicatedStoragePool` (`linstor-auto-*`) | stage 1 | one per LINSTOR pool; persists |
+| `ReplicatedStoragePool` (conversion) | stage 4 | temporary, labeled `migration-conversion-rsp=true`; deleted after RSC conversion |
+| `LVMLogicalVolume` | stage 1 | per diskful replica |
+| `DRBDResource` | stage 1 | per replica; created in maintenance mode, cleared in stage 2 |
+| `ReplicatedVolumeReplica` | stage 1 | per replica |
+| `ReplicatedVolume` | stage 1 | `maxAttachments=2`, starts in Manual; switched to Auto in stage 4 if PV exists |
+| `ReplicatedVolumeAttachment` | stage 1 | for resources with matching `VolumeAttachment` |
 
-Additional details for `ReplicatedVolume`:
+### `ReplicatedVolume` labels
 
-- every migrated volume uses `configurationMode=Manual` with `spec.manualConfiguration` pointing at the migration `ReplicatedStoragePool` (`linstor-auto-*`), not at a pre-migration `ReplicatedStorageClass`, so adopt/v1 formation can load the correct RSP;
-- `spec.manualConfiguration` includes:
-  - `replicatedStoragePoolName` (migration pool),
-  - `topology=Ignored`,
-  - `volumeAccess=PreferablyLocal`,
-  - computed `failuresToTolerate`,
-  - computed `guaranteedMinimumDataRedundancy`;
-- if the LINSTOR resource has no matching PV, the migrator labels the `ReplicatedVolume` with `sds-replicated-volume.deckhouse.io/no-persistent-volume=true`.
+The migrator labels each `ReplicatedVolume` at creation time to signal how stage 4 should handle it:
+
+- `sds-replicated-volume.deckhouse.io/switch-to-auto-configuration=true` — set for volumes with a matching PV; stage 4 switches them to Auto.
+- `sds-replicated-volume.deckhouse.io/no-persistent-volume=true` — set for volumes without a PV; they stay in Manual mode.
+
+During stage 4, the switch-to-auto label is replaced as follows:
+
+- successful switch to Auto → label removed;
+- PV gone before the switch → replaced with `no-persistent-volume=true`;
+- RSC missing, in a terminal phase (`InsufficientNodes`, `InvalidConfiguration`, `PartiallyAligned`, `Terminating`), or in `WaitingForStoragePool` with no conversion RSP (source `linstor-auto-*` not found) → replaced with `sds-replicated-volume.deckhouse.io/auto-configuration-blocked=true` (the volume stays in Manual mode; suitable for an operator alert).
 
 ## Current Limitations
 
-- Stage 2 does not add post-migration data validation beyond the adopt formation gate described above.
-- DRBD shared secrets are read from LINSTOR, but they are not yet propagated into the created `ReplicatedVolume`.
 - Manual topology and volume access are still hard-coded (`Ignored` and `PreferablyLocal`).
 ## Idempotency and Restart
 
-The migrator uses create-if-not-exists semantics for all created resources:
-
-1. attempt `Create`;
-2. if the object already exists, log and continue;
-3. otherwise fail on error.
-
-Owner reference updates are also safe to repeat because the migrator first checks whether the target owner reference is already present.
-
-Practical consequences:
-
-- rerunning stage 1 is safe for already migrated resources;
-- partial restarts during migration are expected;
-- resources without PVs are still migrated and explicitly marked on the resulting `ReplicatedVolume`.
+The migrator is designed to be idempotent: all `Create` calls use create-if-not-exists semantics, patch helpers skip no-op patches, and stage 4 tracks conversion RSPs by label (not in-memory), so a restart recovers from cluster state. Partial restarts at any stage are expected and safe.
 
 ## Recovery Notes
-
-If the migration Job fails, the most useful recovery lever is the ConfigMap state:
-
-- delete the `Job/control-plane-migrator` in `d8-sds-replicated-volume` if it already exists;
-- set `state: not_started` to rerun the full flow (stage 1, then stage 2, then stage 3);
-- set `state: stage1_completed` to rerun from stage 2;
-- set `state: stage2_completed` to rerun only stage 3 (LINSTOR cleanup);
-- keep in mind that deleting the ConfigMap does not itself update the internal Helm value until the hook sees a new ConfigMap object again.
-
-Example reset:
 
 ```bash
 kubectl -n d8-sds-replicated-volume delete job/control-plane-migrator --ignore-not-found

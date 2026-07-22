@@ -30,10 +30,12 @@ import (
 
 // Opt holds the CLI options for the migrator.
 type Opt struct {
-	LogLevel          string
-	Mode              string
-	RetryInterval     time.Duration
-	Stage2WorkerCount int
+	LogLevel            string
+	Mode                string
+	RetryInterval       time.Duration
+	Stage2WorkerCount   int
+	Stage4MaxIterations int
+	Stage4PollInterval  time.Duration
 }
 
 // ModeCreateDirectoryForYourself is the --mode value that makes the migrator only
@@ -60,6 +62,12 @@ func (o *Opt) Parse() {
 				if o.Stage2WorkerCount < 1 {
 					return errors.New("stage2-worker-count must be at least 1")
 				}
+				if o.Stage4MaxIterations < 1 {
+					return errors.New("stage4-max-iterations must be at least 1")
+				}
+				if o.Stage4PollInterval <= 0 {
+					return errors.New("stage4-poll-interval must be positive")
+				}
 			}
 			return nil
 		},
@@ -75,6 +83,8 @@ func (o *Opt) Parse() {
 	rootCmd.Flags().StringVar(&o.Mode, "mode", "", "Migrator mode. Empty means the normal migration flow. "+ModeCreateDirectoryForYourself+" only creates the migrator host directory (owned by the deckhouse user, mode 0700) and exits; it is meant to run as root in the Job init container.")
 	rootCmd.Flags().DurationVar(&o.RetryInterval, "retry-interval", migrator.DefaultRetryInterval, "Interval between ConfigMap state update retries and stage 2 polling rounds")
 	rootCmd.Flags().IntVar(&o.Stage2WorkerCount, "stage2-worker-count", migrator.DefaultStage2WorkerCount, "Number of parallel workers for stage 2")
+	rootCmd.Flags().IntVar(&o.Stage4MaxIterations, "stage4-max-iterations", migrator.DefaultStage4MaxIterations, "Maximum number of stage 4 polling iterations while waiting for ReplicatedStorageClasses to become Ready")
+	rootCmd.Flags().DurationVar(&o.Stage4PollInterval, "stage4-poll-interval", migrator.DefaultStage4PollInterval, "Interval between stage 4 polling iterations")
 	if err := rootCmd.Execute(); err != nil {
 		// Error is already logged by cobra.
 		os.Exit(1)

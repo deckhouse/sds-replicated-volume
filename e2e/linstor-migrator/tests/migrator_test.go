@@ -40,7 +40,7 @@ import (
 
 // Register migrator scenarios at package init (side effect: Ginkgo Describe).
 func init() {
-	buildMigratorScenario("All RVs are created with ConfigurationMode: Manual", "Manual")
+	buildMigratorScenario("RVs with PV are switched to Auto configuration", "Auto")
 }
 
 func buildMigratorScenario(scenarioName string, label string) {
@@ -55,11 +55,11 @@ func buildMigratorScenario(scenarioName string, label string) {
 			runID          string
 
 			// State tracking
-			linstorBefore    *helpers.LinstorState
-			fileChecksums    map[string]string // podName -> checksum
-			oldRSPs          []helpers.RSPBaseline
-			podNames         []string
-			migratedExpected []string
+			linstorBefore *helpers.LinstorState
+			fileChecksums map[string]string // podName -> checksum
+			oldRSPs       []helpers.RSPBaseline
+			podNames      []string
+			pvToRSC       map[string]string
 		)
 
 		BeforeAll(func() {
@@ -122,7 +122,7 @@ func buildMigratorScenario(scenarioName string, label string) {
 			linstorBefore = setupResult.LinstorBefore
 			oldRSPs = append([]helpers.RSPBaseline(nil), setupResult.OldRSPs...)
 			podNames = append([]string(nil), setupResult.PodNames...)
-			migratedExpected = append([]string(nil), setupResult.MigratedResources...)
+			pvToRSC = setupResult.PVToRSC
 
 			if previousRunID == "" {
 				// Temporary helper: remove this once linstor-migrator is merged into main branch of this repository.
@@ -173,6 +173,11 @@ func buildMigratorScenario(scenarioName string, label string) {
 				It("should preserve RSP lvmVolumeGroups in migrated RSPs", func() {
 					errs := helpers.CheckRSPLVMGroupsMatchOldBaselinesFromSnapshot(rspSnapshot, oldRSPs)
 					Expect(errs).To(BeEmpty(), "RSP lvmVolumeGroups check failed")
+				})
+
+				It("no temporary conversion RSPs remain", func() {
+					errors := helpers.CheckRSPNoConversionRSPsFromSnapshot(rspSnapshot)
+					Expect(errors).To(BeEmpty())
 				})
 			})
 
@@ -230,24 +235,19 @@ func buildMigratorScenario(scenarioName string, label string) {
 					Expect(errs).To(BeEmpty(), "RV maxAttachments check failed")
 				})
 
-				It("should set configuration mode Manual for each RV", func() {
-					errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot)
-					Expect(errs).To(BeEmpty(), "RV configuration mode check failed")
+				It("ConfigurationMode=Auto", func() {
+					errors := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot, "Auto")
+					Expect(errors).To(BeEmpty())
 				})
 
-				It("should leave replicatedStorageClassName empty for each RV", func() {
-					errs := helpers.CheckRVReplicatedStorageClassNameEmptyFromSnapshot(rvSnapshot)
-					Expect(errs).To(BeEmpty(), "RV replicatedStorageClassName check failed")
+				It("replicatedStorageClassName matches PV storageClassName", func() {
+					errors := helpers.CheckRVReplicatedStorageClassNameFromSnapshot(rvSnapshot, pvToRSC)
+					Expect(errors).To(BeEmpty())
 				})
 
-				It("should set manualConfiguration for each RV", func() {
-					errs := helpers.CheckRVManualConfigurationFromSnapshot(rvSnapshot)
-					Expect(errs).To(BeEmpty(), "RV manualConfiguration check failed")
-				})
-
-				It("should set correct manualConfiguration fields for each RV", func() {
-					errs := helpers.CheckRVManualConfigurationFieldsFromSnapshot(rvSnapshot, migratedExpected)
-					Expect(errs).To(BeEmpty(), "RV manualConfiguration fields check failed")
+				It("manualConfiguration is nil", func() {
+					errors := helpers.CheckRVManualConfigurationNilFromSnapshot(rvSnapshot)
+					Expect(errors).To(BeEmpty())
 				})
 
 				It("should set RV size equal to PV capacity", func() {
@@ -263,6 +263,16 @@ func buildMigratorScenario(scenarioName string, label string) {
 				It("should not set no-persistent-volume label on each RV", func() {
 					errs := helpers.CheckRVNoPersistentVolumeLabelAbsentFromSnapshot(rvSnapshot)
 					Expect(errs).To(BeEmpty(), "RV no-persistent-volume label check failed")
+				})
+
+				It("switch-to-auto-configuration label absent", func() {
+					errors := helpers.CheckRVSwitchToAutoLabelAbsentFromSnapshot(rvSnapshot)
+					Expect(errors).To(BeEmpty())
+				})
+
+				It("auto-configuration-blocked label absent", func() {
+					errors := helpers.CheckRVAutoConfigurationBlockedLabelAbsentFromSnapshot(rvSnapshot)
+					Expect(errors).To(BeEmpty())
 				})
 
 				It("should set CSI controller finalizer on each RV", func() {
@@ -562,6 +572,11 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 				errs := helpers.CheckRSPLVMGroupsMatchOldBaselinesFromSnapshot(rspSnapshot, oldRSPs)
 				Expect(errs).To(BeEmpty(), "RSP lvmVolumeGroups check failed")
 			})
+
+			It("no temporary conversion RSPs remain", func() {
+				errors := helpers.CheckRSPNoConversionRSPsFromSnapshot(rspSnapshot)
+				Expect(errors).To(BeEmpty())
+			})
 		})
 
 		Describe("RV resource checks", func() {
@@ -589,7 +604,7 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 			})
 
 			It("should set configuration mode Manual for each RV", func() {
-				errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot)
+				errs := helpers.CheckRVConfigurationModeFromSnapshot(rvSnapshot, "Manual")
 				Expect(errs).To(BeEmpty(), "RV configuration mode check failed")
 			})
 
@@ -621,6 +636,16 @@ var _ = Describe("Linstor resources without PV", Ordered, Label("WithoutPV"), fu
 			It("should set CSI controller finalizer on each RV", func() {
 				errs := helpers.CheckRVCSIControllerFinalizerFromSnapshot(rvSnapshot)
 				Expect(errs).To(BeEmpty(), "RV CSI controller finalizer check failed")
+			})
+
+			It("switch-to-auto-configuration label absent", func() {
+				errors := helpers.CheckRVSwitchToAutoLabelAbsentFromSnapshot(rvSnapshot)
+				Expect(errors).To(BeEmpty())
+			})
+
+			It("auto-configuration-blocked label absent", func() {
+				errors := helpers.CheckRVAutoConfigurationBlockedLabelAbsentFromSnapshot(rvSnapshot)
+				Expect(errors).To(BeEmpty())
 			})
 		})
 
