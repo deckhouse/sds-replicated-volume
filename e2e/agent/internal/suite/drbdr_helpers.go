@@ -70,6 +70,7 @@ func assertDRBDRConfigured(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
 	e.Fatalf("DRBDResource %q has no Configured condition", drbdr.Name)
 }
 
+//nolint:unparam // condType is always DRBDResourceCondConfiguredType today; kept general for other condition types.
 func assertDRBDRCondition(e envtesting.E, drbdr *v1alpha1.DRBDResource, condType string, status metav1.ConditionStatus, reason string) {
 	e.Helper()
 	for _, cond := range drbdr.Status.Conditions {

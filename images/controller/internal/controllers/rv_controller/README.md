@@ -223,9 +223,12 @@ count (not the intended diskful count), so it stays correct during transitions w
 The controller now derives both the diskful and tie-breaker counts from `IntendedLayout()`:
 formation (`reconcileFormationStepPreconfigure`), `computeTargetQuorum` (`minD`), and
 `rsc_controller`'s `validateEligibleNodes` all call it (the latter through a config built from
-FTT/GMDR), so the D/TB formula lives in exactly one place for controller code. The only remaining
-duplicate is the e2e helper `pkg/framework/t_layout.go`; collapsing that onto `IntendedLayout` is
-deferred to the final-tests work.
+FTT/GMDR), so the D/TB formula lives in exactly one place for controller code. The e2e helper
+`pkg/framework/t_layout.go` also calls `IntendedLayout()` now (via a config built from its
+`TestLayout` FTT/GMDR), so no production/framework copy of the formula remains. The one deliberate
+re-derivation left is the independent cross-check in the e2e selftest
+(`pkg/framework/selftest/layout_test.go`), which recomputes the expected layout by hand to validate
+the real cluster state against `ExpectedReplicas()` rather than to reuse the formula.
 
 ## Conditions
 

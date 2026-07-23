@@ -131,13 +131,47 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that all fields of `spec` section of the ReplicatedStorageClass resource are **immutable**.
+> Please note that most fields of the `spec` section of the ReplicatedStorageClass resource are **immutable** after creation. Only the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy` and `eligibleNodesConflictResolutionStrategy` can be changed on an existing resource; changing any other field (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`, etc.) is rejected on update.
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
 #### Updating the ReplicatedStorageClass resource
 
-It is currently **not possible** to change configuration parameters of the StorageClass created via the ReplicatedStorageClass resource.
+Most `spec` fields are immutable after creation, and any attempt to change one is rejected with an error naming the field; changing such a field (for example `storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`) requires recreating the resource. The replication settings are mutable, which enables the r3→r2 migration below.
+
+##### Migrating volumes from three replicas (r3) to two replicas + tie-breaker (r2)
+
+Editing `spec.replication` of an existing ReplicatedStorageClass changes the intended layout of **all** volumes of that class at once. To migrate from `ConsistencyAndAvailability` (three data replicas, layout `3D`) to `Availability` (two data replicas plus a diskless tie-breaker, layout `2D+1TB`):
+
+1. Edit the class:
+
+   ```shell
+   kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
+   ```
+
+2. The controller migrates each volume in place: one diskful replica is retyped into a tie-breaker (no full resync, no data movement) and its logical volume is released. Watch progress per volume via the `LayoutConverged` condition and the `Layout` print column:
+
+   ```shell
+   kubectl get replicatedvolume -o wide
+   kubectl get replicatedvolume <RV_NAME> -o jsonpath='{.status.layout} {range .status.conditions[?(@.type=="LayoutConverged")]}{.status}/{.reason}{end}{"\n"}'
+   ```
+
+   A volume is migrated when `LayoutConverged` is `True/Converged` and `status.layout` is `2D+1TB`.
+
+3. Watch the class-wide rollout via the `ConfigurationRolledOut` condition and the `status.volumes` counters:
+
+   ```shell
+   kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.volumes}{"\n"}'
+   ```
+
+   The rollout is complete when `ConfigurationRolledOut` is `True` and `status.volumes.aligned` equals the total number of volumes.
+
+**Requirements.** The `2D+1TB` layout needs a node for the tie-breaker in addition to the two diskful nodes: at least 3 nodes for `Ignored` topology, at least 3 zones for `TransZonal`, or at least 3 nodes in the volume's zone for `Zonal`. These match the `3D` requirements, so r3→r2 does not raise them.
+
+**Limitations.**
+
+- There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `LayoutConverged=False/TransitionUnsupported` and performs no action — it requires manual intervention.
+- The edit applies to every volume of the class at once; a gradual or opt-in rollout (`configurationRolloutStrategy` `maxParallel`/`NewVolumesOnly`) is not yet implemented.
 
 #### Deleting the ReplicatedStorageClass resource
 

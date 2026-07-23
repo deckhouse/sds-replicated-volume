@@ -91,6 +91,23 @@ func (f *Framework) Drbdsetup(ctx context.Context, nodeName string, args ...stri
 	return f.execOnNode(ctx, agentTarget, nodeName, cmd, "drbdsetup "+strings.Join(args, " "))
 }
 
+// RebootNode reboots the host of nodeName by running `systemctl reboot` on the
+// node via nsenter inside the sds-node-configurator pod. It is used only by
+// Disruptive specs to simulate a node outage; the node is expected to come back
+// on its own, after which its replica rejoins the datamesh.
+//
+// The reboot tears down the sds-node-configurator pod mid-exec, so the resulting
+// transport error is expected and intentionally ignored. Goroutine-safe.
+func (f *Framework) RebootNode(ctx context.Context, nodeName string) {
+	GinkgoHelper()
+	nsenter, err := f.resolveNsenterBin(ctx, nodeName)
+	if err != nil {
+		Fail(fmt.Sprintf("reboot: resolving nsenter on node %q: %v", nodeName, err))
+	}
+	cmd := []string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "systemctl", "reboot"}
+	_, _ = f.execOnNode(ctx, sncTarget, nodeName, cmd, "systemctl reboot")
+}
+
 // LVM executes `lvm.static <args>` on the host of nodeName via nsenter
 // inside the sds-node-configurator pod and returns the result.
 // Goroutine-safe.

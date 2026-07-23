@@ -485,7 +485,7 @@ Yes, this is the expected behavior. Currently, the `sds-replicated-volume` modul
 
 ## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
-Yes, this is the expected behavior. All `spec` fields of the resource made immutable.
+Partly. Most `spec` fields are immutable after creation, and updates to them are rejected with an error that names the field. The replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`) and the `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy` fields **can** be changed on an existing resource. Editing `replication` is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); see the "Updating the ReplicatedStorageClass resource" section of the usage guide. All other fields (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`, and so on) remain immutable — to change them, recreate the resource.
 
 ## Deleting a ReplicatedStorageClass resource does not delete its child StorageClass in Kubernetes. What can I do?
 

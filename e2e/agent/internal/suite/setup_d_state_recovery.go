@@ -63,7 +63,7 @@ func SetupDStateRecovery(
 	if drbdrFrozen == nil {
 		e.Fatal("require: drbdrFrozen must not be nil")
 	}
-	if llvFrozen == nil {
+	if llvFrozen == nil { //nolint:staticcheck // SA5011: e.Fatal below is terminal, so llvFrozen is non-nil afterwards.
 		e.Fatal("require: llvFrozen must not be nil")
 	}
 
@@ -71,6 +71,7 @@ func SetupDStateRecovery(
 
 	// `dmsetup` accepts a device path; using the LVM symlink is robust
 	// against dm-mapper name mangling (LVM doubles dashes in mapper names).
+	//nolint:staticcheck // SA5011: e.Fatal above is terminal, so llvFrozen is non-nil here.
 	devPath := fmt.Sprintf("/dev/%s/%s",
 		node.LVG.Spec.ActualVGNameOnTheNode,
 		llvFrozen.Spec.ActualLVNameOnTheNode)

@@ -508,7 +508,7 @@ d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- d
 
 ## Я не могу обновить поля в spec у ресурса ReplicatedStorageClass. Это ожидаемое поведение?
 
-Да, поведение ожидаемое. Все поля 'spec' ReplicatedStorageClass неизменяемы.
+Частично. Большинство полей `spec` неизменяемы после создания, и их обновление отклоняется с ошибкой, называющей поле. Однако параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), а также поля `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy` **можно** менять у существующего ресурса. Именно изменением `replication` выполняется миграция томов между layout'ами — например с `ConsistencyAndAvailability` (`3D`) на `Availability` (`2D+1TB`); см. раздел «Обновление ресурса ReplicatedStorageClass» в руководстве по использованию. Все остальные поля (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector` и т. д.) остаются неизменяемыми — чтобы их изменить, ресурс нужно пересоздать.
 
 ## При удалении ресурса ReplicatedStorageClass не удаляется его дочерний StorageClass в Kubernetes. Что делать?
 

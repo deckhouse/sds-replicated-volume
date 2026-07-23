@@ -106,7 +106,10 @@ spec:
 
               Defines a Kubernetes Storage class configuration.
 
-              > Note that this field is in read-only mode.
+              > Most fields are immutable after creation. Only the replication settings
+              > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
+              > configurationRolloutStrategy and eligibleNodesConflictResolutionStrategy can be
+              > changed on an existing resource; all other fields are rejected on update.
             properties:
               configurationRolloutStrategy:
                 description: |-

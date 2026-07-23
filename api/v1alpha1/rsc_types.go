@@ -116,7 +116,10 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 //
 // Defines a Kubernetes Storage class configuration.
 //
-// > Note that this field is in read-only mode.
+// > Most fields are immutable after creation. Only the replication settings
+// > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
+// > configurationRolloutStrategy and eligibleNodesConflictResolutionStrategy can be
+// > changed on an existing resource; all other fields are rejected on update.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
 	// StoragePool is the name of a ReplicatedStoragePool resource.

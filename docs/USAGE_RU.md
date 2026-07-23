@@ -126,13 +126,47 @@ spec:
 
 Результатом обработки ресурса ReplicatedStorageClass станет создание необходимого StorageClass в Kubernetes.
 
-> Обратите внимание, что все поля в `spec` ресурса ReplicatedStorageClass, являются **неизменяемыми**.
+> Обратите внимание, что большинство полей `spec` ресурса ReplicatedStorageClass являются **неизменяемыми** после создания. Изменить у существующего ресурса можно только параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), а также `configurationRolloutStrategy` и `eligibleNodesConflictResolutionStrategy`; изменение любого другого поля (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector` и т. д.) при обновлении будет отклонено.
 
 Поле `status` будет обновляться `sds-replicated-volume-controller'ом` для отображения информации о результатах проводимых операций.
 
 #### Обновление ресурса ReplicatedStorageClass
 
-Поменять параметры StorageClass, созданного через ресурс ReplicatedStorageClass, на данный момент **невозможно**.
+Большинство полей `spec` неизменяемы после создания, и попытка их изменить отклоняется с ошибкой, называющей поле; для изменения такого поля (например `storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`) ресурс нужно пересоздать. Параметры репликации изменяемы — именно это и позволяет выполнить миграцию r3→r2, описанную ниже.
+
+##### Миграция томов с трёх реплик (r3) на две реплики + tie-breaker (r2)
+
+Изменение `spec.replication` у существующего ReplicatedStorageClass меняет целевой layout сразу **у всех** томов этого класса. Чтобы мигрировать с `ConsistencyAndAvailability` (три реплики данных, layout `3D`) на `Availability` (две реплики данных плюс diskless tie-breaker, layout `2D+1TB`):
+
+1. Измените класс:
+
+   ```shell
+   kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
+   ```
+
+2. Контроллер мигрирует каждый том на месте: одна diskful-реплика ретайпится в tie-breaker (без полного ресинка и без переноса данных), её логический том освобождается. Прогресс по каждому тому виден через condition `LayoutConverged` и колонку `Layout`:
+
+   ```shell
+   kubectl get replicatedvolume -o wide
+   kubectl get replicatedvolume <RV_NAME> -o jsonpath='{.status.layout} {range .status.conditions[?(@.type=="LayoutConverged")]}{.status}/{.reason}{end}{"\n"}'
+   ```
+
+   Том мигрирован, когда `LayoutConverged` = `True/Converged`, а `status.layout` = `2D+1TB`.
+
+3. Прогресс по классу в целом виден через condition `ConfigurationRolledOut` и счётчики `status.volumes`:
+
+   ```shell
+   kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.volumes}{"\n"}'
+   ```
+
+   Раскатка завершена, когда `ConfigurationRolledOut` = `True`, а `status.volumes.aligned` равен общему числу томов.
+
+**Требования.** Для layout `2D+1TB` кроме двух diskful-узлов нужен узел под tie-breaker: не менее 3 узлов для топологии `Ignored`, не менее 3 зон для `TransZonal` либо не менее 3 узлов в зоне тома для `Zonal`. Это те же требования, что и для `3D`, поэтому миграция r3→r2 их не повышает.
+
+**Ограничения.**
+
+- Автоматического обратного пути нет: изменение `replication` в сторону большего числа реплик (r2→r3) репортится на каждом томе как `LayoutConverged=False/TransitionUnsupported` и не выполняет никаких действий — требуется ручная разборка.
+- Правка применяется сразу ко всем томам класса; постепенная или выборочная раскатка (`configurationRolloutStrategy` `maxParallel`/`NewVolumesOnly`) пока не реализована.
 
 #### Удаление ресурса ReplicatedStorageClass
 
