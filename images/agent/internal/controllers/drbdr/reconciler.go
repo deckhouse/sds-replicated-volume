@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -34,7 +35,11 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/blksize"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -76,6 +81,16 @@ func (r *Reconciler) Reconcile(
 	req DRBDReconcileRequest,
 ) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
+
+	// If a DRBD module upgrade was armed at startup, run it exactly once before
+	// any DRBD reconciliation. Execute suspends DRBDMapper devices, downs all
+	// DRBD resources and reloads the kernel module; the reconciles that follow
+	// reconfigure resources and resume the devices.
+	if err := upgrade.Trigger.DoIfEnabled(func() error {
+		return upgrade.Execute(rf.Ctx(), slog.Default(), r.cl, r.nodeName)
+	}); err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
 
 	// Edge case: scanner found non-prefixed DRBD resource
 	if req.ActualNameOnTheNode != "" {
@@ -238,6 +253,14 @@ func (r *Reconciler) reconcileDRBDR(
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 	}
 
+	// Phase 6b: Once DRBD is configured, resume the DRBDMapper upper device if
+	// it was suspended (e.g. by an online module upgrade). Idempotent: a no-op
+	// when there is no matching mapper or it is not suspended.
+	var resumeErr error
+	if drbdErr == nil && !aState.IsZero() && aState.ResourceExists() {
+		resumeErr = r.resumeDRBDMapper(rf.Ctx(), drbdr)
+	}
+
 	// LLV backing the disk after convergence: empty once detached, non-empty if
 	// a detach failed or was skipped (maintenance). Drives both the release
 	// below and the reported lvmLogicalVolumeName.
@@ -266,7 +289,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// Phase 8: Report status (lvmLogicalVolumeName mirrors the actual disk) and
 	// patch it. The pending-release list is written after ensureReportState,
 	// which may initialize ActiveConfiguration.
-	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
+	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr, resumeErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
@@ -807,6 +830,67 @@ func ensureLocalPortConflictResolved(
 	}
 
 	return drbdErr
+}
+
+// resumeDRBDMapper finds the DRBDMapper whose lowerDevicePath matches this
+// DRBDResource's device. If the upper device is SUSPENDED (e.g. after an online
+// module upgrade), it reloads the internal device table to point at the DRBD
+// device, resumes the internal device, then resumes the upper device.
+func (r *Reconciler) resumeDRBDMapper(ctx context.Context, drbdr *v1alpha1.DRBDResource) error {
+	device := drbdr.Status.Device
+	if device == "" {
+		return nil
+	}
+
+	var mappers v1alpha1.DRBDMapperList
+	if err := r.cl.List(ctx, &mappers); err != nil {
+		return flow.Wrapf(err, "listing DRBDMappers")
+	}
+
+	for i := range mappers.Items {
+		m := &mappers.Items[i]
+		if m.Spec.NodeName != r.nodeName || m.Spec.LowerDevicePath != device {
+			continue
+		}
+
+		upperInfo, err := dmsetup.Info(ctx, m.Name)
+		if err != nil || upperInfo == nil {
+			return nil
+		}
+		if upperInfo.State != "SUSPENDED" {
+			return nil
+		}
+
+		logger := log.FromContext(ctx)
+		internalName := drbdm.InternalDeviceName(m.Name)
+
+		sectors, err := blksize.GetDeviceSizeInSectors(device)
+		if err != nil {
+			return flow.Wrapf(err, "getting device size for %q", device)
+		}
+		table := fmt.Sprintf("0 %d linear %s 0", sectors, device)
+
+		logger.Info("Reloading internal device table after upgrade",
+			"internalDevice", internalName, "lowerDevice", device)
+		if err := dmsetup.Load(ctx, internalName, table); err != nil {
+			return flow.Wrapf(err, "reloading table on %q", internalName)
+		}
+
+		logger.Info("Resuming internal device", "internalDevice", internalName)
+		if err := dmsetup.Resume(ctx, internalName); err != nil {
+			return flow.Wrapf(err, "resuming internal device %q", internalName)
+		}
+
+		logger.Info("Resuming upper device after DRBD configured",
+			"drbdMapper", m.Name)
+		if err := dmsetup.Resume(ctx, m.Name); err != nil {
+			return flow.Wrapf(err, "resuming upper device %q", m.Name)
+		}
+
+		return nil
+	}
+
+	return nil
 }
 
 // formatLVMDevicePath formats the path to an LVM logical volume device.

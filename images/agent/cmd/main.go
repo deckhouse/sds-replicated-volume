@@ -32,6 +32,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
@@ -97,6 +98,10 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 		return u.LogError(log, err)
 	}
 	log = log.With("nodeName", envConfig.NodeName())
+
+	// DRBD MODULE UPGRADE CHECK (lightweight, no API calls). Arms a one-shot
+	// trigger that the first DRBDR reconcile fires before touching DRBD.
+	upgrade.CheckAndArm(log)
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
