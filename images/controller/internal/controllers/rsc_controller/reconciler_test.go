@@ -1305,6 +1305,124 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
 		})
 
+		It("keeps already-set spec.Storage and only clears storagePool when they match", func() {
+			// Legacy object carrying both storagePool and storage (reachable because the RSC
+			// webhook is not registered in legacy installs). Content matches the RSP.
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool: "rsp-1",
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-1"},
+							{Name: "lvg-2"},
+						},
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+						{Name: "lvg-2"},
+					},
+				},
+			}
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc, rsp).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
+				Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
+
+			// storagePool cleared, storage kept unchanged (not overwritten).
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
+			Expect(updatedRSC.Spec.Storage).NotTo(BeNil())
+			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
+			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups).To(HaveLen(2))
+			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups[0].Name).To(Equal("lvg-1"))
+			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups[1].Name).To(Equal("lvg-2"))
+
+			// Matching content is not a conflict: reconcile continued (finalizer added).
+			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+		})
+
+		It("keeps already-set spec.Storage and clears storagePool with an honest condition on content conflict", func() {
+			// Legacy object with both fields set, but storage disagrees with the RSP the
+			// deprecated storagePool points to. storage is immutable once set, so it must not
+			// be overwritten (that would be rejected by the update webhook and trap reconcile
+			// in a fail-loop); the conflict is surfaced instead.
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool: "rsp-1",
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-existing"},
+						},
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+						{Name: "lvg-2"},
+					},
+				},
+			}
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc, rsp).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
+				Build()
+			rec = NewReconciler(cl)
+
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-1"},
+			})
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
+
+			// storagePool cleared, but existing storage is NOT overwritten with the RSP config.
+			Expect(updatedRSC.Spec.StoragePool).To(BeEmpty()) //nolint:staticcheck // SA1019: testing migration from deprecated StoragePool
+			Expect(updatedRSC.Spec.Storage).NotTo(BeNil())
+			Expect(updatedRSC.Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVM))
+			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups).To(HaveLen(1))
+			Expect(updatedRSC.Spec.Storage.LVMVolumeGroups[0].Name).To(Equal("lvg-existing"))
+
+			// The conflict is surfaced honestly (Ready=False/InvalidConfiguration).
+			readyCond := meta.FindStatusCondition(updatedRSC.Status.Conditions, v1alpha1.ReplicatedStorageClassCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration))
+			Expect(readyCond.Message).To(ContainSubstring("conflicting content"))
+			Expect(updatedRSC.Status.Phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration))
+
+			// Reconcile stopped at migration (Done), so no finalizer added this pass.
+			Expect(updatedRSC.Finalizers).To(BeEmpty())
+		})
+
 		It("sets conditions when RSP is not found", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},

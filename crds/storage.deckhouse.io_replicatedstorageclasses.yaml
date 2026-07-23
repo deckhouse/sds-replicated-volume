@@ -89,6 +89,21 @@ spec:
 
               TransZonal zone count validations for FTT/GMDR:
 
+              Immutable spec fields (transition rules; evaluated on update only):
+              the conservative r3->r2 migration matrix permits changing only replication,
+              failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
+              eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
+              creation. These CEL rules guard the scalar/enum and bounded-list fields. The unbounded
+              structured fields (storage, nodeLabelSelector) are guarded by the update webhook
+              (images/webhooks/handlers/rscValidator.go) instead of CEL, because a CEL equality
+              comparison over their unbounded list/map would risk the per-expression CEL cost budget
+              and cause the apiserver to reject the whole CRD at install time.
+
+              reclaimPolicy, topology, volumeAccess and zones are strictly immutable (never touched by
+              the controller). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
+              controller fills them from nil to their default (rsc_controller applySpecDefaults), so the
+              rules must permit that initial nil->value transition while still rejecting later changes.
+
               Defines a Kubernetes Storage class configuration.
 
               > Note that this field is in read-only mode.
@@ -485,6 +500,22 @@ spec:
                 || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
                 != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones)
                 == 3 || size(self.zones) == 5
+            - message: spec.reclaimPolicy is immutable
+              rule: self.reclaimPolicy == oldSelf.reclaimPolicy
+            - message: spec.topology is immutable
+              rule: self.topology == oldSelf.topology
+            - message: spec.volumeAccess is immutable
+              rule: has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess)
+                || self.volumeAccess == oldSelf.volumeAccess)
+            - message: spec.zones is immutable
+              rule: has(self.zones) == has(oldSelf.zones) && (!has(self.zones) ||
+                self.zones == oldSelf.zones)
+            - message: spec.systemNetworkNames is immutable once set
+              rule: '!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames)
+                && self.systemNetworkNames == oldSelf.systemNetworkNames)'
+            - message: spec.eligibleNodesPolicy is immutable once set
+              rule: '!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy)
+                && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)'
           status:
             description: Displays current information about the Storage Class.
             properties:

@@ -18,8 +18,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
@@ -48,6 +50,19 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
 		return &kwhvalidating.ValidatorResult{}, nil
+	}
+
+	// On update, reject changes to immutable spec fields that are not guarded by CEL
+	// transition rules on the CRD (see validateImmutableSpecFields). This runs before any
+	// cluster I/O so a rejected mutation fails fast.
+	if arReview.Operation == model.OperationUpdate {
+		oldRSC, err := decodeReplicatedStorageClass(arReview.OldObjectRaw)
+		if err != nil {
+			return nil, err
+		}
+		if r := validateImmutableSpecFields(oldRSC, rsc); !r.Valid {
+			return r, nil
+		}
 	}
 
 	// Determine control plane type based on environment variable.
@@ -111,6 +126,42 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	}
 
 	return &kwhvalidating.ValidatorResult{Valid: true}, nil
+}
+
+// decodeReplicatedStorageClass decodes the admission review's old object JSON into a
+// ReplicatedStorageClass. Used on update to compare the previous spec against the new one.
+func decodeReplicatedStorageClass(raw []byte) (*srv.ReplicatedStorageClass, error) {
+	var rsc srv.ReplicatedStorageClass
+	if err := json.Unmarshal(raw, &rsc); err != nil {
+		return nil, fmt.Errorf("failed to decode old ReplicatedStorageClass from admission review: %w", err)
+	}
+	return &rsc, nil
+}
+
+// validateImmutableSpecFields rejects updates that change spec fields whose immutability is
+// enforced by the webhook rather than by CEL transition rules on the CRD.
+//
+// The conservative r3->r2 migration matrix permits changing only replication,
+// failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
+// eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
+// creation. CEL transition rules on the CRD guard the scalar/enum and bounded-list fields
+// (reclaimPolicy, topology, volumeAccess, zones, systemNetworkNames, eligibleNodesPolicy).
+// The unbounded structured fields below are guarded here because a CEL equality comparison
+// over their unbounded list/map would risk the per-expression CEL cost budget and cause the
+// apiserver to reject the whole CRD at install time.
+//
+// storage is immutable *once set*: the controller migrates the deprecated storagePool field
+// into storage (rsc_controller reconcileStorageMigration sets storage from nil to a value),
+// so the initial nil->value transition must be allowed while any later change or removal is
+// rejected. nodeLabelSelector is strictly immutable — the controller never mutates it.
+func validateImmutableSpecFields(oldRSC, newRSC *srv.ReplicatedStorageClass) *kwhvalidating.ValidatorResult {
+	if oldRSC.Spec.Storage != nil && !reflect.DeepEqual(oldRSC.Spec.Storage, newRSC.Spec.Storage) {
+		return &kwhvalidating.ValidatorResult{Valid: false, Message: "spec.storage is immutable once set"}
+	}
+	if !reflect.DeepEqual(oldRSC.Spec.NodeLabelSelector, newRSC.Spec.NodeLabelSelector) {
+		return &kwhvalidating.ValidatorResult{Valid: false, Message: "spec.nodeLabelSelector is immutable"}
+	}
+	return &kwhvalidating.ValidatorResult{Valid: true}
 }
 
 // validateLegacySpecFields rejects spec fields that are only for new control plane.

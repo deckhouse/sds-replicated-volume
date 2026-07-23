@@ -93,6 +93,27 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 //	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 4",message="TransZonal with FTT=2, GMDR=1 requires exactly 4 zones."
 //	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones) == 3 || size(self.zones) == 5",message="TransZonal with FTT=2, GMDR=2 requires exactly 3 or 5 zones."
 //
+// Immutable spec fields (transition rules; evaluated on update only):
+// the conservative r3->r2 migration matrix permits changing only replication,
+// failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
+// eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
+// creation. These CEL rules guard the scalar/enum and bounded-list fields. The unbounded
+// structured fields (storage, nodeLabelSelector) are guarded by the update webhook
+// (images/webhooks/handlers/rscValidator.go) instead of CEL, because a CEL equality
+// comparison over their unbounded list/map would risk the per-expression CEL cost budget
+// and cause the apiserver to reject the whole CRD at install time.
+//
+// reclaimPolicy, topology, volumeAccess and zones are strictly immutable (never touched by
+// the controller). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
+// controller fills them from nil to their default (rsc_controller applySpecDefaults), so the
+// rules must permit that initial nil->value transition while still rejecting later changes.
+// +kubebuilder:validation:XValidation:rule="self.reclaimPolicy == oldSelf.reclaimPolicy",message="spec.reclaimPolicy is immutable"
+// +kubebuilder:validation:XValidation:rule="self.topology == oldSelf.topology",message="spec.topology is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess) || self.volumeAccess == oldSelf.volumeAccess)",message="spec.volumeAccess is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones)",message="spec.zones is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy) && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)",message="spec.eligibleNodesPolicy is immutable once set"
+//
 // Defines a Kubernetes Storage class configuration.
 //
 // > Note that this field is in read-only mode.

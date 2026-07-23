@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -250,7 +251,10 @@ func (r *Reconciler) reconcileDeletion(
 //
 // Logic:
 //   - If RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
-//   - If RSP found → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+//   - If RSP found and spec.storage is empty → copy type+lvmVolumeGroups to spec.storage, clear storagePool
+//   - If RSP found and spec.storage is already set → keep spec.storage (it is immutable once set;
+//     overwriting it would be rejected by the update webhook and trap reconcile in a fail-loop),
+//     only clear the deprecated storagePool; on a content conflict, surface Ready=False/InvalidConfiguration
 func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -282,17 +286,54 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		return rf.Done()
 	}
 
-	// RSP found, migrate storage configuration.
-	base := rsc.DeepCopy()
-
+	// RSP found. Build the storage configuration that the deprecated storagePool maps to.
 	// Clone LVMVolumeGroups to avoid aliasing.
 	lvmVolumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, len(rsp.Spec.LVMVolumeGroups))
 	copy(lvmVolumeGroups, rsp.Spec.LVMVolumeGroups)
-
-	rsc.Spec.Storage = &v1alpha1.ReplicatedStorageClassStorage{
+	migratedStorage := &v1alpha1.ReplicatedStorageClassStorage{
 		Type:            rsp.Spec.Type,
 		LVMVolumeGroups: lvmVolumeGroups,
 	}
+
+	base := rsc.DeepCopy()
+
+	// spec.storage is immutable once set (enforced by the update webhook). If it is already
+	// populated, never overwrite it: the webhook would reject the change and reconcile would
+	// spin in a fail-loop for legacy objects that carry both storagePool and storage (the RSC
+	// webhook is not registered in legacy installs, so that state is reachable). Keep the
+	// authoritative spec.storage and only drop the deprecated storagePool; when the two
+	// disagree, surface the conflict honestly instead of silently overwriting.
+	if rsc.Spec.Storage != nil {
+		conflict := !reflect.DeepEqual(rsc.Spec.Storage, migratedStorage)
+
+		rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: dropping deprecated field, keeping authoritative spec.storage
+		if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
+			return rf.Fail(err)
+		}
+
+		if conflict {
+			const conflictMessage = "spec.storagePool and spec.storage were both set with conflicting content; " +
+				"the deprecated spec.storagePool was dropped and spec.storage kept unchanged (storage is immutable once set)"
+			rf.Log().Info(conflictMessage)
+
+			statusBase := rsc.DeepCopy()
+			changed := applyReadyCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration,
+				conflictMessage)
+			changed = applyPhase(rsc, v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, conflictMessage) || changed
+			if changed {
+				if err := r.patchRSCStatus(rf.Ctx(), rsc, statusBase); err != nil {
+					return rf.Fail(err)
+				}
+			}
+			return rf.Done()
+		}
+
+		return rf.Continue()
+	}
+
+	// spec.storage not yet set: perform the normal migration.
+	rsc.Spec.Storage = migratedStorage
 	rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 
 	if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
