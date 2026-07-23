@@ -19,6 +19,8 @@ package upgrade
 import (
 	"os"
 	"strings"
+
+	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
 // TargetDRBDVersion is the DRBD kernel module version that this agent expects.
@@ -26,6 +28,16 @@ import (
 // provisioning (currently DRBD is loaded by an init container, and the .ko
 // files are not persisted on the host filesystem).
 const TargetDRBDVersion = "9.2.13"
+
+// FakeUpgrade makes the agent run the upgrade sequence on every start,
+// regardless of the running module version. Kernel module unload/load is
+// skipped; only suspend + DRBD down + controller re-configure + resume
+// is exercised. For testing only.
+var FakeUpgrade = true
+
+// Trigger is the global upgrade trigger. Armed by CheckAndArm at startup,
+// fired by the first DRBDR reconcile via DoIfEnabled.
+var Trigger commonsync.Trigger
 
 const drbdVersionPath = "/sys/module/drbd/version"
 

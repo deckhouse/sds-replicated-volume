@@ -17,6 +17,7 @@ limitations under the License.
 package drbdsetup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,10 +74,10 @@ func ExecuteNewMinor(ctx context.Context, resource string, minor uint, volume ui
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		switch errToExitCode(err) {
-		case 161:
+		switch {
+		case bytes.Contains(out, []byte("(161)")):
 			err = ErrNewMinorAlreadyExists
-		case 158:
+		case bytes.Contains(out, []byte("(158)")):
 			err = ErrNewMinorResourceNotFound
 		}
 		return withOutput(err, out)

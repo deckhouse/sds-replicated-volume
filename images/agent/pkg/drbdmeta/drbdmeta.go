@@ -92,6 +92,23 @@ func ExecuteCreateMD(ctx context.Context, minor uint, backingDev string) error {
 	return nil
 }
 
+// ExecuteApplyAL applies the activity log on existing DRBD metadata.
+// Required before drbdsetup attach when metadata is unclean (e.g. after
+// drbdsetup down). On clean metadata this is a no-op.
+func ExecuteApplyAL(ctx context.Context, minor uint, backingDev string) error {
+	args := []string{
+		strconv.FormatUint(uint64(minor), 10),
+		"v09", backingDev, "internal",
+		"apply-al",
+	}
+	cmd := ExecCommandContext(ctx, Command, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("running command %s %v: %w; output: %q", Command, args, err, string(out))
+	}
+	return nil
+}
+
 // ExecuteCheckMD checks if DRBD metadata exists on a backing device.
 // Returns (true, nil) if metadata exists, (false, nil) if not, or error on failure.
 func ExecuteCheckMD(ctx context.Context, minor uint, backingDev string) (bool, error) {
@@ -106,6 +123,9 @@ func ExecuteCheckMD(ctx context.Context, minor uint, backingDev string) (bool, e
 	output := string(out)
 	if strings.Contains(output, "No valid meta data found") {
 		return false, nil
+	}
+	if strings.Contains(output, "unclean") {
+		return true, nil
 	}
 
 	return false, fmt.Errorf(

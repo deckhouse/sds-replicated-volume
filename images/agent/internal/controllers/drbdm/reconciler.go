@@ -92,12 +92,12 @@ func (r *Reconciler) reconcileNormal(
 		return outcome
 	}
 
-	outcome = r.reconcileDevice(rf.Ctx(), obj)
+	upperInfo, outcome := r.reconcileDevice(rf.Ctx(), obj)
 	if outcome.ShouldReturn() {
 		return outcome
 	}
 
-	outcome = r.reconcileStatus(rf.Ctx(), obj)
+	outcome = r.reconcileStatus(rf.Ctx(), obj, upperInfo)
 	return outcome
 }
 
@@ -197,12 +197,13 @@ func (r *Reconciler) reconcileEnsureFinalizer(
 // reconcileDevice creates the two-layer dm-linear devices if they don't exist.
 // Layer 1 (internal): maps spec.lowerDevicePath
 // Layer 2 (upper): maps the internal device, provides stable path to users
+// Returns the upper device info for reuse by reconcileStatus.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileDevice(
 	ctx context.Context,
 	obj *v1alpha1.DRBDMapper,
-) (outcome flow.ReconcileOutcome) {
+) (upperInfo *dmsetup.DeviceInfo, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "device")
 	defer rf.OnEnd(&outcome)
 
@@ -212,9 +213,9 @@ func (r *Reconciler) reconcileDevice(
 	if err != nil {
 		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
 		if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
-			return rf.Fail(patchErr)
+			return nil, rf.Fail(patchErr)
 		}
-		return rf.Fail(err)
+		return nil, rf.Fail(err)
 	}
 
 	if internalInfo == nil {
@@ -222,19 +223,19 @@ func (r *Reconciler) reconcileDevice(
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 				fmt.Sprintf("creating internal device: %v", err))
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
-				return rf.Fail(patchErr)
+				return nil, rf.Fail(patchErr)
 			}
-			return rf.Fail(err)
+			return nil, rf.Fail(err)
 		}
 	}
 
-	upperInfo, err := dmsetup.Info(rf.Ctx(), obj.Name)
+	upperInfo, err = dmsetup.Info(rf.Ctx(), obj.Name)
 	if err != nil {
 		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
 		if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
-			return rf.Fail(patchErr)
+			return nil, rf.Fail(patchErr)
 		}
-		return rf.Fail(err)
+		return nil, rf.Fail(err)
 	}
 
 	if upperInfo == nil {
@@ -242,33 +243,34 @@ func (r *Reconciler) reconcileDevice(
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 				fmt.Sprintf("creating upper device: %v", err))
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
-				return rf.Fail(patchErr)
+				return nil, rf.Fail(patchErr)
 			}
-			return rf.Fail(err)
+			return nil, rf.Fail(err)
+		}
+		upperInfo, err = dmsetup.Info(rf.Ctx(), obj.Name)
+		if err != nil {
+			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
+			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
+				return nil, rf.Fail(patchErr)
+			}
+			return nil, rf.Fail(err)
 		}
 	}
 
-	return rf.Continue()
+	return upperInfo, rf.Continue()
 }
 
 // reconcileStatus updates the status subresource with device info and conditions.
+// upperInfo is passed from reconcileDevice to avoid a redundant dmsetup info call.
 //
 // Reconcile pattern: Target-state driven
 func (r *Reconciler) reconcileStatus(
 	ctx context.Context,
 	obj *v1alpha1.DRBDMapper,
+	upperInfo *dmsetup.DeviceInfo,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "status")
 	defer rf.OnEnd(&outcome)
-
-	upperInfo, err := dmsetup.Info(rf.Ctx(), obj.Name)
-	if err != nil {
-		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
-		if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
-			return rf.Fail(patchErr)
-		}
-		return rf.Fail(err)
-	}
 
 	base := obj.DeepCopy()
 

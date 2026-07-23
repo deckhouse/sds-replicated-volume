@@ -118,7 +118,18 @@ func (a CreateMetadataAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed,
 		)
 	}
-	err := drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
+	exists, err := drbdmeta.ExecuteCheckMD(ctx, *a.Minor, a.BackingDev)
+	if err != nil {
+		return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
+	}
+	if exists {
+		// Metadata may be unclean after drbdsetup down (activity log not flushed).
+		// apply-al replays pending AL entries and marks metadata clean so that
+		// drbdsetup attach accepts it. On already-clean metadata this is a no-op.
+		err = drbdmeta.ExecuteApplyAL(ctx, *a.Minor, a.BackingDev)
+		return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
+	}
+	err = drbdmeta.ExecuteCreateMD(ctx, *a.Minor, a.BackingDev)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonCreateMetadataFailed)
 }
 

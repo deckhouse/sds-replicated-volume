@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -32,8 +33,11 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/blksize"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -61,6 +65,12 @@ func (r *Reconciler) Reconcile(
 	req DRBDReconcileRequest,
 ) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
+
+	if err := upgrade.Trigger.DoIfEnabled(func() error {
+		return upgrade.Execute(rf.Ctx(), slog.Default(), r.cl, r.nodeName)
+	}); err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
 
 	// Edge case: scanner found non-prefixed DRBD resource
 	if req.ActualNameOnTheNode != "" {
@@ -548,8 +558,9 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 }
 
 // resumeDRBDMapper finds the DRBDMapper whose lowerDevicePath matches this
-// DRBDResource's device and idempotently resumes its upper dm-linear device
-// if it is SUSPENDED.
+// DRBDResource's device. If the upper device is SUSPENDED (e.g. after upgrade),
+// it reloads the internal device table to point at the DRBD device, resumes
+// the internal device, then resumes the upper device.
 func (r *Reconciler) resumeDRBDMapper(ctx context.Context, drbdr *v1alpha1.DRBDResource) error {
 	device := drbdr.Status.Device
 	if device == "" {
@@ -567,18 +578,40 @@ func (r *Reconciler) resumeDRBDMapper(ctx context.Context, drbdr *v1alpha1.DRBDR
 			continue
 		}
 
-		info, err := dmsetup.Info(ctx, m.Name)
-		if err != nil || info == nil {
+		upperInfo, err := dmsetup.Info(ctx, m.Name)
+		if err != nil || upperInfo == nil {
+			return nil
+		}
+		if upperInfo.State != "SUSPENDED" {
 			return nil
 		}
 
-		if info.State == "SUSPENDED" {
-			log.FromContext(ctx).Info("Resuming DRBDMapper upper device after DRBD configured",
-				"drbdMapper", m.Name)
-			if err := dmsetup.Resume(ctx, m.Name); err != nil {
-				return flow.Wrapf(err, "resuming DRBDMapper %q upper device", m.Name)
-			}
+		logger := log.FromContext(ctx)
+		internalName := drbdm.InternalDeviceName(m.Name)
+
+		sectors, err := blksize.GetDeviceSizeInSectors(device)
+		if err != nil {
+			return flow.Wrapf(err, "getting device size for %q", device)
 		}
+		table := fmt.Sprintf("0 %d linear %s 0", sectors, device)
+
+		logger.Info("Reloading internal device table after upgrade",
+			"internalDevice", internalName, "lowerDevice", device)
+		if err := dmsetup.Load(ctx, internalName, table); err != nil {
+			return flow.Wrapf(err, "reloading table on %q", internalName)
+		}
+
+		logger.Info("Resuming internal device", "internalDevice", internalName)
+		if err := dmsetup.Resume(ctx, internalName); err != nil {
+			return flow.Wrapf(err, "resuming internal device %q", internalName)
+		}
+
+		logger.Info("Resuming upper device after DRBD configured",
+			"drbdMapper", m.Name)
+		if err := dmsetup.Resume(ctx, m.Name); err != nil {
+			return flow.Wrapf(err, "resuming upper device %q", m.Name)
+		}
+
 		return nil
 	}
 

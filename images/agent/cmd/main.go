@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -33,6 +34,10 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdmeta"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/blksize"
 )
 
 func main() {
@@ -82,15 +87,15 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	}
 	log = log.With("nodeName", envConfig.NodeName())
 
+	setupCommandTiming(log)
+
+	// DRBD MODULE UPGRADE CHECK (lightweight, no API calls)
+	upgrade.CheckAndArm(log)
+
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
-	}
-
-	// DRBD MODULE UPGRADE (before controllers start)
-	if err := upgrade.RunIfNeeded(ctx, log, mgr.GetAPIReader(), envConfig.NodeName()); err != nil {
-		return u.LogError(log, fmt.Errorf("DRBD module upgrade: %w", err))
 	}
 
 	eg.Go(func() error {
@@ -102,3 +107,77 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 
 	return eg.Wait()
 }
+
+func setupCommandTiming(log *slog.Logger) {
+	cmdLog := log.With("component", "cmd-timing")
+
+	origDrbdsetup := drbdsetup.ExecCommandContext
+	drbdsetup.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdsetup.Cmd {
+		return &timedDrbdsetupCmd{
+			inner: origDrbdsetup(ctx, name, arg...),
+			log:   cmdLog, command: name, args: arg,
+		}
+	}
+
+	origDmsetup := dmsetup.ExecCommandContext
+	dmsetup.ExecCommandContext = func(ctx context.Context, name string, arg ...string) dmsetup.Cmd {
+		return &timedCmd{
+			inner: origDmsetup(ctx, name, arg...),
+			log:   cmdLog, command: name, args: arg,
+		}
+	}
+
+	origDrbdmeta := drbdmeta.ExecCommandContext
+	drbdmeta.ExecCommandContext = func(ctx context.Context, name string, arg ...string) drbdmeta.Cmd {
+		return &timedCmd{
+			inner: origDrbdmeta(ctx, name, arg...),
+			log:   cmdLog, command: name, args: arg,
+		}
+	}
+
+	origBlksize := blksize.GetDeviceSizeInSectors
+	blksize.GetDeviceSizeInSectors = func(devicePath string) (uint64, error) {
+		start := time.Now()
+		result, err := origBlksize(devicePath)
+		cmdLog.Info("blksize", "device", devicePath, "duration", time.Since(start))
+		return result, err
+	}
+}
+
+type combinedOutputer interface {
+	CombinedOutput() ([]byte, error)
+}
+
+type timedCmd struct {
+	inner   combinedOutputer
+	log     *slog.Logger
+	command string
+	args    []string
+}
+
+func (t *timedCmd) CombinedOutput() ([]byte, error) {
+	start := time.Now()
+	out, err := t.inner.CombinedOutput()
+	t.log.Info("exec", "command", t.command, "args", t.args,
+		"duration", time.Since(start), "err", err)
+	return out, err
+}
+
+type timedDrbdsetupCmd struct {
+	inner   drbdsetup.Cmd
+	log     *slog.Logger
+	command string
+	args    []string
+}
+
+func (t *timedDrbdsetupCmd) CombinedOutput() ([]byte, error) {
+	start := time.Now()
+	out, err := t.inner.CombinedOutput()
+	t.log.Info("exec", "command", t.command, "args", t.args,
+		"duration", time.Since(start), "err", err)
+	return out, err
+}
+
+func (t *timedDrbdsetupCmd) StdoutPipe() (io.ReadCloser, error) { return t.inner.StdoutPipe() }
+func (t *timedDrbdsetupCmd) Start() error                       { return t.inner.Start() }
+func (t *timedDrbdsetupCmd) Wait() error                        { return t.inner.Wait() }

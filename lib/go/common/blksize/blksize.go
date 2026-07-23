@@ -31,7 +31,10 @@ import (
 const blkgetsize64 = 0x80081272
 
 // GetDeviceSizeInSectors returns the block device size in 512-byte sectors.
-func GetDeviceSizeInSectors(devicePath string) (uint64, error) {
+// It is a variable to allow wrapping (e.g. for timing instrumentation).
+var GetDeviceSizeInSectors = getDeviceSizeInSectors
+
+func getDeviceSizeInSectors(devicePath string) (uint64, error) {
 	f, err := os.OpenFile(devicePath, os.O_RDONLY, 0)
 	if err != nil {
 		return 0, fmt.Errorf("opening device %q: %w", devicePath, err)
