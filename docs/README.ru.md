@@ -1,7 +1,6 @@
 ---
 title: "Модуль sds-replicated-volume"
 description: "Модуль sds-replicated-volume: общие концепции и положения."
-moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
@@ -17,15 +16,13 @@ moduleStatus: preview
 
 {{< alert level="warning" >}}
 Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
-
 Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-
 Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
 Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Доступные режимы работы для модуля: RWO; RWX — только в DVP.
+Доступные режимы доступа для модуля: RWO; RWX — только в DVP.
 {{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
@@ -68,7 +65,7 @@ moduleStatus: preview
 1. Создайте ресурс ModuleConfig для включения модуля:
 
    ```yaml
-   kubectl apply -f - <<EOF
+   d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
    metadata:
@@ -82,15 +79,15 @@ moduleStatus: preview
 1. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
 
    ```shell
-   kubectl get module sds-node-configurator -w
+   d8 k get module sds-node-configurator -w
    ```
 
 1. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
 
-   Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
+   Пример ниже запускает модуль с настройками по умолчанию, что приведёт к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
 
    ```yaml
-   kubectl apply -f - <<EOF
+   d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
    metadata:
@@ -103,35 +100,30 @@ moduleStatus: preview
   
    {{< alert level="warning" >}}
    Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
-   
    Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
-   
    Если требуется убрать ресурсы модуля с узла не удаляя сам узел из кластера, то необходимо:
-   
    1. Вручную на любом из master-узлов запустить [скрипт эвакуации данных](./faq.html#%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%80%D0%B5%D1%81%D1%83%D1%80%D1%81%D0%BE%D0%B2-%D1%81-%D1%83%D0%B7%D0%BB%D0%B0-%D0%B1%D0%B5%D0%B7-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%81%D0%B0%D0%BC%D0%BE%D0%B3%D0%BE-%D1%83%D0%B7%D0%BB%D0%B0) `/opt/deckhouse/sbin/evict.sh` с параметром `--delete-resources-only`.
-   1. После эвакуации даных удалить с узла лейблы и удалить ноду из LINSTOR:
+   1. После эвакуации данных удалить с узла лейблы и удалить узел из LINSTOR:
       ```shell
       export NODE_NAME=<node-name>
-      
-      kubectl get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
-        kubectl label node $NODE_NAME "$label"-
+      d8 k get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+        d8 k label node $NODE_NAME "$label"-
       done
-      
-      kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
+      d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
    {{< /alert >}}
   
 1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
-   kubectl get module sds-replicated-volume -w
+   d8 k get module sds-replicated-volume -w
    ```
 
-1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+1. Убедитесь, что в неймспейсах `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
-   kubectl -n d8-sds-replicated-volume get pod -o wide -w
-   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   d8 k -n d8-sds-replicated-volume get pod -o wide -w
+   d8 k -n d8-sds-node-configurator get pod -o wide -w
    ```
 
 ### Настройка хранилища на узлах
@@ -143,7 +135,7 @@ moduleStatus: preview
 - Получить все ресурсы [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice), которые доступны в вашем кластере:
 
 ```shell
-kubectl get bd
+d8 k get bd
 
 NAME                                           NODE       CONSUMABLE   SIZE      PATH
 dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
@@ -155,8 +147,8 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 
 - Создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-0`:
 
-```yaml
-kubectl apply -f - <<EOF
+```shell
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -176,18 +168,18 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-0 -w
+d8 k get lvg vg-1-on-worker-0 -w
 ```
 
-- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешёл в состояние `Ready`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
 - Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-1`:
 
 ```shell
-kubectl apply -f - <<EOF
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -206,18 +198,18 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-1 -w
+d8 k get lvg vg-1-on-worker-1 -w
 ```
 
-- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешёл в состояние `Ready`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
 - Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-2`:
 
 ```shell
-kubectl apply -f - <<EOF
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -236,25 +228,25 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-2 -w
+d8 k get lvg vg-1-on-worker-2 -w
 ```
 
-- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешёл в состояние `Ready`, то это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
 
-- Теперь, когда у нас на узлах созданы нужные LVM VG, мы можем создать из них [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
+- После создания нужных LVM VG на узлах создайте из них [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
   type: LVM
-  lvmVolumeGroups: # Здесь указываем имена ресурсов LVMVolumeGroup, которые мы создавали ранее
+  lvmVolumeGroups: # Здесь указываем имена ресурсов LVMVolumeGroup, которые создавались ранее
     - name: vg-1-on-worker-0
     - name: vg-1-on-worker-1
     - name: vg-1-on-worker-2
@@ -262,16 +254,16 @@ EOF
 
 ```
 
-- Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Completed`:
+- Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдёт в состояние `Completed`:
 
 ```shell
-kubectl get rsp data -w
+d8 k get rsp data -w
 ```
 
 - Проверить, что Storage Pool `data` создался на узлах `worker-0`,  `worker-1` и `worker-2`:
 
 ```shell
-alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+alias linstor='d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor sp l
 
 ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -288,8 +280,8 @@ linstor sp l
 
 - Создать ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) для кластера, в котором нет зон (работа зональных ReplicatedStorageClass подробнее описана в [сценариях использования](./layouts.html)):
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStorageClass
 metadata:
@@ -301,16 +293,16 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
+- Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдёт в состояние `Created`:
 
 ```shell
-kubectl get rsc replicated-storage-class -w
+d8 k get rsc replicated-storage-class -w
 ```
 
 - Проверить, что соответствующий `StorageClass` создался:
 
 ```shell
-kubectl get sc replicated-storage-class
+d8 k get sc replicated-storage-class
 ```
 
 - Если `StorageClass` с именем `replicated-storage-class` появился, значит настройка модуля `sds-replicated-volume` завершена. Теперь пользователи могут создавать PV, указывая `StorageClass` с именем `replicated-storage-class`. При указанных выше настройках будет создаваться том с 3мя репликами на разных узлах.
@@ -319,21 +311,25 @@ kubectl get sc replicated-storage-class
 
 ### Требования
 
+Кластер должен соответствовать следующим требованиям:
+
 {{< alert level="info" >}}
 Применительно как к однозональным кластерам, так и к кластерам с использованием нескольких зон доступности.
 {{< /alert >}}
 
-- Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
+- Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - Для сетевого соединения необходимо использовать инфраструктуру с пропускной способностью 10 Gbps или выше.
-- Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс. При задержках более 5 мс будут возникать серьезные проблемы с производительностью.
+- Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс. При задержках более 5 мс будут возникать серьёзные проблемы с производительностью.
 - Не используйте другой SDS (Software defined storage) для предоставления дисков SDS Deckhouse.
 - Чтобы работала репликация `DRBD`, должно быть разрешено взаимодействие между узлами по портам `7000‑7999` по протоколу `UDP`. Подробнее — в таблице [«Трафик между узлами»](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#трафик-между-узлами). При необходимости вы можете переопределить диапазон портов с помощью [настройки `drbdPortRange`](configuration.html#parameters-drbdportrange), указав нужные значения `minPort` и `maxPort`.
-  
+
   {{< alert level="info" >}}
   После изменения параметров `drbdPortRange` перезапустите контроллер LINSTOR, чтобы новые настройки вступили в силу. При этом существующие DRBD-ресурсы сохранят назначенные им порты.
   {{< /alert >}}
 
 ### Рекомендации
+
+При планировании хранилища соблюдайте следующие рекомендации:
 
 - Не используйте RAID. Подробнее [в FAQ](./faq.html#почему-не-рекомендуется-использовать-raid-для-дисков-которые-используются-модулем-sds-replicated-volume).
 - Используйте локальные физические диски. Подробнее [в FAQ](./faq.html#почему-вы-рекомендуете-использовать-локальные-диски-не-nas).

@@ -12,7 +12,7 @@ Once the `sds-replicated-volume` module is enabled in the Deckhouse configuratio
 
 ## Configuring the module
 
-The configuration is performed by the `sds-replicated-volume-controller` using the custom resources [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) and [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass). To create a Storage Pool, the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) and an LVM Thin Pool must be preconfigured on the cluster nodes. LVM configuration is provided by the [`sds-node-configurator`](/modules/sds-node-configurator/) module.
+The configuration is performed by the `sds-replicated-volume-controller` using the custom resources [ReplicatedStoragePool](./cr.html#replicatedstoragepool) and [ReplicatedStorageClass](./cr.html#replicatedstorageclass). To create a Storage Pool, the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) and an LVM Thin Pool must be preconfigured on the cluster nodes. LVM configuration is provided by the [`sds-node-configurator`](/modules/sds-node-configurator/) module.
 
 ### Setting up LVM
 
@@ -21,6 +21,8 @@ Configuration examples can be found in the [sds-node-configurator](/modules/sds-
 ### Using ReplicatedStoragePool resources
 
 #### Creating a ReplicatedStoragePool resource
+
+To create a Storage Pool, follow these steps:
 
 - To create a `Storage Pool` the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources used.
 
@@ -59,7 +61,7 @@ Before working with the backend the controller will validate the provided config
 For all LVMVolumeGroup resources in the `spec` of the ReplicatedStoragePool resource the following rules must be met:
 
 - They must reside on different nodes. You may not refer to multiple LVMVolumeGroup resources located on the same node.
-- All nodes should be of type other than `CloudEphemeral` (see [Node types](https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
+- All nodes should be of type other than `CloudEphemeral` (["Node types"](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types)).
 
 Information about the controller's progress and results is available in the `status` field of the created ReplicatedStoragePool resource.
 
@@ -71,9 +73,10 @@ You can add new LVMVolumeGroups to the `spec.lvmVolumeGroups` list (effectively 
 
 The `sds-replicated-volume-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the backend. The results of this operation will also be reflected in the `status` field of the `ReplicatedStoragePool` resource.
 
-> Note that the `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
->
-> The controller does not respond to changes made by the user in the `status` field of the resource.
+{{< alert level="warning" >}}
+The `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
+The controller does not respond to changes made by the user in the `status` field of the resource.
+{{< /alert >}}
 
 #### Deleting the ReplicatedStoragePool resource
 
@@ -131,7 +134,9 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that all fields of `spec` section of the ReplicatedStorageClass resource are **immutable**.
+{{< alert level="warning" >}}
+All fields of the `spec` section of the ReplicatedStorageClass resource are **immutable**.
+{{< /alert >}}
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 

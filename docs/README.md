@@ -1,7 +1,6 @@
 ---
 title: "The sds-replicated-volume module"
 description: "The sds-replicated-volume module: General Concepts and Principles."
-moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
@@ -17,9 +16,7 @@ To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the
 
 {{< alert level="warning" >}}
 Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
-
 Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
-
 If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
 To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
 {{< /alert >}}
@@ -66,7 +63,7 @@ Enabling the `sds-node-configurator` module:
 1. Create a ModuleConfig resource to enable the module:
 
    ```yaml
-   kubectl apply -f - <<EOF
+   d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
    metadata:
@@ -80,7 +77,7 @@ Enabling the `sds-node-configurator` module:
 1. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
 
    ```shell
-   kubectl get module sds-node-configurator -w
+   d8 k get module sds-node-configurator -w
    ```
 
 1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
@@ -88,7 +85,7 @@ Enabling the `sds-node-configurator` module:
    The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
-   kubectl apply -f - <<EOF
+   d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
    metadata:
@@ -101,35 +98,30 @@ Enabling the `sds-node-configurator` module:
    
    {{< alert level="warning" >}}
    The [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter is recommended to be specified when enabling the module.
-   
    Already added labels `storage.deckhouse.io/sds-replicated-volume-*` are not removed automatically, as the current version of the control-plane does not have an automatic data eviction mechanism from cluster nodes.
-   
    If you need to remove module resources from a node without removing the node itself from the cluster, you must:
-   
    1. Manually run the [data eviction script](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself) `/opt/deckhouse/sbin/evict.sh` with the `--delete-resources-only` parameter on any of the master nodes.
    1. After data eviction, remove the labels from the node and remove the node from LINSTOR:
       ```shell
       export NODE_NAME=<node-name>
-      
-      kubectl get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
-        kubectl label node $NODE_NAME "$label"-
+      d8 k get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+        d8 k label node $NODE_NAME "$label"-
       done
-      
-      kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
+      d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
    {{< /alert >}}
    
 1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
-   kubectl get module sds-replicated-volume -w
+   d8 k get module sds-replicated-volume -w
    ```
 
 1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
    ```shell
-   kubectl -n d8-sds-replicated-volume get pod -o wide -w
-   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   d8 k -n d8-sds-replicated-volume get pod -o wide -w
+   d8 k -n d8-sds-node-configurator get pod -o wide -w
    ```
 
 ### Configuring storage on nodes
@@ -141,7 +133,7 @@ To configure the storage:
 - List all the [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice) resources available in your cluster:
 
 ```shell
-kubectl get bd
+d8 k get bd
 
 NAME                                           NODE       CONSUMABLE   SIZE      PATH
 dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
@@ -154,8 +146,8 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 
 - Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-0`:
 
-```yaml
-kubectl apply -f - <<EOF
+```shell
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -178,7 +170,7 @@ EOF
 - Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-0 -w
+d8 k get lvg vg-1-on-worker-0 -w
 ```
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
@@ -186,7 +178,7 @@ kubectl get lvg vg-1-on-worker-0 -w
   - Next, create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-1`:
 
 ```shell
-kubectl apply -f - <<EOF
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -208,7 +200,7 @@ EOF
 - Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-1 -w
+d8 k get lvg vg-1-on-worker-1 -w
 ```
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
@@ -216,7 +208,7 @@ kubectl get lvg vg-1-on-worker-1 -w
   - Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-2`:
 
 ```shell
-kubectl apply -f - <<EOF
+d8 k apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroup
 metadata:
@@ -238,15 +230,15 @@ EOF
 - Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
-kubectl get lvg vg-1-on-worker-2 -w
+d8 k get lvg vg-1-on-worker-2 -w
 ```
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
 
-  - Now that we have all the LVM VGs created on the nodes, create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) out of those VGs:
+  - After the required LVM VGs are created on the nodes, create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) out of those VGs:
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStoragePool
 metadata:
@@ -264,13 +256,13 @@ EOF
 - Wait for the created `ReplicatedStoragePool` resource to become `Completed`:
 
 ```shell
-kubectl get rsp data -w
+d8 k get rsp data -w
 ```
 
 - Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2`:
 
 ```shell
-alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+alias linstor='d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor sp l
 
 ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -287,8 +279,8 @@ linstor sp l
 
 - Create a [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal ReplicatedStorageClasses work):
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStorageClass
 metadata:
@@ -303,13 +295,13 @@ EOF
 - Wait for the created `ReplicatedStorageClass` resource to become `Created`:
 
 ```shell
-kubectl get rsc replicated-storage-class -w
+d8 k get rsc replicated-storage-class -w
 ```
 
 - Confirm that the corresponding `StorageClass` has been created:
 
 ```shell
-kubectl get sc replicated-storage-class
+d8 k get sc replicated-storage-class
 ```
 
 - If `StorageClass` with the name `replicated-storage-class` is shown, then the configuration of the `sds-replicated-volume` module is complete. Now users can create PVs by specifying `StorageClass` with the name `replicated-storage-class`. Given the above settings, a volume will be created with 3 replicas on different nodes.
@@ -318,23 +310,27 @@ kubectl get sc replicated-storage-class
 
 ### Requirements
 
+The cluster must meet the following requirements:
+
 {{< alert level="info" >}}
 Applicable to both single-zone clusters and clusters using multiple availability zones.
 {{< /alert >}}
 
-- Use stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+- Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
 - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5 ms will cause serious performance issues.
 - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
 - For `DRBD` replication to work, communication between nodes on ports `7000–7999` using the `UDP` protocol must be enabled. For more details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If necessary, you can override the port range using the [`drbdPortRange` setting](configuration.html#parameters-drbdportrange) by specifying the desired `minPort` and `maxPort` values.
-  
+
   {{< alert level="info" >}}
   After changing the `drbdPortRange` settings, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources will retain their assigned ports.
   {{< /alert >}}
 
 ### Recommendations
 
+Follow these recommendations when planning the storage:
+
 - Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
   - Use local physical disks. The reasons are detailed [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
-  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 10ms between nodes
+  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 10ms between nodes.
   - For guaranteed data consistency, use `ReplicatedStorageClass` with the `ConsistencyAndAvailability` replication mode (spec.replication) — this mode is used by default. **Important:** changing the mode to `Availability` may lead to split brain and data loss in case of network connectivity issues.

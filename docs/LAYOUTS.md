@@ -1,6 +1,7 @@
 ---
 title: "Module sds-replicated-volume: use cases"
 linkTitle: "Usage cases"
+description: "Zonal and trans-zonal StorageClass layouts for the sds-replicated-volume module."
 ---
 
 {{< alert level="warning" >}}
@@ -24,6 +25,8 @@ spec:
   topology: Zonal
 ```
 
+The StorageClass created from this resource has the following characteristics:
+
 - Parameters of the StorageClass to be created:
 
   - Number of data replicas per volume: 3.
@@ -43,7 +46,9 @@ spec:
 
   - This StorageClass is best suited for cases where high read speeds are essential, as the data is always on the local disk. This is achieved by the `volumeAccess` parameter set to `Local`, which prevents pods from being created on nodes with no local volume replica and data access over the network.
 
-> **Caution.** Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
+{{< alert level="warning" >}}
+Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
+{{< /alert >}}
 
 ## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
@@ -65,6 +70,8 @@ spec:
   - zone-c
 ```
 
+The StorageClass created from this resource has the following characteristics:
+
 - Parameters of the StorageClass to be created:
 
   - Number of data replicas per volume: 3.
@@ -82,6 +89,8 @@ spec:
 
   - This StorageClass is only recommended if there is a high bandwidth (10 Gbps) and low ping (less than 25 ms) network connection between zones, and if there is no need to minimize network traffic between zones. Setting the `topology` parameter to `TransZonal` activates trans-zonal replication, which results in a significant increase in traffic between zones as compared to the `Zonal` value for the same parameter.
 
-  - This StorageClass is recommended if high write rates are not considered a priority. The synchronous replication protocol used in DRBD treats a read operation as completed only after receiving confirmation from all replicas of a successful write to the local disk. With three replicas distributed across different zones, the write latency will be higher than with a zonal StorageClass. The exception to this is when the network parameters within a zone and between the zones are similar.
+  - This StorageClass is recommended if high write rates are not considered a priority. The synchronous replication protocol used in DRBD treats a write operation as completed only after receiving confirmation from all replicas of a successful write to the local disk. With three replicas distributed across different zones, the write latency will be higher than with a zonal StorageClass. The exception to this is when the network parameters within a zone and between the zones are similar.
 
-> **Caution.** Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in the spec.zones of the trans-zonal StorageClass configuration.
+{{< alert level="warning" >}}
+Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in the `spec.zones` of the trans-zonal StorageClass configuration.
+{{< /alert >}}
