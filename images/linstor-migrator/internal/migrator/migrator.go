@@ -42,24 +42,35 @@ const (
 	DefaultRetryInterval = 2 * time.Second
 	// DefaultStage2WorkerCount is the default number of parallel stage 2 workers.
 	DefaultStage2WorkerCount = 5
+	// DefaultStage4MaxIterations bounds the number of stage 4 polling iterations while waiting
+	// for ReplicatedStorageClasses to become Ready. Exceeding it means some RSC are
+	// non-convertible and the migration cannot complete automatically.
+	DefaultStage4MaxIterations = 500
+	// DefaultStage4PollInterval is the default wait between stage 4 polling iterations.
+	DefaultStage4PollInterval = 2 * time.Second
 )
 
 // MigratorOptions configures optional migrator behavior. Zero values in RetryInterval,
-// RetryBackoff, and Stage2WorkerCount are replaced with defaults when passed to New.
+// RetryBackoff, Stage2WorkerCount, Stage4MaxIterations, and Stage4PollInterval are replaced
+// with defaults when passed to New.
 type MigratorOptions struct {
-	RetryInterval     time.Duration
-	RetryBackoff      wait.Backoff
-	Stage2WorkerCount int
+	RetryInterval       time.Duration
+	RetryBackoff        wait.Backoff
+	Stage2WorkerCount   int
+	Stage4MaxIterations int
+	Stage4PollInterval  time.Duration
 }
 
 // Migrator performs the migration from LINSTOR CRs to the new control-plane CRs.
 type Migrator struct {
-	client            kubecl.Client
-	dynamicClient     dynamic.Interface
-	log               *slog.Logger
-	retryInterval     time.Duration
-	retryBackoff      wait.Backoff
-	stage2WorkerCount int
+	client              kubecl.Client
+	dynamicClient       dynamic.Interface
+	log                 *slog.Logger
+	retryInterval       time.Duration
+	retryBackoff        wait.Backoff
+	stage2WorkerCount   int
+	stage4MaxIterations int
+	stage4PollInterval  time.Duration
 }
 
 // New creates a new Migrator instance.
@@ -73,18 +84,27 @@ func New(client kubecl.Client, dynamicClient dynamic.Interface, log *slog.Logger
 	if opts.Stage2WorkerCount <= 0 {
 		opts.Stage2WorkerCount = DefaultStage2WorkerCount
 	}
+	if opts.Stage4MaxIterations <= 0 {
+		opts.Stage4MaxIterations = DefaultStage4MaxIterations
+	}
+	if opts.Stage4PollInterval <= 0 {
+		opts.Stage4PollInterval = DefaultStage4PollInterval
+	}
 	return &Migrator{
-		client:            client,
-		dynamicClient:     dynamicClient,
-		log:               log,
-		retryInterval:     opts.RetryInterval,
-		retryBackoff:      opts.RetryBackoff,
-		stage2WorkerCount: opts.Stage2WorkerCount,
+		client:              client,
+		dynamicClient:       dynamicClient,
+		log:                 log,
+		retryInterval:       opts.RetryInterval,
+		retryBackoff:        opts.RetryBackoff,
+		stage2WorkerCount:   opts.Stage2WorkerCount,
+		stage4MaxIterations: opts.Stage4MaxIterations,
+		stage4PollInterval:  opts.Stage4PollInterval,
 	}
 }
 
 // Run executes the full migration workflow: pre-flight checks, stage 1 (resource migration),
-// stage 2 (adopt exit maintenance), and stage 3 (LINSTOR cleanup).
+// stage 2 (adopt exit maintenance), stage 3 (LINSTOR cleanup), and stage 4 (switch
+// ReplicatedVolumes to Auto configuration).
 func (m *Migrator) Run(ctx context.Context) error {
 	if err := m.checkNewControlPlaneEnabled(ctx); err != nil {
 		return err
@@ -108,8 +128,20 @@ func (m *Migrator) Run(ctx context.Context) error {
 	case config.StateAllCompleted:
 		m.log.Info("migration already completed, nothing to do")
 		return nil
-	case config.StateStage2Completed, config.StateStage3Started:
-		return m.runStage3(ctx)
+	case config.StateStage3Started:
+		// Finish stage 3 (cleanup), then proceed to stage 4.
+		if err := m.runStage3(ctx); err != nil {
+			return err
+		}
+		return m.runStage4(ctx)
+	case config.StateStage3Completed, config.StateStage4Started:
+		// Stage 3 is done; run stage 4 (switch ReplicatedVolumes to Auto).
+		return m.runStage4(ctx)
+	case config.StateStage2Completed:
+		if err := m.runStage3(ctx); err != nil {
+			return err
+		}
+		return m.runStage4(ctx)
 	case config.StateStage1Completed, config.StateStage2Started:
 		return m.runFromStage2(ctx)
 	default:
@@ -128,7 +160,10 @@ func (m *Migrator) runFromStage2(ctx context.Context) error {
 	if err := m.runStage2(ctx); err != nil {
 		return err
 	}
-	return m.runStage3(ctx)
+	if err := m.runStage3(ctx); err != nil {
+		return err
+	}
+	return m.runStage4(ctx)
 }
 
 // ensureConfigMap creates the migration ConfigMap if it does not exist and returns the current state.

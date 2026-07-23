@@ -93,7 +93,7 @@ func (m *Migrator) runStage3(ctx context.Context) error {
 		}
 	}
 
-	return m.updateMigrationStateAllCompleted(ctx)
+	return m.updateMigrationStateStage3Completed(ctx)
 }
 
 // deleteLegacyReplicatedStoragePool issues Delete for a legacy RSP and verifies the object is gone.
@@ -136,10 +136,10 @@ func (m *Migrator) deleteLegacyReplicatedStoragePool(ctx context.Context, poolNa
 	})
 }
 
-func (m *Migrator) updateMigrationStateAllCompleted(ctx context.Context) error {
-	if err := m.updateMigrationStateRetrying(ctx, config.StateAllCompleted); err != nil {
+func (m *Migrator) updateMigrationStateStage3Completed(ctx context.Context) error {
+	if err := m.updateMigrationStateRetrying(ctx, config.StateStage3Completed); err != nil {
 		return err
 	}
-	m.log.Info("stage 3: completed, migration finished")
+	m.log.Info("stage 3: completed")
 	return nil
 }

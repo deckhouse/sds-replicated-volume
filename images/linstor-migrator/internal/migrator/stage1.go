@@ -824,7 +824,10 @@ type rvCreateOptions struct {
 // (linstor-auto-*) created for the LINSTOR pool, which is the pool adopt/v1 needs.
 //
 // When sharedSecret is non-empty, AdoptSharedSecretAnnotationKey is set so adopt/v1 formation reuses the LINSTOR secret.
-// If hasPersistentVolume is false, LabelKeyNoPersistentVolume is set (LINSTOR resource had no PV in cluster).
+// If hasPersistentVolume is true, SwitchToAutoConfigurationLabelKey is set so stage 4 switches the
+// ReplicatedVolume to Auto configuration once its ReplicatedStorageClass is Ready.
+// If hasPersistentVolume is false, NoPersistentVolumeLabelKey is set (LINSTOR resource had no PV
+// in the cluster); the ReplicatedVolume stays in Manual mode.
 func (m *Migrator) createRV(
 	ctx context.Context,
 	log *slog.Logger,
@@ -849,10 +852,18 @@ func (m *Migrator) createRV(
 		},
 	}
 
+	// Mark the ReplicatedVolume so stage 4 knows how to handle it:
+	// - with PV: switch to Auto configuration once the referenced RSC is Ready;
+	// - without PV: leave in Manual mode (orphaned LINSTOR resource, nothing to switch).
 	var labels map[string]string
-	if !hasPersistentVolume {
+	switch hasPersistentVolume {
+	case true:
 		labels = map[string]string{
-			config.LabelKeyNoPersistentVolume: config.LabelValueNoPersistentVolume,
+			srvv1alpha1.SwitchToAutoConfigurationLabelKey: srvv1alpha1.SwitchToAutoConfigurationLabelValue,
+		}
+	case false:
+		labels = map[string]string{
+			srvv1alpha1.NoPersistentVolumeLabelKey: srvv1alpha1.NoPersistentVolumeLabelValue,
 		}
 	}
 

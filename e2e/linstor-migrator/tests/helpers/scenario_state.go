@@ -50,7 +50,8 @@ type MigratorScenarioState struct {
 	FileChecksums map[string]string `json:"file_checksums"`
 	LinstorBefore *LinstorState     `json:"linstor_before"`
 
-	MigratedResources []string `json:"migrated_resources"`
+	MigratedResources []string          `json:"migrated_resources"`
+	PVToRSC           map[string]string `json:"pv_to_rsc"`
 }
 
 // SaveMigratorScenarioState saves the full scenario snapshot to /tmp.
