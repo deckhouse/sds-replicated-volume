@@ -46,6 +46,18 @@ const (
 )
 
 const (
+	// ReplicatedVolumeCondLayoutConvergedType indicates whether the actual datamesh layout
+	// (diskful voters and tie-breakers) matches the layout intended by the volume's configuration.
+	//
+	// Reasons describe layout convergence state.
+	ReplicatedVolumeCondLayoutConvergedType                        = "LayoutConverged"
+	ReplicatedVolumeCondLayoutConvergedReasonCannotConverge        = "CannotConverge"        // A convergence pattern applies but no admissible candidate is available.
+	ReplicatedVolumeCondLayoutConvergedReasonConverged             = "Converged"             // Actual layout matches the intended layout, no active transition.
+	ReplicatedVolumeCondLayoutConvergedReasonConverging            = "Converging"            // A membership transition is moving the layout toward the intended layout.
+	ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported = "TransitionUnsupported" // Layout mismatch with no supported automatic transition; manual intervention required.
+)
+
+const (
 	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
 	ReplicatedVolumeCondQuorumType = "Quorum"
 )

@@ -71,6 +71,7 @@ func rspPredicates() []predicate.Predicate {
 //   - status.configurationObservedGeneration (observed RSC state for acknowledgment tracking)
 //   - ConfigurationReady condition
 //   - SatisfyEligibleNodes condition
+//   - LayoutConverged condition (feeds the aligned/stale volume aggregate)
 func rvPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
@@ -96,6 +97,7 @@ func rvPredicates() []predicate.Predicate {
 					oldRV, newRV,
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 					v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 				)
 			},
 		},

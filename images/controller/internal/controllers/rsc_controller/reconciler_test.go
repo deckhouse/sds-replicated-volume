@@ -78,7 +78,7 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Total).To(Equal(int32(2)))
 	})
 
-	It("counts aligned volumes with both conditions true", func() {
+	It("counts aligned volumes when all conditions are true", func() {
 		rvs := []rvView{
 			{
 				name:                            "rv-1",
@@ -87,6 +87,8 @@ var _ = Describe("computeActualVolumesSummary", func() {
 					satisfyEligibleNodesKnown: true,
 					satisfyEligibleNodes:      true,
 					configurationReady:        true,
+					layoutConvergedKnown:      true,
+					layoutConverged:           true,
 				},
 			},
 		}
@@ -94,6 +96,49 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Aligned).To(Equal(int32(1)))
+	})
+
+	It("does not count a volume with LayoutConverged present and false as aligned; counts it as stale", func() {
+		rvs := []rvView{
+			{
+				name:                            "rv-1",
+				configurationObservedGeneration: 1,
+				conditions: rvViewConditions{
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReadyKnown:   true,
+					configurationReady:        true,
+					layoutConvergedKnown:      true,
+					layoutConverged:           false, // layout has not converged
+				},
+			},
+		}
+
+		counters := computeActualVolumesSummary(rsc, rvs)
+
+		Expect(*counters.Aligned).To(Equal(int32(0)))
+		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
+	})
+
+	It("does not count a volume with absent LayoutConverged as aligned or stale", func() {
+		rvs := []rvView{
+			{
+				name:                            "rv-1",
+				configurationObservedGeneration: 1,
+				conditions: rvViewConditions{
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReadyKnown:   true,
+					configurationReady:        true,
+					// LayoutConverged absent: not yet evaluated (e.g. still forming).
+				},
+			},
+		}
+
+		counters := computeActualVolumesSummary(rsc, rvs)
+
+		Expect(*counters.Aligned).To(Equal(int32(0)))
+		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
 	})
 
 	It("counts configuration not aligned volumes (configurationReady present and false)", func() {
@@ -181,6 +226,8 @@ var _ = Describe("computeActualVolumesSummary", func() {
 					satisfyEligibleNodesKnown: true,
 					satisfyEligibleNodes:      true,
 					configurationReady:        true,
+					layoutConvergedKnown:      true,
+					layoutConverged:           true,
 				},
 			},
 		}
@@ -877,6 +924,8 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 	)
 
 	// makeAcknowledgedRV creates an rvView that has acknowledged the RSC configuration.
+	// Its layout is reported as converged (the common healthy case); tests that need an
+	// unconverged layout construct the rvView explicitly.
 	makeAcknowledgedRV := func(name string, configOK, nodesOK bool) rvView {
 		return rvView{
 			name:                            name,
@@ -886,6 +935,8 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 				satisfyEligibleNodes:      nodesOK,
 				configurationReadyKnown:   true,
 				configurationReady:        configOK,
+				layoutConvergedKnown:      true,
+				layoutConverged:           true,
 			},
 		}
 	}
@@ -966,6 +1017,40 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		Expect(configCond).NotTo(BeNil())
 		Expect(configCond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled))
+		// Message is honest (reports the stale count), not the old "Not implemented" placeholder.
+		Expect(configCond.Message).To(Equal(
+			"2 volume(s) not yet aligned with the storage class configuration; automatic rollout is disabled"))
+	})
+
+	It("sets ConfigurationRolledOut to False with an honest message when a volume's layout has not converged", func() {
+		rvs := []rvView{
+			makeAcknowledgedRV("rv-1", true, true), // fully converged
+			{
+				name:                            "rv-2",
+				configurationObservedGeneration: 1,
+				conditions: rvViewConditions{
+					satisfyEligibleNodesKnown: true,
+					satisfyEligibleNodes:      true,
+					configurationReadyKnown:   true,
+					configurationReady:        true,
+					layoutConvergedKnown:      true,
+					layoutConverged:           false, // layout not converged → stale
+				},
+			},
+		}
+
+		outcome := ensureVolumeSummaryAndConditions(ctx, rsc, rvs)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(*rsc.Status.Volumes.Aligned).To(Equal(int32(1)))
+		Expect(*rsc.Status.Volumes.StaleConfiguration).To(Equal(int32(1)))
+
+		configCond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
+		Expect(configCond).NotTo(BeNil())
+		Expect(configCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(configCond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled))
+		Expect(configCond.Message).To(Equal(
+			"1 volume(s) not yet aligned with the storage class configuration; automatic rollout is disabled"))
 	})
 
 	It("sets ConfigurationRolledOut to True when StaleConfiguration == 0", func() {

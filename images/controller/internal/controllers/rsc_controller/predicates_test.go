@@ -379,6 +379,49 @@ var _ = Describe("rvPredicates", func() {
 			}
 		})
 
+		It("returns true when LayoutConverged condition changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+							Status: metav1.ConditionFalse,
+							Reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+						},
+					},
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+						},
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns false when all unchanged", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},

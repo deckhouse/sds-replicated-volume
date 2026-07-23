@@ -170,6 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
 				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp),
+				r.reconcileLayoutStatus(rf.Ctx(), rv),
 			)
 		}
 		if outcome.ShouldReturn() {
@@ -793,6 +794,178 @@ func applyConfigurationReadyCondTrue(rv *v1alpha1.ReplicatedVolume, reason, mess
 func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
 	return obju.SetStatusCondition(rv, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: layout status
+//
+
+// reconcileLayoutStatus is the SINGLE writer of the LayoutConverged condition and
+// status.layout. It compares the actual datamesh layout (diskful voters + tie-breakers)
+// against the layout intended by the volume's configuration and reports whether they
+// have converged.
+//
+// It is called only post-formation (the root Reconcile invokes it in the normal-operation
+// branch, never during formation) and after the configuration has been acknowledged
+// (status.configuration is set). This block only reports: it performs no convergence
+// actions. Block 2 adds a separate convergence step that feeds its result back here as the
+// Converging/CannotConverge report, keeping this the only writer of the condition.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileLayoutStatus(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "layout-status")
+	defer rf.OnEnd(&outcome)
+
+	// Precondition: configuration must be acknowledged (guaranteed by the caller, which
+	// invokes this only inside the "configuration exists" normal-operation branch).
+	if rv.Status.Configuration == nil {
+		return rf.Continue()
+	}
+
+	report := computeLayoutReport(rv)
+
+	changed := applyLayout(rv, report.layout)
+	if report.convergedStatus == metav1.ConditionTrue {
+		changed = applyLayoutConvergedCondTrue(rv, report.reason, report.message) || changed
+	} else {
+		changed = applyLayoutConvergedCondFalse(rv, report.reason, report.message) || changed
+	}
+
+	return rf.Continue().ReportChangedIf(changed)
+}
+
+// computeActualLayout counts the actual datamesh layout from members:
+//   - diskful     = Diskful + LiminalDiskful members (quorum voters holding data)
+//   - tiebreakers = TieBreaker members
+//
+// Access and ShadowDiskful (and their liminal variant) members are not part of the layout.
+func computeActualLayout(rv *v1alpha1.ReplicatedVolume) (diskful, tiebreakers int) {
+	for i := range rv.Status.Datamesh.Members {
+		switch rv.Status.Datamesh.Members[i].Type {
+		case v1alpha1.DatameshMemberTypeDiskful, v1alpha1.DatameshMemberTypeLiminalDiskful:
+			diskful++
+		case v1alpha1.DatameshMemberTypeTieBreaker:
+			tiebreakers++
+		}
+	}
+	return diskful, tiebreakers
+}
+
+// hasMembershipTransition reports whether an active datamesh transition changes the layout
+// composition (diskful voters / tie-breakers). Only membership transitions do so; other types
+// (Attach/Detach/ForceDetach, ResizeVolume, ChangeQuorum, ChangeSystemNetworks,
+// Enable/DisableMultiattach, RepairNetworkAddresses) leave the layout unchanged and must not be
+// treated as convergence progress (otherwise the LayoutConverged condition would flap on
+// unrelated attach/resize activity). Membership types mirror the dispatch in
+// datamesh/membership_dispatch.go.
+func hasMembershipTransition(rv *v1alpha1.ReplicatedVolume) bool {
+	for i := range rv.Status.DatameshTransitions {
+		switch rv.Status.DatameshTransitions[i].Type {
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType,
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica:
+			return true
+		}
+	}
+	return false
+}
+
+// layoutReport is the computed report driving status.layout and the LayoutConverged condition.
+type layoutReport struct {
+	layout          string
+	convergedStatus metav1.ConditionStatus
+	reason          string
+	message         string
+}
+
+// computeLayoutReport compares the intended layout (from configuration) with the actual
+// datamesh layout and produces the status.layout string and the LayoutConverged report.
+//
+// This block has no convergence whitelist yet, so any mismatch is reported honestly:
+//   - actual == intended                          → True / Converged
+//   - mismatch with an active membership transition → False / Converging
+//   - mismatch with no active membership transition → False / TransitionUnsupported
+//
+// A matching layout is reported Converged regardless of unrelated active transitions
+// (e.g. attach/resize), so the condition does not flap while the layout is already correct.
+// Only membership transitions (which change diskful/tie-breaker counts) count as convergence
+// progress; see hasMembershipTransition.
+func computeLayoutReport(rv *v1alpha1.ReplicatedVolume) layoutReport {
+	intendedD, intendedTB := rv.Status.Configuration.IntendedLayout()
+	actualD, actualTB := computeActualLayout(rv)
+	actualLayout := formatLayout(actualD, actualTB)
+
+	if actualD == intendedD && actualTB == intendedTB {
+		return layoutReport{
+			layout:          actualLayout,
+			convergedStatus: metav1.ConditionTrue,
+			reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+			message:         fmt.Sprintf("layout converged: %s", actualLayout),
+		}
+	}
+
+	intendedLayout := formatLayout(intendedD, intendedTB)
+
+	if hasMembershipTransition(rv) {
+		return layoutReport{
+			layout:          actualLayout,
+			convergedStatus: metav1.ConditionFalse,
+			reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			message:         fmt.Sprintf("layout transition in progress: have %s, want %s", actualLayout, intendedLayout),
+		}
+	}
+
+	return layoutReport{
+		layout:          actualLayout,
+		convergedStatus: metav1.ConditionFalse,
+		reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported,
+		message: fmt.Sprintf(
+			"layout mismatch: have %s, want %s; automatic transition is not supported, manual intervention required",
+			actualLayout, intendedLayout),
+	}
+}
+
+// formatLayout renders a datamesh layout as a short, deterministic string:
+// "3D" for 3 diskful and no tie-breaker, "2D+1TB" for 2 diskful and 1 tie-breaker.
+// The "+NTB" suffix is omitted when there are no tie-breakers.
+func formatLayout(diskful, tiebreakers int) string {
+	if tiebreakers == 0 {
+		return fmt.Sprintf("%dD", diskful)
+	}
+	return fmt.Sprintf("%dD+%dTB", diskful, tiebreakers)
+}
+
+// applyLayout sets status.layout (the actual datamesh layout string).
+func applyLayout(rv *v1alpha1.ReplicatedVolume, layout string) bool {
+	if rv.Status.Layout == layout {
+		return false
+	}
+	rv.Status.Layout = layout
+	return true
+}
+
+// applyLayoutConvergedCondTrue sets the LayoutConverged condition to True.
+func applyLayoutConvergedCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyLayoutConvergedCondFalse sets the LayoutConverged condition to False.
+func applyLayoutConvergedCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,

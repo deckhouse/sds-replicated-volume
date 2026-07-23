@@ -629,15 +629,17 @@ func ensureVolumeSummaryAndConditions(
 
 	// Apply ConfigurationRolledOut condition.
 	if *rsc.Status.Volumes.StaleConfiguration > 0 {
+		staleMsg := fmt.Sprintf("%d volume(s) not yet aligned with the storage class configuration",
+			*rsc.Status.Volumes.StaleConfiguration)
 		if maxParallelConfigurationRollouts > 0 {
 			changed = applyConfigurationRolledOutCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
-				"Not implemented",
+				staleMsg,
 			) || changed
 		} else {
 			changed = applyConfigurationRolledOutCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutDisabled,
-				"Not implemented",
+				staleMsg+"; automatic rollout is disabled",
 			) || changed
 		}
 	} else {
@@ -667,6 +669,8 @@ type rvViewConditions struct {
 	satisfyEligibleNodes      bool // true when SatisfyEligibleNodes condition is present and True
 	configurationReadyKnown   bool // true when ConfigurationReady condition is present
 	configurationReady        bool // true when ConfigurationReady condition is present and True
+	layoutConvergedKnown      bool // true when LayoutConverged condition is present
+	layoutConverged           bool // true when LayoutConverged condition is present and True
 }
 
 // newRVView creates an rvView from a ReplicatedVolume.
@@ -680,6 +684,8 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 			satisfyEligibleNodes:      objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
 			configurationReadyKnown:   objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
 			configurationReady:        objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			layoutConvergedKnown:      objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
+			layoutConverged:           objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
 		},
 	}
 
@@ -1189,13 +1195,19 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 			continue
 		}
 
-		if rv.conditions.configurationReady && rv.conditions.satisfyEligibleNodes {
+		// Aligned requires ConfigurationReady AND SatisfyEligibleNodes AND LayoutConverged,
+		// all present and True. A volume whose layout has not converged (or is not yet
+		// evaluated) is not aligned.
+		if rv.conditions.configurationReady && rv.conditions.satisfyEligibleNodes && rv.conditions.layoutConverged {
 			aligned++
 		}
 
-		// Only count as "stale" if the condition is present and not True.
-		// Missing condition means the RV hasn't been evaluated yet.
-		if rv.conditions.configurationReadyKnown && !rv.conditions.configurationReady {
+		// Count as "stale" when a tracked condition is present and not True: either the
+		// configuration is not ready, or the layout has not converged. A missing condition
+		// means the RV has not been evaluated yet (e.g. LayoutConverged is only written
+		// post-formation) and is not counted — consistent with the ConfigurationReady rule.
+		if (rv.conditions.configurationReadyKnown && !rv.conditions.configurationReady) ||
+			(rv.conditions.layoutConvergedKnown && !rv.conditions.layoutConverged) {
 			staleConfiguration++
 		}
 	}

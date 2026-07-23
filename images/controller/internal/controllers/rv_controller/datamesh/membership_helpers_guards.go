@@ -592,16 +592,16 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 // Preconditions for removing a TB (RemoveReplica(TB), ChangeReplicaType(TB→...)).
 
 // guardTBSufficient blocks if removing this TB would leave fewer TBs than required.
-// TB_min = 1 if D_count is even AND target_FTT == D_count/2, else 0.
+// TB_min is derived from the current voter count and target FTT via the shared
+// v1alpha1.TieBreakersForDiskful formula (single source of truth for the D/TB layout).
+// Note: this uses the current (actual) voter count, not the intended diskful count, so it
+// stays correct during transitions where the two differ.
 func guardTBSufficient(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	voters := voterCount(gctx)
 	tbs := tbCount(gctx)
 	targetFTT := gctx.configuration.FailuresToTolerate
 
-	var tbMin byte
-	if voters%2 == 0 && voters > 0 && targetFTT == voters/2 {
-		tbMin = 1
-	}
+	tbMin := byte(v1alpha1.TieBreakersForDiskful(int(voters), int(targetFTT)))
 
 	if tbs <= tbMin {
 		return dmte.GuardResult{

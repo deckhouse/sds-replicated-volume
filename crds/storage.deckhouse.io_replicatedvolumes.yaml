@@ -37,6 +37,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.layout
+      name: Layout
+      priority: 1
+      type: string
     - jsonPath: .status.conditions[?(@.type=='ConfigurationReady')].status
       name: ConfigurationReady
       priority: 1
@@ -916,6 +920,13 @@ spec:
                 x-kubernetes-validations:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
+              layout:
+                description: |-
+                  Layout is a short, human-readable representation of the actual datamesh layout
+                  (diskful voters and tie-breakers), e.g. "3D" or "2D+1TB". Derived from the datamesh
+                  members; freely produced (not an enum). See the LayoutConverged condition for whether
+                  it matches the intended layout.
+                type: string
               size:
                 anyOf:
                 - type: integer

@@ -147,14 +147,19 @@ Indicates whether the associated storage pool exists and is ready.
 
 ### ConfigurationRolledOut
 
-Indicates whether all volumes' configuration matches the storage class.
+Indicates whether all volumes are aligned with the storage class (configuration acknowledged and
+layout converged). `staleConfiguration` counts volumes whose `ConfigurationReady` or
+`LayoutConverged` condition is present and `False`.
 
-| Status | Reason | When |
-|--------|--------|------|
-| True | RolledOutToAllVolumes | All RVs have `ConfigurationReady=True` |
-| False | ConfigurationRolloutInProgress | Rolling update in progress |
-| False | ConfigurationRolloutDisabled | `ConfigurationRolloutStrategy.type=NewVolumesOnly` AND `staleConfiguration > 0` |
-| Unknown | NewConfigurationNotYetObserved | Some volumes haven't observed the new configuration yet |
+| Status | Reason | When | Message |
+|--------|--------|------|---------|
+| True | RolledOutToAllVolumes | `staleConfiguration == 0` | All volumes have configuration matching the storage class |
+| False | ConfigurationRolloutInProgress | `staleConfiguration > 0` AND `ConfigurationRolloutStrategy.type=RollingUpdate` | `N volume(s) not yet aligned with the storage class configuration` |
+| False | ConfigurationRolloutDisabled | `staleConfiguration > 0` AND `ConfigurationRolloutStrategy.type=NewVolumesOnly` | `N volume(s) not yet aligned with the storage class configuration; automatic rollout is disabled` |
+| Unknown | NewConfigurationNotYetObserved | Some volumes haven't observed the new configuration yet | `N volume(s) pending observation` |
+
+> **Note:** the `maxParallel`/rollout-throttling semantics are not yet implemented, so the messages
+> report the honest stale count rather than active rollout progress.
 
 ### VolumesSatisfyEligibleNodes
 
@@ -224,8 +229,8 @@ If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNod
 The controller aggregates statistics from all `ReplicatedVolume` resources referencing this RSC:
 
 - **Total** — count of all volumes
-- **Aligned** — volumes where both `ConfigurationReady` and `SatisfyEligibleNodes` conditions are `True`
-- **StaleConfiguration** — volumes where `ConfigurationReady` condition is present and `False` (missing condition is not counted)
+- **Aligned** — volumes where `ConfigurationReady`, `SatisfyEligibleNodes`, **and** `LayoutConverged` conditions are all `True`
+- **StaleConfiguration** — volumes where `ConfigurationReady` is present and `False`, **or** `LayoutConverged` is present and `False`. A missing condition is **not** counted — it means the volume has not been evaluated yet (`LayoutConverged` is only written post-formation), consistent with the `ConfigurationReady` handling. Thus a volume that is acknowledged and configuration-ready but whose layout has not been evaluated yet (e.g. still forming) is neither aligned nor stale.
 - **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` condition is present and `False` (missing condition is not counted)
 - **PendingObservation** — volumes with non-zero `ConfigurationObservedGeneration` that doesn't match RSC's `ConfigurationGeneration`. Volumes with unset (0) `ConfigurationObservedGeneration` are treated as acknowledged to avoid status churn on newly created volumes.
 - **UsedStoragePoolNames** — sorted list of storage pool names referenced by volumes
@@ -249,7 +254,7 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 |----------|--------|---------|
 | RSC | For() (primary) | — |
 | RSP | Generation change, EligibleNodesRevision change, Ready condition change | mapRSPToRSC (includes usedBy names for orphan cleanup) |
-| RV | spec.replicatedStorageClassName change, status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes condition changes | rvEventHandler |
+| RV | spec.replicatedStorageClassName change, status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes/LayoutConverged condition changes | rvEventHandler |
 
 ## Indexes
 

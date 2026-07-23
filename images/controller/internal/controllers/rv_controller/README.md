@@ -135,6 +135,11 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
 │   └── reconcileDeleteAccessReplicas [Pure orchestration] ← details
+├── reconcileLayoutStatus [In-place reconciliation] (status.layout + LayoutConverged condition; SINGLE writer)
+│   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
+│   ├── computeLayoutReport (compare vs Configuration.IntendedLayout(); report-only in this stage)
+│   ├── applyLayout + applyLayoutConvergedCondTrue/False
+│   └── (not called during formation → LayoutConverged absent while forming)
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -178,7 +183,8 @@ flowchart TD
     FormingRVAWaiting --> Finalizers
     CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
     UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + RVA conditions)"]
-    NormalOp --> Finalizers
+    NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.layout + LayoutConverged)"]
+    LayoutStatus --> Finalizers
 
     Finalizers["reconcileRVAMetadata +<br/>reconcileRVRFinalizers"]
     Finalizers --> PatchDecision{Changed?}
@@ -186,6 +192,31 @@ flowchart TD
     PatchDecision -->|No| EndNode([Done])
     Patch --> EndNode
 ```
+
+## Layout formula
+
+The intended datamesh layout is derived from the configuration's FTT/GMDR:
+
+```
+D  (diskful voters) = FailuresToTolerate + GuaranteedMinimumDataRedundancy + 1
+TB (tie-breakers)   = 1  if D is even and FailuresToTolerate == D/2, else 0
+```
+
+This is provided by `ReplicatedVolumeConfiguration.IntendedLayout()` in `api/v1alpha1/rv_types.go`,
+with the tie-breaker sub-formula exposed as `v1alpha1.TieBreakersForDiskful(diskful, ftt)`. It is
+the source of truth for the **layout comparison** (the `LayoutConverged` condition and the
+tie-breaker guard reuse it). Placement decision: `IntendedLayout` is a pure, deterministic,
+context-free get-helper (no I/O, no cluster-state interpretation), so per `api-file-structure.mdc`
+it lives in `rv_types.go` (not `rv_custom_logic_that_should_not_be_here.go`).
+
+The datamesh package reuses the same formula: `guardTBSufficient` computes its required tie-breaker
+count via `v1alpha1.TieBreakersForDiskful`. Note that the guard passes the **actual** current voter
+count (not the intended diskful count), so it stays correct during transitions where the two differ.
+
+> **Not yet unified:** the diskful count formula (`D = FTT + GMDR + 1`) is still duplicated in
+> `computeIntendedDiskfulReplicaCount`, `computeTargetQuorum` (`minD`), and e2e
+> `pkg/framework/t_layout.go`. Collapsing those onto `IntendedLayout` is deferred to the
+> tie-breaker-formation and final-tests work.
 
 ## Conditions
 
@@ -198,6 +229,37 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 | True | Ready | Configuration is valid and matches the source |
 | False | WaitingForStorageClass | RSC not found or RSC configuration not ready (Auto mode only) |
 | False | InvalidConfiguration | Configuration is invalid: RSP not found or TransZonal zone count mismatch |
+
+### LayoutConverged
+
+Indicates whether the actual datamesh layout (diskful voters + tie-breakers) matches the layout
+intended by the configuration. Set by `reconcileLayoutStatus`, which is the **single writer** of
+this condition. It is evaluated only post-formation (never written while a volume is forming) and
+after the configuration has been acknowledged (`status.configuration` is set). This stage only
+reports; it performs no convergence actions (block 2 adds a convergence step that feeds its result
+back through this same writer).
+
+The intended layout comes from `ReplicatedVolumeConfiguration.IntendedLayout()` (the source of
+truth for the layout comparison — see [Layout formula](#layout-formula)); the actual layout is
+counted from `status.datamesh.members` (Diskful + LiminalDiskful = diskful voters, TieBreaker =
+tie-breakers; Access and ShadowDiskful are not part of the layout).
+
+Only **membership** transitions (`AddReplica`/`RemoveReplica`/`ChangeReplicaType`/`ForceRemoveReplica`
+— see `hasMembershipTransition`) change the layout composition and thus count as convergence
+progress. Other transitions (Attach/Detach, ResizeVolume, ChangeQuorum, network, multiattach) leave
+the layout unchanged and do not flip the reason.
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | Converged | Actual layout matches the intended layout (reported even if an unrelated transition is active, so it does not flap) |
+| False | Converging | Layout mismatches and a membership transition (see `hasMembershipTransition`) is in progress |
+| False | TransitionUnsupported | Layout mismatches with no active membership transition (non-membership transitions such as Attach/Resize may be active); no supported automatic transition (manual intervention required) |
+| False | CannotConverge | A convergence pattern applies but no admissible candidate exists (reserved; written only once block 2 convergence exists) |
+
+The mismatch message uses the exact layout arithmetic, e.g.
+`layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required`.
+`status.layout` holds the actual layout string (e.g. `3D`, `2D+1TB`; the `+NTB` suffix is omitted
+when there are no tie-breakers) and is exposed as a priority-1 print column.
 
 ### Attached (on RVA)
 
