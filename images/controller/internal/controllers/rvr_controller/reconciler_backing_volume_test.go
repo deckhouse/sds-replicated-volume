@@ -262,6 +262,39 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
+	It("returns nil for a TieBreaker member whose spec is also TieBreaker (retype complete)", func() {
+		// After an r3→r2 retype completes, both the datamesh member and the RVR spec are
+		// TieBreaker → no backing volume, so the generic backing-volume reconcile deletes the LLV.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-1"},
+		}
+
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+	})
+
+	It("keeps the backing volume for a Diskful member whose spec is TieBreaker (retype in progress)", func() {
+		// During the retype the member is still Diskful (holds data / quorum) while the spec
+		// already targets TieBreaker → the LLV must be kept until the member actually leaves.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", LVMVolumeGroupName: "lvg-1"},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+	})
+
 	It("returns backing volume for Access member with Diskful spec (vestibule)", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},

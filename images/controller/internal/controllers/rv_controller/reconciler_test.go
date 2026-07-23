@@ -19,6 +19,7 @@ package rvcontroller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -3572,16 +3573,50 @@ func layoutMember(t v1alpha1.DatameshMemberType) v1alpha1.DatameshMember {
 	return v1alpha1.DatameshMember{Type: t}
 }
 
-// layoutMembers builds a members slice: n diskful voters plus tb tie-breakers.
+// layoutMembers builds a members slice: n diskful voters plus tb tie-breakers, each with a
+// unique name (rvr-N) and node (node-N) so layout convergence can match them to RVRs and select
+// a deterministic retype candidate.
 func layoutMembers(diskful, tb int) []v1alpha1.DatameshMember {
 	members := make([]v1alpha1.DatameshMember, 0, diskful+tb)
+	idx := 0
+	add := func(t v1alpha1.DatameshMemberType) {
+		members = append(members, v1alpha1.DatameshMember{
+			Name:     fmt.Sprintf("rvr-%d", idx),
+			NodeName: fmt.Sprintf("node-%d", idx),
+			Type:     t,
+		})
+		idx++
+	}
 	for range diskful {
-		members = append(members, layoutMember(v1alpha1.DatameshMemberTypeDiskful))
+		add(v1alpha1.DatameshMemberTypeDiskful)
 	}
 	for range tb {
-		members = append(members, layoutMember(v1alpha1.DatameshMemberTypeTieBreaker))
+		add(v1alpha1.DatameshMemberTypeTieBreaker)
 	}
 	return members
+}
+
+// layoutRVRs builds RVRs matching the given datamesh members (same name and node, spec.type
+// derived directly from the member type — Diskful/TieBreaker), so layout convergence sees a
+// consistent intent for each member.
+func layoutRVRs(members []v1alpha1.DatameshMember) []*v1alpha1.ReplicatedVolumeReplica {
+	rvrs := make([]*v1alpha1.ReplicatedVolumeReplica, 0, len(members))
+	for _, m := range members {
+		rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: m.Name},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:     v1alpha1.ReplicaType(m.Type),
+				NodeName: m.NodeName,
+			},
+		})
+	}
+	return rvrs
+}
+
+// layoutReportOf computes the layout report for rv, deriving matching RVRs from its members and
+// assuming no attachments. Used by computeLayoutReport tests where RVR intent mirrors the members.
+func layoutReportOf(rv *v1alpha1.ReplicatedVolume) layoutReport {
+	return computeLayoutReport(rv, layoutRVRs(rv.Status.Datamesh.Members), nil)
 }
 
 // layoutRV builds an RV with the given intended config (FTT/GMDR), actual members and,
@@ -3656,7 +3691,7 @@ var _ = Describe("formatLayout", func() {
 
 var _ = Describe("computeLayoutReport", func() {
 	It("reports Converged when actual matches intended (r2 = 2D+1TB)", func() {
-		report := computeLayoutReport(layoutRV(1, 0, layoutMembers(2, 1), false))
+		report := layoutReportOf(layoutRV(1, 0, layoutMembers(2, 1), false))
 		Expect(report.layout).To(Equal("2D+1TB"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionTrue))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
@@ -3664,7 +3699,7 @@ var _ = Describe("computeLayoutReport", func() {
 	})
 
 	It("reports Converged when actual matches intended (None = 1D)", func() {
-		report := computeLayoutReport(layoutRV(0, 0, layoutMembers(1, 0), false))
+		report := layoutReportOf(layoutRV(0, 0, layoutMembers(1, 0), false))
 		Expect(report.layout).To(Equal("1D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionTrue))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
@@ -3674,32 +3709,33 @@ var _ = Describe("computeLayoutReport", func() {
 	It("reports Converged when layout matches, even with an active membership transition", func() {
 		// Layout already matches → Converged takes precedence over the Converging branch,
 		// so the condition does not flap while a transition finishes.
-		report := computeLayoutReport(layoutRV(1, 1, layoutMembers(3, 0), true))
+		report := layoutReportOf(layoutRV(1, 1, layoutMembers(3, 0), true))
 		Expect(report.layout).To(Equal("3D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionTrue))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 	})
 
-	It("reports TransitionUnsupported for 3D at an r2 config (no active transition)", func() {
-		report := computeLayoutReport(layoutRV(1, 0, layoutMembers(3, 0), false))
+	It("reports Converging (P1 retype) for 3D at an r2 config (whitelist)", func() {
+		// Block 2: 3D at an r2 config is now a P1 retype candidate (was TransitionUnsupported
+		// in block 1). With three unattached Diskful RVRs the lexicographically last is chosen.
+		report := layoutReportOf(layoutRV(1, 0, layoutMembers(3, 0), false))
 		Expect(report.layout).To(Equal("3D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("retyping Diskful replica rvr-2 to tie-breaker: have 3D, want 2D+1TB"))
 	})
 
-	It("reports False for 2D at an r2 config (tie-breaker deficit)", func() {
-		report := computeLayoutReport(layoutRV(1, 0, layoutMembers(2, 0), false))
+	It("reports Converging (P2 heal) for 2D at an r2 config (tie-breaker deficit)", func() {
+		// Block 2: 2D at an r2 config is now a P2 heal (create the missing tie-breaker).
+		report := layoutReportOf(layoutRV(1, 0, layoutMembers(2, 0), false))
 		Expect(report.layout).To(Equal("2D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 2D, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("creating tie-breaker replica: have 2D, want 2D+1TB"))
 	})
 
-	It("reports False when diskful count is insufficient (2D at an r3 config)", func() {
-		report := computeLayoutReport(layoutRV(1, 1, layoutMembers(2, 0), false))
+	It("reports TransitionUnsupported when diskful count is insufficient (2D at an r3 config)", func() {
+		report := layoutReportOf(layoutRV(1, 1, layoutMembers(2, 0), false))
 		Expect(report.layout).To(Equal("2D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionFalse))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
@@ -3708,26 +3744,26 @@ var _ = Describe("computeLayoutReport", func() {
 	})
 
 	It("reports Converging on a mismatch while a membership transition is active", func() {
-		report := computeLayoutReport(layoutRV(1, 0, layoutMembers(3, 0), true))
+		report := layoutReportOf(layoutRV(1, 0, layoutMembers(3, 0), true))
 		Expect(report.layout).To(Equal("3D"))
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionFalse))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal("layout transition in progress: have 3D, want 2D+1TB"))
 	})
 
-	It("reports TransitionUnsupported on a mismatch while only non-membership transitions are active", func() {
+	It("still converges (P1) when only non-membership transitions are active", func() {
+		// Block 2: Attach/Resize do not gate the whitelist (only membership transitions do), so a
+		// 3D volume at an r2 config with unattached candidates still plans a retype.
 		rv := layoutRV(1, 0, layoutMembers(3, 0), false) // r2 config, actual 3D
-		// Attach/Resize do not change the layout composition → not convergence progress.
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
 			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach},
 			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeResizeVolume},
 		}
 
-		report := computeLayoutReport(rv)
+		report := layoutReportOf(rv)
 		Expect(report.convergedStatus).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("retyping Diskful replica rvr-2 to tie-breaker: have 3D, want 2D+1TB"))
 	})
 })
 
@@ -3792,12 +3828,13 @@ var _ = Describe("reconcileLayoutStatus", func() {
 	})
 
 	It("sets status.layout and the LayoutConverged condition", func(ctx SpecContext) {
-		rv := layoutRV(1, 0, layoutMembers(3, 0), false) // r2 config, actual 3D → unsupported
-		outcome := rec.reconcileLayoutStatus(ctx, rv)
+		rv := layoutRV(1, 1, layoutMembers(2, 0), false) // r3 config, actual 2D → unsupported (deficit)
+		members := rv.Status.Datamesh.Members
+		outcome := rec.reconcileLayoutStatus(ctx, rv, layoutRVRs(members), nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.Layout).To(Equal("3D"))
+		Expect(rv.Status.Layout).To(Equal("2D"))
 
 		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
@@ -3807,10 +3844,11 @@ var _ = Describe("reconcileLayoutStatus", func() {
 
 	It("does not flap on repeated reconciles (idempotent, no patch churn)", func(ctx SpecContext) {
 		rv := layoutRV(1, 0, layoutMembers(2, 1), false) // converged
-		Expect(rec.reconcileLayoutStatus(ctx, rv).DidChange()).To(BeTrue())
+		rvrs := layoutRVRs(rv.Status.Datamesh.Members)
+		Expect(rec.reconcileLayoutStatus(ctx, rv, rvrs, nil).DidChange()).To(BeTrue())
 
 		before := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType).DeepCopy()
-		outcome := rec.reconcileLayoutStatus(ctx, rv)
+		outcome := rec.reconcileLayoutStatus(ctx, rv, rvrs, nil)
 		Expect(outcome.DidChange()).To(BeFalse())
 
 		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
@@ -3821,7 +3859,7 @@ var _ = Describe("reconcileLayoutStatus", func() {
 
 	It("is a no-op when configuration is not yet acknowledged (nil)", func(ctx SpecContext) {
 		rv := &v1alpha1.ReplicatedVolume{}
-		outcome := rec.reconcileLayoutStatus(ctx, rv)
+		outcome := rec.reconcileLayoutStatus(ctx, rv, nil, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeFalse())
 		Expect(obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)).To(BeNil())
@@ -3875,5 +3913,407 @@ var _ = Describe("reconcileLayoutStatus wiring", func() {
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)).
 			To(BeNil(), "LayoutConverged must not be written during formation")
+	})
+})
+
+// convergenceFixture builds an RV named "rv-1" with the given intended config (Ignored topology,
+// FailuresToTolerate fixed at 1, and the given GMDR — gmdr=0 → r2 = 2D+1TB, gmdr=1 → r3 = 3D) and
+// a datamesh of `diskful` Diskful members + `tb` TieBreaker members, together with matching RVRs
+// (consistent names/nodes, RV controller finalizer, spec.type equal to the member type). It is the
+// steady-state starting point for convergence tests.
+func convergenceFixture(gmdr byte, diskful, tb int) (*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica) {
+	rv := &v1alpha1.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "rv-1", UID: "rv-1-uid"},
+		Status: v1alpha1.ReplicatedVolumeStatus{
+			Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+				Topology:                        v1alpha1.TopologyIgnored,
+				FailuresToTolerate:              1,
+				GuaranteedMinimumDataRedundancy: gmdr,
+				ReplicatedStoragePoolName:       "test-pool",
+			},
+		},
+	}
+	var members []v1alpha1.DatameshMember
+	var rvrs []*v1alpha1.ReplicatedVolumeReplica
+	i := 0
+	add := func(mt v1alpha1.DatameshMemberType, rt v1alpha1.ReplicaType) {
+		name := v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", uint8(i))
+		node := fmt.Sprintf("node-%d", i)
+		members = append(members, v1alpha1.DatameshMember{Name: name, NodeName: node, Type: mt})
+		rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Finalizers: []string{v1alpha1.RVControllerFinalizer}},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: rt, NodeName: node,
+			},
+		})
+		i++
+	}
+	for range diskful {
+		add(v1alpha1.DatameshMemberTypeDiskful, v1alpha1.ReplicaTypeDiskful)
+	}
+	for range tb {
+		add(v1alpha1.DatameshMemberTypeTieBreaker, v1alpha1.ReplicaTypeTieBreaker)
+	}
+	rv.Status.Datamesh.Members = members
+	return rv, rvrs
+}
+
+var _ = Describe("computeTargetLayoutAction", func() {
+	It("takes no action when converged (2D+1TB at r2)", func() {
+		rv, rvrs := convergenceFixture(0, 2, 1)
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.convergedStatus).To(Equal(metav1.ConditionTrue))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+	})
+
+	It("P1: plans a retype for 3D at an r2 config, picking the lexicographically last RVR", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)))
+		Expect(action.convergedStatus).To(Equal(metav1.ConditionFalse))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+	})
+
+	It("P1: is idempotent while a retype is already requested (spec flipped, no transition yet)", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		// Simulate a previous pass: one Diskful member's RVR already retyped to TieBreaker,
+		// but the member type has not changed yet and no membership transition exists.
+		rvrs[2].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(action.message).To(Equal("retype to tie-breaker requested: have 3D, want 2D+1TB"))
+	})
+
+	It("P1: is a no-op while a membership transition is active", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType},
+		}
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(action.message).To(Equal("layout transition in progress: have 3D, want 2D+1TB"))
+	})
+
+	It("P1: excludes attached replicas (member.Attached) from candidates", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		// The lexicographically last diskful member is attached → the next one is chosen.
+		rv.Status.Datamesh.Members[2].Attached = true
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1)))
+	})
+
+	It("P1: excludes replicas with an active RVA on their node", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{{
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{ReplicatedVolumeName: "rv-1", NodeName: "node-2"},
+		}}
+		action := computeTargetLayoutAction(rv, rvrs, rvas)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1)))
+	})
+
+	It("P1: reports CannotConverge when all diskful replicas are attached", func() {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		for i := range rv.Status.Datamesh.Members {
+			rv.Status.Datamesh.Members[i].Attached = true
+		}
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(action.message).To(ContainSubstring("all diskful replicas are attached"))
+	})
+
+	It("P1: excludes TransZonal candidates whose zone holds more than one diskful voter", func() {
+		// 3D TransZonal at an r2 config: two voters in zone-a, one in zone-b. Only the zone-b
+		// replica may host a tie-breaker, even though it is not the lexicographically last name.
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
+		rv.Status.Datamesh.Members[0].Zone = "zone-b"
+		rv.Status.Datamesh.Members[1].Zone = "zone-a"
+		rv.Status.Datamesh.Members[2].Zone = "zone-a"
+
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0)))
+	})
+
+	It("P1: reports CannotConverge when no zone can host a tie-breaker", func() {
+		// 3D TransZonal, all diskful voters share one zone → no admissible candidate.
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
+		for i := range rv.Status.Datamesh.Members {
+			rv.Status.Datamesh.Members[i].Zone = "zone-a"
+		}
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(action.message).To(ContainSubstring("without violating zone placement"))
+	})
+
+	It("P1: excludes Zonal candidates outside the primary (max voter count) zone", func() {
+		// Degenerate Zonal layout (e.g. after manual ops/adopt): two voters in zone-a, one in
+		// zone-b. A Zonal tie-breaker gain must land in the primary zone (guardZonalSameZone), so
+		// the minority-zone replica is skipped even though it is the lexicographically last name.
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyZonal
+		rv.Status.Datamesh.Members[0].Zone = "zone-a" // primary zone (2 voters)
+		rv.Status.Datamesh.Members[1].Zone = "zone-a"
+		rv.Status.Datamesh.Members[2].Zone = "zone-b" // minority zone (1 voter)
+
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 1)))
+	})
+
+	It("P1: reports CannotConverge when only a minority-zone Zonal candidate remains", func() {
+		// Both primary-zone (zone-a) replicas are attached; the only free replica is in the
+		// minority zone (zone-b), which a Zonal tie-breaker may not join → no admissible candidate.
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyZonal
+		rv.Status.Datamesh.Members[0].Zone = "zone-a"
+		rv.Status.Datamesh.Members[0].Attached = true
+		rv.Status.Datamesh.Members[1].Zone = "zone-a"
+		rv.Status.Datamesh.Members[1].Attached = true
+		rv.Status.Datamesh.Members[2].Zone = "zone-b"
+
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(action.message).To(ContainSubstring("without violating zone placement"))
+	})
+
+	It("P2: plans a tie-breaker creation for 2D at an r2 config", func() {
+		rv, rvrs := convergenceFixture(0, 2, 0)
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionCreateTieBreaker))
+		Expect(action.convergedStatus).To(Equal(metav1.ConditionFalse))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+	})
+
+	It("P2: is idempotent while a tie-breaker RVR already exists but is not yet a member", func() {
+		rv, rvrs := convergenceFixture(0, 2, 0)
+		// A TieBreaker RVR was created in a previous pass but has not joined the datamesh yet.
+		rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeTieBreaker},
+		})
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(action.message).To(Equal("tie-breaker creation pending: have 2D, want 2D+1TB"))
+	})
+
+	It("reports TransitionUnsupported outside the whitelist (2D+1TB at an r3 config, upsize)", func() {
+		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(action.message).To(Equal(
+			"layout mismatch: have 2D+1TB, want 3D; automatic transition is not supported, manual intervention required"))
+	})
+
+	It("reports TransitionUnsupported when the diskful count is insufficient (2D at an r3 config)", func() {
+		rv, rvrs := convergenceFixture(1, 2, 0)
+		action := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+	})
+
+	It("4D at an r2 config: plans exactly one retype, then reports Unsupported at 3D+1TB", func() {
+		// One retype fills the single tie-breaker deficit (never removes the extra diskful voters).
+		rv4, rvrs4 := convergenceFixture(0, 4, 0)
+		action := computeTargetLayoutAction(rv4, rvrs4, nil)
+		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
+
+		// After the retype resolves the datamesh is 3D+1TB — still not the intended 2D+1TB, but
+		// no whitelisted transition applies, so it is reported honestly.
+		rv3, rvrs3 := convergenceFixture(0, 3, 1)
+		action = computeTargetLayoutAction(rv3, rvrs3, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(action.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(action.message).To(Equal(
+			"layout mismatch: have 3D+1TB, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+	})
+})
+
+var _ = Describe("isMemberAttached", func() {
+	It("is true when the member is marked Attached", func() {
+		m := &v1alpha1.DatameshMember{Name: "rvr-0", NodeName: "node-0", Attached: true}
+		Expect(isMemberAttached(m, nil)).To(BeTrue())
+	})
+
+	It("is true when an active RVA targets the member's node", func() {
+		m := &v1alpha1.DatameshMember{Name: "rvr-0", NodeName: "node-0"}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{{
+			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-0"},
+		}}
+		Expect(isMemberAttached(m, rvas)).To(BeTrue())
+	})
+
+	It("ignores deleting RVAs and RVAs on other nodes", func() {
+		now := metav1.Now()
+		m := &v1alpha1.DatameshMember{Name: "rvr-0", NodeName: "node-0"}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{
+			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-1"}},
+			{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now, Finalizers: []string{"f"}},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-0"}},
+		}
+		Expect(isMemberAttached(m, rvas)).To(BeFalse())
+	})
+})
+
+var _ = Describe("reconcileLayoutConvergence", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	// buildRec builds a fake client seeded with the given RVRs and returns the reconciler plus
+	// the RVRs re-read from the client (so they carry a resourceVersion for optimistic-lock patches).
+	buildRec := func(ctx context.Context, rvrs []*v1alpha1.ReplicatedVolumeReplica, extra ...interceptor.Funcs) (*Reconciler, []*v1alpha1.ReplicatedVolumeReplica) {
+		objs := make([]client.Object, 0, len(rvrs))
+		for _, r := range rvrs {
+			objs = append(objs, r)
+		}
+		b := newClientBuilder(scheme).WithObjects(objs...)
+		if len(extra) > 0 {
+			b = b.WithInterceptorFuncs(extra[0])
+		}
+		rec := NewReconciler(b.Build(), scheme)
+		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
+		Expect(err).NotTo(HaveOccurred())
+		return rec, fresh
+	}
+
+	It("P1: retypes exactly one Diskful RVR to TieBreaker and requeues", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 3, 0) // r2 config, actual 3D
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeTrue()) // DoneAndRequeue
+
+		retyped := 0
+		for _, r := range fresh {
+			if r.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+				retyped++
+				Expect(r.Name).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)))
+			}
+		}
+		Expect(retyped).To(Equal(1))
+
+		// Persisted to the API server.
+		var updated v1alpha1.ReplicatedVolumeReplica
+		Expect(rec.cl.Get(ctx, client.ObjectKey{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)}, &updated)).To(Succeed())
+		Expect(updated.Spec.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+	})
+
+	It("P1: is a no-op (idempotent) while a membership transition is active", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
+			{Type: v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType},
+		}
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		for _, r := range fresh {
+			Expect(r.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		}
+	})
+
+	It("P2: creates exactly one TieBreaker RVR and requeues", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 2, 0) // r2 config, actual 2D
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeTrue()) // DoneAndRequeue
+		Expect(fresh).To(HaveLen(3))
+
+		var list v1alpha1.ReplicatedVolumeReplicaList
+		Expect(rec.cl.List(ctx, &list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(3))
+		tbCount := 0
+		for i := range list.Items {
+			if list.Items[i].Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+				tbCount++
+			}
+		}
+		Expect(tbCount).To(Equal(1))
+	})
+
+	It("P2: does not create a second tie-breaker while one is pending", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 2, 0)
+		// A TieBreaker RVR already exists but has not joined the datamesh yet.
+		rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer}},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeTieBreaker},
+		})
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+
+		var list v1alpha1.ReplicatedVolumeReplicaList
+		Expect(rec.cl.List(ctx, &list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(3)) // unchanged
+	})
+
+	It("P2: treats AlreadyExists on create as an expected race (requeue, no error)", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 2, 0)
+		rec, fresh := buildRec(ctx, rvrs, interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
+					return apierrors.NewAlreadyExists(
+						schema.GroupResource{Group: v1alpha1.SchemeGroupVersion.Group, Resource: "replicatedvolumereplicas"},
+						"rvr-exists",
+					)
+				}
+				return cl.Create(ctx, obj, opts...)
+			},
+		})
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeTrue()) // DoneAndRequeue
+	})
+
+	It("takes no action for a mismatch outside the whitelist (2D at an r3 config)", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(1, 2, 0) // r3 config wants 3D, actual 2D
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		Expect(fresh).To(HaveLen(2))
+		for _, r := range fresh {
+			Expect(r.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		}
+	})
+
+	It("is a no-op when the RV is being deleted", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(0, 3, 0)
+		now := metav1.Now()
+		rv.DeletionTimestamp = &now
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		for _, r := range fresh {
+			Expect(r.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		}
 	})
 })
