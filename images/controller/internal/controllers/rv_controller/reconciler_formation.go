@@ -137,8 +137,10 @@ func (r *Reconciler) reconcileFormation(
 // Reconcile: formation-preconfigure
 //
 
-// reconcileFormationStepPreconfigure handles initial formation: creates replicas, waits for them
-// to become preconfigured, and initializes datamesh configuration.
+// reconcileFormationStepPreconfigure handles initial formation: creates the replicas of the
+// intended layout (diskful replicas and, for layouts with TB>0, a diskless tie-breaker), waits for
+// them to become preconfigured, and initializes datamesh configuration. The layout counts come from
+// ReplicatedVolumeConfiguration.IntendedLayout (single source of truth for D/TB).
 //
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) reconcileFormationStepPreconfigure(
@@ -192,16 +194,28 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful
 	})
 
-	// Ignore misplaced replicas.
-	diskful = diskful.Difference(misplaced)
+	// Collect tie-breaker replicas. Layouts with an even diskful count and FTT == D/2 require a
+	// diskless tie-breaker (v1alpha1.TieBreakersForDiskful). Creating it during formation — via the
+	// same path as diskful, with no DMTE and no Access stage — makes the volume form directly at
+	// its target layout (e.g. 2D+1TB), closing the window where a fresh r2 volume would otherwise
+	// live at 2D until layout convergence heals it.
+	tiebreakers := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker
+	})
 
-	// Ignore deleting replicas.
-	diskful = diskful.Difference(deleting)
+	// Ignore misplaced and deleting replicas from both sets.
+	diskful = diskful.Difference(misplaced).Difference(deleting)
+	tiebreakers = tiebreakers.Difference(misplaced).Difference(deleting)
 
-	targetDiskfulCount := computeIntendedDiskfulReplicaCount(rv)
+	// Intended layout (single source of truth). D = FTT+GMDR+1; TB = 1 when D is even and
+	// FTT == D/2, else 0. No second copy of the formula (see IntendedLayout).
+	intendedD, intendedTB := rv.Status.Configuration.IntendedLayout()
+	targetDiskfulCount := byte(intendedD)
+	targetTieBreakerCount := byte(intendedTB)
 
-	// Create missing diskful replicas only when there are no replicas being deleted or misplaced.
-	// This prevents zombie accumulation: we wait for all cleanup to finish before creating new ones.
+	// Create missing diskful and tie-breaker replicas only when there are no replicas being
+	// deleted or misplaced. This prevents zombie accumulation: we wait for all cleanup to finish
+	// before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
 		for diskful.Len() < int(targetDiskfulCount) {
 			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
@@ -214,6 +228,18 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 				return rf.Failf(err, "creating diskful RVR")
 			}
 			diskful.Add(rvr.ID())
+		}
+		for tiebreakers.Len() < int(targetTieBreakerCount) {
+			rvr, err := r.createTieBreakerRVR(rf.Ctx(), rv, rvrs)
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					// Same stale-cache handling as diskful: requeue to pick up the created RVR.
+					rf.Log().Info("RVR already exists, requeueing")
+					return rf.DoneAndRequeue()
+				}
+				return rf.Failf(err, "creating tie-breaker RVR")
+			}
+			tiebreakers.Add(rvr.ID())
 		}
 	}
 
@@ -239,23 +265,32 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 				Eval()
 	})
 
-	// Remove excess diskful replicas (prefer higher ID).
+	// Remove excess replicas of each type (prefer higher ID).
 	// Priority: prefer deleting replicas that are less progressed (not scheduled > not preconfigured > any).
-	for diskful.Len() > int(targetDiskfulCount) {
-		var candidates idset.IDSet
-		if ns := diskful.Difference(scheduled); !ns.IsEmpty() {
-			candidates = ns
-		} else if np := diskful.Difference(preconfigured); !np.IsEmpty() {
-			candidates = np
-		} else {
-			candidates = diskful
+	// Applied independently to diskful and tie-breakers so each type converges to its target count.
+	trimExcess := func(set idset.IDSet, target int) idset.IDSet {
+		for set.Len() > target {
+			var candidates idset.IDSet
+			if ns := set.Difference(scheduled); !ns.IsEmpty() {
+				candidates = ns
+			} else if np := set.Difference(preconfigured); !np.IsEmpty() {
+				candidates = np
+			} else {
+				candidates = set
+			}
+			set.Remove(candidates.Max())
 		}
-		diskful.Remove(candidates.Max())
+		return set
 	}
+	diskful = trimExcess(diskful, int(targetDiskfulCount))
+	tiebreakers = trimExcess(tiebreakers, int(targetTieBreakerCount))
 
-	// Delete all replicas not in diskful (misplaced, excess, etc.).
+	// Replicas participating in this formation: kept as members, everything else is deleted.
+	formationReplicas := diskful.Union(tiebreakers)
+
+	// Delete all replicas not participating in formation (misplaced, excess, externally created).
 	for _, rvr := range *rvrs {
-		if !diskful.Contains(rvr.ID()) {
+		if !formationReplicas.Contains(rvr.ID()) {
 			if err := r.deleteRVRWithForcedFinalizerRemoval(rf.Ctx(), rvr); err != nil {
 				return rf.Failf(err, "deleting RVR %s", rvr.Name)
 			}
@@ -283,8 +318,10 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			ReportChangedIf(changed)
 	}
 
-	// Replicas waiting to be scheduled.
-	waitingScheduling := diskful.Difference(scheduled)
+	// Replicas waiting to be scheduled (diskful and tie-breakers alike). A tie-breaker that cannot
+	// be placed (no third node/zone) surfaces here as Scheduled=False → schedulingFailed, so
+	// formation reports it honestly instead of silently hanging.
+	waitingScheduling := formationReplicas.Difference(scheduled)
 
 	// Split waitingScheduling: replicas where scheduling explicitly failed vs not yet processed.
 	schedulingFailed := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
@@ -296,11 +333,11 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	pendingScheduling := waitingScheduling.Difference(schedulingFailed)
 
 	// Replicas scheduled but waiting for preconfiguration.
-	waitingPreconfiguration := scheduled.Intersect(diskful).Difference(preconfigured)
+	waitingPreconfiguration := scheduled.Intersect(formationReplicas).Difference(preconfigured)
 
 	// Wait for replicas to become preconfigured; restart formation if timeout exceeded.
 	if !waitingScheduling.IsEmpty() || !waitingPreconfiguration.IsEmpty() {
-		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount,
+		msg := computeFormationPreconfigureWaitMessage(*rvrs, targetDiskfulCount+targetTieBreakerCount,
 			pendingScheduling, schedulingFailed, waitingPreconfiguration)
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed
 		changed = applyDatameshReplicaRequestMessages(
@@ -311,10 +348,12 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			ReportChangedIf(changed)
 	}
 
-	// Verify all diskful replicas have addresses for all required SystemNetworkNames (safety check).
+	// Verify all formation replicas have addresses for all required SystemNetworkNames (safety
+	// check). Tie-breakers also need addresses: they are added to the datamesh with their peer
+	// addresses in the next step.
 	requiredNetworks := rv.Status.Datamesh.SystemNetworkNames
 	missingAddresses := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.ID()) {
+		if !formationReplicas.Contains(rvr.ID()) {
 			return false
 		}
 		// Check if RVR has addresses for all required networks.
@@ -327,7 +366,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 		return matchCount != len(requiredNetworks)
 	})
 	if !missingAddresses.IsEmpty() {
-		okReplicas := diskful.Difference(missingAddresses)
+		okReplicas := formationReplicas.Difference(missingAddresses)
 
 		msg := fmt.Sprintf(
 			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v. "+
@@ -348,12 +387,12 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			ReportChangedIf(changed)
 	}
 
-	// Verify all diskful replicas are on eligible nodes (safety check).
+	// Verify all formation replicas are on eligible nodes (safety check).
 	notEligible := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		return diskful.Contains(rvr.ID()) && rsp.FindEligibleNode(rvr.Spec.NodeName) == nil
+		return formationReplicas.Contains(rvr.ID()) && rsp.FindEligibleNode(rvr.Spec.NodeName) == nil
 	})
 	if !notEligible.IsEmpty() {
-		okReplicas := diskful.Difference(notEligible)
+		okReplicas := formationReplicas.Difference(notEligible)
 
 		msg := fmt.Sprintf(
 			"Replicas [%s] are placed on nodes not in eligible nodes list. "+
@@ -376,7 +415,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 
 	// Verify spec matches pending transition (safety check against spec changes during formation).
 	specMismatch := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-		if !diskful.Contains(rvr.ID()) {
+		if !formationReplicas.Contains(rvr.ID()) {
 			return false
 		}
 		req := rvr.Status.DatameshRequest
@@ -388,7 +427,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 			rvr.Spec.LVMVolumeGroupThinPoolName != req.ThinPoolName
 	})
 	if !specMismatch.IsEmpty() {
-		okReplicas := diskful.Difference(specMismatch)
+		okReplicas := formationReplicas.Difference(specMismatch)
 
 		msg := fmt.Sprintf(
 			"Replicas [%s] have spec changes that don't match pending transition. "+
@@ -473,8 +512,33 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 	diskful := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil
 	})
+	// Collect active tie-breaker replicas (not being deleted). They join the datamesh in the same
+	// bulk-add as diskful members below — no DMTE, no Access stage — so the volume forms directly
+	// at its target layout and never passes through a diskless→diskful transition.
+	tiebreakers := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker && rvr.DeletionTimestamp == nil
+	})
+	members := diskful.Union(tiebreakers)
 
 	if len(rv.Status.Datamesh.Members) == 0 {
+		// Guard: every member is added from its own datamesh Join request (the Type/LVG source).
+		// The preconfigure gate normally guarantees a non-nil request, but it can be cleared in the
+		// window between preconfigure and here (stale cache, manual intervention, or an RSP flap that
+		// drives computeTargetDatameshRequest to nil). Adding from a nil request would panic and, worse,
+		// build a partial datamesh — so wait for the request to reappear instead of touching state.
+		missingRequest := idset.FromWhere(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+			return members.Contains(rvr.ID()) && rvr.Status.DatameshRequest == nil
+		})
+		if !missingRequest.IsEmpty() {
+			changed = applyDatameshTransitionStepMessage(step, fmt.Sprintf(
+				"Waiting for replicas [%s] to report a datamesh membership request before joining the datamesh. "+
+					"If not resolved automatically, formation will be restarted",
+				missingRequest.String(),
+			)) || changed
+			return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+				ReportChangedIf(changed)
+		}
+
 		// Replicas need shared secret to establish peer connections.
 		secret, err := generateSharedSecret()
 		if err != nil {
@@ -483,9 +547,10 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		rv.Status.Datamesh.SharedSecretAlg = v1alpha1.SharedSecretAlgSHA256
 		rv.Status.Datamesh.SharedSecret = secret
 
-		// Add diskful replicas as datamesh members.
+		// Add diskful and tie-breaker replicas as datamesh members. The member Type comes from the
+		// replica's own membership request (Diskful or TieBreaker), so both are added in one pass.
 		for _, rvr := range *rvrs {
-			if !diskful.Contains(rvr.ID()) {
+			if !members.Contains(rvr.ID()) {
 				continue
 			}
 
@@ -497,7 +562,7 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 
 			// We could use rv.Status.DatameshReplicaRequests, but that would require
 			// searching by name. ensureDatameshReplicaRequests called earlier guarantees
-			// these fields match.
+			// these fields match. The nil-request guard above ensures req != nil here.
 			req := rvr.Status.DatameshRequest
 
 			applyDatameshMember(rv, v1alpha1.DatameshMember{
@@ -515,17 +580,20 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 		// Formation creates the exact layout matching configuration, so baseline = config.
 		rv.Status.BaselineGuaranteedMinimumDataRedundancy = rv.Status.Configuration.GuaranteedMinimumDataRedundancy
 
-		// Quorum settings control DRBD split-brain prevention based on replica count.
+		// Quorum settings control DRBD split-brain prevention based on replica count. Tie-breakers
+		// are not voters (computeTargetQuorum counts only diskful voters), so the quorum threshold
+		// is unaffected by adding them here — but with the tie-breaker present DRBD sees an odd node
+		// count, which is exactly what quorum=floor(D/2)+1 assumes for an even-D layout.
 		quorum, quorumMinimumRedundancy := computeTargetQuorum(rv)
 		rv.Status.Datamesh.Quorum = quorum
 		rv.Status.Datamesh.QuorumMinimumRedundancy = quorumMinimumRedundancy
 
 		rv.Status.DatameshRevision++
 		step.DatameshRevision = rv.Status.DatameshRevision
-		applyDatameshReplicaRequestMessages(rv, diskful, "Datamesh is forming, waiting for replica to apply new configuration")
+		applyDatameshReplicaRequestMessages(rv, members, "Datamesh is forming, waiting for replica to apply new configuration")
 		applyDatameshTransitionStepMessage(step, fmt.Sprintf(
 			"Replicas [%s] preconfigured and added to datamesh. Waiting for them to establish connections",
-			diskful.String(),
+			members.String(),
 		))
 
 		return rf.Continue().ReportChanged()

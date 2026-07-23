@@ -1935,31 +1935,30 @@ var _ = Describe("rvShouldNotExist", func() {
 	})
 })
 
-var _ = Describe("computeIntendedDiskfulReplicaCount", func() {
-	It("returns D = FTT + GMDR + 1 for all valid FTT/GMDR combinations", func() {
+// IntendedLayout is the single source of truth for the D/TB formula that formation and
+// computeTargetQuorum consume. Verify both counts across all valid FTT/GMDR combinations.
+var _ = Describe("IntendedLayout (D/TB formula used by formation)", func() {
+	It("returns D = FTT + GMDR + 1 and the correct tie-breaker count", func() {
 		cases := []struct {
-			ftt, gmdr byte
-			expected  byte
+			ftt, gmdr     byte
+			wantD, wantTB int
+			desc          string
 		}{
-			{0, 0, 1}, // 1D
-			{1, 0, 2}, // 2D+1TB
-			{0, 1, 2}, // 2D
-			{1, 1, 3}, // 3D
-			{2, 1, 4}, // 4D
-			{1, 2, 4}, // 4D+1TB
-			{2, 2, 5}, // 5D
+			{0, 0, 1, 0, "1D"},
+			{0, 1, 2, 0, "2D (Consistency)"},
+			{1, 0, 2, 1, "2D+1TB (Availability, r2)"},
+			{1, 1, 3, 0, "3D (ConsistencyAndAvailability, r3)"},
+			{2, 1, 4, 1, "4D+1TB (FTT=2=D/2)"},
+			{1, 2, 4, 0, "4D (FTT=1!=D/2)"},
+			{2, 2, 5, 0, "5D"},
 		}
 		for _, tc := range cases {
-			rv := &v1alpha1.ReplicatedVolume{
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
-						FailuresToTolerate: tc.ftt, GuaranteedMinimumDataRedundancy: tc.gmdr,
-						ReplicatedStoragePoolName: "test-pool",
-					},
-				},
+			cfg := v1alpha1.ReplicatedVolumeConfiguration{
+				FailuresToTolerate: tc.ftt, GuaranteedMinimumDataRedundancy: tc.gmdr,
 			}
-			Expect(computeIntendedDiskfulReplicaCount(rv)).To(Equal(tc.expected),
-				"FTT=%d, GMDR=%d", tc.ftt, tc.gmdr)
+			d, tb := cfg.IntendedLayout()
+			Expect(d).To(Equal(tc.wantD), "D for %s (FTT=%d, GMDR=%d)", tc.desc, tc.ftt, tc.gmdr)
+			Expect(tb).To(Equal(tc.wantTB), "TB for %s (FTT=%d, GMDR=%d)", tc.desc, tc.ftt, tc.gmdr)
 		}
 	})
 })

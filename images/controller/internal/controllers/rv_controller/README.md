@@ -220,10 +220,12 @@ The datamesh package reuses the same formula: `guardTBSufficient` computes its r
 count via `v1alpha1.TieBreakersForDiskful`. Note that the guard passes the **actual** current voter
 count (not the intended diskful count), so it stays correct during transitions where the two differ.
 
-> **Not yet unified:** the diskful count formula (`D = FTT + GMDR + 1`) is still duplicated in
-> `computeIntendedDiskfulReplicaCount`, `computeTargetQuorum` (`minD`), and e2e
-> `pkg/framework/t_layout.go`. Collapsing those onto `IntendedLayout` is deferred to the
-> tie-breaker-formation and final-tests work.
+The controller now derives both the diskful and tie-breaker counts from `IntendedLayout()`:
+formation (`reconcileFormationStepPreconfigure`), `computeTargetQuorum` (`minD`), and
+`rsc_controller`'s `validateEligibleNodes` all call it (the latter through a config built from
+FTT/GMDR), so the D/TB formula lives in exactly one place for controller code. The only remaining
+duplicate is the e2e helper `pkg/framework/t_layout.go`; collapsing that onto `IntendedLayout` is
+deferred to the final-tests work.
 
 ## Conditions
 
@@ -657,7 +659,13 @@ flowchart TD
 
 ### reconcileFormationStepPreconfigure Details
 
-**Purpose:** Creates diskful replicas and waits for them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing.
+**Purpose:** Creates the replicas that make up the volume's target layout — diskful replicas **and**, for layouts with a tie-breaker (`TB > 0`, e.g. r2 = 2D+1TB), a diskless tie-breaker — and waits for all of them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing. Creating the tie-breaker here (rather than healing it afterwards via layout convergence) closes the window where a fresh r2 volume would live at 2D without a tie-breaker.
+
+**Tie-breaker count** comes from `ReplicatedVolumeConfiguration.IntendedLayout()` (the single source of truth), not a second formula. Diskful and tie-breaker replicas are created through the same `createRVR` path with no DMTE and no Access stage, so the volume never passes through a diskless→diskful transition.
+
+**Behavior when a tie-breaker cannot be placed:** the tie-breaker RVR is scheduled by `rvr_scheduling_controller` like any other replica. If no node/zone can host it (e.g. fewer than three nodes for `Ignored`, three zones for `TransZonal`, or three nodes in the volume's zone for `Zonal`, or the `guardTransZonalTBPlacement` precondition rejects every zone that already holds a diskful voter), the scheduler sets `Scheduled=False` on the tie-breaker RVR. Formation surfaces this in the same scheduling-wait gate as diskful replicas (`scheduling failed [#N]` with the scheduler's message) and keeps waiting — it does not silently hang, and it does not advance to a 2D-only datamesh.
+
+This is a secondary safety net: `rsc_controller`'s `validateEligibleNodes` already accounts for the tie-breaker (it requires `D + TB` total nodes/zones, not just `D`) and marks the RSC `Ready=False` (`InsufficientEligibleNodes`) when the pool cannot host the full layout, so an under-provisioned class is rejected before any volume starts forming. The formation-time gate matters only for clusters that shrank (or whose nodes became ineligible) after the class was validated.
 
 **File:** `reconciler_formation.go`
 
@@ -670,22 +678,22 @@ flowchart TD
     Init -->|No| FindMisplaced
     InitConfig --> FindMisplaced["Find misplaced replicas<br/>(SatisfyEligibleNodes=False)"]
     FindMisplaced --> FindDeleting["Find deleting replicas<br/>(DeletionTimestamp set)"]
-    FindDeleting --> CollectDiskful["Collect active diskful replicas<br/>(exclude misplaced + deleting)"]
-    CollectDiskful --> ComputeCount[computeIntendedDiskfulReplicaCount]
+    FindDeleting --> CollectDiskful["Collect active diskful + tie-breaker replicas<br/>(exclude misplaced + deleting)"]
+    CollectDiskful --> ComputeCount["IntendedLayout → D, TB counts"]
 
     ComputeCount --> CheckClean{"No deleting and<br/>no misplaced?"}
-    CheckClean -->|Yes| CreateLoop{"diskful.Len < target?"}
-    CreateLoop -->|Yes| CreateRVR[createRVR]
+    CheckClean -->|Yes| CreateLoop{"diskful.Len < D<br/>or tiebreakers.Len < TB?"}
+    CreateLoop -->|Yes| CreateRVR["createDiskfulRVR /<br/>createTieBreakerRVR"]
     CreateRVR -->|AlreadyExists| Requeue1([DoneAndRequeue])
     CreateRVR --> CreateLoop
     CheckClean -->|No| SkipCreate[Skip creation]
     SkipCreate --> RemoveExcess
 
-    CreateLoop -->|No| RemoveExcess{"diskful.Len > target?"}
+    CreateLoop -->|No| RemoveExcess{"diskful.Len > D<br/>or tiebreakers.Len > TB?"}
 
-    RemoveExcess -->|Yes| PickCandidate["Pick least-progressed replica<br/>(not scheduled > not preconfigured > any)"]
+    RemoveExcess -->|Yes| PickCandidate["Trim excess of each type<br/>(not scheduled > not preconfigured > any)"]
     PickCandidate --> RemoveExcess
-    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in diskful set<br/>(misplaced, excess, externally created)"]
+    RemoveExcess -->|No| DeleteUnwanted["Delete replicas not in formation set<br/>(diskful ∪ tie-breakers;<br/>misplaced, excess, externally created)"]
 
     DeleteUnwanted --> CheckDeleting{"Any replicas still<br/>deleting?"}
     CheckDeleting -->|Yes| WaitDeleting["Wait for cleanup /<br/>restart if timeout (30s)"]
@@ -715,7 +723,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rv.Spec.Size` | Target volume size |
-| `rv.Status.Configuration` (FTT, GMDR) | Determines diskful replica count: D = FTT + GMDR + 1 |
+| `rv.Status.Configuration` (FTT, GMDR) | Determines the target layout via `IntendedLayout()`: D diskful + TB tie-breakers |
 | `rsp` | Storage pool view (eligible nodes, system network names) |
 | `rvrs` | Current replicas (status: scheduled, preconfigured, addresses, backing volume) |
 
@@ -731,7 +739,7 @@ flowchart TD
 
 ### reconcileFormationStepEstablishConnectivity Details
 
-**Purpose:** Adds preconfigured replicas to the datamesh (with shared secret and quorum), then waits for DRBD configuration, peer connections, and replication establishment.
+**Purpose:** Adds preconfigured replicas — diskful **and** tie-breakers — to the datamesh (with shared secret and quorum) in a single bulk-add, then waits for DRBD configuration, peer connections, and replication establishment among the **diskful** members. Tie-breakers are diskless and do not participate in the diskful connectivity/data-bootstrap gates; the volume leaves formation already at its target layout (e.g. 2D+1TB) and the tie-breaker's peer connections converge during normal operation. Quorum is computed by `computeTargetQuorum`, which counts only diskful voters, so the tie-breaker does not change the threshold — but it does make DRBD see an odd node count, which is what `q = floor(D/2)+1` assumes for an even-D layout.
 
 **File:** `reconciler_formation.go`
 
@@ -743,7 +751,7 @@ flowchart TD
 
     CollectDiskful --> CheckMembers{Datamesh members<br/>already set?}
     CheckMembers -->|No| GenSecret[generateSharedSecret]
-    GenSecret --> AddMembers["Add diskful replicas as datamesh members<br/>(zone, addresses, LVG from membership request)"]
+    GenSecret --> AddMembers["Add diskful + tie-breaker replicas as datamesh members<br/>(zone, addresses, LVG from membership request)"]
     AddMembers --> SetBaseline["Set BaselineGMDR<br/>(from configuration)"]
     SetBaseline --> SetQuorum[computeTargetQuorum]
     SetQuorum --> IncrRevision["DatameshRevision++"]

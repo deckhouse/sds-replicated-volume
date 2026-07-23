@@ -910,7 +910,7 @@ func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs i
 // (pending scheduling, scheduling failed with inline error details, preconfiguring).
 func computeFormationPreconfigureWaitMessage(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	targetDiskfulCount byte,
+	targetReplicaCount byte,
 	pendingScheduling, schedulingFailed, waitingPreconfiguration idset.IDSet,
 ) string {
 	var waitReasons []string
@@ -929,7 +929,7 @@ func computeFormationPreconfigureWaitMessage(
 	}
 	waitingCount := pendingScheduling.Len() + schedulingFailed.Len() + waitingPreconfiguration.Len()
 	return fmt.Sprintf("Waiting for %d/%d replicas: %s",
-		waitingCount, targetDiskfulCount, strings.Join(waitReasons, ", "))
+		waitingCount, targetReplicaCount, strings.Join(waitReasons, ", "))
 }
 
 // computeActualSchedulingFailureMessages collects deduplicated, sorted messages from RVRs
@@ -953,22 +953,18 @@ func computeActualSchedulingFailureMessages(rvrs []*v1alpha1.ReplicatedVolumeRep
 	return msgs
 }
 
-// computeIntendedDiskfulReplicaCount returns the intended number of diskful replicas.
-// D = FTT + GMDR + 1
-func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
-	cfg := rv.Status.Configuration
-	return cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
-}
-
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy from the
 // configuration. Used during formation to set initial q/qmr values.
 //
 //	qmr = config.GMDR + 1
 //	q   = floor(voters / 2) + 1, but at least floor(minD / 2) + 1
-//	minD = config.FTT + config.GMDR + 1
+//	minD = intended diskful count (v1alpha1.ReplicatedVolumeConfiguration.IntendedLayout)
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	cfg := rv.Status.Configuration
-	minD := cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
+	// minD is the intended diskful count. Derived from the single source of truth
+	// (IntendedLayout) rather than re-deriving D = FTT+GMDR+1 here.
+	intendedD, _ := cfg.IntendedLayout()
+	minD := byte(intendedD)
 
 	minQ := minD/2 + 1
 	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {

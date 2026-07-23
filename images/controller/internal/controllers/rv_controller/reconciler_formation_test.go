@@ -757,6 +757,254 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updatedRVR0 v1alpha1.ReplicatedVolumeReplica
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr0), &updatedRVR0)).To(Succeed())
 	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// Tie-breaker formation (block 3): formation must create the tie-breaker of the
+	// intended layout so a volume leaves formation directly at e.g. 2D+1TB.
+
+	// newPreconfiguredTBRVR builds a TieBreaker RVR that is fully preconfigured for create/v1
+	// formation: scheduled, DRBDConfigured=PendingDatameshJoin, addresses reported, and a
+	// datamesh Join request of type TieBreaker. Diskless: no LVG and no backing volume.
+	//nolint:unparam // rvName is always "rv-1" in current tests, kept for symmetry with newPreconfiguredRVR.
+	newPreconfiguredTBRVR := func(rvName string, id uint8, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName(rvName, id),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeTieBreaker,
+				NodeName:             nodeName,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "Internal"},
+				},
+				DatameshRequest: &v1alpha1.DatameshMembershipRequest{
+					Operation: v1alpha1.DatameshMembershipRequestOperationJoin,
+					Type:      v1alpha1.ReplicaTypeTieBreaker,
+				},
+			},
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonPendingDatameshJoin,
+		})
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		})
+		return rvr
+	}
+
+	// countRVRTypes lists RVRs and returns (diskful, tie-breaker) counts.
+	countRVRTypes := func(ctx context.Context, cl client.Client) (diskful, tiebreaker int) {
+		var list v1alpha1.ReplicatedVolumeReplicaList
+		Expect(cl.List(ctx, &list)).To(Succeed())
+		for i := range list.Items {
+			switch list.Items[i].Spec.Type {
+			case v1alpha1.ReplicaTypeDiskful:
+				diskful++
+			case v1alpha1.ReplicaTypeTieBreaker:
+				tiebreaker++
+			}
+		}
+		return diskful, tiebreaker
+	}
+
+	It("creates the intended diskful + tie-breaker layout for each replication setting", func(ctx SpecContext) {
+		cases := []struct {
+			name                    string
+			ftt, gmdr               byte
+			wantDiskful, wantTBreak int
+		}{
+			{"None → 1D", 0, 0, 1, 0},
+			{"Consistency → 2D", 0, 1, 2, 0},
+			{"Availability → 2D+1TB", 1, 0, 2, 1},
+			{"ConsistencyAndAvailability → 3D", 1, 1, 3, 0},
+			{"Manual FTT=2,GMDR=1 → 4D+1TB", 2, 1, 4, 1},
+		}
+		for _, tc := range cases {
+			rsc := newRSCWithConfiguration("rsc-1")
+			rsc.Status.Configuration.FailuresToTolerate = tc.ftt
+			rsc.Status.Configuration.GuaranteedMinimumDataRedundancy = tc.gmdr
+			rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3", "node-4", "node-5")
+			rv := newFormationRV("rsc-1")
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc, rsp).
+				WithStatusSubresource(rv, rsc).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			// A single reconcile creates every missing replica of the layout (no early
+			// return between the diskful and tie-breaker create loops).
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred(), tc.name)
+
+			diskful, tiebreaker := countRVRTypes(ctx, cl)
+			Expect(diskful).To(Equal(tc.wantDiskful), "diskful count for %s", tc.name)
+			Expect(tiebreaker).To(Equal(tc.wantTBreak), "tie-breaker count for %s", tc.name)
+		}
+	})
+
+	It("adds the tie-breaker to the datamesh during establish-connectivity (2D+1TB)", func(ctx SpecContext) {
+		// r2 layout: FTT=1, GMDR=0 → 2D+1TB. All replicas already preconfigured, so a single
+		// reconcile passes preconfigure and falls through to establish-connectivity.
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsc.Status.Configuration.FailuresToTolerate = 1
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3")
+		rv := newFormationRV("rsc-1")
+
+		d0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		d1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+		tb := newPreconfiguredTBRVR("rv-1", 2, "node-3")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+		// The datamesh is formed with the full 2D+1TB layout in one bulk-add.
+		Expect(updated.Status.Datamesh.SharedSecret).NotTo(BeEmpty())
+		Expect(updated.Status.Datamesh.Members).To(HaveLen(3))
+		memberTypes := map[v1alpha1.DatameshMemberType]int{}
+		for _, m := range updated.Status.Datamesh.Members {
+			memberTypes[m.Type]++
+		}
+		Expect(memberTypes[v1alpha1.DatameshMemberTypeDiskful]).To(Equal(2))
+		Expect(memberTypes[v1alpha1.DatameshMemberTypeTieBreaker]).To(Equal(1))
+		// Tie-breaker is not a voter, so quorum stays floor(2/2)+1 = 2, qmr = GMDR+1 = 1.
+		Expect(updated.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(updated.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(1)))
+	})
+
+	It("does not create a second tie-breaker on repeated reconcile (idempotent)", func(ctx SpecContext) {
+		// r2 layout with the full 2D+1TB already present and preconfigured.
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsc.Status.Configuration.FailuresToTolerate = 1
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3")
+		rv := newFormationRV("rsc-1")
+
+		d0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		d1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+		tb := newPreconfiguredTBRVR("rv-1", 2, "node-3")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		for i := 0; i < 3; i++ {
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		diskful, tiebreaker := countRVRTypes(ctx, cl)
+		Expect(diskful).To(Equal(2), "diskful count must stay 2")
+		Expect(tiebreaker).To(Equal(1), "tie-breaker count must stay 1 (no duplicate)")
+	})
+
+	It("requeues without error when the tie-breaker create returns AlreadyExists", func(ctx SpecContext) {
+		// r2 layout: 2 diskful create successfully, the tie-breaker create hits a stale cache.
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsc.Status.Configuration.FailuresToTolerate = 1
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2", "node-3")
+		rv := newFormationRV("rsc-1")
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp).
+			WithStatusSubresource(rv, rsc).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+						return apierrors.NewAlreadyExists(
+							schema.GroupResource{Group: v1alpha1.SchemeGroupVersion.Group, Resource: "replicatedvolumereplicas"},
+							rvr.Name,
+						)
+					}
+					return cl.Create(ctx, obj, opts...)
+				},
+			}).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		// AlreadyExists on the tie-breaker → DoneAndRequeue (no error surfaced).
+		Expect(result.Requeue).To(BeTrue()) //nolint:staticcheck // Requeue field is set by flow.DoneAndRequeue
+	})
+
+	It("waits with an honest status when the tie-breaker cannot be scheduled", func(ctx SpecContext) {
+		// r2 layout: diskful placed, but the tie-breaker cannot be scheduled (no third node/zone).
+		// The scheduler set Scheduled=False; formation must report it and keep waiting, not advance
+		// to a 2D-only datamesh.
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsc.Status.Configuration.FailuresToTolerate = 1
+		rsp := newTestRSPWithNodes("test-pool", "node-1", "node-2")
+		rv := newFormationRV("rsc-1")
+
+		d0 := newPreconfiguredRVR("rv-1", 0, "node-1")
+		d1 := newPreconfiguredRVR("rv-1", 1, "node-2")
+		// Tie-breaker exists but scheduling failed.
+		tb := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeTieBreaker,
+			},
+		}
+		obju.SetStatusCondition(tb, metav1.Condition{
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+			Message: "no node can host a tie-breaker",
+		})
+		obju.SetStatusCondition(tb, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied,
+		})
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		// Formation waits (requeue), does not silently hang or advance.
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		// Honest status: the wait message names the tie-breaker's scheduling failure.
+		msg := updated.Status.DatameshTransitions[0].CurrentStep().Message
+		Expect(msg).To(ContainSubstring("scheduling failed [#2]"))
+		Expect(msg).To(ContainSubstring("no node can host a tie-breaker"))
+		// Datamesh not formed: no members added while the layout is incomplete.
+		Expect(updated.Status.Datamesh.Members).To(BeEmpty())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1075,6 +1323,53 @@ var _ = Describe("Formation: EstablishConnectivity", func() {
 		var drbdrOp v1alpha1.DRBDResourceOperation
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "rv-1-formation"}, &drbdrOp)).To(Succeed())
 		Expect(drbdrOp.Spec.Type).To(Equal(v1alpha1.DRBDResourceOperationCreateNewUUID))
+	})
+
+	It("waits without panicking when a member has no datamesh request at member-add", func(ctx SpecContext) {
+		// Members are empty, so the bulk member-add path runs. A candidate member whose
+		// DatameshRequest was cleared (stale cache / manual intervention / RSP flap) must not be
+		// dereferenced: formation waits with an honest status instead of panicking or building a
+		// partial datamesh.
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsp := newTestRSP("test-pool")
+		rsp.Status.EligibleNodes = []v1alpha1.ReplicatedStoragePoolEligibleNode{
+			{NodeName: "node-1", LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}}},
+		}
+		rv := newRVInEstablishConnectivity()
+		rv.Status.Datamesh.Members = nil // force the bulk member-add path
+
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 0),
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
+				NodeName:             "node-1",
+				LVMVolumeGroupName:   "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRequest: nil, // cleared: must not be dereferenced during member-add
+			},
+		}
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, rvr).
+			WithStatusSubresource(rv, rsc, rvr).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		// Formation waits (no panic, no partial datamesh).
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.Datamesh.Members).To(BeEmpty(), "no member should be added while a request is missing")
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).
+			To(ContainSubstring("membership request"))
 	})
 })
 

@@ -1040,14 +1040,16 @@ func validateEligibleNodes(
 		return fmt.Errorf("No nodes available in the storage pool")
 	}
 
-	// Compute layout parameters from FTT/GMDR.
+	// Compute layout parameters from FTT/GMDR through the single source of truth
+	// (v1alpha1.ReplicatedVolumeConfiguration.IntendedLayout), so the D/TB formula
 	//   D  = FTT + GMDR + 1   (diskful replicas)
 	//   TB = 1 if D is even AND FTT == D/2, else 0
-	d := int(ftt + gmdr + 1)
-	tb := 0
-	if d%2 == 0 && int(ftt) == d/2 {
-		tb = 1
+	// is not duplicated here.
+	cfg := v1alpha1.ReplicatedVolumeConfiguration{
+		FailuresToTolerate:              ftt,
+		GuaranteedMinimumDataRedundancy: gmdr,
 	}
+	d, tb := cfg.IntendedLayout()
 	totalReplicas := d + tb
 
 	// Count nodes and nodes with disks.
