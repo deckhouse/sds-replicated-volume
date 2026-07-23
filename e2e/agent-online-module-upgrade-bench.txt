@@ -1,0 +1,44 @@
+==========================================================================================
+UPGRADE TEST RESULTS — 400 R4 groups, 100 DRBDMappers/node, 20 concurrent reconciles
+FakeUpgrade (no kernel module reload), per-device suspend-to-resume timing
+==========================================================================================
+
+1. COMMON PHASE (suspend all + wipe tables + DRBD down) — per node, shared by all devices
+
+   Node         Duration
+   ------------ --------
+   ubuntu-0        3.01s
+   ubuntu-1        2.95s
+   redos-0         2.92s
+   redos-1         3.17s
+   avg             3.01s
+
+2. QUEUE WAIT (upgrade complete → reconcile start)
+
+   Node            N     Min     Avg     P50     P95     Max
+   ------------ ---- ------- ------- ------- ------- -------
+   ubuntu-0      100   0.11s   9.92s  10.66s  18.54s  19.72s
+   ubuntu-1      100   0.14s   8.62s   8.38s  17.58s  18.65s
+   redos-0       100   0.21s   7.58s   7.09s  16.14s  16.79s
+   redos-1       100   0.10s   7.85s   7.80s  16.47s  17.49s
+   ALL           400   0.10s   8.49s   8.18s  17.16s  19.72s
+
+3. DRBD RECONCILE (reconcile start → device resumed)
+
+   Node            N     Min     Avg     P50     P95     Max
+   ------------ ---- ------- ------- ------- ------- -------
+   ubuntu-0      100   0.49s   1.05s   1.04s   1.67s   2.15s
+   ubuntu-1      100   0.30s   0.98s   0.97s   1.73s   2.31s
+   redos-0       100   0.26s   0.95s   0.97s   1.53s   1.69s
+   redos-1       100   0.33s   0.93s   0.89s   1.57s   1.82s
+   ALL           400   0.26s   0.98s   0.97s   1.61s   2.31s
+
+4. TOTAL PER-DEVICE (device suspended → device resumed)
+
+   Node            N     Min     Avg     P50     P95     Max
+   ------------ ---- ------- ------- ------- ------- -------
+   ubuntu-0      100   3.55s  13.92s  14.67s  22.73s  23.95s
+   ubuntu-1      100   3.39s  12.55s  12.25s  21.63s  23.14s
+   redos-0       100   3.55s  11.44s  10.45s  19.81s  20.65s
+   redos-1       100   3.59s  11.94s  11.91s  20.83s  21.37s
+   ALL           400   3.39s  12.46s  12.13s  21.29s  23.95s
