@@ -37,8 +37,10 @@ shell:
     - apt-get update
     - apt-get install -y gcc14 make binutils bc kmod coccinelle patch elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils ca-certificates
     - apt-get clean && rm -rf /var/lib/apt/lists/*
-    # ALT installs the compiler as x86_64-alt-linux-gcc-14; expose it as gcc-14.
-    - if [ -f /usr/bin/x86_64-alt-linux-gcc-14 ]; then ln -sf x86_64-alt-linux-gcc-14 /usr/bin/gcc-14; fi
+    # ALT ships the compiler as x86_64-alt-linux-gcc-14. DRBD's Makefile.spatch host
+    # step (GENPATCHNAMES) invokes the unversioned x86_64-alt-linux-gcc; the kernel
+    # module compile uses CC=gcc-14. Provide every default name pointing at gcc-14.
+    - for n in gcc-14 gcc cc x86_64-alt-linux-gcc; do ln -sf x86_64-alt-linux-gcc-14 /usr/bin/$n; done
   install:
     - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
     - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
