@@ -17,6 +17,22 @@ memory: 25Mi
 ^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$
 {{- end }}
 
+{{- define "drbd_desired_version" -}}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane -}}
+{{ .Values.sdsReplicatedVolume.internal.drbdVersion }}
+{{- else -}}
+{{ .Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}
+{{- end -}}
+{{- end }}
+
+{{- define "drbd_package_name" -}}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane -}}
+drbd
+{{- else -}}
+drbdLegacy
+{{- end -}}
+{{- end }}
+
 {{- define "linstor_resources_cleaner" }}
 cpu: 50m
 memory: 150Mi
