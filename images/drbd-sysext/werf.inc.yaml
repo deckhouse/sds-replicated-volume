@@ -3,17 +3,18 @@
 # NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]);
 # nodelet merges the sysext via systemd-sysext.
 #
-# Two stages: the compat + module compile needs coccinelle/patch + a GCC>=14 (the
-# kernel uses -fmin-function-alignment) — apt/golang-alt; the sysext packaging needs
-# erofs-utils/cryptsetup — pm/golang. The kernel build tree comes from the stable
-# Olcedar kernel-devel image (Module.symvers present; CONFIG_MODVERSIONS=y).
+# Toolchain follows sds-replicated-volume-kernel-module/images/drbd-builder: alt:sisyphus
+# has the full repo — gcc14 (kernel 6.12+ needs -fmin-function-alignment=16), coccinelle
+# (DRBD kernel-compat spatch), patch, plus erofs-utils/cryptsetup for packaging. The
+# kernel build tree comes from the stable Olcedar kernel-devel image (Module.symvers
+# present; CONFIG_MODVERSIONS=y). The kernel-devel tag is re-pinned on kernel rebuild.
 ---
 image: kernel-devel-src
 from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b14f4d756447cf29945db736d78adfd35b-1784912011538
 final: false
 ---
-image: {{ $.ImageName }}-compile
-from: {{ index $.Images "builder/golang-alt" }}
+image: {{ $.ImageName }}-artifact
+from: alt:sisyphus
 final: false
 import:
   - image: kernel-devel-src
@@ -24,27 +25,6 @@ import:
     add: /drbd
     to: /drbd
     before: install
-shell:
-  beforeInstall:
-    - export DEBIAN_FRONTEND=noninteractive
-    - apt-get update && apt-get -y install patch coccinelle gcc15 make ca-certificates
-    - {{ $.Root.ALT_CLEANUP_CMD }}
-  install:
-    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
-    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
-    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}" CC=x86_64-alt-linux-gcc-15
-    - mkdir -p /out
-    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /out/
-    - echo "${KREL}" > /out/kernel.release
----
-image: {{ $.ImageName }}-artifact
-from: {{ index $.Images "builder/golang" }}
-final: false
-import:
-  - image: {{ $.ImageName }}-compile
-    add: /out
-    to: /compiled
-    before: install
 git:
   - add: /images/{{ $.ImageName }}/sysext
     to: /sysext-files
@@ -53,13 +33,21 @@ git:
         - "**/*"
 shell:
   beforeInstall:
-    - pm install erofs-utils cryptsetup coreutils
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update
+    - apt-get install -y gcc14 make binutils bc kmod coccinelle patch elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils ca-certificates
+    - apt-get clean && rm -rf /var/lib/apt/lists/*
+    # ALT installs the compiler as x86_64-alt-linux-gcc-14; expose it as gcc-14.
+    - if [ -f /usr/bin/x86_64-alt-linux-gcc-14 ]; then ln -sf x86_64-alt-linux-gcc-14 /usr/bin/gcc-14; fi
   install:
-    - export KREL="$(cat /compiled/kernel.release)"
+    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
+    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
+    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}" CC=gcc-14
+    # Assemble the sysext filesystem tree.
     - mkdir -p /sysext/usr/lib/modules/${KREL}/updates
     - mkdir -p /sysext/usr/lib/extension-release.d
     - mkdir -p /sysext/usr/lib/systemd/system
-    - cp /compiled/drbd.ko /compiled/drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
+    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
     - cp /sysext-files/extension-release.drbd /sysext/usr/lib/extension-release.d/extension-release.drbd
     - cp /sysext-files/sysext-drbd.service    /sysext/usr/lib/systemd/system/sysext-drbd.service
     - mkfs.erofs -L _sysext -U 00000000-0000-0000-0000-000000000000 -z lzma,9 /drbd.erofs /sysext/
