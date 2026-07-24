@@ -1,22 +1,18 @@
 # drbd-sysext — DRBD kernel module compiled against the Olcedar kernel and packaged
-# as a systemd-sysext (erofs + dm-verity) for Deckhouse Olcedar nodes.
+# as a systemd-sysext (erofs + dm-verity) for Deckhouse Olcedar nodes. Driven by a
+# NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]);
+# nodelet merges the sysext via systemd-sysext.
 #
-# Olcedar nodes have a read-only root and no on-node compiler, so DRBD is compiled at
-# CI time and shipped as a sysext that nodelet merges via systemd-sysext, driven by a
-# NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]).
-#
-# Kernel: compiled against the Olcedar kernel-devel image (a stable FINAL image with
-# the prepared build tree + Module.symvers; CONFIG_MODVERSIONS=y requires it). The
-# module compiler must match the kernel's (GCC >= 14, uses -fmin-function-alignment),
-# so gcc/make come from gnu-gcc-devel (pm), while the DRBD compat tooling (patch,
-# coccinelle) comes from apt. The kernel-devel tag is pinned and re-pinned on rebuild.
+# Two stages: the compat + module compile needs coccinelle/patch + a GCC>=14 (the
+# kernel uses -fmin-function-alignment) — apt/golang-alt; the sysext packaging needs
+# erofs-utils/cryptsetup — pm/golang. The kernel build tree comes from the stable
+# Olcedar kernel-devel image (Module.symvers present; CONFIG_MODVERSIONS=y).
 ---
-# Carrier of the Olcedar kernel build tree (from the external kernel-devel image).
 image: kernel-devel-src
 from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b14f4d756447cf29945db736d78adfd35b-1784912011538
 final: false
 ---
-image: {{ $.ImageName }}-artifact
+image: {{ $.ImageName }}-compile
 from: {{ index $.Images "builder/golang-alt" }}
 final: false
 import:
@@ -24,10 +20,30 @@ import:
     add: /usr/src
     to: /usr/src
     before: install
-  # DRBD source (3p-drbd, compat tooling) built by images/drbd.
   - image: drbd-artifact
     add: /drbd
     to: /drbd
+    before: install
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update && apt-get -y install patch coccinelle gcc15 make ca-certificates
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
+    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
+    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}" CC=x86_64-alt-linux-gcc-15
+    - mkdir -p /out
+    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /out/
+    - echo "${KREL}" > /out/kernel.release
+---
+image: {{ $.ImageName }}-artifact
+from: {{ index $.Images "builder/golang" }}
+final: false
+import:
+  - image: {{ $.ImageName }}-compile
+    add: /out
+    to: /compiled
     before: install
 git:
   - add: /images/{{ $.ImageName }}/sysext
@@ -37,21 +53,13 @@ git:
         - "**/*"
 shell:
   beforeInstall:
-    - export DEBIAN_FRONTEND=noninteractive
-    # DRBD kernel-compat tooling from apt.
-    - apt-get update && apt-get -y install patch coccinelle ca-certificates
-    - {{ $.Root.ALT_CLEANUP_CMD }}
-    # Kernel-matching compiler (>= 14) + module build + sysext packaging tools from pm.
-    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils
+    - pm install erofs-utils cryptsetup coreutils
   install:
-    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
-    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
-    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}"
-    # Assemble the sysext filesystem tree.
+    - export KREL="$(cat /compiled/kernel.release)"
     - mkdir -p /sysext/usr/lib/modules/${KREL}/updates
     - mkdir -p /sysext/usr/lib/extension-release.d
     - mkdir -p /sysext/usr/lib/systemd/system
-    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
+    - cp /compiled/drbd.ko /compiled/drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
     - cp /sysext-files/extension-release.drbd /sysext/usr/lib/extension-release.d/extension-release.drbd
     - cp /sysext-files/sysext-drbd.service    /sysext/usr/lib/systemd/system/sysext-drbd.service
     - mkfs.erofs -L _sysext -U 00000000-0000-0000-0000-000000000000 -z lzma,9 /drbd.erofs /sysext/
