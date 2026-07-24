@@ -5,29 +5,53 @@
 # CI time and shipped as a sysext that nodelet merges via systemd-sysext, driven by a
 # NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]).
 #
-# Kernel: we compile against the Olcedar kernel-devel image (a stable FINAL image that
-# carries the prepared build tree + Module.symvers, needed because the Olcedar kernel
-# has CONFIG_MODVERSIONS=y). The kernel-devel tag below is pinned and re-pinned when
-# the Olcedar kernel is rebuilt (same model as olcedar pinning KERNEL_VERSION).
+# Kernel: compiled against the Olcedar kernel-devel image (a stable FINAL image with
+# the prepared build tree + Module.symvers; CONFIG_MODVERSIONS=y requires it). The
+# kernel-devel tag below is pinned and re-pinned when the Olcedar kernel is rebuilt.
+#
+# Two build stages because the toolchains live on different bases: the DRBD compat +
+# module compile needs build-essential/patch/coccinelle (golang-alt/apt); the sysext
+# packaging needs erofs-utils/cryptsetup (golang/pm).
 ---
-# Carrier of the Olcedar kernel build tree (from the external kernel-devel image), so
-# the builder stage can werf-import it.
+# Carrier of the Olcedar kernel build tree (from the external kernel-devel image).
 image: kernel-devel-src
 from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b14f4d756447cf29945db736d78adfd35b-1784912011538
 final: false
 ---
-image: {{ $.ImageName }}-artifact
-from: {{ index $.Images "builder/golang" }}
+# Compile stage: build drbd.ko against the Olcedar kernel tree.
+image: {{ $.ImageName }}-compile
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 import:
   - image: kernel-devel-src
     add: /usr/src
     to: /usr/src
     before: install
-  # DRBD source (3p-drbd, compat tooling) built by images/drbd.
   - image: drbd-artifact
     add: /drbd
     to: /drbd
+    before: install
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update && apt-get -y install {{ $.Root.BUILD_PACKAGES }} coccinelle
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
+    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
+    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}"
+    - mkdir -p /out
+    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /out/
+    - echo "${KREL}" > /out/kernel.release
+---
+# Package stage: wrap drbd.ko into an erofs + dm-verity sysext.
+image: {{ $.ImageName }}-artifact
+from: {{ index $.Images "builder/golang" }}
+final: false
+import:
+  - image: {{ $.ImageName }}-compile
+    add: /out
+    to: /compiled
     before: install
 git:
   - add: /images/{{ $.ImageName }}/sysext
@@ -37,24 +61,15 @@ git:
         - "**/*"
 shell:
   beforeInstall:
-    # Module compile toolchain + sysext packaging tools (the build tree itself comes
-    # from the kernel-devel image).
-    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl patch coccinelle erofs-utils cryptsetup coreutils
+    - pm install erofs-utils cryptsetup coreutils
   install:
-    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
-    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
-    # Build the DRBD module via DRBD's own Makefile (it sets up kernel-compat and
-    # invokes the kernel build correctly) against the prepared Olcedar kernel tree.
-    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}"
-    - cd /drbd/drbd
-    # Assemble the sysext filesystem tree.
+    - export KREL="$(cat /compiled/kernel.release)"
     - mkdir -p /sysext/usr/lib/modules/${KREL}/updates
     - mkdir -p /sysext/usr/lib/extension-release.d
     - mkdir -p /sysext/usr/lib/systemd/system
-    - cp drbd.ko drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
+    - cp /compiled/drbd.ko /compiled/drbd_transport_tcp.ko /sysext/usr/lib/modules/${KREL}/updates/
     - cp /sysext-files/extension-release.drbd /sysext/usr/lib/extension-release.d/extension-release.drbd
     - cp /sysext-files/sysext-drbd.service    /sysext/usr/lib/systemd/system/sysext-drbd.service
-    # erofs + dm-verity (same recipe as core sysexts).
     - mkfs.erofs -L _sysext -U 00000000-0000-0000-0000-000000000000 -z lzma,9 /drbd.erofs /sysext/
     - veritysetup format /drbd.erofs /drbd.verity > /verity.txt
     - mkdir -p /out && cat /drbd.erofs /drbd.verity > /out/drbd.raw
