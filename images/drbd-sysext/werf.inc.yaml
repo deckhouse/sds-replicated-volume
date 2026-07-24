@@ -17,7 +17,7 @@ from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b
 final: false
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ index $.Images "builder/golang-alt" }}
+from: {{ index $.Images "builder/golang" }}
 final: false
 import:
   - image: kernel-devel-src
