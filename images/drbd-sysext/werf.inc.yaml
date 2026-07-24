@@ -45,7 +45,7 @@ shell:
     - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
     # Build the DRBD module via DRBD's own Makefile (it sets up kernel-compat and
     # invokes the kernel build correctly) against the prepared Olcedar kernel tree.
-    - make -C /drbd/drbd KDIR="${KDIR}" KVER="${KREL}" module
+    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}"
     - cd /drbd/drbd
     # Assemble the sysext filesystem tree.
     - mkdir -p /sysext/usr/lib/modules/${KREL}/updates
