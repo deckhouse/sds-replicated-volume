@@ -1,21 +1,19 @@
 # drbd-sysext — DRBD kernel module compiled against the Olcedar kernel and packaged
 # as a systemd-sysext (erofs + dm-verity) for Deckhouse Olcedar nodes.
 #
-# Olcedar nodes have a read-only root and no on-node compiler, so DRBD cannot be
-# built on the node (images/drbd ships source + compiles on-node via spaas). Here
-# the module is compiled at CI time and shipped as a sysext that nodelet merges via
-# systemd-sysext, driven by a NodeExtensionRequest (node-manager resolves it into
-# the node's NodeConfig.spec.extensions[]).
+# Olcedar nodes have a read-only root and no on-node compiler, so DRBD is compiled
+# at CI time and shipped as a sysext that nodelet merges via systemd-sysext, driven
+# by a NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]).
 #
-# Kernel: we compile against the Olcedar kernel BUILD artifact (kernel-artifact),
-# which already carries the prepared /src tree + Module.symvers (needed because the
-# Olcedar kernel has CONFIG_MODVERSIONS=y). No change to the kernel repo.
-# NOTE: the kernel-artifact tag below is a pinned werf stage tag from
-# container-factory/kernel and must be re-pinned when the Olcedar kernel is rebuilt
-# (same model as olcedar pinning KERNEL_VERSION/INITRAMFS_VERSION).
+# Kernel: we build on top of the Olcedar kernel SOURCE artifact (kernel-src-artifact),
+# install the kernel build toolchain, build the kernel to produce Module.symvers
+# (the Olcedar kernel has CONFIG_MODVERSIONS=y, so a valid Module.symvers is required
+# for the module to load), then compile DRBD out-of-tree against it. No change to the
+# kernel repo. NOTE: the kernel-src-artifact tag below is a pinned werf stage tag from
+# container-factory/kernel and is re-pinned when the Olcedar kernel is rebuilt.
 ---
 image: {{ $.ImageName }}-artifact
-from: dev-registry.deckhouse.io/container-factory/kernel:243699225d19b4fbd0e2939d71d81d9682337a2d035685d06050a9f8-1784904516298
+from: dev-registry.deckhouse.io/container-factory/kernel:8e84142f58863a82add02add37e056bea692d2fa4ed27aec0ee1d41c-1783630518054
 final: false
 import:
   # DRBD source (3p-drbd, compat tooling) built by images/drbd.
@@ -31,14 +29,17 @@ git:
         - "**/*"
 shell:
   beforeInstall:
-    # The kernel-artifact base already carries the kernel build toolchain
-    # (gnu-gcc-devel, make, binutils, linux-headers). Only add the sysext packaging
-    # tools, the same way the core sysexts do it (007-registrypackages).
-    - pm install erofs-utils coreutils cryptsetup
+    # Kernel build toolchain (same set the kernel repo uses) + sysext packaging tools.
+    - pm install gnu-glibc-devel binutils bc cpio kmod linux-headers make openssl-devel elfutils-devel diffutils findutils zstd pahole bison flex gnu-gcc-devel m4 python perl erofs-utils cryptsetup coreutils
   install:
+    # Build the Olcedar kernel to produce the prepared tree + Module.symvers.
+    - export CARCH="amd64"
+    - cd /src
+    - cp /src/config-${CARCH}.txt /src/.config
+    - make olddefconfig
+    - make KCFLAGS="-Wno-unused-but-set-variable" -j"$(nproc)"
     - export KREL="$(cat /src/include/config/kernel.release)"
-    # Compat-patch DRBD for this kernel and build the module out-of-tree against the
-    # prepared kernel tree in /src (Module.symvers present -> valid symbol versions).
+    # Compat-patch DRBD for this kernel and build the module out-of-tree.
     - cd /drbd/drbd
     - make -C /src M="$(pwd)" modules KERNELRELEASE="${KREL}"
     # Assemble the sysext filesystem tree.
