@@ -43,9 +43,10 @@ shell:
   install:
     - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
     - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
-    # Build the DRBD module out-of-tree against the prepared Olcedar kernel tree.
+    # Build the DRBD module via DRBD's own Makefile (it sets up kernel-compat and
+    # invokes the kernel build correctly) against the prepared Olcedar kernel tree.
+    - make -C /drbd/drbd KDIR="${KDIR}" KVER="${KREL}" module
     - cd /drbd/drbd
-    - make -C "${KDIR}" M="$(pwd)" modules
     # Assemble the sysext filesystem tree.
     - mkdir -p /sysext/usr/lib/modules/${KREL}/updates
     - mkdir -p /sysext/usr/lib/extension-release.d
