@@ -39,7 +39,7 @@ shell:
   beforeInstall:
     # Module compile toolchain + sysext packaging tools (the build tree itself comes
     # from the kernel-devel image).
-    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils
+    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl patch coccinelle erofs-utils cryptsetup coreutils
   install:
     - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
     - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
