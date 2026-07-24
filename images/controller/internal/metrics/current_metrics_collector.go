@@ -65,11 +65,13 @@ type currentMetricsCollector struct {
 	reader client.Reader
 	log    logr.Logger
 
-	rvCountDesc          *prometheus.Desc
-	rvrCountDesc         *prometheus.Desc
-	rvaCountDesc         *prometheus.Desc
-	rvrDeletingCountDesc *prometheus.Desc
-	datameshActiveDesc   *prometheus.Desc
+	rvCountDesc                    *prometheus.Desc
+	rvrCountDesc                   *prometheus.Desc
+	rvaCountDesc                   *prometheus.Desc
+	rvrDeletingCountDesc           *prometheus.Desc
+	datameshActiveDesc             *prometheus.Desc
+	rvNoPersistentVolumeDesc       *prometheus.Desc
+	rvAutoConfigurationBlockedDesc *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -106,6 +108,18 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelStorageClass, LabelNode, LabelType},
 			nil,
 		),
+		rvNoPersistentVolumeDesc: prometheus.NewDesc(
+			"sds_rv_no_persistent_volume",
+			"ReplicatedVolume objects carrying the no-persistent-volume label (set by linstor-migrator when the volume has no matching PersistentVolume). Emitted once per affected ReplicatedVolume with value 1. Built from controller cache at scrape time.",
+			[]string{LabelName},
+			nil,
+		),
+		rvAutoConfigurationBlockedDesc: prometheus.NewDesc(
+			"sds_rv_auto_configuration_blocked",
+			"ReplicatedVolume objects carrying the auto-configuration-blocked label (set by linstor-migrator when the volume cannot be switched to Auto configuration). Emitted once per affected ReplicatedVolume with value 1. Built from controller cache at scrape time.",
+			[]string{LabelName},
+			nil,
+		),
 	}
 }
 
@@ -115,6 +129,8 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvaCountDesc
 	ch <- c.rvrDeletingCountDesc
 	ch <- c.datameshActiveDesc
+	ch <- c.rvNoPersistentVolumeDesc
+	ch <- c.rvAutoConfigurationBlockedDesc
 }
 
 func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -159,6 +175,7 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
+	collectRVMigratorLabels(ch, c.rvNoPersistentVolumeDesc, c.rvAutoConfigurationBlockedDesc, rvList.Items)
 	collectRVRCounts(ch, c.rvrCountDesc, rvrList.Items)
 	collectRVACounts(ch, c.rvaCountDesc, rvList.Items, rvaList.Items)
 	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvrList.Items)
@@ -232,6 +249,43 @@ func collectRVCounts(
 			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(sc, phase)], sc, phase)
 		}
 	}
+}
+
+// collectRVMigratorLabels emits one gauge (value 1) per ReplicatedVolume carrying a migrator
+// label: no-persistent-volume or auto-configuration-blocked. Only affected RVs produce series,
+// so healthy RVs contribute no samples and the metric is absent (alert resolves) once the label
+// is removed or the RV is deleted.
+func collectRVMigratorLabels(
+	ch chan<- prometheus.Metric,
+	noPersistentVolumeDesc *prometheus.Desc,
+	autoConfigurationBlockedDesc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+) {
+	noPersistentVolume := make(map[string]float64)
+	autoConfigurationBlocked := make(map[string]float64)
+	for i := range rvs {
+		rv := &rvs[i]
+		if rv.Labels[v1alpha1.NoPersistentVolumeLabelKey] == v1alpha1.NoPersistentVolumeLabelValue {
+			noPersistentVolume[rv.Name] = 1
+		}
+		if rv.Labels[v1alpha1.AutoConfigurationBlockedLabelKey] == v1alpha1.AutoConfigurationBlockedLabelValue {
+			autoConfigurationBlocked[rv.Name] = 1
+		}
+	}
+
+	emit := func(desc *prometheus.Desc, counts map[string]float64) {
+		names := make([]string, 0, len(counts))
+		for name := range counts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[name], name)
+		}
+	}
+
+	emit(noPersistentVolumeDesc, noPersistentVolume)
+	emit(autoConfigurationBlockedDesc, autoConfigurationBlocked)
 }
 
 func collectRVRCounts(
