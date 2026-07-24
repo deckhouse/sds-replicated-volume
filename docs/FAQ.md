@@ -417,6 +417,70 @@ dmesg | grep 'Remote failed to finish a request within'
 
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
+### Diagnosing DRBD out-of-sync data or lost quorum (new control plane)
+
+This section applies to clusters running the new control plane of `sds-replicated-volume` (its own controller, without LINSTOR). In this mode there is no LINSTOR client: DRBD resources are managed directly with `drbdsetup`, and the per-node agent runs in the `agent` DaemonSet (label `app=agent`). The `agent` container is distroless — it has no shell, so the `drbd*` binaries are invoked directly (`exec ... -- drbdsetup ...`, not `-- bash`).
+
+The DRBD alerts (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdDeviceIsNotConnected`) carry two useful labels:
+
+- `name` — the DRBD resource name; use it as the `<resource>` argument below;
+- `conn_name` — the affected peer connection, shown as `peer-N`, where `N` is the peer node-id used by `drbdsetup` (confirm it in `drbdsetup status --verbose`, which prints `peer-N node-id:X`).
+
+All commands below use `d8 k` as the kubectl entry point.
+
+#### Inspect a resource
+
+Find the `agent` Pod on the node and print the resource status (replace `<node>` and `<resource>`):
+
+```shell
+POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<node> -l app=agent -o name)
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --verbose --statistics
+```
+
+Note: `drbdadm status <resource>` does not work here (the new control plane does not write `/etc/drbd.d/*.res` files), always use `drbdsetup`.
+
+#### Restore a lost quorum (`D8DrbdDeviceHasNoQuorum`)
+
+A diskless Primary suspends its I/O when it loses quorum. A common cause is a diskful replica stuck resyncing near completion (`replication:SyncTarget` with `out-of-sync`/`received` not moving, sometimes a corrupt `done:` value far above 100%), so too few replicas are `UpToDate`.
+
+Reconnect the stalled peer connection on the stalled (`Inconsistent`) node to restart the resync. `<peer-node-id>` is the node-id of the up-to-date source:
+
+```shell
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
+```
+
+The connection re-establishes automatically. When a second replica reaches `UpToDate`, quorum is restored and the Primary resumes I/O (`drbdsetup status <resource>` shows `quorum:yes`, `blocked:no`).
+
+This is safe: the up-to-date source is untouched, an `Inconsistent` replica does not count toward quorum, and the Primary I/O is already suspended, so reconnecting introduces no new disruption and cannot lose data.
+
+#### Clear out-of-sync data (`D8DrbdPeerDeviceIsOutOfSync`)
+
+When both ends of a connection are `UpToDate` but residual `out-of-sync` bytes stay frozen, DRBD will not resync them on its own (matching generation UUIDs mean no resync is triggered). Reconnecting the peer forces a bitmap-based resync of exactly those extents:
+
+```shell
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
+# out-of-sync should become 0:
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --statistics
+```
+
+If a small residual persists:
+
+1. Run an online verification of that connection (reads both disks and reconciles matching/differing blocks):
+
+   ```shell
+   d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup verify <resource> <peer-node-id> 0
+   ```
+
+2. If it still persists and the peer disk is `UpToDate`, fully re-mirror the peer copy. On the peer node (the one named by `conn_name`), invalidate its local copy — it becomes `Inconsistent` and does a full resync from an up-to-date replica. Quorum is held by the remaining up-to-date replicas during the resync:
+
+   ```shell
+   PEER_POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<peer-node> -l app=agent -o name)
+   MIN=$(d8 k -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup status <peer-resource> --verbose | grep -oE 'minor:[0-9]+' | head -1 | cut -d: -f2)
+   d8 k -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup invalidate $MIN
+   ```
+
+**Phantom counter.** If, after a full re-mirror, a Primary still reports a tiny `out-of-sync` toward a peer whose data was just re-read bit-for-bit, this is a stale accounting artifact on the Primary side, not a real divergence — the data on all replicas is identical. Reconnect, verify and re-mirror will not clear it, it resets only on a disruptive action (a failover or a reboot of the Primary node). For a live volume it is safe to leave it until the next maintenance window.
+
 ## I have deleted the ReplicatedStoragePool resource, yet its associated Storage Pool in the backend is still there. Is it supposed to be like this?
 
 Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the ReplicatedStoragePool resource.

@@ -440,6 +440,70 @@ dmesg | grep 'Remote failed to finish a request within'
 
 Если вывод команды не пустой (в выводе `dmesg` есть строки вида *"Remote failed to finish a request within ..."*), скорее всего, дисковая подсистема слишком медленная для нормального функционирования DRBD.
 
+### Диагностика рассинхронизации данных DRBD или потери кворума (новый control plane)
+
+Раздел относится к кластерам на новом control plane (плоскость управления) модуля `sds-replicated-volume` — с собственным контроллером, без LINSTOR. В этом режиме LINSTOR-клиента нет: DRBD-ресурсами управляют напрямую через `drbdsetup`, а поузловой агент работает в DaemonSet `agent` (метка `app=agent`). Контейнер `agent` — distroless (без оболочки shell), поэтому бинарники `drbd*` вызываются напрямую (`exec ... -- drbdsetup ...`, а не `-- bash`).
+
+DRBD-алерты (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdDeviceIsNotConnected`) несут две полезные метки:
+
+- `name` — имя DRBD-ресурса; используйте его как аргумент `<resource>` ниже;
+- `conn_name` — затронутое соединение с пиром, в виде `peer-N`, где `N` — это peer node-id (идентификатор узла-пира), который использует `drbdsetup` (проверить можно в `drbdsetup status --verbose`, там выводится `peer-N node-id:X`).
+
+Все команды ниже используют `d8 k` как точку входа в kubectl.
+
+#### Просмотр состояния ресурса
+
+Найдите под `agent` на узле и выведите статус ресурса (подставьте `<node>` и `<resource>`):
+
+```shell
+POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<node> -l app=agent -o name)
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --verbose --statistics
+```
+
+Обратите внимание: `drbdadm status <resource>` здесь не работает (новый control plane не пишет файлы `/etc/drbd.d/*.res`), всегда используйте `drbdsetup`.
+
+#### Восстановление потерянного кворума (`D8DrbdDeviceHasNoQuorum`)
+
+Diskless-Primary (бездисковый первичный) приостанавливает свой ввод-вывод при потере кворума. Частая причина — diskful-реплика (реплика с диском), застрявшая в пересинхронизации у самого конца (`replication:SyncTarget`, при этом `out-of-sync`/`received` не двигаются, иногда встречается повреждённое значение `done:` намного больше 100%), из-за чего слишком мало реплик в состоянии `UpToDate`.
+
+Переподключите застрявшее соединение с пиром на застрявшем (`Inconsistent`) узле, чтобы перезапустить пересинхронизацию. `<peer-node-id>` — это node-id актуального источника данных (`UpToDate`):
+
+```shell
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
+```
+
+Соединение восстановится автоматически. Как только вторая реплика достигнет `UpToDate`, кворум восстановится и Primary разморозит ввод-вывод (`drbdsetup status <resource>` покажет `quorum:yes`, `blocked:no`).
+
+Это безопасно: актуальный источник данных не затрагивается, `Inconsistent`-реплика не участвует в кворуме, а ввод-вывод на Primary и так уже приостановлен — переподключение не создаёт новой деградации и не может привести к потере данных.
+
+#### Очистка рассинхронизированных данных (`D8DrbdPeerDeviceIsOutOfSync`)
+
+Когда оба конца соединения в `UpToDate`, но остаточные байты `out-of-sync` «заморожены», DRBD не пересинхронизирует их сам (совпадающие generation UUID означают, что пересинхронизация не запускается). Переподключение пира форсирует bitmap-based resync (пересинхронизацию по битовой карте) ровно этих экстентов:
+
+```shell
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
+# out-of-sync должен обнулиться:
+d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --statistics
+```
+
+Если остаётся небольшой остаток:
+
+1. Запустите онлайн-верификацию этого соединения (читает оба диска и сверяет совпадающие/различающиеся блоки):
+
+   ```shell
+   d8 k -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup verify <resource> <peer-node-id> 0
+   ```
+
+2. Если остаток сохраняется, а диск пира в `UpToDate`, выполните полное перезеркалирование копии пира. На узле-пире (том, что указан в `conn_name`) инвалидируйте его локальную копию — она станет `Inconsistent` и выполнит полную пересинхронизацию от актуальной реплики. Кворум на время resync держат остальные `UpToDate`-реплики:
+
+   ```shell
+   PEER_POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<peer-node> -l app=agent -o name)
+   MIN=$(d8 k -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup status <peer-resource> --verbose | grep -oE 'minor:[0-9]+' | head -1 | cut -d: -f2)
+   d8 k -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup invalidate $MIN
+   ```
+
+**Фантомный счётчик (phantom counter).** Если после полного перезеркалирования Primary всё ещё показывает крошечный `out-of-sync` к пиру, чьи данные только что были побитово перечитаны, — это остаточный артефакт учёта на стороне Primary, а не реальное расхождение: данные на всех репликах идентичны. Переподключение, верификация и перезеркалирование его не снимут — он сбрасывается только при деструктивном действии (failover — переключение роли — или перезагрузке узла-Primary). Для рабочего тома его безопасно оставить до ближайшего окна обслуживания.
+
 ## Я удалил ресурс ReplicatedStoragePool, но соответствующий Storage Pool в бэкенде остался. Так и должно быть?
 
 Да, в настоящий момент модуль `sds-replicated-volume` не обрабатывает операции при удалении ресурса ReplicatedStoragePool.
