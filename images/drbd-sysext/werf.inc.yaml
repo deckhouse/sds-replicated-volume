@@ -43,7 +43,7 @@ git:
 shell:
   beforeInstall:
     # Matching kernel compiler + module + compat + sysext packaging tools.
-    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl coccinelle erofs-utils cryptsetup coreutils
+    - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils
   install:
     - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
     - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
