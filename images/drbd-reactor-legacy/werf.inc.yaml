@@ -1,14 +1,14 @@
 ---
-# build drbd-utils .deb packages
+# build legacy drbd-utils .rpm packages for the LINSTOR control plane
 image: {{ $.ImageName }}-utils-artifact
 from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 git:
-  - url: {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd-utils
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
     add: /
     to: /drbd-utils
-    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root) }}
     stageDependencies:
       setup:
         - "**/*"
@@ -39,8 +39,8 @@ shell:
   setup:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" (printf "%s/deckhouse/3p-drbd-utils" $.Root.SOURCE_REPO) }}
-    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root))) }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root))) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
@@ -48,37 +48,20 @@ shell:
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
     # substitute ubuntu packages with ALTLinux's ones
     - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
-    # fix upstream_version/rpm_version: configure.ac has base version (e.g. 9.31.0),
-    # but we build with full flant-suffixed version from oss.yaml (e.g. 9.31.0-flant.1)
+    # fix upstream_version/rpm_version: configure.ac has base version (e.g. 9.30.0),
+    # but we build with the version from oss.yaml.
     - |
-      FULL_VERSION="{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}"
+      FULL_VERSION="{{ include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root) }}"
       RPM_VERSION=$(echo "$FULL_VERSION" | sed -e 's/-rc/~rc/' -e 's/-alpha/~alpha/' -e 's/-flant/~flant/')
       sed -i \
         -e "s/^%global upstream_version .*/%global upstream_version ${FULL_VERSION}/" \
         -e "s/^%global rpm_version .*/%global rpm_version ${RPM_VERSION}/" \
         drbd.spec
-    # drbd-utils >= 9.32.0 removed the legacy %bcond compatibility wrappers from
-    # drbd.spec.in (upstream "spec: remove unneeded compat macros"). ALT Linux rpm
-    # does not define %bcond_without/%bcond_with, so rpmbuild fails with
-    # "Macro %bcond_without not found". Re-inject the shim older drbd-utils shipped.
-    - |
-      : > /tmp/bcond-compat.spec
-      echo '%{!?bcond_without: %{expand: %%global bcond_without() %%{expand:%%%%{!?_without_%%{1}:%%%%global with_%%{1} 1}}}}' >> /tmp/bcond-compat.spec
-      echo '%{!?bcond_with:    %{expand: %%global bcond_with()    %%{expand:%%%%{?_with_%%{1}:%%%%global with_%%{1} 1}}}}' >> /tmp/bcond-compat.spec
-      echo '%{!?with:          %{expand: %%global with()          %%{expand:%%%%{?with_%%{1}:1}%%%%{!?with_%%{1}:0}}}}' >> /tmp/bcond-compat.spec
-      echo '%{!?without:       %{expand: %%global without()       %%{expand:%%%%{?with_%%{1}:0}%%%%{!?with_%%{1}:1}}}}' >> /tmp/bcond-compat.spec
-      cat /tmp/bcond-compat.spec drbd.spec > drbd.spec.new && mv drbd.spec.new drbd.spec
-    # drbd-utils >= 9.32.0 always packages systemd units/preset and configures with
-    # --with-initscripttype=systemd, but auto-detects the systemd unit/preset dirs via
-    # `pkg-config systemd`, which is absent in the ALT build env -> they install to the
-    # buildroot root and %files fails ("No such file ... /usr/lib/systemd/system/
-    # drbd@.service"). Pin both dirs to the same rpm macros %files uses so paths match.
-    - sed -i 's|--with-initscripttype=systemd|--with-initscripttype=systemd --with-systemdunitdir=%{_unitdir} --with-systemdpresetdir=%{_presetdir}|' drbd.spec
 
     # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "drbd-utils" }}
-    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root)) }}
+    {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root)) }}
     {{- $_ := set $ctx "spec" "drbd.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
     # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
@@ -102,7 +85,6 @@ shell:
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-9.30.0-1.x86_64.rpm
     # drbd-utils-9.30.0-1.x86_64.rpm
     # thin-send-recv-1.1.3-1.x86_64.rpm
 
@@ -207,5 +189,5 @@ docker:
   LABEL:
     distro: ALTLinux
     version: all
-    drbd-utils: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
+    drbd-utils: {{ include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root) }}
     drbd-reactor: {{ include "get_oss_version_by_id" (list "DRBD_REACTOR" $.Root) }}

@@ -260,7 +260,7 @@ import:
       - linstor-client-*.rpm
     before: setup
 
-  - image: drbd-reactor-utils-artifact
+  - image: drbd-reactor-legacy-utils-artifact
     add: /
     # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
     to: /drbd-utils
