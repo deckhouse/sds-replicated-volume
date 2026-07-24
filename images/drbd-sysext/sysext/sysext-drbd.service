@@ -1,16 +1,16 @@
-# Fires once the drbd sysext is merged — a delivery-mechanism smoke marker.
-# Proves the sysext was fetched by nodelet and merged by systemd-sysext (the
-# marker file only exists after merge). The real unit (loading drbd kernel
-# modules) replaces this once the compiled drbd.ko payload lands.
+# Indexes the DRBD kernel modules shipped by this sysext (drbd.ko /
+# drbd_transport_tcp.ko under /usr/lib/modules/<ver>/updates/) so modprobe can
+# resolve them after the sysext is merged. nodelet performs the actual load of
+# `drbd` / `drbd_transport_tcp` from NodeExtensionRequest.kernelModules.
 [Unit]
-Description=DRBD sysext delivery marker
+Description=Index DRBD kernel modules from the drbd sysext
 After=systemd-sysext.service
-ConditionPathExists=/usr/share/drbd-sysext/marker
+ConditionPathExists=/usr/lib/modules/%v/updates/drbd.ko
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'echo "drbd sysext merged: $(cat /usr/share/drbd-sysext/marker)"'
+ExecStart=/sbin/depmod %v
 
 [Install]
 WantedBy=multi-user.target
