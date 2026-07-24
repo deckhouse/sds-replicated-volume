@@ -24,10 +24,6 @@ import:
     add: /usr/src
     to: /usr/src
     before: install
-  - image: kernel-devel-src
-    add: /lib/modules
-    to: /lib/modules
-    before: install
   # DRBD source (3p-drbd, compat tooling) built by images/drbd.
   - image: drbd-artifact
     add: /drbd
