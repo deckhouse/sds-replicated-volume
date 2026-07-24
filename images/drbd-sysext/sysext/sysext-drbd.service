@@ -1,0 +1,20 @@
+# Regenerates the module dependency index after the drbd sysext is merged so that
+# the shipped drbd.ko / drbd_transport_tcp.ko under
+# /usr/lib/modules/<ver>/updates/ are discoverable by modprobe.
+#
+# The actual load of `drbd` / `drbd_transport_tcp` is driven by nodelet from
+# NodeExtensionRequest.kernelModules (node-manager), not here — this unit only
+# makes the modules resolvable. TODO(olcedar): confirm depmod target path is
+# writable on the Olcedar overlay, or move index regeneration into nodelet.
+[Unit]
+Description=Index DRBD kernel modules shipped by the drbd sysext
+After=systemd-sysext.service
+ConditionPathExists=/usr/lib/modules/%v/updates/drbd.ko
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/depmod %v
+
+[Install]
+WantedBy=multi-user.target
