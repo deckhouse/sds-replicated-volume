@@ -6,10 +6,10 @@
 # NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]).
 #
 # Kernel: compiled against the Olcedar kernel-devel image (a stable FINAL image with
-# the prepared build tree + Module.symvers; CONFIG_MODVERSIONS=y requires it). We use
-# the same compiler family the kernel was built with (gnu-gcc-devel via pm) — the
-# kernel is built with GCC >= 14 (uses -fmin-function-alignment), so an older gcc
-# cannot build modules for it. The kernel-devel tag is pinned and re-pinned on rebuild.
+# the prepared build tree + Module.symvers; CONFIG_MODVERSIONS=y requires it). The
+# module compiler must match the kernel's (GCC >= 14, uses -fmin-function-alignment),
+# so gcc/make come from gnu-gcc-devel (pm), while the DRBD compat tooling (patch,
+# coccinelle) comes from apt. The kernel-devel tag is pinned and re-pinned on rebuild.
 ---
 # Carrier of the Olcedar kernel build tree (from the external kernel-devel image).
 image: kernel-devel-src
@@ -17,7 +17,7 @@ from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b
 final: false
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ index $.Images "builder/golang" }}
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 import:
   - image: kernel-devel-src
@@ -29,11 +29,6 @@ import:
     add: /drbd
     to: /drbd
     before: install
-  # `patch` is not in the pm repo; borrow it from drbd-artifact (built with apt).
-  - image: drbd-artifact
-    add: /usr/bin/patch
-    to: /usr/bin/patch
-    before: install
 git:
   - add: /images/{{ $.ImageName }}/sysext
     to: /sysext-files
@@ -42,7 +37,11 @@ git:
         - "**/*"
 shell:
   beforeInstall:
-    # Matching kernel compiler + module + compat + sysext packaging tools.
+    - export DEBIAN_FRONTEND=noninteractive
+    # DRBD kernel-compat tooling from apt.
+    - apt-get update && apt-get -y install patch coccinelle ca-certificates
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+    # Kernel-matching compiler (>= 14) + module build + sysext packaging tools from pm.
     - pm install gnu-gcc-devel make binutils bc kmod elfutils-devel bison flex m4 perl erofs-utils cryptsetup coreutils
   install:
     - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
