@@ -1,32 +1,17 @@
-# drbd-sysext — precompiled DRBD kernel module packaged as a systemd-sysext
-# (erofs + dm-verity) for Deckhouse Olcedar nodes.
+# drbd-sysext — a systemd-sysext (erofs + dm-verity) for Deckhouse Olcedar nodes.
 #
-# Why a sysext: an Olcedar node runs a type-1 hypervisor with a read-only root
-# and no on-node compiler, so DRBD cannot be built on the node the way it is on a
-# regular node (images/drbd ships source + compiles on-node via spaas). Instead
-# the module is compiled at CI time against the exact Olcedar kernel and shipped
-# as a signed sysext that nodelet merges via `systemd-sysext`. On the node-manager
-# side this is requested by a NodeExtensionRequest and resolved into the node's
-# NodeConfig.spec.extensions[] (image + kernel modules drbd / drbd_transport_tcp).
+# SCOPE: this is a delivery-mechanism test. It packages a MINIMAL sysext (a marker
+# file + a oneshot unit that fires on merge) — NOT the compiled DRBD kernel module.
+# The goal is to exercise the end-to-end delivery path: a NodeExtensionRequest is
+# aggregated by node-controller into the node's NodeConfig.spec.extensions[], and
+# nodelet fetches this sysext, merges it with systemd-sysext, and reports status.
 #
-# DRAFT — cross-repo dependency: compiling drbd.ko out-of-tree needs the Olcedar
-# KERNEL BUILD TREE (`/lib/modules/<ver>/build`: Module.symvers, .config, scripts,
-# headers). The kernel repo (deckhouse/container-base/kernel) currently runs
-# `make modules_install` but does NOT export a kernel-devel image. Until it does,
-# the compile stage's `from:`/KDIR below are placeholders and this image is not
-# buildable. See the PR description for the required kernel-repo change.
+# The real drbd.ko payload (compiled against the exact Olcedar kernel) is a separate
+# task and does NOT touch the kernel repo — see the PR description.
 ---
 image: {{ $.ImageName }}-artifact
-# TODO(olcedar): replace with the Olcedar kernel-devel image (container-factory/kernel
-# once it exports the build tree). Placeholder base carries the compile toolchain.
 from: {{ index $.Images "builder/golang-alt" }}
 final: false
-import:
-  # DRBD source tarball (compat tooling included) built by images/drbd.
-  - image: drbd-artifact
-    add: /drbd
-    to: /drbd
-    before: install
 git:
   - add: /images/{{ $.ImageName }}/sysext
     to: /sysext-files
@@ -36,27 +21,15 @@ git:
 shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
-    - apt-get update && apt-get -y install {{ $.Root.BUILD_PACKAGES }} erofs-utils cryptsetup make gcc coccinelle ca-certificates
+    - apt-get update && apt-get -y install erofs-utils cryptsetup coreutils
     - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
-    # Kernel this module is built for. TODO(olcedar): read from the kernel-devel
-    # image label instead of hardcoding; must equal the Olcedar kernel release.
-    - export KVER="6.12.85-lvc19"
-    # KDIR is provided by the Olcedar kernel-devel image (TODO: mount/import it).
-    - export KDIR="/lib/modules/${KVER}/build"
-    # Compat-patch DRBD for the target kernel and build the module out-of-tree.
-    # gen_compat_patch.sh (coccinelle/spatch) adapts DRBD to the kernel API.
-    - cd /drbd/drbd
-    - make -C "${KDIR}" M="$(pwd)" modules KERNELRELEASE="${KVER}"
-    # Assemble the sysext filesystem tree.
-    - mkdir -p /sysext/usr/lib/modules/${KVER}/updates
     - mkdir -p /sysext/usr/lib/extension-release.d
     - mkdir -p /sysext/usr/lib/systemd/system
-    - cp drbd.ko drbd_transport_tcp.ko /sysext/usr/lib/modules/${KVER}/updates/
-    # TODO(olcedar): build & add drbd-utils userspace (drbdadm/drbdsetup/drbdmeta)
-    # from 3p-drbd's drbd-utils submodule into /sysext/usr/sbin, plus /usr/lib/tmpfiles.d.
+    - mkdir -p /sysext/usr/share/drbd-sysext
     - cp /sysext-files/extension-release.drbd /sysext/usr/lib/extension-release.d/extension-release.drbd
     - cp /sysext-files/sysext-drbd.service    /sysext/usr/lib/systemd/system/sysext-drbd.service
+    - echo "drbd sysext delivery marker" > /sysext/usr/share/drbd-sysext/marker
     # Build the erofs image + dm-verity, same recipe as the core sysexts
     # (007-registrypackages/images/*/sysext in deckhouse).
     - mkfs.erofs -L _sysext -U 00000000-0000-0000-0000-000000000000 -z lzma,9 /drbd.erofs /sysext/
@@ -73,5 +46,4 @@ import:
 docker:
   LABEL:
     distro: all
-    kernel: "6.12.85-lvc19"
     drbd: {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}
