@@ -1,16 +1,22 @@
-# Indexes the DRBD kernel modules shipped by this sysext (drbd.ko /
-# drbd_transport_tcp.ko under /usr/lib/modules/<ver>/updates/) so modprobe can
-# resolve them after the sysext is merged. nodelet performs the actual load of
-# `drbd` / `drbd_transport_tcp` from NodeExtensionRequest.kernelModules.
+# Loads the DRBD kernel modules shipped by this sysext (drbd.ko /
+# drbd_transport_tcp.ko under /usr/lib/modules/<ver>/updates/) once it is merged.
+#
+# The modules are inserted by path with insmod, not modprobe: an Olcedar node
+# ships an empty, read-only /usr/lib/modules, so there is no modules.dep and
+# depmod cannot write one. drbd's own dependencies are built into the kernel,
+# so a direct insmod in dependency order (core first, then the TCP transport)
+# is sufficient. The "-" prefixes keep the unit green when a module is already
+# loaded (a re-merge re-runs the unit).
 [Unit]
-Description=Index DRBD kernel modules from the drbd sysext
+Description=Load DRBD kernel modules from the drbd sysext
 After=systemd-sysext.service
 ConditionPathExists=/usr/lib/modules/%v/updates/drbd.ko
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/sbin/depmod %v
+ExecStart=-/usr/bin/insmod /usr/lib/modules/%v/updates/drbd.ko
+ExecStart=-/usr/bin/insmod /usr/lib/modules/%v/updates/drbd_transport_tcp.ko
 
 [Install]
 WantedBy=multi-user.target
