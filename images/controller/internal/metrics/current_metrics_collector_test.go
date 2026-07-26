@@ -290,6 +290,70 @@ func TestCollectDatameshActiveTransitionsUsesGlobalAndUnknownNodes(t *testing.T)
 	})
 }
 
+func TestCollectRVMigratorLabelsEmitsOnlyLabeledRVs(t *testing.T) {
+	ch := make(chan prometheus.Metric, 100)
+	noPVDesc := prometheus.NewDesc(
+		"test_rv_no_persistent_volume",
+		"test",
+		[]string{LabelName},
+		nil,
+	)
+	blockedDesc := prometheus.NewDesc(
+		"test_rv_auto_configuration_blocked",
+		"test",
+		[]string{LabelName},
+		nil,
+	)
+
+	go func() {
+		defer close(ch)
+		collectRVMigratorLabels(ch, noPVDesc, blockedDesc, []v1alpha1.ReplicatedVolume{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-orphan",
+					Labels: map[string]string{
+						v1alpha1.NoPersistentVolumeLabelKey: v1alpha1.NoPersistentVolumeLabelValue,
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-blocked",
+					Labels: map[string]string{
+						v1alpha1.AutoConfigurationBlockedLabelKey: v1alpha1.AutoConfigurationBlockedLabelValue,
+					},
+				},
+			},
+			// Key present with a wrong value must not produce any series.
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv-wrong-value",
+					Labels: map[string]string{
+						v1alpha1.NoPersistentVolumeLabelKey: "false",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-clean"},
+			},
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 2 {
+		t.Fatalf("expected two labeled metrics, got %d: %#v", len(metrics), metrics)
+	}
+	// collectRVMigratorLabels emits all no-persistent-volume series first (names sorted),
+	// then all auto-configuration-blocked series (names sorted). rv-wrong-value has the
+	// no-persistent-volume label with value "false", so it is skipped; rv-clean has neither label.
+	assertMetric(t, metrics[0], 1, map[string]string{
+		LabelName: "rv-orphan",
+	})
+	assertMetric(t, metrics[1], 1, map[string]string{
+		LabelName: "rv-blocked",
+	})
+}
+
 type testMetric struct {
 	labels map[string]string
 	value  float64
