@@ -148,16 +148,28 @@ spec:
     fi
 
     # Registry-package may skip install when the digest marker matches even if
-    # /opt/deckhouse/drbd is stale. Remove only when on-disk sources do not match.
+    # /opt/deckhouse/drbd is stale. Both drbd and drbdLegacy unpack to the same
+    # path; remove the inactive sibling too so a later uninstall of the old hold
+    # cannot wipe the active sources. Sibling uninstall clears the shared tree,
+    # so the active package must be removed as well to force reinstall.
     package_name="{{ include "drbd_package_name" . }}"
+    if [ "$package_name" = "drbd" ]; then
+      sibling_package_name="drbdLegacy"
+    else
+      sibling_package_name="drbd"
+    fi
+    sibling_installed="false"
+    if [ -f "/var/cache/registrypackages/${sibling_package_name}/uninstall" ]; then
+      sibling_installed="true"
+    fi
     drbd_config="/opt/deckhouse/drbd/drbd/linux/drbd_config.h"
     sources_version=""
     if [ -f "$drbd_config" ]; then
       sources_version="$(sed -ne '/^#define REL_VERSION/{s/^[^"]*"\([^ "]*\).*/\1/;p;q;}' "$drbd_config")"
     fi
-    if [ -z "$sources_version" ] || [ "$sources_version" != "$desired_version" ]; then
-      bb-log-info "DRBD sources missing or stale (have '${sources_version:-none}', want '${desired_version}'), forcing package reinstall"
-      bb-package-remove "$package_name"
+    if [ "$sibling_installed" = "true" ] || [ -z "$sources_version" ] || [ "$sources_version" != "$desired_version" ]; then
+      bb-log-info "DRBD package reinstall required (sources='${sources_version:-none}', desired='${desired_version}', sibling_${sibling_package_name}=${sibling_installed})"
+      bb-package-remove "$sibling_package_name" "$package_name"
     fi
     bb-package-module-install "${package_name}:{{ include "helm_lib_module_image_digest" (list . (include "drbd_package_name" .) "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
 
