@@ -544,8 +544,16 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **d-to-tb-q-down/v1: D∅→TB+q↓, q lowered, BV cleared.**
   2D. Step 2: type=TieBreaker, BV cleared, q lowered (2→1).
 
-- **D→TB guard: VolumeAccess=Local blocks.**
+- ⚡ **D→TB: VolumeAccess=Local does NOT block an unattached demotion (both plan variants).**
+  A TieBreaker serves no IO in any access mode, so `guardVolumeAccessNotLocal` is not on the D→TB
+  plans (it belongs to Access plans and to `sd-to-tb/v1`). Transition is created.
+- ⚡ **D→TB guard: VolumeAccess=Local blocks an ATTACHED demotion.**
+  `guardVolumeAccessLocalForDemotion`; message "volumeAccess=Local requires Diskful on attached node".
 - **D→TB guard: GMDR blocks.**
+- ⚡ **D→TB TransZonal 3D in three zones: passes the retype-aware zone FTT guard.**
+  Post-state 2D+1TB survives losing any zone (1D+1TB). The generic guard blocks the same layout.
+- **D→TB TransZonal control: D→A in the same layout stays blocked ("zone FTT").**
+- **D→TB TransZonal control: RemoveReplica(D) in the same layout stays blocked ("zone FTT").**
 
 ### Liminal dispatch
 
@@ -1394,6 +1402,18 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **guardZoneFTTPreserved: 4D+TB (2+1+1+TB), remove from 2-zone → passes.**
 - ⚡ **guardZoneFTTPreserved: 5D (2+2+1), remove from 1-zone → blocked.**
   After removal: 4D, losing zone-a(2) → 2 < q=3 → blocked.
+- **guardZoneGMDRPreserved: D→TB is still modelled as a plain data loss (no retype-aware variant).**
+  GMDR=0 passes, GMDR=1 blocks — identical to a plain removal, since a TieBreaker carries no data.
+- **guardZoneFTTPreservedForRetypeToTieBreaker: skip non-TransZonal.**
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: 3D (1+1+1) → passes where the generic variant blocks.**
+  The subject survives as the TieBreaker of its zone, so every foreign zone loss leaves 1D+1TB.
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: 2D in zone-a + 1D in zone-b, subject in zone-a → blocked.**
+  The subject's future TieBreaker dies with its own zone: losing zone-a leaves 1D+0TB. A wrong
+  implementation that credits the subject's OWN zone with +1 TB would let this pass.
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: same layout, subject in zone-b → blocked.**
+  Losing zone-a leaves 0D+1TB. Together with the previous case this makes the 2-zone 2D+1D layout
+  genuinely non-convergible (`rv_controller` reports CannotConverge).
+- **guardZoneFTTPreservedForRetypeToTieBreaker: existing TB in another zone counted once, alongside the subject.**
 - **guardZoneTBSufficient: 2D+1TB TransZonal, remove last TB → blocked.**
 - **guardZoneTBSufficient: 2D+2TB, remove one → passes.**
 - **guardZoneTBSufficient: 3D+1TB, odd D → passes.**

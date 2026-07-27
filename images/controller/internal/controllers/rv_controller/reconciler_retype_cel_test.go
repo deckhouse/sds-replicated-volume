@@ -171,7 +171,7 @@ var _ = Describe("reconcileLayoutConvergence: CEL validity of the retype patch",
 
 		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
-		Expect(outcome.ShouldReturn()).To(BeTrue()) // DoneAndRequeue
+		Expect(outcome.ShouldReturn()).To(BeFalse()) // ContinueAndRequeue
 
 		var after v1alpha1.ReplicatedVolumeReplica
 		Expect(rec.cl.Get(ctx, key, &after)).To(Succeed())

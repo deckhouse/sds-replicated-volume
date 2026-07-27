@@ -427,6 +427,32 @@ attachments.
 | **PreferablyLocal** | Any member type | Same as Any for attachment purposes. The scheduler prefers placing Diskful replicas on nodes that will attach, but does not enforce it. |
 | **Local** | Only Diskful members | IO goes through the local disk — no network hop for reads. Access replicas are not created on attach nodes in this mode. |
 
+#### Local and membership changes
+
+`volumeAccess=Local` constrains **attachment**, not membership. Two distinct guards express that:
+
+- `guardVolumeAccessNotLocal` (defined in `membership_plan_access.go`) blocks the creation of an
+  **Access** replica under Local, because an Access replica exists precisely to serve I/O
+  remotely. It is carried by the Access plans and by `sd-to-tb/v1`.
+- `guardVolumeAccessLocalForDemotion` (in `loseVoterGuardsCommon`) blocks demoting the **attached**
+  Diskful member under Local — the attached node must keep its local disk.
+
+The D→TB plans (`d-to-tb/v1`, `d-to-tb-q-down/v1`) deliberately carry **only** the second guard: a
+TieBreaker serves no I/O in any access mode, so demoting an *unattached* Diskful under Local is
+legitimate. This is the r3→r2 migration path; blocking it was a bug (the blanket guard had been
+copied over from the Access plans by analogy).
+
+`sd-to-tb/v1` keeps `guardVolumeAccessNotLocal` on purpose: a ShadowDiskful *has* a backing volume
+and can serve a Local attachment, while the demotion-safety protocol (intent/gate/extender) is
+designed for Diskful only, so dropping the guard there would open an unprotected path to losing
+local I/O. Extending that protocol to ShadowDiskful is out of scope.
+
+Guards are evaluated at **dispatch** time. Closing the race where an attachment appears between a
+controller-side decision and dispatch (a dispatch-time workload/RVA guard, execution-record revoke,
+rollback/repick) is specified separately in the **RVR authorization design contract**
+(`docs/rvr-authorization-design-contract.md` in the project workspace) and is not implemented in
+the guard layer described here.
+
 ### FIFO ordering
 
 When multiple nodes request attachment and only one slot is available, earlier

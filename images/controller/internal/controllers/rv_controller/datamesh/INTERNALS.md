@@ -532,7 +532,9 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 |-------|---------|--------|
 | `commonAddGuards` | All AddReplica plans | RVNotDeleting, RSPAvailable, NodeEligible, NodeHasAllSystemNetworks, NoMemberOnSameNode, AddressesPopulated |
 | `commonRemoveGuards` | All RemoveReplica plans | NotAttached |
-| `loseVoterGuards` | RemoveReplica(D), ChangeType(D→...) | VolumeAccessLocalForDemotion, GMDRPreserved, FTTPreserved, ZoneGMDRPreserved, ZoneFTTPreserved |
+| `loseVoterGuardsCommon` | (shared base, not used directly) | VolumeAccessLocalForDemotion, GMDRPreserved, FTTPreserved, ZoneGMDRPreserved |
+| `loseVoterGuards` | RemoveReplica(D), ChangeType(D→A), ChangeType(D→sD) | `loseVoterGuardsCommon` + ZoneFTTPreserved |
+| `loseVoterToTieBreakerGuards` | ChangeType(D→TB) | `loseVoterGuardsCommon` + ZoneFTTPreservedForRetypeToTieBreaker |
 | `loseTBGuards` | RemoveReplica(TB), ChangeType(TB→...) | TBSufficient, ZoneTBSufficient |
 | `gainVoterGuards` | AddReplica(D), ChangeType(→D) | ZonalSameZone, TransZonalVoterPlacement |
 | `gainTBGuards` | AddReplica(TB), ChangeType(→TB) | ZonalSameZone, TransZonalTBPlacement |
@@ -551,6 +553,17 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 - `guardTransZonalVoterPlacement` — blocks if adding a voter would make any zone loss violate quorum or GMDR.
 - `guardTransZonalTBPlacement` — blocks if TB zone has > 1 D voter.
 - `guardZoneGMDRPreserved`/`guardZoneFTTPreserved` — blocks if removing a voter would violate zone-level guarantees.
+- `guardZoneFTTPreservedForRetypeToTieBreaker` — the D→TB variant of `guardZoneFTTPreserved`
+  (shared arithmetic in `evaluateZoneFTT`). The subject does not disappear: it stays a quorum
+  participant as a TieBreaker in **its own** zone, so it counts as a surviving TB for every zone
+  except its own (that future TB dies together with its zone). Modelling the retype as a plain D
+  removal blocks legitimate TransZonal r3→r2 migrations — 3D in three zones becomes 2D+1TB, which
+  survives the loss of any zone (`1D+1TB`), yet the generic guard sees `1D+0TB` and blocks, leaving
+  the volume `Converging` forever. `guardZoneGMDRPreserved` deliberately has **no** retype-aware
+  variant: GMDR is about data redundancy, and the subject really does stop carrying data.
+  `rv_controller`'s `selectRetypeCandidate` mirrors this guard
+  (`isRetypeToTieBreakerZoneQuorumSafe`) so preselection never picks a candidate whose dispatch
+  would stay blocked.
 - `guardZoneTBSufficient` — blocks if removing the last TB when TB coverage required.
 
 **Attachment-specific guards:**

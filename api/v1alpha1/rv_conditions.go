@@ -55,6 +55,7 @@ const (
 	ReplicatedVolumeCondLayoutConvergedReasonConverged             = "Converged"             // Actual layout matches the intended layout, no active transition.
 	ReplicatedVolumeCondLayoutConvergedReasonConverging            = "Converging"            // A membership transition is moving the layout toward the intended layout.
 	ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported = "TransitionUnsupported" // Layout mismatch with no supported automatic transition; manual intervention required.
+	ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting        = "VolumeDeleting"        // Volume is being deleted; layout convergence is not evaluated.
 )
 
 const (

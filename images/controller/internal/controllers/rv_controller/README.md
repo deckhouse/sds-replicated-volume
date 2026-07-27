@@ -135,17 +135,20 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
 │   ├── reconcileDeleteAccessReplicas [Pure orchestration] ← details
-│   └── reconcileLayoutConvergence [Pure orchestration] (≤1 whitelisted action/pass; DoneAndRequeue after acting)
+│   └── reconcileLayoutConvergence [Pure orchestration] (≤1 whitelisted action/pass; ContinueAndRequeue after acting)
 │       ├── computeTargetLayoutAction (pure decision: P1 retype D→TB / P2 create TB / none; also drives the condition)
-│       │   ├── selectRetypeCandidate (exclude attached + zone-placement fails; lexicographically last name)
+│       │   ├── hasLayoutChangingTransition (classified by the transition's replica types, not by Group)
+│       │   ├── selectRetypeCandidate (exclude attached + gain-side zone placement + lose-side zone quorum; lexicographically last name)
+│       │   │   └── isRetypeToTieBreakerZoneQuorumSafe (mirrors guardZoneFTTPreservedForRetypeToTieBreaker)
 │       │   ├── countPendingRetypesToTieBreaker / countPendingTieBreakerCreations (idempotency vs stale cache)
+│       │   ├── computeActualPendingTieBreakerSchedulingFailure (current Scheduled=False → CannotConverge)
 │       │   └── isMemberAttached
 │       ├── P1: base := rvr.DeepCopy(); rvr.Spec.Type = TieBreaker + clear LVG/ThinPool; patchRVR  (ChangeRole → DMTE drives it)
 │       └── P2: createTieBreakerRVR (createRVR(..., TieBreaker, "")); AlreadyExists → Info + requeue
 ├── reconcileLayoutStatus [In-place reconciliation] (status.layout + LayoutConverged condition; SINGLE writer)
 │   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
-│   ├── applyLayout + applyLayoutConvergedCondTrue/False
+│   ├── applyLayout + applyLayoutConvergedCondTrue/False/Unknown
 │   └── (not called during formation → LayoutConverged absent while forming)
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
@@ -259,30 +262,59 @@ truth for the layout comparison — see [Layout formula](#layout-formula)); the 
 counted from `status.datamesh.members` (Diskful + LiminalDiskful = diskful voters, TieBreaker =
 tie-breakers; Access and ShadowDiskful are not part of the layout).
 
-Only **membership** transitions (`AddReplica`/`RemoveReplica`/`ChangeReplicaType`/`ForceRemoveReplica`
-— see `hasMembershipTransition`) change the layout composition and thus count as convergence
-progress. Other transitions (Attach/Detach, ResizeVolume, ChangeQuorum, network, multiattach) leave
-the layout unchanged and do not gate convergence.
+Only **layout-changing** transitions count as convergence progress — see
+`hasLayoutChangingTransition`. Two conditions must hold: the transition type is a membership one
+(`AddReplica`/`RemoveReplica`/`ForceRemoveReplica`/`ChangeReplicaType`), **and** the replica types
+recorded in the transition touch the layout (`Diskful` or `TieBreaker`; for `ChangeReplicaType`,
+either end). Other transition types (Attach/Detach, ResizeVolume, ChangeQuorum, network,
+multiattach) and membership transitions confined to `Access`/`ShadowDiskful` leave the layout
+unchanged and do not gate convergence. The classification deliberately goes by the record's fields
+and **not** by `Group`: `ForceRemoveReplica` lives in the `Emergency` group, so a
+`Group == VotingMembership` filter would silently drop it.
+
+**Decision order in `computeTargetLayoutAction`** (fixed; each earlier step wins):
+
+1. RV deletion → `Unknown`/`VolumeDeleting`, no action.
+2. An active layout-changing transition → `Converging`, no action.
+3. A retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) → `Converging`.
+4. Comparison of actual against intended: equal → `Converged`; otherwise the whitelist below.
+
+Step 2 precedes the actual/intended comparison **on purpose**: mid-flight D→TB makes the counted
+layout equal the intended one for one step (the member is already a `TieBreaker` while the
+transition is still running), and reporting `Converged` there would flip the condition True and
+straight back. Step 4 still absorbs unrelated activity, so the condition does not flap on
+attach/resize or Access churn.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Converged | Actual layout matches the intended layout (reported even if an unrelated transition is active, so it does not flap) |
-| False | Converging | A convergence action is in flight: a membership transition is running, a retype was just requested, or a tie-breaker creation is pending |
-| False | CannotConverge | A whitelist pattern applies but no admissible candidate exists (e.g. all diskful replicas are attached, or no zone can host a tie-breaker) |
+| True | Converged | Actual layout matches the intended layout, and no layout-changing transition is running (unrelated transitions do not affect this) |
+| False | Converging | A convergence action is in flight: a layout-changing transition is running, a retype was just requested, or a tie-breaker creation is pending |
+| False | CannotConverge | A whitelist pattern applies but no admissible candidate exists (all diskful replicas are attached, no zone can host a tie-breaker, the retype would break zone quorum, or the pending tie-breaker has a current `Scheduled=False`) |
 | False | TransitionUnsupported | Layout mismatches outside the whitelist; no supported automatic transition (manual intervention required) |
+| Unknown | VolumeDeleting | The volume is being deleted; convergence is no longer evaluated |
 
 The unsupported message uses the exact layout arithmetic, e.g.
 `layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required`.
 `status.layout` holds the actual layout string (e.g. `3D`, `2D+1TB`; the `+NTB` suffix is omitted
 when there are no tie-breakers) and is exposed as a priority-1 print column.
 
+`Unknown`/`VolumeDeleting` is published on **both** deletion paths: by `reconcileLayoutStatus` for a
+volume that still goes through normal operation (deleting but attached), and by `reconcileDeletion`
+for a volume that enters the early deletion branch directly (unattached) and never reaches normal
+operation. In the latter the condition is written in the same status patch that clears the datamesh
+members. Leaving the previous `Converging`/`CannotConverge` message in place would promise an action
+the deletion path never performs.
+
 ### Layout convergence (`reconcileLayoutConvergence`)
 
 A normal-operation step that performs **at most one** whitelisted action per reconcile pass to move
-the actual layout toward the intended one, then returns `DoneAndRequeue` (the split-client cache may
-be stale relative to our own write, so we requeue rather than rely on the watch). Preconditions:
-configuration acknowledged, formation complete (guaranteed by the caller), RV not deleting, and no
-active membership transition.
+the actual layout toward the intended one, then returns `ContinueAndRequeue` (the split-client cache
+may be stale relative to our own write, so we requeue rather than rely on the watch). The outcome is
+deliberately **non-terminal**: the root `Reconcile` checks `ShouldReturn()` before `patchRVStatus`,
+so a terminal outcome here would drop every status change computed in the acting pass — including
+the `LayoutConverged` report describing that very action (`controller-reconciliation-flow.mdc`,
+`Continue*` vs `Done*` with requeue). Preconditions: configuration acknowledged, formation complete
+(guaranteed by the caller), RV not deleting, and no active layout-changing transition.
 
 Two whitelisted patterns (nothing else is ever acted upon):
 
@@ -295,24 +327,54 @@ Two whitelisted patterns (nothing else is ever acted upon):
   Diskful/LiminalDiskful its backing volume (and LLV name) is derived from the datamesh member
   record, not from the RVR spec, so the LLV lives until the member actually leaves. The
   existing ChangeRole → DMTE machinery drives the membership transition (no resync, no data
-  movement). Candidate selection (`selectRetypeCandidate`) is deterministic: it excludes attached
-  replicas (`member.Attached` or an active RVA on the node) and applies the topology's tie-breaker
-  placement precondition, mirroring the DMTE gain-TB guards — for TransZonal, replicas whose zone
-  holds more than one diskful voter (`guardTransZonalTBPlacement`); for Zonal, replicas outside the
-  primary zone, i.e. not in a zone with the maximum diskful-voter count (`guardZonalSameZone`).
-  Mirroring these matters because a candidate the DMTE would reject would have its spec flipped to
-  TieBreaker while the ChangeRole transition never runs, wedging the volume in a misleading
-  `Converging` state. Among the remaining candidates it picks the lexicographically last RVR name.
-  No admissible candidate → `CannotConverge`.
+  movement). Candidate selection (`selectRetypeCandidate`) is deterministic and mirrors **both**
+  sides of the DMTE guard set, because a candidate the DMTE would reject would have its spec flipped
+  to TieBreaker while the ChangeRole transition never runs, wedging the volume in a misleading
+  `Converging` state:
+  - attached replicas are excluded (`member.Attached` or an active RVA on the node);
+  - **gain side** (tie-breaker placement): for TransZonal, replicas whose zone holds more than one
+    diskful voter are excluded (`guardTransZonalTBPlacement`); for Zonal, replicas outside the
+    primary zone, i.e. not in a zone with the maximum diskful-voter count (`guardZonalSameZone`);
+  - **lose side** (zone quorum, TransZonal only): the retype must keep quorum survivable for the
+    loss of any zone — `isRetypeToTieBreakerZoneQuorumSafe`, mirroring
+    `guardZoneFTTPreservedForRetypeToTieBreaker`. Without this mirror a legitimately
+    non-convergible layout (e.g. two zones holding 2D and 1D — losing the 2D zone breaks quorum
+    whichever replica is retyped) would pick a candidate whose dispatch stays blocked forever.
+
+  Among the remaining candidates it picks the lexicographically last RVR name. No admissible
+  candidate → `CannotConverge`, with a reason distinguishing "violates zone placement" (gain side)
+  from "losing a zone would lose quorum" (lose side).
 - **P2 heal** — `actualD == intendedD && actualTB < intendedTB`: create the missing tie-breaker via
   `createTieBreakerRVR`. The scheduler places it and it joins the datamesh via the standard
   `tiebreaker/v1` plan. This also closes the "new r2 volume lives at 2D until healed" window and
-  restores a manually deleted tie-breaker.
+  restores a manually deleted tie-breaker. While the created tie-breaker is not yet a member the
+  report distinguishes progress from a verdict: only a **current** `Scheduled=False` (its
+  `ObservedGeneration` equals the RVR generation) is the scheduler's answer for this spec and yields
+  `CannotConverge` with the scheduler's own message
+  (`computeActualPendingTieBreakerSchedulingFailure`); a missing, `Unknown` or stale `Scheduled`
+  means the scheduler has simply not (re-)evaluated the replica yet → `Converging`. Once it becomes
+  `Scheduled=True` the report goes back to `Converging`.
 
 Ordering / whitelist notes: convergence runs **after** `ProcessTransitions`, so a transition just
 created this pass makes it a no-op. It fills only the tie-breaker deficit — a 4D volume at an r2
 config becomes 3D+1TB after one retype and is then reported `TransitionUnsupported` (the extra
 diskful voters are never removed).
+
+**volumeAccess=Local.** A retype under `volumeAccess=Local` is allowed as long as the candidate is
+unattached. A TieBreaker serves no I/O in **any** access mode, so the blanket `guardVolumeAccessNotLocal`
+(written for `Access` replicas, which do serve I/O) does not belong on the D→TB plans and is not
+attached to them. The real Local invariant — "the attached node must keep its Diskful" — is enforced
+by the DMTE guard `guardVolumeAccessLocalForDemotion`, and preselection additionally never picks an
+attached replica. Note the two checks are not the same thing: preselection reads the cache at
+decision time, while the guard is evaluated at dispatch time.
+
+> **Known gap (tracked elsewhere).** An attachment appearing *between* the retype patch and the DMTE
+> dispatch is a scheduling race that this step does not close: there is no dispatch-time
+> workload/RVA guard, no execution-record revoke and no rollback/repick here. That protocol is
+> specified in the **RVR authorization design contract** (project docs,
+> `docs/rvr-authorization-design-contract.md` in the project workspace) and implemented separately;
+> the branch is not merged or released before it lands. Do not add a partial preflight/rollback
+> here — it would contradict the cache-only execution-record model of that contract.
 
 **Safety invariants:** convergence **never creates a Diskful replica** and **never deletes a replica
 or its data** (freeing the retyped replica's LLV is the ordered redundancy reduction, handled by the

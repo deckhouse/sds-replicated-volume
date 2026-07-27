@@ -675,6 +675,28 @@ var _ = Describe("guardZoneGMDRPreserved", func() {
 		r := guardZoneGMDRPreserved(gctx, &ReplicaContext{})
 		Expect(r.Blocked).To(BeFalse())
 	})
+
+	It("D→TB retype is still modelled as a plain data loss (no retype-aware variant)", func() {
+		// Unlike zone FTT, GMDR has no retype-aware variant on purpose: a
+		// TieBreaker carries no data, so the subject really does stop being a
+		// data copy. The verdicts below must stay exactly those of a plain removal.
+		mk := func(gmdr byte) *globalContext {
+			return mkZonalGctx(1, gmdr,
+				zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+				zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+				zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+			)
+		}
+		// GMDR=0: after the retype 2 copies remain, losing a zone leaves 1 > 0.
+		gctx := mk(0)
+		Expect(guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0)).Blocked).To(BeFalse())
+
+		// GMDR=1: losing a foreign zone leaves 1 ≤ 1 → blocked.
+		gctx = mk(1)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("zone GMDR"))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -694,13 +716,13 @@ var _ = Describe("guardZoneFTTPreserved", func() {
 		Expect(r.Blocked).To(BeFalse())
 	})
 
-	It("pass: 3D (1+1+1), remove from zone-a → q_after=1", func() {
-		// votersAfter=2, q_after=2. Losing zone-b: 2-1-1=0? No:
-		// votersAfter=2, adjustedZoneVoters for zone-b=1. dSurviving=2-1=1. 1 < 2 → check TB.
-		// No TB → blocked.
-		// Hmm, so removing from 3D (1+1+1) with TransZonal is blocked by zone-FTT?
-		// After removal: 2D, q_after=2. Losing zone-b: 1D surviving. 1 < 2, no TB → blocked.
-		// This makes sense: 2D in TransZonal can't survive a zone loss without TB.
+	It("blocked: 3D (1+1+1), remove from zone-a (generic variant is not relaxed)", func() {
+		// votersAfter=2, q_after=2. Losing zone-b: adjustedZoneVoters=1,
+		// dSurviving=2-1=1 < 2 and there is no TB → blocked.
+		// Correct for a plain removal: 2D in TransZonal cannot survive a zone loss
+		// without a TieBreaker. The D→TB retype variant of this guard
+		// (guardZoneFTTPreservedForRetypeToTieBreaker) reaches the opposite verdict
+		// on the same layout, because there the subject SURVIVES as a TieBreaker.
 		gctx := mkZonalGctx(1, 1,
 			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
 			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
@@ -792,6 +814,92 @@ var _ = Describe("guardZoneFTTPreserved", func() {
 	It("no voters → pass", func() {
 		gctx := mkZonalGctx(0, 0)
 		r := guardZoneFTTPreserved(gctx, &ReplicaContext{})
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// guardZoneFTTPreservedForRetypeToTieBreaker
+//
+
+var _ = Describe("guardZoneFTTPreservedForRetypeToTieBreaker", func() {
+	It("skip: non-TransZonal topology", func() {
+		gctx := mkZonalGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		gctx.configuration.Topology = v1alpha1.TopologyIgnored
+
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3D (1+1+1) → 2D+1TB survives losing any zone (r3→r2 migration)", func() {
+		// votersAfter=2, q_after=2, subject in zone-a becomes the TB of zone-a.
+		// zone-a (subject zone): adjustedZoneVoters=0, dSurviving=2 ≥ 2 ✓.
+		// zone-b: dSurviving=1, tbSurviving=0+1(subject)=1 → 1 == 2-1 && 1 > 0 ✓.
+		// zone-c: symmetric ✓.
+		// The generic variant blocks the very same layout (see the spec above).
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		Expect(guardZoneFTTPreserved(gctx, rctxByID(gctx, 0)).Blocked).
+			To(BeTrue(), "precondition: the generic variant blocks this layout")
+
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: 2D in zone-a + 1D in zone-b, subject in zone-a (own zone gets no TB)", func() {
+		// The subject's future TieBreaker dies together with its own zone, so
+		// losing zone-a leaves 1D+0TB: votersAfter=2, q_after=2,
+		// dSurviving=2-1=1 < 2 and tbSurviving=0 → blocked.
+		// A wrong implementation that credits the subject's OWN zone with +1 TB
+		// would let this pass.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring(`losing zone "a"`))
+	})
+
+	It("blocked: 2D in zone-a + 1D in zone-b, subject in zone-b (2D zone loss breaks quorum)", func() {
+		// Losing zone-a leaves 0D + 1TB: dSurviving=0 < q_after-1=1 → blocked.
+		// Together with the previous spec this makes the 2-zone 2D+1D layout
+		// genuinely non-convergible — the honest verdict is CannotConverge.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring(`losing zone "a"`))
+	})
+
+	It("pass: existing TB in another zone is counted once, alongside the subject", func() {
+		// 3D (1+1+1) + TB in zone-c, subject in zone-a. votersAfter=2, q_after=2.
+		// zone-b: dSurviving=1, tbSurviving = 1 - 0 + 1 = 2 ✓.
+		// zone-c: dSurviving=1, tbSurviving = 1 - 1 + 1 = 1 ✓ (existing TB lost, subject remains).
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "c", false},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("no voters → pass", func() {
+		gctx := mkZonalGctx(0, 0)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, &ReplicaContext{})
 		Expect(r.Blocked).To(BeFalse())
 	})
 })

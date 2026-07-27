@@ -2428,7 +2428,11 @@ var _ = Describe("ChangeReplicaType(D→TB) plans", func() {
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(1)))
 	})
 
-	It("guard: VolumeAccessLocal blocks D→TB", func() {
+	It("VolumeAccess=Local does NOT block an unattached D→TB (d-to-tb/v1)", func() {
+		// A TieBreaker never serves IO, in any volumeAccess mode, so demoting an
+		// UNATTACHED Diskful under volumeAccess=Local is legitimate (r3→r2 migration).
+		// The Local invariant is enforced by guardVolumeAccessLocalForDemotion, which
+		// only blocks the ATTACHED member (see the companion spec below).
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
@@ -2447,8 +2451,116 @@ var _ = Describe("ChangeReplicaType(D→TB) plans", func() {
 		}
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb/v1"))
+	})
+
+	It("VolumeAccess=Local does NOT block an unattached D→TB (d-to-tb-q-down/v1)", func() {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-1", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+		}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb-q-down/v1"))
+	})
+
+	It("guard: VolumeAccess=Local still blocks an ATTACHED D→TB", func() {
+		// guardVolumeAccessLocalForDemotion (loseVoterGuards) is the real Local
+		// invariant: the attached node must keep its Diskful.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMemberAttached("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			nil,
+		)
+		rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		rvas := []*v1alpha1.ReplicatedVolumeAttachment{mkRVA("rva-1", "node-3")}
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, rvas, FeatureFlags{})
+		Expect(changed).To(BeTrue())
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
-		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("Local"))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(
+			ContainSubstring("volumeAccess=Local requires Diskful on attached node"))
+	})
+
+	// ── TransZonal r3→r2: retype-aware zone FTT ───────────────────────────────
+	//
+	// The subject of a D→TB retype stays a quorum participant (as a TieBreaker) in
+	// its own zone, so the zone-loss arithmetic must count it as a surviving TB for
+	// every zone except its own. Modelling the retype as a plain D removal wedges
+	// every TransZonal r3→r2 migration.
+
+	// mkTransZonal3D builds a TransZonal r2 config (FTT=1, GMDR=0) with 3 Diskful
+	// members in three distinct zones and the given replica request.
+	mkTransZonal3D := func(
+		req v1alpha1.ReplicatedVolumeDatameshReplicaRequest,
+	) (*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica, RSP) {
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkZonedMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1", "zone-a"),
+				mkZonedMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2", "zone-b"),
+				mkZonedMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3", "zone-c"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{req},
+			nil,
+		)
+		rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
+		rv.Status.Configuration.FailuresToTolerate = 1
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 0
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVRUpToDate("rv-1-2", "node-3", 5),
+		}
+		rsp := mkRSPWithZones("node-1", "zone-a", "node-2", "zone-b", "node-3", "zone-c")
+		return rv, rvrs, rsp
+	}
+
+	It("TransZonal 3D/3 zones: D→TB passes the retype-aware zone FTT guard", func() {
+		// Post-state is 2D+1TB: losing any zone leaves 1D+1TB
+		// (dSurviving == qAfter-1 && tbSurviving > 0) → quorum holds.
+		rv, rvrs, rsp := mkTransZonal3D(mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeTieBreaker))
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("d-to-tb/v1"))
+	})
+
+	It("TransZonal 3D/3 zones control: D→A stays blocked by the generic zone FTT guard", func() {
+		// D→A produces no quorum participant, so the generic (non-retype-aware)
+		// arithmetic still applies and must keep blocking.
+		rv, rvrs, rsp := mkTransZonal3D(mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeAccess))
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("zone FTT"))
+	})
+
+	It("TransZonal 3D/3 zones control: RemoveReplica(D) stays blocked by the generic zone FTT guard", func() {
+		rv, rvrs, rsp := mkTransZonal3D(mkLeaveRequest("rv-1-2"))
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(ContainSubstring("zone FTT"))
 	})
 
 	It("guard: leavingDGuards block D→TB (GMDR)", func() {

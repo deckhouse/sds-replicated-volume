@@ -18,6 +18,7 @@ package datamesh
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -58,20 +59,34 @@ var commonRemoveGuards = []any{
 	guardNotAttached,
 }
 
-// loseVoterGuards are guards for transitions where a replica loses voter status
-// (RemoveReplica(D), ChangeReplicaType(D→...)).
+// loseVoterGuardsCommon are the lose-voter guards that do not depend on what the
+// subject becomes. The zone FTT guard does depend on it and is appended per
+// destination below (see loseVoterGuards / loseVoterToTieBreakerGuards).
+var loseVoterGuardsCommon = []any{
+	guardVolumeAccessLocalForDemotion,
+	guardGMDRPreserved,
+	guardFTTPreserved,
+	guardZoneGMDRPreserved,
+}
+
+// loseVoterGuards are guards for transitions where a replica loses voter status and
+// does NOT stay a quorum participant (RemoveReplica(D), ChangeReplicaType(D→A),
+// ChangeReplicaType(D→sD)).
 //
 // Plans MUST also add defense-in-depth guards explicitly:
 //   - Voter parity: guardVotersEven or guardVotersOdd
 //   - QMR: guardQMRLowerNeeded (qmr↓ plans)
 //   - Feature: guardShadowDiskfulSupported (sD variants)
-var loseVoterGuards = []any{
-	guardVolumeAccessLocalForDemotion,
-	guardGMDRPreserved,
-	guardFTTPreserved,
-	guardZoneGMDRPreserved,
-	guardZoneFTTPreserved,
-}
+var loseVoterGuards = slices.Concat(loseVoterGuardsCommon, []any{guardZoneFTTPreserved})
+
+// loseVoterToTieBreakerGuards are guards for ChangeReplicaType(D→TB): the subject
+// loses voter status but stays a quorum participant as a TieBreaker in its own zone,
+// so the zone FTT arithmetic uses the retype-aware variant. Everything else is
+// identical to loseVoterGuards.
+//
+// Plans MUST also add the voter-parity guard explicitly (guardVotersEven / guardVotersOdd).
+var loseVoterToTieBreakerGuards = slices.Concat(
+	loseVoterGuardsCommon, []any{guardZoneFTTPreservedForRetypeToTieBreaker})
 
 // loseTBGuards are guards for transitions where a replica loses TieBreaker status
 // (RemoveReplica(TB), ChangeReplicaType(TB→...)).
@@ -534,6 +549,10 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 // guardZoneFTTPreserved blocks if removing this voter would cause any zone
 // loss to violate quorum. Only applies to TransZonal topology.
 //
+// Use for transitions after which the subject is no longer a quorum participant:
+// RemoveReplica(D), ChangeReplicaType(D→A), ChangeReplicaType(D→sD).
+// For D→TB use guardZoneFTTPreservedForRetypeToTieBreaker instead.
+//
 // For each zone z:
 //
 //	D_surviving = (D_count − 1) − D_in_zone(z)
@@ -542,6 +561,26 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 //	q_after = floor((D_count − 1) / 2) + 1
 //	Quorum holds if D_surviving >= q_after, or D_surviving == q_after−1 with TB_surviving > 0
 func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	return evaluateZoneFTT(gctx, rctx, false)
+}
+
+// guardZoneFTTPreservedForRetypeToTieBreaker is the ChangeReplicaType(D→TB) variant of
+// guardZoneFTTPreserved. The subject does not disappear: it stays a quorum participant
+// as a TieBreaker in its own zone. Modelling the retype as a plain D removal blocks
+// legitimate TransZonal r3→r2 migrations (3D in three zones becomes 2D+1TB, which
+// survives the loss of any zone) — the volume would stay Converging forever.
+//
+// Difference from the generic variant: for every zone z other than the subject's zone
+// the surviving TieBreaker count includes the subject (+1). For the subject's own zone
+// it does not — that future TieBreaker dies together with its zone.
+func guardZoneFTTPreservedForRetypeToTieBreaker(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	return evaluateZoneFTT(gctx, rctx, true)
+}
+
+// evaluateZoneFTT is the shared zone-loss quorum arithmetic behind the two zone FTT
+// guards. When subjectBecomesTieBreaker is true the subject is counted as a surviving
+// TieBreaker for every zone except its own (see guardZoneFTTPreservedForRetypeToTieBreaker).
+func evaluateZoneFTT(gctx *globalContext, rctx *ReplicaContext, subjectBecomesTieBreaker bool) dmte.GuardResult {
 	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
 		return dmte.GuardResult{}
 	}
@@ -569,6 +608,9 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		}
 		dSurviving := votersAfter - adjustedZoneVoters
 		tbSurviving := totalTB - findZoneCount(tbPerZone, zone)
+		if subjectBecomesTieBreaker && zone != removedZone {
+			tbSurviving++
+		}
 
 		if dSurviving >= qAfter {
 			continue
