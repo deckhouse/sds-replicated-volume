@@ -8,3 +8,13 @@
 {{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
 {{- $_ := set $ "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}
 {{- $_ := set $ "ALT_BASE_PACKAGES" "openssl libtirpc tzdata" }}
+# builder/golang-alt ships the Svace analyzer (/opt/svace, ~2 GiB with a bundled JDK,
+# .NET runtime, Python and a pile of jars). Nothing in this repo builds with Svace
+# (the analysis runs in a separate CI job), so drop it from the images we ship.
+{{- $_ := set $ "SVACE_CLEANUP_CMD" "rm -rf /opt/svace /usr/local/bin/svace" }}
+# Date of the ALT p11 archive snapshot the ALT-based images upgrade their packages to.
+# base/golang-alt from container-base is pinned to an older snapshot, so images that ship
+# ALT packages have to move to a newer one to pick up OS security fixes.
+# Only dates present in the archive repository are valid (see
+# http://ftp.altlinux.org/pub/distributions/archive/p11/date/).
+{{- $_ := set $ "ALT_SNAPSHOT_DATE" "2026/07/26" }}

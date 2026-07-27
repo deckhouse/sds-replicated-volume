@@ -48,9 +48,12 @@ shell:
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
-    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod tidy
     - cd cmd/linstor-scheduler-extender
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}"
+    # -mod=mod instead of `go mod tidy`: tidy also resolves the test dependencies of
+    # the modules we import, and google.golang.org/grpc tests pull go-logr/funcr, which
+    # does not exist in the go-logr/logr v0.3.0 the extender pins for stork. The build
+    # itself does not need those packages, so let the build update go.mod/go.sum.
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod GOPROXY=$(cat /run/secrets/GOPROXY) go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ include "get_oss_version_by_id" (list "LINSTOR_SCHEDULER_EXTENDER" $.Root) }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
 ---

@@ -38,3 +38,9 @@ General defense: any typed deserialize of cluster objects (including foreign
 CRD OpenAPI schemas with vendor extensions) must not abort LINSTOR startup.
 Does not replace 003 — 003 removes the unnecessary all-CRD list; 004 hardens
 the client against unknown fields elsewhere.
+
+### 005-drop-jre-package-requires.patch
+
+Drop the jre-11-headless and tzdata-java requirements
+
+OpenJDK 11 is imported into the image from the container-base openjdk-11.0.31 image instead of the ALT java-11-openjdk-headless package, so the rpm dependency on a jre package cannot be satisfied. OpenJDK ships its own tzdb.dat, so tzdata-java is not needed either.

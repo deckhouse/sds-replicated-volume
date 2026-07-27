@@ -8,6 +8,22 @@
 - apt-get update -y
 {{- end }}
 
+{{- define "alt packages upgrade" }}
+# Move the ALT p11 archive snapshot forward and upgrade every installed package.
+# base/golang-alt is pinned to an old snapshot, so images that ship ALT packages
+# stay on its (vulnerable) package versions until they are upgraded explicitly.
+# The date is replaced in place, so it works both with the snapshot baked into the
+# base image and with the one rewritten by "alt packages proxy".
+- export DEBIAN_FRONTEND=noninteractive
+- sed -i -E "s|/p11/date/[0-9]{4}/[0-9]{2}/[0-9]{2}/|/p11/date/{{ $.Root.ALT_SNAPSHOT_DATE }}/|g" /etc/apt/sources.list.d/alt.list
+- grep -q "{{ $.Root.ALT_SNAPSHOT_DATE }}" /etc/apt/sources.list.d/alt.list
+- apt-get update -y
+- apt-get -y dist-upgrade
+# altlinux-repos owns alt.list and may reset it during the upgrade above
+- sed -i -E "s|/p11/date/[0-9]{4}/[0-9]{2}/[0-9]{2}/|/p11/date/{{ $.Root.ALT_SNAPSHOT_DATE }}/|g" /etc/apt/sources.list.d/alt.list
+- apt-get update -y
+{{- end }}
+
 {{- define "alpine packages proxy" }}
 # Replace alpine repos with our proxy
   {{- if $.DistroPackagesProxy }}
