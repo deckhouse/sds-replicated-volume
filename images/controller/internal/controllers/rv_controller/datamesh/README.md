@@ -398,6 +398,41 @@ Downgrade (2,2)→(0,0): 5D → 4D → 3D → 2D → 1D
 
 All three safety guarantees (§6) are maintained at every intermediate step.
 
+### Replacing a TieBreaker: strict create-first
+
+Deleting a live TieBreaker (node drain, manual `kubectl delete rvr`) does not remove it from the
+datamesh right away. The RVR keeps the controller finalizer, so it stays a working DRBD peer while
+the datamesh replaces it — **the replacement first becomes operational, only then is the old one
+released**. There is never a moment without tiebreak protection.
+
+| State | What happens |
+|-------|--------------|
+| Old TieBreaker terminating, no replacement | Layout convergence creates a replacement RVR; `LayoutConverged=False/Converging` |
+| Replacement created, not scheduled | `Converging`; a **current** `Scheduled=False` (no free eligible node) → `CannotConverge` with the scheduler's message |
+| Replacement joined the datamesh, not operational yet | `Converging`; the old TieBreaker is still held by `guardTBSufficient` |
+| Replacement operational | The guard lets the old one leave; the layout is honestly reported as `2D+2TB` while it does |
+| Old TieBreaker gone | `2D+1TB`, `Converged` |
+
+"Operational" means more than membership: the replacement must have applied the current datamesh
+revision, report `DRBDConfigured=True` for its current spec, and have every connection to the
+data-bearing members confirmed `Connected` by a fresh reporter. Joining alone only proves that the
+agents applied the configuration revision, not that DRBD connected.
+
+Two consequences worth knowing:
+
+- **The window holds two TieBreakers.** That is legal for DRBD (diskless peers are generic, none of
+  them is a voter), but a tiebreak then requires connectivity with *both* diskless peers — which is
+  precisely why the switch waits for the new one to be operational instead of overlapping blindly.
+- **No free eligible node → the deletion waits.** The terminating TieBreaker still occupies its
+  node, so the scheduler has nowhere to put the replacement; the volume reports `CannotConverge`
+  and keeps running on the terminating-but-alive TieBreaker. To finish the deletion on a full
+  cluster, remove the finalizer from the terminating RVR: it becomes an orphan, is force-removed
+  without TieBreaker guards, and a replacement is then scheduled onto the freed node (recipe in
+  `debug_and_problem_solving.md`).
+
+Guard details are in [TRANSITIONS.md](TRANSITIONS.md) § "TieBreaker replacement"; the creation
+side lives in `rv_controller` (see its README, "Layout convergence").
+
 For step-by-step transition procedures, see
 [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md).
 

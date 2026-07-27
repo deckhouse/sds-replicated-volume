@@ -633,23 +633,43 @@ func evaluateZoneFTT(gctx *globalContext, rctx *ReplicaContext, subjectBecomesTi
 //
 // Preconditions for removing a TB (RemoveReplica(TB), ChangeReplicaType(TB→...)).
 
-// guardTBSufficient blocks if removing this TB would leave fewer TBs than required.
-// TB_min is derived from the current voter count and target FTT via the shared
+// guardTBSufficient blocks if releasing this TB would leave fewer OPERATIONAL TBs than
+// required. TB_min is derived from the current voter count and target FTT via the shared
 // v1alpha1.TieBreakersForDiskful formula (single source of truth for the D/TB layout).
 // Note: this uses the current (actual) voter count, not the intended diskful count, so it
 // stays correct during transitions where the two differ.
-func guardTBSufficient(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+//
+// The count is deliberately restricted to OPERATIONAL tie-breakers (isTieBreakerOperational)
+// and excludes the subject. This is what makes replacing a tie-breaker strictly create-first:
+// the old one is released only once its replacement actually provides tiebreak protection —
+// completing AddReplica(TB) proves that the agents applied the revision, not that DRBD
+// connections exist. Until then the terminating tie-breaker stays a working datamesh member
+// (its finalizer holds it), so the protection is never lost for a moment. The layout
+// convergence loop in rv_controller creates the replacement; if no free eligible node exists
+// it reports CannotConverge and the old tie-breaker keeps working (see the rv_controller
+// README, "tie-breaker replacement").
+//
+// The comparison is strict (`<`, not `<=`): the subject is already excluded from the count,
+// so operationalAfterRemoval is exactly what the datamesh keeps, and blocking at equality
+// would refuse a legitimate release when the remaining tie-breakers are exactly sufficient.
+func guardTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	voters := voterCount(gctx)
-	tbs := tbCount(gctx)
 	targetFTT := gctx.configuration.FailuresToTolerate
 
 	tbMin := byte(v1alpha1.TieBreakersForDiskful(int(voters), int(targetFTT)))
+	if tbMin == 0 {
+		return dmte.GuardResult{}
+	}
 
-	if tbs <= tbMin {
-		return dmte.GuardResult{
-			Blocked: true,
-			Message: fmt.Sprintf("TieBreaker required for quorum (Diskful=%d even, FTT=%d)", voters, targetFTT),
+	operationalAfterRemoval, notOperational := operationalTieBreakerCount(gctx, rctx.ID())
+	if operationalAfterRemoval < tbMin {
+		msg := fmt.Sprintf(
+			"TieBreaker required for quorum (Diskful=%d even, FTT=%d): %d operational TieBreaker(s) would remain, need %d",
+			voters, targetFTT, operationalAfterRemoval, tbMin)
+		if len(notOperational) > 0 {
+			msg += "; " + strings.Join(notOperational, "; ")
 		}
+		return dmte.GuardResult{Blocked: true, Message: msg}
 	}
 	return dmte.GuardResult{}
 }

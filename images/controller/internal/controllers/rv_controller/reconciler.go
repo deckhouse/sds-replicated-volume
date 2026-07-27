@@ -339,7 +339,11 @@ func makeDatameshSingleStepTransition(
 //     movement).
 //   - P2 heal: create a missing TieBreaker replica when the diskful count is already correct
 //     (e.g. a freshly formed r2 volume still at 2D, or a manually deleted TB). The scheduler
-//     places it and it joins the datamesh via the standard tiebreaker/v1 plan.
+//     places it and it joins the datamesh via the standard tiebreaker/v1 plan. The same action
+//     replaces a TieBreaker whose RVR is being deleted: it is still a member and still counted
+//     by the raw layout, so the replacement deficit is computed separately
+//     (computeTargetTieBreakerReplacement) — strict create-first, the datamesh releases the old
+//     one only once the replacement is operational.
 //
 // Safety invariant: convergence NEVER creates a Diskful replica and NEVER deletes a replica or
 // its data. The decision is a pure compute helper (computeTargetLayoutAction), reused by the
@@ -465,7 +469,11 @@ type targetLayoutAction struct {
 //     intended one for one step (the member is already a TieBreaker while the transition is still
 //     running), and reporting Converged there would flip the condition True and back.
 //  3. A retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) → Converging.
-//  4. Comparison of actual against intended: equal → Converged; otherwise the whitelist below.
+//  4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted has no
+//     replacement yet) → create the replacement (strict create-first). This also precedes the
+//     actual/intended comparison: the raw layout still counts the terminating tie-breaker, so the
+//     comparison alone would report Converged while the only tie-breaker is leaving.
+//  5. Comparison of actual against intended: equal → Converged; otherwise the whitelist below.
 //
 // Whitelist (only these two mismatches ever trigger an action; everything else is reported but
 // never acted upon):
@@ -518,7 +526,16 @@ func computeTargetLayoutAction(
 		}
 	}
 
-	// 4. Converged: actual matches intended.
+	// 4. Tie-breaker replacement (strict create-first): a tie-breaker whose RVR is being deleted
+	// still counts in the raw layout, but it is on its way out and must be replaced BEFORE the
+	// datamesh releases it.
+	if action, ok := computeTargetTieBreakerReplacement(
+		rv, rvrs, actualD, actualTB, intendedD, intendedTB, actualLayout, intendedLayout,
+	); ok {
+		return action
+	}
+
+	// 5. Converged: actual matches intended.
 	if actualD == intendedD && actualTB == intendedTB {
 		return targetLayoutAction{
 			kind:            layoutActionNone,
@@ -590,6 +607,132 @@ func computeTargetLayoutAction(
 				actualLayout, intendedLayout),
 		}
 	}
+}
+
+// computeTargetTieBreakerReplacement decides what convergence does about tie-breaker members
+// that are leaving (their RVR is being deleted), and reports (action, true) when the tie-breaker
+// replacement domain owns this pass. It returns (_, false) when nothing is leaving or when the
+// situation is outside its scope, letting the caller fall through to the plain actual/intended
+// comparison.
+//
+// Strict create-first: the datamesh only releases the old tie-breaker once its replacement is
+// operational (see the datamesh guard guardTBSufficient), so the replacement must be created
+// while the old one is still a member. The raw layout counts the terminating tie-breaker, so the
+// deficit is computed SEPARATELY here, over non-deleting tie-breakers only; computeActualLayout
+// stays raw and status.layout keeps reporting the honest composition (2D+2TB in the replacement
+// window).
+//
+// State table:
+//
+//	old leaving, no replacement                  → create it (Converging)
+//	old leaving, replacement pending             → Converging (or CannotConverge on a current
+//	                                               Scheduled=False: the old tie-breaker keeps
+//	                                               working, the replacement RVR keeps waiting
+//	                                               for a free eligible node)
+//	old leaving, replacement joined the datamesh → Converging (the DMTE guard releases the old
+//	                                               one once the replacement is operational)
+//	old gone                                     → not our business (the caller compares layouts)
+//
+// Scope: only the tie-breaker deficit created by the departure is handled. A wrong diskful count
+// (actualD != intendedD) or a genuine tie-breaker surplus is left to the caller, which reports it
+// honestly instead of piling a replacement on top of an unsupported layout.
+func computeTargetTieBreakerReplacement(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	actualD, actualTB, intendedD, intendedTB int,
+	actualLayout, intendedLayout string,
+) (targetLayoutAction, bool) {
+	leaving := deletingTieBreakerMemberNames(rv, rvrs)
+	if len(leaving) == 0 || actualD != intendedD {
+		return targetLayoutAction{}, false
+	}
+
+	// Tie-breakers that stay: the supply the intended layout can rely on.
+	availableTB := actualTB - len(leaving)
+	if availableTB > intendedTB {
+		// A surplus beyond the departure — outside this domain, report it honestly.
+		return targetLayoutAction{}, false
+	}
+
+	subject := fmt.Sprintf("tie-breaker %s is terminating", strings.Join(leaving, ", "))
+	if len(leaving) > 1 {
+		subject = fmt.Sprintf("tie-breakers %s are terminating", strings.Join(leaving, ", "))
+	}
+	layouts := fmt.Sprintf("have %s, want %s", actualLayout, intendedLayout)
+
+	if availableTB == intendedTB {
+		// The remaining tie-breakers already cover the intended layout — either a replacement
+		// joined the datamesh, or none is needed at all. Releasing the leaving member is the
+		// DMTE's decision (it waits until a replacement is operational), so there is nothing to
+		// do here but report progress.
+		waiting := "waiting for it to leave the datamesh"
+		switch {
+		case len(leaving) > 1:
+			waiting = "waiting for them to leave the datamesh"
+		case intendedTB > 0:
+			waiting = "its replacement joined the datamesh, waiting for it to leave"
+		}
+		return targetLayoutAction{
+			kind:            layoutActionNone,
+			convergedStatus: metav1.ConditionFalse,
+			reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			message:         fmt.Sprintf("%s: %s (%s)", subject, waiting, layouts),
+		}, true
+	}
+
+	deficit := intendedTB - availableTB
+	if countPendingTieBreakerCreations(rv, rvrs) >= deficit {
+		// The replacement RVR exists but has not joined yet. Only a CURRENT Scheduled=False is
+		// the scheduler's verdict for this spec (see computeActualPendingTieBreakerSchedulingFailure):
+		// with every eligible node occupied the replacement cannot be placed, and strict
+		// create-first keeps the terminating tie-breaker working instead of releasing it.
+		if failure := computeActualPendingTieBreakerSchedulingFailure(rv, rvrs); failure != "" {
+			return targetLayoutAction{
+				kind:            layoutActionNone,
+				convergedStatus: metav1.ConditionFalse,
+				reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge,
+				message: fmt.Sprintf("%s: cannot place a replacement (%s): %s",
+					subject, layouts, failure),
+			}, true
+		}
+		return targetLayoutAction{
+			kind:            layoutActionNone,
+			convergedStatus: metav1.ConditionFalse,
+			reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			message:         fmt.Sprintf("%s: replacement tie-breaker creation pending (%s)", subject, layouts),
+		}, true
+	}
+
+	return targetLayoutAction{
+		kind:            layoutActionCreateTieBreaker,
+		convergedStatus: metav1.ConditionFalse,
+		reason:          v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+		message:         fmt.Sprintf("%s: creating a replacement (%s)", subject, layouts),
+	}, true
+}
+
+// deletingTieBreakerMemberNames returns the sorted names of TieBreaker members whose RVR is being
+// deleted — the tie-breakers that need a replacement before the datamesh may release them.
+//
+// A member whose RVR is gone entirely is NOT one of them: that is an orphan, force-removed by the
+// datamesh without any tie-breaker guard, and the plain deficit path then heals the layout. Adding
+// it here would start a replacement in parallel with the force-removal.
+func deletingTieBreakerMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var names []string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.DeletionTimestamp != nil {
+			names = append(names, m.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 // selectRetypeCandidate deterministically chooses the Diskful replica to retype into a
@@ -768,14 +911,16 @@ func isRetypeToTieBreakerZoneQuorumSafe(
 // ObservedGeneration matches the RVR generation.
 //
 // A missing, Unknown or stale Scheduled condition is not a verdict — the scheduler simply has not
-// (re-)evaluated this replica yet, so convergence is still in progress.
+// (re-)evaluated this replica yet, so convergence is still in progress. A tie-breaker RVR that is
+// being deleted is not a pending creation at all and is skipped (mirrors
+// countPendingTieBreakerCreations).
 func computeActualPendingTieBreakerSchedulingFailure(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) string {
 	var msgs []string
 	for _, rvr := range rvrs {
-		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
 			continue
 		}
 		if rv.Status.Datamesh.FindMemberByName(rvr.Name) != nil {
@@ -835,10 +980,13 @@ func countPendingRetypesToTieBreaker(rv *v1alpha1.ReplicatedVolume, rvrs []*v1al
 // countPendingTieBreakerCreations counts TieBreaker RVRs that are not yet datamesh members
 // (created in a previous pass, still being scheduled / joining). Used to avoid creating a second
 // tie-breaker while the first is in flight.
+//
+// A tie-breaker RVR that is itself being deleted is not in flight towards membership — it is on
+// its way out and will never satisfy the deficit, so it does not hold back a new creation.
 func countPendingTieBreakerCreations(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) int {
 	count := 0
 	for _, rvr := range rvrs {
-		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
 			continue
 		}
 		if rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil {

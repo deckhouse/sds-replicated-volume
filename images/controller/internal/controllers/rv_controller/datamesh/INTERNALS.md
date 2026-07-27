@@ -55,7 +55,7 @@ graph TD
 | File | Purpose |
 |------|---------|
 | `datamesh.go` | Entry point (`ProcessTransitions`, `BuildRegistry`) |
-| `context.go` | Data model (`globalContext`, `ReplicaContext`, `buildContexts`, writeback) |
+| `context.go` | Data model (`globalContext` incl. the `datameshRevision` snapshot, `ReplicaContext`, `buildContexts`, writeback) |
 | `slots.go` | Slot constants and accessors |
 | `concurrency_tracker.go` | `CanAdmit` rules, transition tracking state |
 | `helpers_confirm.go` | Shared confirm callbacks |
@@ -565,6 +565,17 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
   (`isRetypeToTieBreakerZoneQuorumSafe`) so preselection never picks a candidate whose dispatch
   would stay blocked.
 - `guardZoneTBSufficient` — blocks if removing the last TB when TB coverage required.
+
+**Leaving-TB guard:**
+
+- `guardTBSufficient` — blocks if releasing this TB would leave fewer **operational** TBs than
+  required (`operationalTieBreakerCount` excluding the subject, strict `<` against TB_min). This
+  is what makes tie-breaker replacement strictly create-first: the old TB is released only once
+  its replacement actually provides tiebreak protection (`isTieBreakerOperational` in
+  `membership_helpers.go`: not terminating, current `DatameshRevision`, `DRBDConfigured=True` at a
+  current `ObservedGeneration`, and every FM connection confirmed by a fresh side). Completing
+  `AddReplica(TB)` only proves that the agents applied the revision — see
+  [TRANSITIONS.md](TRANSITIONS.md) § "TieBreaker replacement".
 
 **Attachment-specific guards:**
 

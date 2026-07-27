@@ -853,8 +853,49 @@ for each zone z:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **TBSufficient** | TB count > TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TieBreaker required for quorum (Diskful=N even, FTT=M)" |
+| 1 | **TBSufficient** | Operational TB count excluding the subject >= TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TieBreaker required for quorum (Diskful=N even, FTT=M): X operational TieBreaker(s) would remain, need Y; \<per-TB diagnostics\>" |
 | 2 | **ZoneTBSufficient** | Topology is not TransZonal, OR after removal, each zone that needs TB coverage still has it | "would violate zone TB coverage" |
+
+**TBSufficient detail**: the count is restricted to **operational** tie-breakers — membership
+alone is not protection, see [§ TieBreaker replacement](#tiebreaker-replacement-strict-create-first)
+below. The comparison is strict (`>=` TB_min after excluding the subject, i.e. blocked only when
+`operational < TB_min`): the subject is already out of the count, so equality is exactly enough.
+
+### TieBreaker replacement (strict create-first)
+
+Replacing a live tie-breaker (its RVR is deleted while a finalizer holds it) is **strictly
+create-first**: the replacement joins the datamesh and becomes operational *before* the old
+tie-breaker is released. A tie-breaker is **operational** when
+
+1. its RVR exists and is not itself terminating,
+2. it has applied the current `rv.Status.DatameshRevision`,
+3. `DRBDConfigured=True` with a current `ObservedGeneration`,
+4. every connection to a full-mesh (data-bearing) member is confirmed `Connected` by at least
+   one side whose report is fresh — agent ready and at the current revision.
+
+Criterion 4 is the reason membership is not enough: `AddReplica(TB)` completes on
+`confirmFMPlusSubject`, which proves that the agents applied the configuration revision, not that
+DRBD connections were established.
+
+Consequences, by design:
+
+- The window holds **two** tie-breakers (`2D+2TB`). DRBD has no dedicated "the tiebreaker" — all
+  diskless peers are generic, two intentional diskless are legal, and neither is counted as a
+  voter. Note that with two diskless peers a tiebreak requires connectivity with **both**, which
+  is exactly why the old one must keep working and the new one must be operational before the
+  switch (verified in the DRBD sources, `drbd_state.c`, `calc_quorum`).
+- If no free eligible node exists, the replacement cannot be placed (the terminating tie-breaker
+  still occupies its own node — `OccupiedNodes` plus `guardNoMemberOnSameNode`). The volume then
+  reports `LayoutConverged=False/CannotConverge` with the scheduler's message and the old
+  tie-breaker keeps working, terminating but alive. Nothing else is blocked: only the deletion
+  waits. The manual escape is to remove the finalizer from the terminating RVR, which turns it
+  into an orphan (force-removed without tie-breaker guards) and lets a replacement be scheduled
+  on the freed node — see the recipe in `debug_and_problem_solving.md`.
+- Two tie-breakers terminating at once never release each other: a terminating replica is not
+  operational.
+
+The replacement itself is created by `rv_controller`'s layout convergence (see its README,
+"Layout convergence"), which computes the replacement deficit over non-deleting tie-breakers.
 
 ### Preconditions for ForceRemoveReplica
 

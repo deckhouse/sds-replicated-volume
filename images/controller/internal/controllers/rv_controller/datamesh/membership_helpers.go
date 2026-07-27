@@ -18,8 +18,10 @@ package datamesh
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
@@ -156,6 +158,86 @@ func tbCount(gctx *globalContext) byte {
 // computeTargetQ computes quorum threshold from voter count: floor(voters/2) + 1.
 func computeTargetQ(voters byte) byte {
 	return voters/2 + 1
+}
+
+// operationalTieBreakerCount returns the number of TieBreaker members that are operational
+// right now, excluding the replica with excludeID (the subject of the transition being
+// guarded), together with a diagnostic line per non-operational TieBreaker.
+//
+// Used by guardTBSufficient to answer "would releasing this TieBreaker leave the datamesh
+// with enough WORKING tie-breakers?" — membership alone is not an answer, see
+// isTieBreakerOperational.
+func operationalTieBreakerCount(gctx *globalContext, excludeID uint8) (byte, []string) {
+	var (
+		count       byte
+		diagnostics []string
+	)
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil || rc.member.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		if rc.id == excludeID {
+			continue
+		}
+		if ok, why := isTieBreakerOperational(gctx, rc); ok {
+			count++
+		} else {
+			diagnostics = append(diagnostics, fmt.Sprintf("%s: %s", rc.Name(), why))
+		}
+	}
+	slices.Sort(diagnostics)
+	return count, diagnostics
+}
+
+// isTieBreakerOperational reports whether the TieBreaker member behind rctx actually provides
+// tiebreak protection right now. If it does not, the second return value explains why (used in
+// guard messages).
+//
+// Membership is NOT enough: completing AddReplica(TB) only proves that the agents applied the
+// configuration revision (confirmFMPlusSubject), not that DRBD connections were established —
+// and a tie-breaker that is not connected breaks the tie for nobody. The criteria:
+//
+//  1. its RVR exists and is not itself being deleted (a terminating replica is on its way out);
+//  2. it has applied the current datamesh revision (gctx.datameshRevision);
+//  3. DRBDConfigured=True with a current ObservedGeneration (the agent configured THIS spec);
+//  4. every connection to the members it is expected to be connected to (the full-mesh,
+//     data-bearing members) is confirmed Connected by at least one side whose own report is
+//     fresh — agent ready and at the current revision (connectionVerified).
+func isTieBreakerOperational(gctx *globalContext, rctx *ReplicaContext) (bool, string) {
+	if rctx.rvr == nil {
+		return false, "replica object is gone"
+	}
+	if rctx.rvr.DeletionTimestamp != nil {
+		return false, "replica is terminating"
+	}
+	if rctx.rvr.Status.DatameshRevision < gctx.datameshRevision {
+		return false, fmt.Sprintf("datamesh revision %d applied, want %d",
+			rctx.rvr.Status.DatameshRevision, gctx.datameshRevision)
+	}
+	if !obju.StatusCondition(rctx.rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType).
+		IsTrue().ObservedGenerationCurrent().Eval() {
+		return false, "DRBD is not configured"
+	}
+
+	allMembers := allMemberIDs(gctx)
+	fmMembers := fullMeshMemberIDs(gctx)
+	expected := expectedPeerIDs(rctx.member.Type, rctx.id, allMembers, fmMembers)
+	for peerID := range expected.All() {
+		peer := gctx.replicas[peerID]
+		if !connectionVerified(rctx, peer, gctx.datameshRevision, peerConnected) {
+			return false, fmt.Sprintf("connection to %s is not confirmed", replicaDisplayName(peer, peerID))
+		}
+	}
+	return true, ""
+}
+
+// replicaDisplayName renders a replica for diagnostics: its name when known, otherwise its ID.
+func replicaDisplayName(rctx *ReplicaContext, id uint8) string {
+	if rctx != nil && rctx.Name() != "" {
+		return rctx.Name()
+	}
+	return fmt.Sprintf("replica %d", id)
 }
 
 // zoneCount is a zone name + count pair returned by per-zone count helpers.

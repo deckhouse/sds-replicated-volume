@@ -277,19 +277,22 @@ and **not** by `Group`: `ForceRemoveReplica` lives in the `Emergency` group, so 
 1. RV deletion → `Unknown`/`VolumeDeleting`, no action.
 2. An active layout-changing transition → `Converging`, no action.
 3. A retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) → `Converging`.
-4. Comparison of actual against intended: equal → `Converged`; otherwise the whitelist below.
+4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted) → create the
+   replacement (strict create-first, see below).
+5. Comparison of actual against intended: equal → `Converged`; otherwise the whitelist below.
 
-Step 2 precedes the actual/intended comparison **on purpose**: mid-flight D→TB makes the counted
-layout equal the intended one for one step (the member is already a `TieBreaker` while the
+Steps 2 and 4 precede the actual/intended comparison **on purpose**. Mid-flight D→TB makes the
+counted layout equal the intended one for one step (the member is already a `TieBreaker` while the
 transition is still running), and reporting `Converged` there would flip the condition True and
-straight back. Step 4 still absorbs unrelated activity, so the condition does not flap on
-attach/resize or Access churn.
+straight back; likewise, a terminating tie-breaker is still counted by the raw layout, so the
+comparison alone would report `Converged` while the volume's only tie-breaker is leaving. Step 5
+still absorbs unrelated activity, so the condition does not flap on attach/resize or Access churn.
 
 | Status | Reason | When |
 |--------|--------|------|
 | True | Converged | Actual layout matches the intended layout, and no layout-changing transition is running (unrelated transitions do not affect this) |
 | False | Converging | A convergence action is in flight: a layout-changing transition is running, a retype was just requested, or a tie-breaker creation is pending |
-| False | CannotConverge | A whitelist pattern applies but no admissible candidate exists (all diskful replicas are attached, no zone can host a tie-breaker, the retype would break zone quorum, or the pending tie-breaker has a current `Scheduled=False`) |
+| False | CannotConverge | A whitelist pattern applies but no admissible candidate exists (all diskful replicas are attached, no zone can host a tie-breaker, the retype would break zone quorum, or the pending tie-breaker — including a replacement for a terminating one — has a current `Scheduled=False`) |
 | False | TransitionUnsupported | Layout mismatches outside the whitelist; no supported automatic transition (manual intervention required) |
 | Unknown | VolumeDeleting | The volume is being deleted; convergence is no longer evaluated |
 
@@ -359,6 +362,40 @@ Ordering / whitelist notes: convergence runs **after** `ProcessTransitions`, so 
 created this pass makes it a no-op. It fills only the tie-breaker deficit — a 4D volume at an r2
 config becomes 3D+1TB after one retype and is then reported `TransitionUnsupported` (the extra
 diskful voters are never removed).
+
+**Tie-breaker replacement (strict create-first).** Deleting a live tie-breaker (node drain, manual
+`kubectl delete rvr`) does not release it from the datamesh: the RV controller finalizer holds the
+RVR, it keeps working as a DRBD peer, and the datamesh guard `guardTBSufficient` releases it only
+once a replacement is **operational** (applied the current datamesh revision, `DRBDConfigured=True`
+for its current spec, every connection to the data-bearing members confirmed `Connected` by a fresh
+reporter). Tiebreak protection is therefore never lost, not even for a moment.
+
+Convergence supplies the replacement (`computeTargetTieBreakerReplacement`, step 4 of the decision
+order). Two properties matter:
+
+- `computeActualLayout` is **not** touched: `status.layout` keeps reporting the raw member
+  composition, so the replacement window is honestly shown as `2D+2TB`.
+- the replacement deficit is computed **separately**, as `intendedTB` minus the tie-breaker members
+  whose RVR is *not* being deleted (`deletingTieBreakerMemberNames`), with in-flight creations
+  counted by `countPendingTieBreakerCreations` so no second replacement is ever created.
+
+| State | Action / report |
+|-------|-----------------|
+| Old tie-breaker terminating, no replacement | Create it (P2 `createTieBreakerRVR`); `Converging` |
+| Replacement created, not a member yet | `Converging` |
+| Replacement carries a **current** `Scheduled=False` (no free eligible node) | `CannotConverge` with the scheduler's message; the old tie-breaker keeps working, the replacement RVR stays pending and is placed as soon as a node frees up |
+| Replacement joined the datamesh (operational or not) | `Converging`; releasing the old one is the guard's decision |
+| Old tie-breaker gone | `2D+1TB`, `Converged` |
+
+Out of scope on purpose: a member whose RVR is gone entirely is an **orphan**, force-removed by the
+datamesh without tie-breaker guards, and the plain P2 deficit then heals the layout — creating a
+replacement in parallel would race with that. A wrong diskful count or a genuine tie-breaker
+surplus is likewise reported honestly instead of being papered over with a new tie-breaker.
+
+If the cluster has no free eligible node the deletion simply waits (nothing else is blocked). To
+finish it, remove the finalizer from the terminating RVR: it becomes an orphan, is force-removed,
+and the replacement is scheduled onto the freed node — the step-by-step recipe lives in
+`debug_and_problem_solving.md` (project knowledge base).
 
 **volumeAccess=Local.** A retype under `volumeAccess=Local` is allowed as long as the candidate is
 unattached. A TieBreaker serves no I/O in **any** access mode, so the blanket `guardVolumeAccessNotLocal`

@@ -502,6 +502,64 @@ var _ = Describe("guardFTTPreserved", func() {
 // guardTBSufficient
 //
 
+// guardRevision is the datamesh revision used by the operational-tie-breaker fixtures below.
+const guardRevision int64 = 7
+
+// mkOperationalGctx builds a topology-agnostic context (guardTBSufficient ignores topology) in
+// which EVERY member is fully operational: it applied the current datamesh revision, reports
+// DRBDConfigured=True at its current generation, and sees every other member as Connected.
+// Tests then degrade exactly one aspect to prove which one the guard reacts to.
+func mkOperationalGctx(ftt, gmdr byte, members ...zoneMember) *globalContext {
+	gctx := mkZonalGctx(ftt, gmdr, members...)
+	gctx.configuration.Topology = v1alpha1.TopologyIgnored
+	gctx.datameshRevision = guardRevision
+
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		rc.rvr.Name = rc.name
+		rc.rvr.Generation = 1
+		rc.rvr.Status.DatameshRevision = guardRevision
+		rc.rvr.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Configured",
+			ObservedGeneration: 1,
+		}}
+		for j := range gctx.allReplicas {
+			if i == j {
+				continue
+			}
+			rc.rvr.Status.Peers = append(rc.rvr.Status.Peers,
+				mkPeerConnected(gctx.allReplicas[j].name))
+		}
+	}
+	return gctx
+}
+
+// mk2D2TBGctx builds the tie-breaker replacement window: 2D + the terminating tie-breaker
+// (id 2, the guard subject) + its replacement (id 3), everything operational.
+func mk2D2TBGctx() *globalContext {
+	return mkOperationalGctx(1, 0,
+		zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		zoneMember{2, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+	)
+}
+
+// dropPeer removes the peer entry for peerName from the replica's reported peers, so that side
+// no longer confirms the connection.
+func dropPeer(gctx *globalContext, id uint8, peerName string) {
+	rvr := rctxByID(gctx, id).rvr
+	peers := rvr.Status.Peers[:0]
+	for _, p := range rvr.Status.Peers {
+		if p.Name != peerName {
+			peers = append(peers, p)
+		}
+	}
+	rvr.Status.Peers = peers
+}
+
 var _ = Describe("guardTBSufficient", func() {
 	mkGctx := func(ftt, gmdr byte, members ...zoneMember) *globalContext {
 		gctx := mkZonalGctx(ftt, gmdr, members...)
@@ -520,13 +578,8 @@ var _ = Describe("guardTBSufficient", func() {
 		Expect(r.Message).To(ContainSubstring("TieBreaker required"))
 	})
 
-	It("pass: 2D+2TB, FTT=1 → still 1 TB left", func() {
-		gctx := mkGctx(1, 0,
-			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
-			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
-			zoneMember{2, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
-			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
-		)
+	It("pass: 2D+2TB, FTT=1 → the operational replacement stays", func() {
+		gctx := mk2D2TBGctx()
 		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
 		Expect(r.Blocked).To(BeFalse())
 	})
@@ -563,6 +616,161 @@ var _ = Describe("guardTBSufficient", func() {
 			zoneMember{4, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
 		)
 		r := guardTBSufficient(gctx, rctxByID(gctx, 4))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 4D+2TB, FTT=2 → exactly one operational TB remains (strict `<`, not `<=`)", func() {
+		// tbMin=1 and the subject is already excluded from the count: one remaining operational
+		// tie-breaker is exactly sufficient, so blocking here would be a false positive.
+		gctx := mkOperationalGctx(2, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{4, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+			zoneMember{5, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		)
+		r := guardTBSufficient(gctx, rctxByID(gctx, 4))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	// ── Operational criteria: membership of the replacement is not enough ─────
+	//
+	// AddReplica(TB) completing only proves that the agents applied the datamesh revision, not
+	// that DRBD connections exist. Each test below degrades exactly ONE aspect of the
+	// replacement (id 3) in an otherwise-operational 2D+2TB window and expects the release of
+	// the old tie-breaker (id 2) to stay blocked.
+
+	It("blocked: the replacement has not applied the current datamesh revision", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.DatameshRevision = guardRevision - 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("datamesh revision 6 applied, want 7"))
+	})
+
+	It("blocked: the replacement has no DRBDConfigured condition", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.Conditions = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement's DRBDConfigured is stale (ObservedGeneration behind)", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Generation = 2 // condition still reports generation 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement's DRBDConfigured is False", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.Conditions[0].Status = metav1.ConditionFalse
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement is itself terminating", func() {
+		gctx := mk2D2TBGctx()
+		now := metav1.Now()
+		rctxByID(gctx, 3).rvr.DeletionTimestamp = &now
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("replica is terminating"))
+	})
+
+	It("blocked: the replacement's RVR is gone", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("replica object is gone"))
+	})
+
+	// One test per diskful connection: an unconfirmed link to ANY diskful member means the
+	// replacement cannot break a tie for that member.
+	for _, d := range []struct {
+		id   uint8
+		name string
+	}{{0, "rv-1-0"}, {1, "rv-1-1"}} {
+		It(fmt.Sprintf("blocked: the replacement's connection to %s is not confirmed", d.name), func() {
+			gctx := mk2D2TBGctx()
+			dropPeer(gctx, 3, d.name)      // the replacement does not report the diskful...
+			dropPeer(gctx, d.id, "rv-1-3") // ...and the diskful does not report the replacement
+
+			r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+			Expect(r.Blocked).To(BeTrue())
+			Expect(r.Message).To(ContainSubstring("connection to " + d.name + " is not confirmed"))
+		})
+	}
+
+	It("blocked: the only side reporting the connection is stale (agent not ready)", func() {
+		// The replacement itself does not report the connection; the diskful does, but its
+		// agent is not ready, so its Peers list is stale and proves nothing.
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+		rctxByID(gctx, 0).rvr.Status.Conditions[0] = metav1.Condition{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			ObservedGeneration: 1,
+		}
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("connection to rv-1-0 is not confirmed"))
+	})
+
+	It("blocked: the only side reporting the connection is behind on the datamesh revision", func() {
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+		rctxByID(gctx, 0).rvr.Status.DatameshRevision = guardRevision - 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("connection to rv-1-0 is not confirmed"))
+	})
+
+	It("pass: a current Connected report from ONE side is enough", func() {
+		// The replacement does not report the connection to rv-1-0, but rv-1-0 (fresh agent,
+		// current revision) reports the replacement as Connected — that confirms the link.
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: two tie-breakers terminating at once do not release each other", func() {
+		gctx := mk2D2TBGctx()
+		now := metav1.Now()
+		rctxByID(gctx, 2).rvr.DeletionTimestamp = &now
+		rctxByID(gctx, 3).rvr.DeletionTimestamp = &now
+
+		Expect(guardTBSufficient(gctx, rctxByID(gctx, 2)).Blocked).To(BeTrue())
+		Expect(guardTBSufficient(gctx, rctxByID(gctx, 3)).Blocked).To(BeTrue())
+	})
+
+	It("ignores a non-operational tie-breaker in a layout that needs no tie-breaker at all", func() {
+		// 3D+1TB: tbMin=0, so the guard never looks at operational state.
+		gctx := mkOperationalGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		)
+		rctxByID(gctx, 3).rvr.Status.Conditions = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 3))
 		Expect(r.Blocked).To(BeFalse())
 	})
 })
