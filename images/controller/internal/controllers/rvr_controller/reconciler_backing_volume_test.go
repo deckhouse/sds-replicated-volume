@@ -295,6 +295,38 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
 	})
 
+	It("keeps the backing volume when the retype cleared both storage fields on the spec", func() {
+		// The r3→r2 retype patch clears spec.lvmVolumeGroupName and
+		// spec.lvmVolumeGroupThinPoolName together with the type flip (the API rejects them on a
+		// non-Diskful replica). A member that still holds data takes its backing volume from the
+		// datamesh member record, so the LLV — including its name, i.e. no delete+recreate — must
+		// survive the clearing until the member actually leaves.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:     v1alpha1.ReplicaTypeTieBreaker,
+				NodeName: "node-1",
+			},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{
+				Name:                       "rvr-1",
+				Type:                       v1alpha1.DatameshMemberTypeLiminalDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thindata",
+			},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(bv.ThinPoolName).To(Equal("thindata"))
+		Expect(bv.LLVName).To(Equal(rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thindata")))
+	})
+
 	It("returns backing volume for Access member with Diskful spec (vestibule)", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},

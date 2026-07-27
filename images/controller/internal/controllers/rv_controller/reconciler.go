@@ -334,8 +334,9 @@ func makeDatameshSingleStepTransition(
 // reconcile pass to move the actual datamesh layout toward the intended layout:
 //
 //   - P1 retype (r3→r2 migration): convert one Diskful replica into a TieBreaker by patching
-//     its spec.type; the existing ChangeRole → DMTE machinery then drives the membership
-//     transition (no resync, no data movement).
+//     its spec.type together with its (now invalid) backing-volume fields; the existing
+//     ChangeRole → DMTE machinery then drives the membership transition (no resync, no data
+//     movement).
 //   - P2 heal: create a missing TieBreaker replica when the diskful count is already correct
 //     (e.g. a freshly formed r2 volume still at 2D, or a manually deleted TB). The scheduler
 //     places it and it joins the datamesh via the standard tiebreaker/v1 plan.
@@ -377,8 +378,18 @@ func (r *Reconciler) reconcileLayoutConvergence(
 		}
 		// Mutate spec.type in the Reconcile method (not in the patch helper); take base
 		// immediately before the mutation and patch with the existing optimistic-lock merge.
+		//
+		// The backing-volume fields are cleared in the SAME patch: the API rejects them on a
+		// non-Diskful replica ("lvmVolumeGroupName can only be set for Diskful type", see
+		// ReplicatedVolumeReplicaSpec), so a patch that only flips the type never lands and the
+		// migration retries forever. This matches the datamesh plan, which clears the backing
+		// volume on the D∅ → TB step. The LLV survives the clearing: for a datamesh member the
+		// intended backing volume is derived from the member record, not from the RVR spec, so
+		// it is kept until the member actually leaves (see computeIntendedBackingVolume).
 		base := rvr.DeepCopy()
 		rvr.Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+		rvr.Spec.LVMVolumeGroupName = ""
+		rvr.Spec.LVMVolumeGroupThinPoolName = ""
 		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
 			return rf.Failf(err, "retyping Diskful RVR %s to TieBreaker", rvr.Name)
 		}

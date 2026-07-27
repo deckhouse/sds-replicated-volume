@@ -140,7 +140,7 @@ Reconcile (root) [Pure orchestration]
 │       │   ├── selectRetypeCandidate (exclude attached + zone-placement fails; lexicographically last name)
 │       │   ├── countPendingRetypesToTieBreaker / countPendingTieBreakerCreations (idempotency vs stale cache)
 │       │   └── isMemberAttached
-│       ├── P1: base := rvr.DeepCopy(); rvr.Spec.Type = TieBreaker; patchRVR  (ChangeRole → DMTE drives it)
+│       ├── P1: base := rvr.DeepCopy(); rvr.Spec.Type = TieBreaker + clear LVG/ThinPool; patchRVR  (ChangeRole → DMTE drives it)
 │       └── P2: createTieBreakerRVR (createRVR(..., TieBreaker, "")); AlreadyExists → Info + requeue
 ├── reconcileLayoutStatus [In-place reconciliation] (status.layout + LayoutConverged condition; SINGLE writer)
 │   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
@@ -288,6 +288,12 @@ Two whitelisted patterns (nothing else is ever acted upon):
 
 - **P1 retype (r3→r2 migration)** — `actualD > intendedD && actualTB < intendedTB`: convert one
   Diskful replica into the missing tie-breaker by patching its `spec.type` to `TieBreaker`. The
+  same patch clears `spec.lvmVolumeGroupName` and `spec.lvmVolumeGroupThinPoolName`: the API
+  rejects backing-volume fields on a non-Diskful replica (`lvmVolumeGroupName can only be set for
+  Diskful type`), so a patch that only flips the type is refused by the apiserver and the
+  migration retries forever. Clearing them is safe for the data: while the member is still
+  Diskful/LiminalDiskful its backing volume (and LLV name) is derived from the datamesh member
+  record, not from the RVR spec, so the LLV lives until the member actually leaves. The
   existing ChangeRole → DMTE machinery drives the membership transition (no resync, no data
   movement). Candidate selection (`selectRetypeCandidate`) is deterministic: it excludes attached
   replicas (`member.Attached` or an active RVA on the node) and applies the topology's tie-breaker

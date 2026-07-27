@@ -3628,4 +3628,190 @@ var _ = Describe("Reconciler", func() {
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume)
 		})
 	})
+
+	// ────────────────────────────────────────────────────────────────────────
+	// Retyped TieBreaker (r3→r2 migration)
+	//
+
+	Describe("Retyped TieBreaker", func() {
+		// r3→r2 migration: the rv_controller retypes a Diskful replica into a TieBreaker,
+		// clearing its backing-volume fields but keeping its node (spec.nodeName is immutable
+		// once set). A TieBreaker needs nothing but a node to be placed, so the scheduler must
+		// treat it as scheduled instead of re-running the placement pipeline for it on every
+		// reconcile.
+		It("node-only TieBreaker stays scheduled while its node is temporarily not ready", func() {
+			// Re-running the pipeline for an already-placed TieBreaker is not free: any
+			// transient node condition makes the (single, node-pinned) candidate disappear and
+			// flips a working tie-breaker to Scheduled=False, even though its placement is
+			// immutable and there is nothing to re-decide.
+			rv := newRV(defaultConfig())
+			notReady := makeNode("node-b", "zone-b", makeLVG("vg-b", true))
+			notReady.NodeReady = false
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					notReady,
+				})
+
+			d := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d.Spec.NodeName = "node-a"
+			d.Spec.LVMVolumeGroupName = "vg-a"
+
+			retyped := newRVR(1, v1alpha1.ReplicaTypeTieBreaker)
+			retyped.Spec.NodeName = "node-b"
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d, retyped).
+				WithStatusSubresource(d, retyped).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			expectScheduledCondition(ctx, cl, retyped, metav1.ConditionTrue,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled)
+			expectNodeName(ctx, cl, retyped, "node-b")
+		})
+
+		It("node-only TieBreaker keeps its node and needs no LVG", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-c", makeLVG("vg-c", true)),
+				})
+
+			d := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			d.Spec.NodeName = "node-a"
+			d.Spec.LVMVolumeGroupName = "vg-a"
+
+			retyped := newRVR(1, v1alpha1.ReplicaTypeTieBreaker)
+			retyped.Spec.NodeName = "node-b"
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, d, retyped).
+				WithStatusSubresource(d, retyped).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getUpdatedRVR(ctx, cl, retyped)
+			Expect(updated.Spec.NodeName).To(Equal("node-b"), "the tie-breaker must not be re-placed")
+			Expect(updated.Spec.LVMVolumeGroupName).To(BeEmpty(), "a tie-breaker never gets an LVG")
+			expectScheduledCondition(ctx, cl, retyped, metav1.ConditionTrue,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled)
+		})
+
+		It("node-only TieBreaker blocks its node for other replicas", func() {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				})
+
+			retyped := newRVR(0, v1alpha1.ReplicaTypeTieBreaker)
+			retyped.Spec.NodeName = "node-a"
+
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, retyped, newD).
+				WithStatusSubresource(retyped, newD).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			expectNodeName(ctx, cl, retyped, "node-a")
+			expectNodeName(ctx, cl, newD, "node-b")
+		})
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// computeSchedulingContext
+//
+
+var _ = Describe("computeSchedulingContext", func() {
+	// eligibleNodeNames renders the node names of an eligible-node list in slice order.
+	eligibleNodeNames := func(nodes []v1alpha1.ReplicatedStoragePoolEligibleNode) []string {
+		names := make([]string, 0, len(nodes))
+		for i := range nodes {
+			names = append(names, nodes[i].NodeName)
+		}
+		return names
+	}
+
+	It("sorts eligible nodes without mutating the RSP it read them from", func() {
+		rv := newRV(defaultConfig())
+		rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+			[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+				makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+			})
+
+		sctx := computeSchedulingContext(rv, rsp, nil, nil)
+
+		Expect(eligibleNodeNames(sctx.EligibleNodes)).To(Equal([]string{"node-a", "node-b"}))
+		Expect(eligibleNodeNames(rsp.Status.EligibleNodes)).To(Equal([]string{"node-b", "node-a"}),
+			"the RSP is a read-only input and must keep its own order")
+	})
+
+	DescribeTable("classifies a replica with a node assigned by type",
+		func(poolType v1alpha1.ReplicatedStoragePoolType, replicaType v1alpha1.ReplicaType, lvg, thinPool string, wantScheduled bool) {
+			rv := newRV(defaultConfig())
+			rsp := newRSP(poolType, []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+			})
+
+			rvr := newRVR(0, replicaType)
+			rvr.Spec.NodeName = "node-a"
+			rvr.Spec.LVMVolumeGroupName = lvg
+			rvr.Spec.LVMVolumeGroupThinPoolName = thinPool
+
+			sctx := computeSchedulingContext(rv, rsp, []*v1alpha1.ReplicatedVolumeReplica{rvr}, nil)
+
+			Expect(sctx.Scheduled.Contains(rvr.ID())).To(Equal(wantScheduled))
+			Expect(sctx.OccupiedNodes).To(HaveKey("node-a"), "any assigned node is occupied")
+		},
+		Entry("TieBreaker needs only a node", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeTieBreaker, "", "", true),
+		Entry("TieBreaker on a thin pool still needs only a node", v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			v1alpha1.ReplicaTypeTieBreaker, "", "", true),
+		Entry("Access is never scheduled by this controller", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeAccess, "", "", false),
+		Entry("Diskful without an LVG is not scheduled", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeDiskful, "", "", false),
+		Entry("Diskful with an LVG is scheduled (thick pool)", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeDiskful, "vg-a", "", true),
+		Entry("Diskful with a thin pool is not scheduled on a thick pool", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeDiskful, "vg-a", "thin-a", false),
+		Entry("Diskful without a thin pool is not scheduled on a thin pool", v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			v1alpha1.ReplicaTypeDiskful, "vg-a", "", false),
+		Entry("Diskful with a thin pool is scheduled on a thin pool", v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			v1alpha1.ReplicaTypeDiskful, "vg-a", "thin-a", true),
+		Entry("ShadowDiskful follows the Diskful criterion", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeShadowDiskful, "vg-a", "", true),
+		Entry("ShadowDiskful without an LVG is not scheduled", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicaTypeShadowDiskful, "", "", false),
+	)
+
+	It("does not schedule a replica without a node", func() {
+		rv := newRV(defaultConfig())
+		rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+			[]v1alpha1.ReplicatedStoragePoolEligibleNode{makeNode("node-a", "zone-a", makeLVG("vg-a", true))})
+
+		tb := newRVR(0, v1alpha1.ReplicaTypeTieBreaker)
+
+		sctx := computeSchedulingContext(rv, rsp, []*v1alpha1.ReplicatedVolumeReplica{tb}, nil)
+
+		Expect(sctx.Scheduled.Contains(tb.ID())).To(BeFalse())
+		Expect(sctx.OccupiedNodes).To(BeEmpty())
+	})
 })

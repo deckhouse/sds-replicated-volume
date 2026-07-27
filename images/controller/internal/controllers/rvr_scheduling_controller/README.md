@@ -45,7 +45,9 @@ if Scheduled replicas exist:
 
 if all non-Access replicas are scheduled → Done
 
-compute unscheduled = All - Scheduled - Deleting
+compute unscheduled = All - Scheduled
+    (deleting RVRs are not excluded: the scheduler places replicas, it does not
+    decide whether they are needed; unnecessary ones disappear on their own)
 
 Phase 2: for each unscheduled Diskful (in ID order):
     build per-RVR pipeline → filter → score via extender → SelectBest
@@ -172,11 +174,11 @@ Each pipeline step tracks how many candidates it excluded. When no candidate sur
 
 ### Scheduled
 
-Indicates whether the replica has been fully scheduled (node, LVG, and ThinPool if applicable are all assigned).
+Indicates whether the replica's placement is complete for its type (see [Scheduled Detection](#scheduled-detection)): a node plus, for replica types that carry a backing volume, an LVG and a ThinPool if applicable.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Scheduled | Node, LVG, and ThinPool (if applicable) are all assigned |
+| True | Scheduled | Placement is complete for the replica type: node only for TieBreaker; node + LVG + ThinPool (if applicable) for Diskful/ShadowDiskful |
 | False | SchedulingFailed | No suitable candidate found (pipeline summary in message) |
 | False | ExtenderUnavailable | Scheduler extender is unreachable or reservation failed |
 | Unknown | WaitingForReplicatedVolume | RV not found, RV has no configuration, or RSP not found |
@@ -216,7 +218,7 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 
 | Field | Source | Description |
 |-------|--------|-------------|
-| `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (sorted by NodeName) |
+| `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (a clone owned by the context, sorted by NodeName — the RSP is a read-only input) |
 | `OccupiedNodes` | RVRs with `spec.nodeName != ""` | Nodes already used by any RVR |
 | `AttachToNodes` | RVA objects (via `getIntendedAttachments`) | Nodes preferred for attachment (sorted, deduplicated) |
 | `ReservationID` | RV annotation or computed from LLV name | Scheduler-extender reservation key |
@@ -230,15 +232,19 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 | `Access` | RVRs with type=Access | IDSet |
 | `Diskful` | RVRs with type=Diskful | IDSet |
 | `TieBreaker` | RVRs with type=TieBreaker | IDSet |
-| `Deleting` | RVRs with DeletionTimestamp | IDSet |
-| `Scheduled` | RVRs with NodeName + LVG + valid pool type | IDSet |
+| `Scheduled` | RVRs whose placement is complete for their type (`isReplicaScheduled`) | IDSet |
 
 ### Scheduled Detection
 
-An RVR is considered "scheduled" when all conditions are met:
-- `spec.nodeName` is set
-- `spec.lvmVolumeGroupName` is set
-- Pool type consistency: for LVMThin, `spec.lvmVolumeGroupThinPoolName` must be set; for LVM (thick), it must be empty
+An RVR is considered "scheduled" when `spec.nodeName` is set **and** the type-specific criterion below holds (`isReplicaScheduled`). The criterion is type-aware because the placement pipelines are: a TieBreaker is placed by the node-only pipeline (`TakeOnlyNodesFromEligibleNodes`) and never gets an LVG.
+
+| Replica type | Criterion (on top of `spec.nodeName`) |
+|--------------|---------------------------------------|
+| TieBreaker | nothing else — the node is the whole placement |
+| Access | never scheduled by this controller (created directly on the node where it is needed; the condition is removed) |
+| Diskful, ShadowDiskful | `spec.lvmVolumeGroupName` is set, and the pool type matches: for LVMThin `spec.lvmVolumeGroupThinPoolName` must be set, for LVM (thick) it must be empty |
+
+Requiring an LVG from a TieBreaker would keep it permanently unscheduled — in particular a tie-breaker retyped from Diskful by the r3→r2 migration, which keeps its node (`spec.nodeName` is immutable once set) but has its backing-volume fields cleared — and would re-run the pipeline for it on every reconcile even though there is nothing left to decide.
 
 ## Managed Metadata
 
@@ -342,21 +348,24 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([computeSchedulingContext]) --> SortNodes[Sort eligibleNodes by NodeName]
+    Start([computeSchedulingContext]) --> SortNodes["Clone eligibleNodes from the RSP<br/>and sort the clone by NodeName"]
     SortNodes --> InitCtx["Initialize context:<br/>topology, FTT, GMDR, volumeAccess,<br/>attachToNodes, reservationID, size"]
 
     InitCtx --> LoopRVR{For each RVR}
     LoopRVR -->|Done| ComputeZones[computeReplicasByZone]
     ComputeZones --> Return([Return schedulingContext])
 
-    LoopRVR --> Classify["Add to All set<br/>Classify: Access / Diskful / TieBreaker<br/>Check DeletionTimestamp → Deleting"]
+    LoopRVR --> Classify["Add to All set<br/>Classify: Access / Diskful / TieBreaker"]
     Classify --> CheckNode{NodeName set?}
     CheckNode -->|No| LoopRVR
     CheckNode -->|Yes| MarkOccupied[Add to OccupiedNodes]
-    MarkOccupied --> CheckLVG{LVG set?}
+    MarkOccupied --> CheckType{"isReplicaScheduled:<br/>replica type?"}
+    CheckType -->|TieBreaker| MarkScheduled[Add to Scheduled]
+    CheckType -->|Access| LoopRVR
+    CheckType -->|Diskful / ShadowDiskful| CheckLVG{LVG set?}
     CheckLVG -->|No| LoopRVR
     CheckLVG -->|Yes| CheckPoolType{"Pool type consistent?<br/>LVMThin: ThinPool set<br/>LVM: ThinPool empty"}
-    CheckPoolType -->|Yes| MarkScheduled[Add to Scheduled]
+    CheckPoolType -->|Yes| MarkScheduled
     CheckPoolType -->|No| LoopRVR
     MarkScheduled --> LoopRVR
 ```

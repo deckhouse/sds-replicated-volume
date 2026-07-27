@@ -135,8 +135,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	// Mark replicas that already have a node assigned and passed eligible-node
-	// validation as successfully scheduled.
+	// Mark replicas whose placement is already complete for their type
+	// (see isReplicaScheduled) as successfully scheduled.
 	if sctx.Scheduled.Len() > 0 {
 		outcome = outcome.Merge(r.reconcileRVRsCondition(rf.Ctx(), rvrs, sctx.Scheduled,
 			metav1.ConditionTrue,
@@ -603,7 +603,8 @@ type schedulingContext struct {
 	// Size is the requested volume size in bytes.
 	Size int64
 
-	// EligibleNodes are the candidate nodes from the RSP, sorted by NodeName.
+	// EligibleNodes are the candidate nodes from the RSP (a clone owned by this
+	// context), sorted by NodeName.
 	// OccupiedNodes tracks nodes already assigned to an RVR in this Reconcile.
 	// AttachToNodes lists nodes where the volume must be attached (from RV).
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
@@ -632,6 +633,9 @@ type schedulingContext struct {
 	VolumeAccess                    v1alpha1.ReplicatedStorageClassVolumeAccess
 
 	// Replica type sets (computed in one pass over rvrs).
+	//
+	// Scheduled holds the replicas whose placement is already complete for their
+	// type (see isReplicaScheduled); Access replicas are never in it.
 	All        idset.IDSet
 	Access     idset.IDSet
 	Diskful    idset.IDSet
@@ -642,17 +646,19 @@ type schedulingContext struct {
 // computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
 // the desired attach-to node list (from RVA objects).
 // All replica-type sets (All, Access, Diskful, TieBreaker, Scheduled)
-// and OccupiedNodes are computed in a single pass over rvrs.
-// EligibleNodes are sorted by NodeName.
+// and OccupiedNodes are computed in a single pass over rvrs; membership in
+// Scheduled is decided per replica type by isReplicaScheduled.
+// EligibleNodes are a clone of the RSP list, sorted by NodeName.
 func computeSchedulingContext(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	attachToNodes []string,
 ) *schedulingContext {
-	eligibleNodes := rsp.Status.EligibleNodes
-
-	// Safety sort: eligible nodes should arrive sorted from the API, but ensure it.
+	// Safety sort: eligible nodes should arrive sorted from the API, but ensure it. The RSP is a
+	// read-only input, so sort a clone — sorting the slice in place would reorder the caller's
+	// (cached) object through the alias.
+	eligibleNodes := slices.Clone(rsp.Status.EligibleNodes)
 	slices.SortFunc(eligibleNodes, func(a, b v1alpha1.ReplicatedStoragePoolEligibleNode) int {
 		return cmp.Compare(a.NodeName, b.NodeName)
 	})
@@ -688,17 +694,8 @@ func computeSchedulingContext(
 		if rvr.Spec.NodeName != "" {
 			sctx.OccupiedNodes[rvr.Spec.NodeName] = struct{}{}
 
-			if rvr.Spec.LVMVolumeGroupName != "" {
-				scheduled := false
-				switch poolType {
-				case v1alpha1.ReplicatedStoragePoolTypeLVMThin:
-					scheduled = rvr.Spec.LVMVolumeGroupThinPoolName != ""
-				case v1alpha1.ReplicatedStoragePoolTypeLVM:
-					scheduled = rvr.Spec.LVMVolumeGroupThinPoolName == ""
-				}
-				if scheduled {
-					sctx.Scheduled.Add(id)
-				}
+			if isReplicaScheduled(rvr, poolType) {
+				sctx.Scheduled.Add(id)
 			}
 		}
 	}
@@ -706,6 +703,41 @@ func computeSchedulingContext(
 	sctx.ReplicasByZone = computeReplicasByZone(eligibleNodes, rvrs)
 
 	return sctx
+}
+
+// isReplicaScheduled reports whether an RVR that already has a node assigned carries everything
+// its type needs to be considered placed — the criterion is type-aware because the placement
+// pipelines are:
+//
+//   - TieBreaker: diskless, placed by the node-only pipeline
+//     (TakeOnlyNodesFromEligibleNodes) and never assigned an LVG — the node IS its whole
+//     placement. Requiring an LVG here would keep every tie-breaker (in particular one retyped
+//     from Diskful by the r3→r2 migration) permanently unscheduled and re-run the pipeline for
+//     it on every reconcile, even though spec.nodeName is immutable and there is nothing left
+//     to decide.
+//   - Access: not scheduled by this controller at all — Access replicas are created directly on
+//     the node where they are needed and their Scheduled condition is removed.
+//   - Diskful / ShadowDiskful: backed by a volume, so the storage assignment must match the pool
+//     type (thin pools require a thin-pool name, thick pools require its absence).
+func isReplicaScheduled(rvr *v1alpha1.ReplicatedVolumeReplica, poolType v1alpha1.ReplicatedStoragePoolType) bool {
+	switch rvr.Spec.Type {
+	case v1alpha1.ReplicaTypeTieBreaker:
+		return true
+	case v1alpha1.ReplicaTypeAccess:
+		return false
+	default:
+		if rvr.Spec.LVMVolumeGroupName == "" {
+			return false
+		}
+		switch poolType {
+		case v1alpha1.ReplicatedStoragePoolTypeLVMThin:
+			return rvr.Spec.LVMVolumeGroupThinPoolName != ""
+		case v1alpha1.ReplicatedStoragePoolTypeLVM:
+			return rvr.Spec.LVMVolumeGroupThinPoolName == ""
+		default:
+			return false
+		}
+	}
 }
 
 // Update records a successful placement: marks the node as occupied and adds
