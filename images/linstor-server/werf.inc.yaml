@@ -232,6 +232,15 @@ shell:
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
 ---
+# OpenJDK 11 for the LINSTOR controller/satellite. Taken from container-base
+# instead of the ALT java-11-openjdk-headless package: the ALT package comes from
+# the archive snapshot builder/golang-alt is pinned to, while this image is rebuilt
+# with every container-base release.
+image: {{ $.ImageName }}-openjdk-artifact
+from: {{ index $.Images "openjdk-11.0.31" }}
+final: false
+
+---
 # main image based on AltLinux for now because we need bash and other tools
 image: {{ $.ImageName }}
 from: {{ index $.Images "builder/golang-alt" }}
@@ -277,6 +286,16 @@ import:
       - k8s-await-election
     before: setup
 
+  # jmods, include and man are only needed to build Java code, not to run it
+  - image: {{ $.ImageName }}-openjdk-artifact
+    add: /usr/lib/jvm/openjdk-11
+    to: /usr/lib/jvm/openjdk-11
+    excludePaths:
+      - jmods
+      - include
+      - man
+    before: setup
+
 shell:
   # add some scripts to image to be able to use them
   install:
@@ -291,13 +310,26 @@ shell:
     - cp /utils/cleaner.py /cleaner.py && chmod 755 /cleaner.py
 
   setup:
+    # Make the imported OpenJDK the system java. LINSTOR's gradle build hard-codes
+    # JAVACMD=/usr/lib/jvm/jre-11/bin/java into the controller/satellite launcher
+    # scripts (see -Pjava11=lib in linstor.spec), which is the path the ALT
+    # java-11-openjdk-headless package used to provide, so keep that name working.
+    - ln -sfn openjdk-11 /usr/lib/jvm/jre-11
+    - |
+      for b in java keytool jcmd jstack jmap; do
+        ln -sf ../lib/jvm/openjdk-11/bin/${b} /usr/bin/${b}
+      done
+    - java -version
+    - /usr/lib/jvm/jre-11/bin/java -version
+
     - mv /drbd-utils/* /packages/
     # Source https://github.com/piraeusdatastore/piraeus/blob/master/dockerfiles/piraeus-server/Dockerfile
     - |
       { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus
     # Enable contrib repos for zfsutils
     - sed -r -i 's/^deb(.*)$/deb\1 contrib/' /etc/apt/sources.list
-    - echo "Update packages list..." && apt-get update
+    - echo "Update packages and move to a newer ALT snapshot..."
+    {{- include "alt packages upgrade" $ | nindent 4 }}
 
     # install our own RPM packages first
     - |
@@ -316,7 +348,8 @@ shell:
       # zfsutils-linux: for zfs storage pools
       # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
       DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils openssh lsb-core"
-      LINSTOR_COMMON_DEPS="java-11-openjdk-headless openssl"
+      # no jre package here: OpenJDK 11 is imported from container-base above
+      LINSTOR_COMMON_DEPS="openssl"
       LINSTOR_SATELLITE_DEPS="lvm2 libudev-devel"
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort python3-module-distutils-extra"
       THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
@@ -345,6 +378,20 @@ shell:
 # │ │ linstor-server/setup    python_linstor: Depends: python3(distutils.version) (< 0) but it is not installable
 # │ │ linstor-server/setup  E: Unmet dependencies. Try 'apt-get --fix-broken install' with no packages (or specify a        ↵
 # solution).
+
+    # python3-module-distutils-extra pulls ALT's python3-module-setuptools, which lags
+    # behind (80.10.2, CVE-2026-59890 — the ALT p11 snapshot has no 83.0.0 yet). Replace
+    # it with a fixed version from PyPI and drop pip again, so nothing extra is shipped.
+    # The stale dist-info has to go first: it carries no RECORD, so pip refuses to touch it.
+    - |
+      echo "Update setuptools..."
+      apt-get install -y python3-module-pip
+      rpm -e --nodeps python3-module-setuptools
+      rm -rf /usr/lib64/python3/site-packages/setuptools-*.dist-info /usr/lib/python3/site-packages/setuptools-*.dist-info
+      pip3 install --no-deps --no-cache-dir 'setuptools>=83.0.0'
+      rpm -e --nodeps python3-module-pip
+      python3 -c 'import setuptools; print("setuptools", setuptools.__version__)'
+      python3 -c 'import pkg_resources; print("pkg_resources ok")'
 
     - |
       echo "Patch some files..."
@@ -387,6 +434,7 @@ shell:
       #    zfs-utils: Depends: /lib/udev/rules.d
       #               Depends: udev
       rm -rf /packages
+    - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
 
 docker:

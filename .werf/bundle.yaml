@@ -66,3 +66,5 @@ git:
       - templates
       - Chart.yaml
       - module.yaml
+---
+{{- include "vex mitigation" (list $ "bundle") }}

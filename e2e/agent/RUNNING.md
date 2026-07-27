@@ -64,7 +64,7 @@ Bump `golang:` to match `images/agent/go.mod` and `FROM <module image>@<digest>`
 to a current digest (see "Picking a base-image digest" below). Skeleton:
 
 ```dockerfile
-FROM golang:1.25.10-alpine3.22 AS builder
+FROM golang:1.26.5-alpine3.22 AS builder
 WORKDIR /go/src
 COPY api/        /api/
 COPY lib/go/     /lib/go/
