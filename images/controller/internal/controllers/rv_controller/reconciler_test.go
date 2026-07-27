@@ -4124,6 +4124,56 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("retype to tie-breaker requested: have 3D, want 2D+1TB"))
 	})
 
+	// ── №1: ANY pending retype blocks Converged (configuration flip-flop) ─────
+	//
+	// The gate of step 3 does not depend on a tie-breaker deficit: a retype whose spec.type is
+	// already flipped is in flight no matter what the intended layout says, and Converged
+	// ("actual matches intended and nothing is moving") would be a lie while it runs. The
+	// deficit branch keeps its own message — see "P1: is idempotent while a retype is already
+	// requested" above.
+
+	It("reports Converging while a retype is pending even when the layout already matches intended", func() {
+		// Flip-flop: the class was switched to r2, convergence flipped one RVR's spec.type to
+		// TieBreaker, and the class was switched back to r3 before the DMTE dispatched. The
+		// member is still Diskful, so the counted layout (3D) equals the intended one.
+		rv, rvrs := convergenceFixture(1, 3, 0) // r3 config wants 3D, actual 3D
+		rvrs[2].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		// "have 3D, want 3D" would say nothing, so the message names the pending replica.
+		Expect(report.message).To(Equal(
+			"retype to tie-breaker pending on rv-1-2: the layout already matches the intended one (3D); " +
+				"likely a reverted configuration change, and the retype is not rolled back automatically"))
+	})
+
+	It("reports Converged for the same layout once no retype is pending", func() {
+		// Control for the test above: step 5 stays reachable — only the in-flight retype
+		// (not the r3 layout itself) blocks Converged.
+		rv, rvrs := convergenceFixture(1, 3, 0)
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.message).To(Equal("layout converged: 3D"))
+	})
+
+	It("names the pending replica when the layout differs but has no tie-breaker deficit", func() {
+		// 3D+1TB at an r2 config with a second retype flipped by hand: there is no tie-breaker
+		// deficit, so the deficit branch does not apply, yet have/want do differ here.
+		rv, rvrs := convergenceFixture(0, 3, 1)
+		rvrs[2].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal(
+			"retype to tie-breaker pending on rv-1-2: have 3D+1TB, want 2D+1TB"))
+	})
+
 	It("P1: is a no-op while a membership transition is active", func() {
 		rv, rvrs := convergenceFixture(0, 3, 0)
 		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{
@@ -4551,6 +4601,20 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.message).To(Equal("layout transition in progress: have 2D+2TB, want 2D+1TB"))
+	})
+
+	It("replacement: a pending retype defers the replacement (step 3 wins over step 4)", func() {
+		// Both a terminating tie-breaker and a retype flipped by hand (convergence itself never
+		// requests a retype at an already-converged layout). Step 3 wins: the report stays
+		// honest and no replacement is created while another layout change is in flight.
+		rv, rvrs := convergenceFixture(0, 2, 1)
+		markDeleting(rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2))
+		rvrs[0].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.message).To(HavePrefix("retype to tie-breaker pending on rv-1-0:"))
 	})
 
 	It("replacement: a genuine tie-breaker surplus is still reported as unsupported", func() {

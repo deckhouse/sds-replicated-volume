@@ -181,6 +181,7 @@ kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(
 **Ограничения.**
 
 - Автоматического обратного пути нет: изменение `replication` в сторону большего числа реплик (r2→r3) репортится на каждом томе как `LayoutConverged=False/TransitionUnsupported` и не выполняет никаких действий — требуется ручная разборка.
+- Откат правки, пока том ещё мигрирует, не отменяет уже запущенный перевод реплики в tie-breaker, и такой том больше не вернётся в `Converged` сам. В зависимости от момента отката том останется либо в раскладке `2D+1TB` при желаемой `3D` (`LayoutConverged=False/TransitionUnsupported`), либо с репликой, у которой `spec.type` застрял в значении `TieBreaker`, тогда как раскладка по-прежнему `3D` (`LayoutConverged=False/Converging`, имя реплики указано в сообщении condition). Данные не теряются ни в одном из случаев. Во втором случае реплику нужно восстановить одним патчем: вернуть `spec.type` в `Diskful` и одновременно вернуть поля backing volume (`spec.lvmVolumeGroupName`, а для thin-пула ещё и `spec.lvmVolumeGroupThinPoolName`), взяв значения из `status.datamesh.members` тома.
 - При `RollingUpdate` правка применяется сразу ко всем томам класса: ограничение параллельности раскатки (`configurationRolloutStrategy.rollingUpdate.maxParallel`) пока не реализовано.
 
 #### Удаление ресурса ReplicatedStorageClass

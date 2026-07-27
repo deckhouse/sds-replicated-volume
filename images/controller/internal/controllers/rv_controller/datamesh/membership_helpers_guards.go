@@ -278,13 +278,18 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 }
 
 // guardGMDRPreserved blocks if removing this voter would violate the GMDR guarantee.
-// Condition: ADR > target_GMDR, where ADR = UpToDate_D_count − 1.
-func guardGMDRPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+// Condition: ADR > target_GMDR, where ADR is the UpToDate_D_count that survives the removal.
+//
+// The subject is subtracted from the count only when it is itself an UpToDate data copy
+// (isUpToDateDiskful): removing a replica that carries no UpToDate copy does not reduce
+// redundancy, and pretending otherwise blocks exactly the transitions that have nothing to lose
+// (a degraded replica is the best retype candidate). For an UpToDate subject the arithmetic is
+// unchanged.
+func guardGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	utd := upToDateDiskfulCount(gctx)
-	var adr byte
-	if utd > 0 {
-		adr = utd - 1
+	adr := upToDateDiskfulCount(gctx)
+	if isUpToDateDiskful(rctx) && adr > 0 {
+		adr--
 	}
 	if adr <= targetGMDR {
 		return dmte.GuardResult{
@@ -505,9 +510,15 @@ func guardTransZonalTBPlacement(gctx *globalContext, rctx *ReplicaContext) dmte.
 //
 // For each zone z:
 //
-//	UpToDate_surviving = (UpToDate_D_count − 1) − UpToDate_in_zone(z)
-//	  (adjusted if z is the zone of the removed D)
+//	UpToDate_surviving = UpToDate_D_count_after_removal − UpToDate_in_zone(z)_after_removal
 //	if UpToDate_surviving <= target_GMDR → blocked
+//
+// The subject is excluded exactly once and only when it is itself an UpToDate data copy
+// (isUpToDateDiskful): it is then counted both in the total and in its own zone, so both are
+// decremented; a subject that carries no UpToDate copy is in neither count and leaves both
+// untouched. Subtracting it from the total unconditionally punished a degraded subject twice —
+// and, when every UpToDate copy sat in one foreign zone, made the byte subtraction below
+// underflow into a false pass.
 func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
 		return dmte.GuardResult{}
@@ -516,22 +527,22 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
 	totalUTD := upToDateDiskfulCount(gctx)
 	perZone := upToDateDiskfulCountPerZone(gctx)
+	subjectIsUTD := isUpToDateDiskful(rctx)
 	removedZone := ""
 	if rctx.member != nil {
 		removedZone = rctx.member.Zone
 	}
 
+	adjustedTotal := totalUTD
+	if subjectIsUTD && adjustedTotal > 0 {
+		adjustedTotal--
+	}
+
 	for _, zc := range perZone {
 		zone, zoneUTD := zc.Zone, zc.Count
 		adjustedZoneUTD := zoneUTD
-		if zone == removedZone {
-			if adjustedZoneUTD > 0 {
-				adjustedZoneUTD--
-			}
-		}
-		var adjustedTotal byte
-		if totalUTD > 0 {
-			adjustedTotal = totalUTD - 1
+		if subjectIsUTD && zone == removedZone && adjustedZoneUTD > 0 {
+			adjustedZoneUTD--
 		}
 		surviving := adjustedTotal - adjustedZoneUTD
 		if surviving <= targetGMDR {

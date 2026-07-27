@@ -1880,7 +1880,8 @@ var _ = Describe("ChangeReplicaType(D→A) plans", func() {
 	})
 
 	It("d-to-a: guard leavingDGuards block (GMDR)", func() {
-		// 2D with GMDR=1: ADR = 1-1 = 0. 0 > 1 false → blocked.
+		// 2D with GMDR=1, and the leaving replica is the one that is not UpToDate (so it is not
+		// subtracted): ADR = 1. 1 > 1 false → blocked.
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),

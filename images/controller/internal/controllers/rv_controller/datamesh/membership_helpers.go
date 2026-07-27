@@ -125,18 +125,29 @@ func voterCount(gctx *globalContext) byte {
 	return n
 }
 
-// upToDateDiskfulCount returns the number of voter members that have a backing
-// volume and are UpToDate (BackingVolume.State == UpToDate).
-// D∅ members are excluded (they are voters but have no attached disk).
+// isUpToDateDiskful reports whether the replica counts as an UpToDate data copy: a voter member
+// with a backing volume whose RVR reports BackingVolume.State == UpToDate. D∅ members are
+// excluded (they are voters but have no attached disk).
+//
+// Single source of the criterion: it is what upToDateDiskfulCount and upToDateDiskfulCountPerZone
+// count, and the guards that model the loss of a subject (guardGMDRPreserved,
+// guardZoneGMDRPreserved) ask the very same question about the subject before subtracting it from
+// those counts. Two spellings of the criterion would let the counters and the correction drift
+// apart.
+func isUpToDateDiskful(rc *ReplicaContext) bool {
+	if rc == nil || rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
+		return false
+	}
+	return rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+		rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
+}
+
+// upToDateDiskfulCount returns the number of members that count as an UpToDate data copy
+// (see isUpToDateDiskful).
 func upToDateDiskfulCount(gctx *globalContext) byte {
 	var n byte
 	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
-			continue
-		}
-		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
-			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+		if isUpToDateDiskful(&gctx.allReplicas[i]) {
 			n++
 		}
 	}
@@ -269,15 +280,10 @@ func voterCountPerZone(gctx *globalContext) []zoneCount {
 	})
 }
 
-// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts, sorted by zone name.
+// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts (see isUpToDateDiskful),
+// sorted by zone name.
 func upToDateDiskfulCountPerZone(gctx *globalContext) []zoneCount {
-	return countPerZone(gctx, func(rc *ReplicaContext) bool {
-		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
-			return false
-		}
-		return rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
-			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
-	})
+	return countPerZone(gctx, isUpToDateDiskful)
 }
 
 // tbCountPerZone returns per-zone TieBreaker counts, sorted by zone name.

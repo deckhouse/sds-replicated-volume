@@ -484,7 +484,13 @@ type layoutConvergedReport struct {
 //     actual/intended comparison on purpose: mid-flight D→TB makes the counted layout equal the
 //     intended one for one step (the member is already a TieBreaker while the transition is still
 //     running), and reporting Converged there would flip the condition True and back.
-//  3. A retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) → Converging.
+//  3. ANY retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
+//     Converging. The step does not look at the tie-breaker deficit: a flipped spec is a layout
+//     change in flight even when the intended layout no longer asks for it (the configuration was
+//     switched back inside the dispatch window), and Converged there would be a false "nothing is
+//     moving". Because the step also precedes the replacement domain, a terminating tie-breaker
+//     waits for the pending retype to resolve before a replacement is created — a combination
+//     convergence itself never produces (it issues at most one action per pass).
 //  4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted has no
 //     replacement yet) → create the replacement (strict create-first). This also precedes the
 //     actual/intended comparison: the raw layout still counts the terminating tie-breaker, so the
@@ -499,9 +505,9 @@ type layoutConvergedReport struct {
 //   - P2 heal: actualD == intendedD && actualTB < intendedTB — create the missing tie-breaker.
 //
 // Idempotency across the split-client cache is handled by counting in-flight work: a retype whose
-// spec was already flipped (countPendingRetypesToTieBreaker, step 3) or a tie-breaker RVR already
-// created but not yet a member (countPendingTieBreakerCreations) is reported without issuing a
-// second action.
+// spec was already flipped (pendingRetypeToTieBreakerMemberNames, step 3) or a tie-breaker RVR
+// already created but not yet a member (countPendingTieBreakerCreations) is reported without
+// issuing a second action.
 func computeTargetLayoutAction(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -531,11 +537,35 @@ func computeTargetLayoutAction(
 	}
 
 	// 3. A retype already requested in a previous pass (spec flipped, DMTE not started yet).
-	if actualTB < intendedTB && countPendingRetypesToTieBreaker(rv, rvrs) >= intendedTB-actualTB {
+	// ANY pending retype blocks Converged, whether or not the intended layout still shows a
+	// tie-breaker deficit: the spec of a member is already flipped and the datamesh may act on
+	// it at any moment, so "actual matches intended and nothing is moving" would be a lie.
+	if pending := pendingRetypeToTieBreakerMemberNames(rv, rvrs); len(pending) > 0 {
+		var message string
+		switch {
+		case actualTB < intendedTB:
+			// The retype fills a genuine tie-breaker deficit — the layouts tell the whole story.
+			message = fmt.Sprintf("retype to tie-breaker requested: have %s, want %s",
+				actualLayout, intendedLayout)
+		case actualD == intendedD && actualTB == intendedTB:
+			// The deficit the retype was requested for is gone (typically the configuration was
+			// switched back before the datamesh dispatched the transition). "have 3D, want 3D"
+			// would say nothing here, so the message names the replica whose spec is flipped;
+			// see the rv_controller README for the recovery recipes.
+			message = fmt.Sprintf(
+				"retype to tie-breaker pending on %s: the layout already matches the intended one (%s); "+
+					"likely a reverted configuration change, and the retype is not rolled back automatically",
+				strings.Join(pending, ", "), actualLayout)
+		default:
+			// A mismatch that needs no additional tie-breaker: the layouts are meaningful, but
+			// the pending replica still has to be named.
+			message = fmt.Sprintf("retype to tie-breaker pending on %s: have %s, want %s",
+				strings.Join(pending, ", "), actualLayout, intendedLayout)
+		}
 		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
 			status:  metav1.ConditionFalse,
 			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
-			message: fmt.Sprintf("retype to tie-breaker requested: have %s, want %s", actualLayout, intendedLayout),
+			message: message,
 		}
 	}
 
@@ -982,21 +1012,26 @@ func isMemberAttached(m *v1alpha1.DatameshMember, rvas []*v1alpha1.ReplicatedVol
 	return false
 }
 
-// countPendingRetypesToTieBreaker counts diskful members whose RVR spec.type has already been
-// flipped to TieBreaker (a retype requested in a previous pass, not yet reflected in the member
-// type). Used to avoid issuing a second retype while the first is in flight.
-func countPendingRetypesToTieBreaker(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) int {
-	count := 0
+// pendingRetypeToTieBreakerMemberNames returns the sorted names of diskful members whose RVR
+// spec.type has already been flipped to TieBreaker (a retype requested in a previous pass, not
+// yet reflected in the member type). Used to avoid issuing a second retype while the first is in
+// flight, and to name the replica in the Converging message.
+func pendingRetypeToTieBreakerMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var names []string
 	for i := range rv.Status.Datamesh.Members {
 		m := &rv.Status.Datamesh.Members[i]
 		if m.Type != v1alpha1.DatameshMemberTypeDiskful && m.Type != v1alpha1.DatameshMemberTypeLiminalDiskful {
 			continue
 		}
 		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
-			count++
+			names = append(names, m.Name)
 		}
 	}
-	return count
+	slices.Sort(names)
+	return names
 }
 
 // countPendingTieBreakerCreations counts TieBreaker RVRs that are not yet datamesh members

@@ -413,6 +413,14 @@ func rctxByID(gctx *globalContext, id uint8) *ReplicaContext {
 	return gctx.replicas[id]
 }
 
+// setDiskState gives the member's RVR a backing volume in the given state. It models the second
+// way a replica fails the UpToDate criterion (a backing volume that is not UpToDate); the first
+// one — no backing volume at all — is what mkZonalGctx produces for upToDate=false.
+func setDiskState(gctx *globalContext, id uint8, state v1alpha1.DiskState) {
+	rctxByID(gctx, id).rvr.Status.BackingVolume =
+		&v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{State: state}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // guardGMDRPreserved
 //
@@ -451,6 +459,72 @@ var _ = Describe("guardGMDRPreserved", func() {
 		)
 		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeTrue())
+	})
+
+	// ── №3: the subject is subtracted only when it is itself UpToDate ─────────
+	//
+	// Losing a replica that holds no UpToDate copy does not reduce redundancy, so modelling it
+	// as "one UpToDate copy fewer" blocks legitimate transitions (the degraded replica is the
+	// best retype candidate — there is nothing to lose on it).
+
+	It("pass: 3D, GMDR=1, subject has no backing volume → ADR=2 > 1", func() {
+		gctx := mkGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", false}, // subject: no backing volume
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3D, GMDR=1, subject's backing volume is not UpToDate → ADR=2 > 1", func() {
+		gctx := mkGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		setDiskState(gctx, 0, v1alpha1.DiskStateInconsistent) // subject is syncing
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: 2D, GMDR=1, subject not UpToDate → ADR=1 ≤ 1 (relaxation is exactly one copy)", func() {
+		gctx := mkGctx(0, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+	})
+
+	It("does not block RemoveReplica(D) of a replica that holds no UpToDate copy", func() {
+		// The guard is shared by every lose-voter plan through loseVoterGuardsCommon
+		// (RemoveReplica(D), D→A, D→sD, D→TB), so the relaxation is not specific to the retype
+		// path: 3D at GMDR=1 with a degraded subject leaves two UpToDate copies either way.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2 // GMDR=1 → qmr=2, already settled
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVR("rv-1-2", "node-3", 5), // the leaving replica holds no UpToDate copy
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).
+			To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 	})
 })
 
@@ -901,6 +975,49 @@ var _ = Describe("guardZoneGMDRPreserved", func() {
 
 		// GMDR=1: losing a foreign zone leaves 1 ≤ 1 → blocked.
 		gctx = mk(1)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("zone GMDR"))
+	})
+
+	// ── №3: the subject is subtracted only when it is itself UpToDate ─────────
+
+	It("pass: 3 zones × 1D, GMDR=0, subject has no backing volume", func() {
+		// The subject holds no copy, so the two UpToDate replicas both survive the removal:
+		// losing either foreign zone still leaves one copy (1 > 0). Subtracting the subject
+		// from the total anyway left 0 and blocked the retype of the very replica that has
+		// nothing to lose.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3 zones × 1D, GMDR=0, subject's backing volume is not UpToDate", func() {
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		setDiskState(gctx, 0, v1alpha1.DiskStateFailed) // subject's disk failed
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: every UpToDate copy sits in one foreign zone and the subject holds none", func() {
+		// Regression for a byte underflow: with the subject subtracted unconditionally the
+		// adjusted total (2-1=1) was smaller than the zone count (2), `adjustedTotal -
+		// adjustedZoneUTD` wrapped around to 255 and the guard passed — although losing zone b
+		// would leave no UpToDate copy at all. Excluding the subject only when it is UpToDate
+		// removes the underflow as a class: the total can never be below any zone's count.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
 		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeTrue())
 		Expect(r.Message).To(ContainSubstring("zone GMDR"))

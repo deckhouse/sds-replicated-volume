@@ -140,7 +140,7 @@ Reconcile (root) [Pure orchestration]
 │       │   ├── hasLayoutChangingTransition (classified by the transition's replica types, not by Group)
 │       │   ├── selectRetypeCandidate (exclude attached + gain-side zone placement + lose-side zone quorum; lexicographically last name)
 │       │   │   └── isRetypeToTieBreakerZoneQuorumSafe (mirrors guardZoneFTTPreservedForRetypeToTieBreaker)
-│       │   ├── countPendingRetypesToTieBreaker / countPendingTieBreakerCreations (idempotency vs stale cache)
+│       │   ├── pendingRetypeToTieBreakerMemberNames (any pending retype → Converging; also names it) / countPendingTieBreakerCreations
 │       │   ├── computeActualPendingTieBreakerSchedulingFailure (current Scheduled=False → CannotConverge)
 │       │   └── isMemberAttached
 │       ├── P1: base := rvr.DeepCopy(); applyRVRRetypeToTieBreaker (type=TieBreaker + clear LVG/ThinPool); patchRVR  (ChangeRole → DMTE drives it)
@@ -281,22 +281,29 @@ and **not** by `Group`: `ForceRemoveReplica` lives in the `Emergency` group, so 
 
 1. RV deletion → `Unknown`/`VolumeDeleting`, no action.
 2. An active layout-changing transition → `Converging`, no action.
-3. A retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) → `Converging`.
+3. **Any** retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
+   `Converging`. The step deliberately ignores the tie-breaker deficit: see below.
 4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted) → create the
    replacement (strict create-first, see below).
 5. Comparison of actual against intended: equal → `Converged`; otherwise the whitelist below.
 
-Steps 2 and 4 precede the actual/intended comparison **on purpose**. Mid-flight D→TB makes the
+Steps 2, 3 and 4 precede the actual/intended comparison **on purpose**. Mid-flight D→TB makes the
 counted layout equal the intended one for one step (the member is already a `TieBreaker` while the
 transition is still running), and reporting `Converged` there would flip the condition True and
-straight back; likewise, a terminating tie-breaker is still counted by the raw layout, so the
-comparison alone would report `Converged` while the volume's only tie-breaker is leaving. Step 5
-still absorbs unrelated activity, so the condition does not flap on attach/resize or Access churn.
+straight back; a flipped `spec.type` is a layout change in flight even when the intended layout no
+longer asks for it (see [Configuration flip-flop](#configuration-flip-flop-known-limitation));
+likewise, a terminating tie-breaker is still counted by the raw layout, so the comparison alone
+would report `Converged` while the volume's only tie-breaker is leaving. Step 5 still absorbs
+unrelated activity, so the condition does not flap on attach/resize or Access churn.
+
+Step 3 also wins over step 4, so a tie-breaker replacement waits until a pending retype resolves.
+Convergence never produces that combination itself (at most one action per pass), and the report
+stays honest while it lasts.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Converged | Actual layout matches the intended layout, and no layout-changing transition is running (unrelated transitions do not affect this) |
-| False | Converging | A convergence action is in flight: a layout-changing transition is running, a retype was just requested, or a tie-breaker creation is pending |
+| True | Converged | Actual layout matches the intended layout, no layout-changing transition is running and no retype is pending (unrelated transitions do not affect this) |
+| False | Converging | A layout change is in flight: a layout-changing transition is running, a retype is pending (requested in this or an earlier pass), or a tie-breaker creation is pending |
 | False | CannotConverge | A whitelist pattern applies but no admissible candidate exists (all diskful replicas are attached, no zone can host a tie-breaker, the retype would break zone quorum, or the pending tie-breaker — including a replacement for a terminating one — has a current `Scheduled=False`) |
 | False | TransitionUnsupported | Layout mismatches outside the whitelist; no supported automatic transition (manual intervention required) |
 | Unknown | VolumeDeleting | The volume is being deleted; convergence is no longer evaluated |
@@ -371,6 +378,35 @@ Ordering / whitelist notes: convergence runs **after** `ProcessTransitions`, so 
 created this pass makes it a no-op. It fills only the tie-breaker deficit — a 4D volume at an r2
 config becomes 3D+1TB after one retype and is then reported `TransitionUnsupported` (the extra
 diskful voters are never removed).
+
+#### Configuration flip-flop (known limitation)
+
+The whitelist is one-directional: convergence retypes D→TB and creates a tie-breaker, and it never
+flips a `spec.type` back. Reverting the class (r2 → r3) inside the retype window — between the
+`spec.type` patch and the DMTE dispatch — therefore leaves the retype **stranded**, and it is not
+rolled back automatically. The volume never reports `Converged` while this lasts (step 3 of the
+decision order fires on any pending retype), and the `Converging` message names the flipped
+replica. Two outcomes, depending on when the revert lands:
+
+| Branch | What happened | Resulting state | Recovery |
+|--------|---------------|-----------------|----------|
+| **A — the DMTE dispatched under the r2 configuration** | The lose-side guards passed (`D_min = FTT+GMDR+1 = 2` at r2), so the ChangeRole transition runs to completion | The retype finishes: `2D+1TB` against an intended `3D` → `TransitionUnsupported` (the layout alert fires) | The usual manual upsize, in this order: create a Diskful RVR (`2D+1TB` → `3D+1TB`), then delete the tie-breaker RVR — with an odd diskful count no tie-breaker is required (`TB_min = 0`), so `guardTBSufficient` releases it. An automatic r2→r3 path does not exist |
+| **B — the configuration was already r3 at dispatch time** | `guardFTTPreserved` blocks the transition permanently (`D_min = FTT+GMDR+1 = 3`, voters = 3, so `3 <= 3`); the retype never runs and **no data is lost** — the guard did its job | Raw layout stays `3D` and matches the intended one, but the volume reports `Converging` **forever** | Undo the flip: patch the RVR back to `spec.type: Diskful` **together with** the backing-volume fields the retype cleared (`spec.lvmVolumeGroupName`, plus `spec.lvmVolumeGroupThinPoolName` on a thin pool), copying the values from the volume's datamesh member record, which still carries them |
+
+Both fields must go in the **same** patch as the type: the API rejects backing-volume fields on a
+non-Diskful replica, and a Diskful replica without them counts as unscheduled, so the scheduler
+would assign the storage itself (possibly a different LVG on that node). Deleting the flipped RVR
+is **not** an escape in branch B: the Leave request hits the very same `guardFTTPreserved` and
+hangs the same way, only with a terminating replica on top.
+
+In both branches the class-level aggregate keeps the volume out of `aligned` (a present and False
+`LayoutConverged` counts as `staleConfiguration`, see `rsc_controller`), so
+`ConfigurationRolledOut` stays False until the replica is repaired.
+
+Branch B is **not covered by the layout alert**, which fires on `TransitionUnsupported` and
+`CannotConverge` only: a healthy cluster sits in an honest but permanent `Converging`. A proper way
+out (revoking the retype decision and re-picking a candidate) needs the execution-record protocol
+of the **RVR authorization design contract** — see the note at the end of this section.
 
 **Tie-breaker replacement (strict create-first).** Deleting a live tie-breaker (node drain, manual
 `kubectl delete rvr`) does not release it from the datamesh: the RV controller finalizer holds the

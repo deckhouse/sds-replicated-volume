@@ -186,6 +186,7 @@ Held volumes are counted in `status.volumes.staleConfiguration` of the class, an
 **Limitations.**
 
 - There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `LayoutConverged=False/TransitionUnsupported` and performs no action — it requires manual intervention.
+- Reverting the edit while a volume is still migrating does not cancel a retype that is already in flight, and such a volume never reports `Converged` again on its own. Depending on the timing the volume ends up either at `2D+1TB` against the intended `3D` (`LayoutConverged=False/TransitionUnsupported`), or with a replica whose `spec.type` is stuck at `TieBreaker` while the layout still reads `3D` (`LayoutConverged=False/Converging`, with the affected replica named in the condition message). No data is lost in either case. In the second case, restore the replica with a single patch that sets `spec.type` back to `Diskful` and re-adds its backing-volume fields (`spec.lvmVolumeGroupName`, and `spec.lvmVolumeGroupThinPoolName` for a thin pool) with the values from `status.datamesh.members` of the volume.
 - Under `RollingUpdate` the edit applies to every volume of the class at once: throttling the rollout (`configurationRolloutStrategy.rollingUpdate.maxParallel`) is not yet implemented.
 
 #### Deleting the ReplicatedStorageClass resource

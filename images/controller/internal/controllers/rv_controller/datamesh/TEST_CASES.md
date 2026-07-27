@@ -373,7 +373,10 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   2D with FTT=1: D_min = FTT + GMDR + 1 = 1+0+1 = 2. D_count=2 ≤ D_min=2 → blocked. Message contains "FTT".
 
 - ⚡ **guardGMDRPreserved blocks when UpToDate D too low.**
-  2D with config.GMDR=1. One D is NOT UpToDate. ADR = UpToDate_D - 1 = 1 - 1 = 0. 0 ≤ 1 → blocked. Message contains "GMDR".
+  2D with config.GMDR=1. The leaving D is the one that is NOT UpToDate, so it is not subtracted: ADR = 1 ≤ 1 → blocked. Message contains "GMDR".
+
+- ⚡ **guardGMDRPreserved does not block RemoveReplica(D) of a replica that holds no UpToDate copy.**
+  3D with config.GMDR=1, the leaving D is not UpToDate: ADR = 2 > 1 → RemoveReplica transition is created. The relaxation is shared by every lose-voter plan (`loseVoterGuardsCommon`), not only D→TB.
 
 - ⚡ **guardVolumeAccessLocal blocks attached D removal.**
   3D, member #1 Attached=true, VolumeAccess=Local. guardNotAttached fires first (attached → Detach dispatched). On second pass: active Detach → guardNotAttached blocks with "transition in progress".
@@ -517,7 +520,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 - **D→A guard: VolumeAccess=Local blocks.**
 - **D→A guard: GMDR blocks.**
-  2D with config.GMDR=1. ADR = UpToDate_D - 1. Not enough UpToDate → blocked.
+  2D with config.GMDR=1, the demoted D is not UpToDate: ADR = 1 ≤ 1 → blocked.
 
 ### Voter pairs: TB↔D
 
@@ -1376,6 +1379,11 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **guardGMDRPreserved: 3D all UpToDate, GMDR=1 → ADR=2 > 1 → passes.**
 - **guardGMDRPreserved: 2D all UpToDate, GMDR=1 → ADR=1 ≤ 1 → blocked.**
 - **guardGMDRPreserved: 1D UpToDate, GMDR=0 → ADR=0 ≤ 0 → blocked.**
+- ⚡ **guardGMDRPreserved: 3D GMDR=1, subject is not UpToDate → ADR=2 > 1 → passes.**
+  Two fixtures, one per branch of the criterion (no backing volume / backing volume not UpToDate):
+  the subject is not part of the UpToDate count, so nothing is subtracted from it.
+- **guardGMDRPreserved: 2D GMDR=1, subject is not UpToDate → ADR=1 ≤ 1 → still blocked.**
+  The relaxation is exactly one copy, not a blanket pass.
 - **guardFTTPreserved: 3D, FTT=1 GMDR=1 → D=3 ≤ D_min=3 → blocked.**
 - **guardFTTPreserved: 4D, FTT=1 GMDR=1 → D=4 > 3 → passes.**
 - **guardFTTPreserved: 2D+TB, FTT=1 GMDR=0 → D=2 ≤ 2 → blocked.**
@@ -1404,6 +1412,14 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   After removal: 4D, losing zone-a(2) → 2 < q=3 → blocked.
 - **guardZoneGMDRPreserved: D→TB is still modelled as a plain data loss (no retype-aware variant).**
   GMDR=0 passes, GMDR=1 blocks — identical to a plain removal, since a TieBreaker carries no data.
+- ⚡ **guardZoneGMDRPreserved: 3 zones × 1D GMDR=0, subject is not UpToDate → passes.**
+  Two fixtures, one per branch of the criterion: no backing volume at all, and a backing volume in
+  a non-UpToDate state. The subject is in neither the total nor its zone count, so both stay
+  untouched and losing a foreign zone still leaves 1 > 0.
+- ⚡ **guardZoneGMDRPreserved: every UpToDate copy in one foreign zone, subject holds none → blocked.**
+  Regression for a byte underflow: subtracting the subject unconditionally made the adjusted total
+  (1) smaller than the zone count (2), so `total − zone` wrapped to 255 and the guard passed
+  although losing that zone would leave no copy at all.
 - **guardZoneFTTPreservedForRetypeToTieBreaker: skip non-TransZonal.**
 - ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: 3D (1+1+1) → passes where the generic variant blocks.**
   The subject survives as the TieBreaker of its zone, so every foreign zone loss leaves 1D+1TB.

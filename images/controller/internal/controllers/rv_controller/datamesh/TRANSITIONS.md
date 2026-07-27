@@ -815,17 +815,21 @@ is additionally blocked until **all** of the following pass:
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
 | 1 | **VolumeAccessLocalForDemotion** | Member is not attached with volumeAccess=Local | "volumeAccess=Local requires Diskful on attached node" |
-| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = UpToDate D count − 1) | "would violate GMDR (ADR=N, need > M)" |
+| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = the UpToDate D count that survives the removal — the subject is subtracted only if it is itself UpToDate) | "would violate GMDR (ADR=N, need > M)" |
 | 3 | **FTTPreserved** | D count > D_min (D_min = target FTT + target GMDR + 1) | "would violate FTT (Diskful=N, need > M)" |
 | 4 | **ZoneGMDRPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough UpToDate D for GMDR | "would violate zone GMDR" |
 | 5 | **ZoneFTTPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough D for quorum | "would violate zone FTT" |
 
-**ZoneGMDRPreserved pseudocode:**
+**ZoneGMDRPreserved pseudocode** (the subject is excluded exactly once, and only when it is itself
+UpToDate: a subject that carries no UpToDate copy is in neither the total nor its zone count, so
+removing it changes nothing):
 
 ```
+subject_utd = 1 if the removed D is UpToDate else 0
+
 for each zone z:
-    UpToDate_in_zone = UpToDate_D_in_zone(z) − (1 if z == removed_D_zone)
-    UpToDate_surviving = (UpToDate_D_count − 1) − UpToDate_in_zone
+    UpToDate_in_zone = UpToDate_D_in_zone(z) − (subject_utd if z == removed_D_zone)
+    UpToDate_surviving = (UpToDate_D_count − subject_utd) − UpToDate_in_zone
     if UpToDate_surviving <= target_GMDR → blocked
 ```
 

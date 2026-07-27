@@ -553,6 +553,11 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 - `guardTransZonalVoterPlacement` — blocks if adding a voter would make any zone loss violate quorum or GMDR.
 - `guardTransZonalTBPlacement` — blocks if TB zone has > 1 D voter.
 - `guardZoneGMDRPreserved`/`guardZoneFTTPreserved` — blocks if removing a voter would violate zone-level guarantees.
+  `guardZoneGMDRPreserved` (like the non-zone `guardGMDRPreserved`) subtracts the subject from the
+  UpToDate counts — the total and its own zone — **only when the subject is itself UpToDate**
+  (`isUpToDateDiskful`, the single spelling of the criterion behind `upToDateDiskfulCount` and
+  `upToDateDiskfulCountPerZone`): a replica that carries no UpToDate copy takes none away when it
+  leaves, and pretending otherwise blocked exactly the transitions that risk nothing.
 - `guardZoneFTTPreservedForRetypeToTieBreaker` — the D→TB variant of `guardZoneFTTPreserved`
   (shared arithmetic in `evaluateZoneFTT`). The subject does not disappear: it stays a quorum
   participant as a TieBreaker in **its own** zone, so it counts as a surviving TB for every zone
