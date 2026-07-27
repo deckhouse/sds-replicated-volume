@@ -131,6 +131,46 @@ var _ = Describe("IOWorkload writer program", func() {
 			"the marker must be published atomically, or two writers could race")
 	})
 
+	It("blames a short pwrite or pread on the syscall, not on the read-back", func() {
+		// A short syscall does not raise: it returns the byte count it moved.
+		// Unchecked, it first surfaces in the content compare below — as "the
+		// device gave back other data" instead of "the device moved fewer
+		// bytes than asked", which sends the investigation the wrong way.
+		write := strings.Index(ioWorkloadProgram, "written = os.pwrite(fd")
+		readBack := strings.Index(ioWorkloadProgram, "back = os.pread(fd")
+		shortWrite := strings.Index(ioWorkloadProgram, `die("short write:`)
+		shortRead := strings.Index(ioWorkloadProgram, `die("short read:`)
+		compare := strings.Index(ioWorkloadProgram, "if back != buf:")
+
+		Expect(write).To(BeNumerically(">", 0),
+			"the pwrite result must be captured, or a short write cannot be seen at all")
+		Expect(ioWorkloadProgram).To(ContainSubstring("if written != len(buf):"),
+			"a write is short unless it moved the whole record")
+		Expect(ioWorkloadProgram).To(ContainSubstring("if len(back) != SLOT_SIZE:"),
+			"a read is short unless it returned the whole slot")
+		Expect(shortWrite).To(BeNumerically(">", write))
+		Expect(shortWrite).To(BeNumerically("<", compare),
+			"a short write must be diagnosed before the content compare")
+		Expect(shortRead).To(BeNumerically(">", readBack),
+			"the read guard must sit after the pread, or `back` is not bound yet")
+		Expect(shortRead).To(BeNumerically("<", compare),
+			"a short read must be diagnosed before the content compare")
+	})
+
+	It("names short I/O and a corrupted read-back as different failures", func() {
+		// die() puts the message into the journal and stderr, and that message
+		// is the whole diagnosis a run leaves behind.
+		Expect(lineContaining(ioWorkloadProgram, `die("short write:`)).
+			To(ContainSubstring("got %d bytes, want %d"),
+				"a short write must name both counts")
+		Expect(lineContaining(ioWorkloadProgram, `die("short read:`)).
+			To(ContainSubstring("got %d bytes, want %d"),
+				"a short read must name both counts")
+		Expect(lineContaining(ioWorkloadProgram, `die("readback:`)).
+			NotTo(ContainSubstring("short"),
+				"the corruption message must not read like a short-I/O one")
+	})
+
 	It("journals a heartbeat only after the write was read back and compared", func() {
 		sync := strings.Index(ioWorkloadProgram, "os.fdatasync(fd)")
 		readBack := strings.Index(ioWorkloadProgram, "back = os.pread(fd")

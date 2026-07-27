@@ -47,6 +47,9 @@ const spawnedMarker = "#spawned"
 //     descriptor (block device, DRBD major, expected minor) and do all I/O
 //     through the same descriptor, leaving no window between check and write;
 //   - write only aligned, slot-sized records, only inside the bounded ring;
+//   - report a short pwrite/pread as such: a short syscall returns a byte
+//     count instead of raising, and left unchecked it would be reported as
+//     corrupted data;
 //   - publish a heartbeat only after write -> fdatasync -> read-back ->
 //     checksum comparison, so a heartbeat proves a device write.
 const ioWorkloadProgram = `import errno
@@ -184,7 +187,7 @@ def main():
         offset = slot * SLOT_SIZE
         buf, crc = build_record(seq, slot)
         try:
-            os.pwrite(fd, buf, offset)
+            written = os.pwrite(fd, buf, offset)
             os.fdatasync(fd)
             try:
                 os.posix_fadvise(fd, offset, SLOT_SIZE, os.POSIX_FADV_DONTNEED)
@@ -193,6 +196,14 @@ def main():
             back = os.pread(fd, SLOT_SIZE, offset)
         except EnvironmentError as exc:
             die("io: sequence %d: %s" % (seq, exc))
+        # A short pwrite/pread raises nothing: the syscall reports how many
+        # bytes it moved. Diagnose it here, before the comparison below turns
+        # it into a readback failure and blames the device for giving back
+        # other data.
+        if written != len(buf):
+            die("short write: sequence %d in slot %d: got %d bytes, want %d" % (seq, slot, written, len(buf)))
+        if len(back) != SLOT_SIZE:
+            die("short read: sequence %d in slot %d: got %d bytes, want %d" % (seq, slot, len(back), SLOT_SIZE))
         if back != buf:
             die("readback: sequence %d in slot %d differs from what was written" % (seq, slot))
         journal("ok %d %d %d %08x" % (seq, slot, now_ms(), crc))
