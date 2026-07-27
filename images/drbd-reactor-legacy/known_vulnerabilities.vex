@@ -1,0 +1,25 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-drbd-reactor-legacy",
+  "author": "Deckhouse <contact@deckhouse.io>",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "ALT-PU-2025-12610"
+      },
+      "products": [
+        {
+          "@id": "pkg:rpm/altlinux/drbd-reactor@1.8.0-1"
+        },
+        {
+          "@id": "pkg:rpm/alt/drbd-reactor@1.8.0-1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "impact_statement": "ALT-PU-2025-12610 — это errata ALT Linux об обновлении пакета drbd-reactor из репозитория ALT до версии 1.9.0-alt2; конкретной уязвимости (CVE) в ней не указано. В образе нет пакета drbd-reactor из ALT: rpm собирается в этом репозитории из исходников LINBIT/drbd-reactor версии, зафиксированной в oss.yaml (DRBD_REACTOR 1.8.0), со своими патчами. Находка — совпадение по имени и версии пакета с другой сборкой, поэтому errata к образу не применима"
+    }
+  ],
+  "timestamp": "2026-07-27T00:00:00Z"
+}

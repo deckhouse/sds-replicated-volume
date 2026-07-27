@@ -168,10 +168,9 @@ import:
 
 shell:
   install:
-    - export DEBIAN_FRONTEND=noninteractive
-    - |
-      apt-get update \
-      && apt-get -y install libkeyutils kmod sysklogd
+    {{- include "alt packages upgrade" $ | nindent 4 }}
+    - apt-get -y install libkeyutils kmod sysklogd
+    - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
     # Remove build-only static analysis tooling inherited from the builder base.
     - {{ $.Root.SVACE_CLEANUP_CMD }}
@@ -191,3 +190,5 @@ docker:
     version: all
     drbd-utils: {{ include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root) }}
     drbd-reactor: {{ include "get_oss_version_by_id" (list "DRBD_REACTOR" $.Root) }}
+---
+{{- include "vex mitigation" (list $ $.ImageName) }}
