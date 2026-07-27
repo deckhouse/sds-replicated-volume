@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -42,7 +43,7 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				trv.Create(ctx)
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("rejecting a storage-pool change (immutable once set)")
 				trsc.UpdateExpect(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {
@@ -57,7 +58,7 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				By("verifying the RSC spec and the volume layout are untouched")
 				Expect(trsc.Object().Spec.Topology).To(Equal(v1alpha1.TopologyIgnored))
 				Expect(trsc.Object().Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("accepting a legitimate replication edit")
 				trsc.Update(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {

@@ -1771,6 +1771,11 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		copy(*out, *in)
 	}
 	in.Datamesh.DeepCopyInto(&out.Datamesh)
+	if in.Layout != nil {
+		in, out := &in.Layout, &out.Layout
+		*out = new(string)
+		**out = **in
+	}
 	in.EffectiveLayout.DeepCopyInto(&out.EffectiveLayout)
 	if in.DatameshTransitions != nil {
 		in, out := &in.DatameshTransitions, &out.DatameshTransitions

@@ -1644,7 +1644,11 @@ func isLayoutReplicaType(t v1alpha1.ReplicaType) bool {
 
 // layoutReport is the computed report driving status.layout and the LayoutConverged condition.
 type layoutReport struct {
-	layout          string
+	// layout mirrors the optional status.layout field: nil means "unset" (no layout to
+	// publish), never the empty string. computeLayoutReport always fills it, because it only
+	// runs post-formation, where the member composition is known; the pointer keeps the
+	// "unset" state representable end-to-end so it is never conflated with "".
+	layout          *string
 	convergedStatus metav1.ConditionStatus
 	reason          string
 	message         string
@@ -1669,7 +1673,7 @@ func computeLayoutReport(
 	actualD, actualTB := computeActualLayout(rv)
 	targetAction := computeTargetLayoutAction(rv, rvrs, rvas)
 	return layoutReport{
-		layout:          formatLayout(actualD, actualTB),
+		layout:          ptr.To(formatLayout(actualD, actualTB)),
 		convergedStatus: targetAction.convergedStatus,
 		reason:          targetAction.reason,
 		message:         targetAction.message,
@@ -1687,11 +1691,20 @@ func formatLayout(diskful, tiebreakers int) string {
 }
 
 // applyLayout sets status.layout (the actual datamesh layout string).
-func applyLayout(rv *v1alpha1.ReplicatedVolume, layout string) bool {
-	if rv.Status.Layout == layout {
+//
+// status.layout is an optional scalar: nil (absent) means "not computed yet" and is NOT the
+// same as the empty string, which is never a valid layout value. A nil layout therefore
+// clears the field instead of publishing "".
+func applyLayout(rv *v1alpha1.ReplicatedVolume, layout *string) bool {
+	if ptr.Equal(rv.Status.Layout, layout) {
 		return false
 	}
-	rv.Status.Layout = layout
+	if layout == nil {
+		rv.Status.Layout = nil
+	} else {
+		// Copy the value instead of sharing the report's pointer (read-only input contract).
+		rv.Status.Layout = ptr.To(*layout)
+	}
 	return true
 }
 

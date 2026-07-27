@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -47,7 +48,7 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				rvrCountBefore := trv.RVRCount()
 
@@ -66,7 +67,7 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType, "have 2D+1TB, want 3D"))
 
 				By("verifying the replica composition is untouched (no new RVR / diskful)")
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(trv.RVRCount()).To(Equal(rvrCountBefore))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
@@ -87,6 +88,6 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 			})
 	})

@@ -49,7 +49,10 @@ func newMigrationRSC(ctx SpecContext, replication v1alpha1.ReplicatedStorageClas
 }
 
 // layoutOf returns the RV's reported actual layout string (e.g. "3D", "2D+1TB").
-func layoutOf(trv *fw.TestRV) string {
+// status.layout is optional: an unset layout (formation not finished, nothing reported yet)
+// is returned as nil, never as an empty string — assert with Equal(ptr.To("...")) so an
+// unreported layout can never satisfy an expectation.
+func layoutOf(trv *fw.TestRV) *string {
 	return trv.Object().Status.Layout
 }
 
@@ -98,7 +101,7 @@ func rvrNames(trv *fw.TestRV) []string {
 // matches a stale pre-migration snapshot (3D/Converged) nor a mid-migration one.
 func migratedToR2() types.GomegaMatcher {
 	return match.RV.Custom("migrated to 2D+1TB", func(rv *v1alpha1.ReplicatedVolume) bool {
-		if rv.Status.Layout != "2D+1TB" {
+		if rv.Status.Layout == nil || *rv.Status.Layout != "2D+1TB" {
 			return false
 		}
 		tb := 0

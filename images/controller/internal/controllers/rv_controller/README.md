@@ -304,7 +304,9 @@ still absorbs unrelated activity, so the condition does not flap on attach/resiz
 The unsupported message uses the exact layout arithmetic, e.g.
 `layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required`.
 `status.layout` holds the actual layout string (e.g. `3D`, `2D+1TB`; the `+NTB` suffix is omitted
-when there are no tie-breakers) and is exposed as a priority-1 print column.
+when there are no tie-breakers) and is exposed as a priority-1 print column. The field is an
+optional scalar (`*string`): it stays **absent** until `reconcileLayoutStatus` first runs (i.e.
+throughout formation), and an empty string is never published — absent means "not computed yet".
 
 `Unknown`/`VolumeDeleting` is published on **both** deletion paths: by `reconcileLayoutStatus` for a
 volume that still goes through normal operation (deleting but attached), and by `reconcileDeletion`

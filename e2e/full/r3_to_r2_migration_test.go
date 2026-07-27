@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -48,7 +49,7 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal("3D"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("3D")))
 
 				By("attaching the volume and keeping I/O-safety invariants active")
 				trv.ActivateSafetyInvariants()
@@ -108,7 +109,7 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 				for _, trv := range volumes {
 					trv.Await(ctx, match.RV.FormationComplete())
 					trv.Await(ctx, match.RV.Members(3))
-					Expect(layoutOf(trv)).To(Equal("3D"))
+					Expect(layoutOf(trv)).To(Equal(ptr.To("3D")))
 				}
 
 				By("attaching a subset to keep I/O on part of the volumes")

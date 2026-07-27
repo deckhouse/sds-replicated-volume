@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -56,7 +57,7 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				// where formation finishes as 2D and the TB is doctored in later would
 				// make this fail (layout still "2D" at formation-complete) and would also
 				// trip the invariants above.
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
 
@@ -81,7 +82,7 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("deleting the tie-breaker RVR and waiting for it to actually leave the datamesh")
 				deleted := tieBreakerRVR(trv)
@@ -102,7 +103,7 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				trv.Await(ctx, match.RV.Members(3))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
 
 				By("verifying the healed tie-breaker is a NEW RVR, not the deleted one")

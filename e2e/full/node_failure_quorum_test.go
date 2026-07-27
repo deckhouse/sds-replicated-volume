@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -43,7 +44,7 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				trv.Create(ctx)
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
@@ -95,7 +96,7 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 
 				By("the layout is intact and converged after recovery")
 				trv.Await(ctx, match.RV.Members(3))
-				Expect(layoutOf(trv)).To(Equal("2D+1TB"))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))

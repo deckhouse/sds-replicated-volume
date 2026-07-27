@@ -231,8 +231,10 @@ type ReplicatedVolumeStatus struct {
 	// (diskful voters and tie-breakers), e.g. "3D" or "2D+1TB". Derived from the datamesh
 	// members; freely produced (not an enum). See the LayoutConverged condition for whether
 	// it matches the intended layout.
+	// Unset (absent) while the layout has not been computed yet: during formation the
+	// controller does not report a layout at all. An empty string is never published.
 	// +optional
-	Layout string `json:"layout,omitempty"`
+	Layout *string `json:"layout,omitempty"`
 
 	// EffectiveLayout describes the real-time protection level and health
 	// of the datamesh, based on observable cluster state.
