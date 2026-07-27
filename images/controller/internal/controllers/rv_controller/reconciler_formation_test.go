@@ -35,6 +35,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
 // mkFormationTransition creates a Formation transition with all steps where the
@@ -2885,3 +2886,533 @@ var _ = Describe("Formation: Adopt", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Pure helpers: isRVMetadataInSync, applyRVMetadata
 //
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Formation: tie-breaker readiness (review finding #5)
+//
+
+var _ = Describe("Formation: tie-breaker readiness", func() {
+	var scheme *runtime.Scheme
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+	})
+
+	// formationStartedAt is recent enough that the formation restart timeout has NOT passed:
+	// these specs assert on wait messages, not on restarts.
+	formationStartedAt := metav1.NewTime(time.Now().Add(-5 * time.Second))
+
+	rvrName := func(id uint8) string { return v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", id) }
+
+	newRSPWith := func(nodeNames ...string) *v1alpha1.ReplicatedStoragePool {
+		rsp := newTestRSP("test-pool")
+		rsp.Status.EligibleNodes = make([]v1alpha1.ReplicatedStoragePoolEligibleNode, len(nodeNames))
+		for i, nn := range nodeNames {
+			rsp.Status.EligibleNodes[i] = v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName:        nn,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{{Name: "lvg-1"}},
+			}
+		}
+		return rsp
+	}
+
+	newRSCr2 := func() *v1alpha1.ReplicatedStorageClass {
+		rsc := newRSCWithConfiguration("rsc-1")
+		rsc.Status.Configuration.FailuresToTolerate = 1
+		return rsc
+	}
+
+	// newRV2D1TB builds an r2 volume (FTT=1 → 2D+1TB) whose datamesh is already populated,
+	// sitting at the given create/v1 formation step.
+	newRV2D1TB := func(stepIdx int) *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					Topology: v1alpha1.TopologyIgnored, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+					VolumeAccess: v1alpha1.VolumeAccessLocal, ReplicatedStoragePoolName: "test-pool",
+				},
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					SharedSecret: "test-secret", SharedSecretAlg: v1alpha1.SharedSecretAlgSHA256,
+					SystemNetworkNames: []string{"Internal"}, Size: resource.MustParse("10Gi"),
+					Quorum: 2, QuorumMinimumRedundancy: 1,
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name: rvrName(0), Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+						{
+							Name: rvrName(1), Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2",
+							Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+							LVMVolumeGroupName: "lvg-1",
+						},
+						{
+							Name: rvrName(2), Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-3",
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+					},
+				},
+				DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+					mkFormationTransitionWithTime(stepIdx, formationStartedAt),
+				},
+			},
+		}
+	}
+
+	// newReadyDiskful builds a diskful RVR that passes every diskful gate of establish-connectivity:
+	// current datamesh revision, DRBDConfigured=True, Connected + Established replication with the
+	// other diskful peer.
+	newReadyDiskful := func(id uint8, nodeName string, diskState v1alpha1.DiskState, peerIDs ...uint8) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: rvrName(id), Finalizers: []string{v1alpha1.RVControllerFinalizer}},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeDiskful,
+				NodeName: nodeName, LVMVolumeGroupName: "lvg-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Addresses:        []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+				BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					Size: ptr.To(resource.MustParse("11Gi")), State: diskState,
+				},
+			},
+		}
+		for _, peerID := range peerIDs {
+			rvr.Status.Peers = append(rvr.Status.Peers, v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+				Name: rvrName(peerID), Type: v1alpha1.ReplicaTypeDiskful,
+				ConnectionState:  v1alpha1.ConnectionStateConnected,
+				ReplicationState: v1alpha1.ReplicationStateEstablished,
+			})
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
+		return rvr
+	}
+
+	// newOperationalTieBreaker builds a tie-breaker RVR that satisfies every readiness gate:
+	// current datamesh revision, DRBDConfigured=True, and a Connected report for each diskful peer.
+	newOperationalTieBreaker := func(id uint8, nodeName string, peerIDs ...uint8) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: rvrName(id), Finalizers: []string{v1alpha1.RVControllerFinalizer}},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: "rv-1", Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: nodeName,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 1,
+				Addresses:        []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+			},
+		}
+		for _, peerID := range peerIDs {
+			rvr.Status.Peers = append(rvr.Status.Peers, v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+				Name: rvrName(peerID), Type: v1alpha1.ReplicaTypeDiskful,
+				ConnectionState: v1alpha1.ConnectionStateConnected,
+			})
+		}
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
+		return rvr
+	}
+
+	// newSucceededBootstrapOp builds the data bootstrap operation of a 2D volume on thick LVM
+	// (force-resync) in Succeeded phase.
+	newSucceededBootstrapOp := func() *v1alpha1.DRBDResourceOperation {
+		return &v1alpha1.DRBDResourceOperation{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "rv-1-formation",
+				CreationTimestamp: metav1.NewTime(formationStartedAt.Add(1 * time.Second)),
+			},
+			Spec: v1alpha1.DRBDResourceOperationSpec{
+				NodeName: "node-1", DRBDResourceName: rvrName(0),
+				Type:          v1alpha1.DRBDResourceOperationCreateNewUUID,
+				CreateNewUUID: &v1alpha1.CreateNewUUIDParams{ForceResync: true},
+			},
+			Status: v1alpha1.DRBDResourceOperationStatus{Phase: v1alpha1.DRBDOperationPhaseSucceeded},
+		}
+	}
+
+	It("does not advance to data bootstrap while the tie-breaker is not operational", func(ctx SpecContext) {
+		// Red repro (#5): every diskful gate passes, but the tie-breaker has neither applied the
+		// datamesh revision nor reported a single connection. Formation must not walk past
+		// establish-connectivity with a tie-breaker that breaks the tie for nobody.
+		rsc := newRSCr2()
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		rv := newRV2D1TB(formationStepIdxEstablishConnectivity)
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateInconsistent, 1)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateInconsistent, 0)
+		tb := newOperationalTieBreaker(2, "node-3", 0, 1)
+		tb.Status.DatameshRevision = 0
+		tb.Status.Peers = nil
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		result, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Requeue())
+
+		var drbdrOp v1alpha1.DRBDResourceOperation
+		err = cl.Get(ctx, client.ObjectKey{Name: "rv-1-formation"}, &drbdrOp)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "data bootstrap must not start before the tie-breaker is ready")
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("tie-breaker"))
+	})
+
+	It("does not complete formation while the tie-breaker is not operational", func(ctx SpecContext) {
+		// Red repro (#5): data bootstrap succeeded and both diskful replicas are UpToDate, but the
+		// tie-breaker is not operational — formation must not be declared complete.
+		rsc := newRSCr2()
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		rv := newRV2D1TB(formationStepIdxBootstrapData)
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateUpToDate, 1)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateUpToDate, 0)
+		tb := newOperationalTieBreaker(2, "node-3", 0, 1)
+		tb.Status.DatameshRevision = 0
+		tb.Status.Peers = nil
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb, newSucceededBootstrapOp()).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1), "formation must not complete without a ready tie-breaker")
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("tie-breaker"))
+	})
+
+	It("completes formation when the tie-breaker is operational", func(ctx SpecContext) {
+		rsc := newRSCr2()
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		rv := newRV2D1TB(formationStepIdxBootstrapData)
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateUpToDate, 1)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateUpToDate, 0)
+		tb := newOperationalTieBreaker(2, "node-3", 0, 1)
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb, newSucceededBootstrapOp()).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "formation completes once the tie-breaker is operational")
+	})
+
+	It("waits when the tie-breaker loses readiness during data bootstrap, completes after recovery", func(ctx SpecContext) {
+		// The establish-connectivity gate passed a whole data bootstrap ago; connectivity can be
+		// lost while the resync runs. The final re-check must catch that — and must only wait, so
+		// that recovery completes formation instead of restarting it.
+		rsc := newRSCr2()
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		rv := newRV2D1TB(formationStepIdxBootstrapData)
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateUpToDate, 1)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateUpToDate, 0)
+		tb := newOperationalTieBreaker(2, "node-3", 0, 1)
+		tb.Status.Peers = nil // connections lost during bootstrap
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb, newSucceededBootstrapOp()).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(HaveLen(1), "formation must neither complete nor restart")
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Name).To(Equal(formationStepNames[formationStepIdxBootstrapData]))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("connection to"))
+
+		// The replicas are still there — waiting did not delete a bootstrapped layout.
+		var rvrList v1alpha1.ReplicatedVolumeReplicaList
+		Expect(cl.List(ctx, &rvrList)).To(Succeed())
+		Expect(rvrList.Items).To(HaveLen(3))
+
+		// The tie-breaker reconnects.
+		var updatedTB v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName(2)}, &updatedTB)).To(Succeed())
+		updatedTB.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: rvrName(0), Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+			{Name: rvrName(1), Type: v1alpha1.ReplicaTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected},
+		}
+		Expect(cl.Status().Update(ctx, &updatedTB)).To(Succeed())
+
+		_, err = rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "formation completes after the tie-breaker recovers")
+	})
+
+	It("completes r3 formation unchanged (no tie-breaker to gate)", func(ctx SpecContext) {
+		// Regression control: a layout without tie-breakers must not be affected by the gates.
+		rsc := newRSCr2()
+		rsc.Status.Configuration.GuaranteedMinimumDataRedundancy = 1 // FTT=1, GMDR=1 → 3D, no TB
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		rv := newRV2D1TB(formationStepIdxBootstrapData)
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.Members[2] = v1alpha1.DatameshMember{
+			Name: rvrName(2), Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-3",
+			Addresses:          []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+			LVMVolumeGroupName: "lvg-1",
+		}
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateUpToDate, 1, 2)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateUpToDate, 0, 2)
+		d2 := newReadyDiskful(2, "node-3", v1alpha1.DiskStateUpToDate, 0, 1)
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, d2, newSucceededBootstrapOp()).
+			WithStatusSubresource(rv, rsc, d0, d1, d2).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "r3 formation completes as before")
+	})
+
+	It("completes adopt formation with a degraded tie-breaker (adopt is not gated)", func(ctx SpecContext) {
+		// Adopt accepts pre-existing replicas as-is, even degraded ones — normal operation heals
+		// them afterwards. Gating adopt on tie-breaker readiness would keep such volumes in
+		// formation forever, so the gates are deliberately create/v1-only.
+		rsc := newRSCr2()
+		rsp := newRSPWith("node-1", "node-2", "node-3")
+		// Same 2D+1TB datamesh, but formed by adopt/v1 — the transition below replaces the
+		// create/v1 one, so the step index passed here is irrelevant.
+		rv := newRV2D1TB(formationStepIdxBootstrapData)
+		rv.Annotations = map[string]string{v1alpha1.AdoptRVRAnnotationKey: ""}
+		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{{
+			Type:   v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation,
+			Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupFormation,
+			PlanID: formationPlanAdopt,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: adoptStepNames[0], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted},
+				{Name: adoptStepNames[1], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted},
+				{
+					Name: adoptStepNames[2], Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					StartedAt: ptr.To(formationStartedAt),
+				},
+			},
+		}}
+
+		d0 := newReadyDiskful(0, "node-1", v1alpha1.DiskStateUpToDate, 1)
+		d1 := newReadyDiskful(1, "node-2", v1alpha1.DiskStateUpToDate, 0)
+		tb := newOperationalTieBreaker(2, "node-3", 0, 1)
+		tb.Status.DatameshRevision = 0 // degraded: no revision applied
+		tb.Status.Peers = nil          // and no confirmed connection
+
+		cl := newClientBuilder(scheme).
+			WithObjects(rv, rsc, rsp, d0, d1, tb).
+			WithStatusSubresource(rv, rsc, d0, d1, tb).
+			Build()
+		rec := NewReconciler(cl, scheme)
+
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated v1alpha1.ReplicatedVolume
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+		Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "adopt completes regardless of tie-breaker readiness")
+	})
+
+	// ── gates, one negative each (pure helper) ──
+
+	Describe("computeActualTieBreakerReadiness", func() {
+		var (
+			rv         *v1alpha1.ReplicatedVolume
+			d0, d1, tb *v1alpha1.ReplicatedVolumeReplica
+		)
+
+		BeforeEach(func() {
+			rv = newRV2D1TB(formationStepIdxEstablishConnectivity)
+			d0 = newReadyDiskful(0, "node-1", v1alpha1.DiskStateInconsistent, 1)
+			d1 = newReadyDiskful(1, "node-2", v1alpha1.DiskStateInconsistent, 0)
+			tb = newOperationalTieBreaker(2, "node-3", 0, 1)
+		})
+
+		readiness := func(rvrs ...*v1alpha1.ReplicatedVolumeReplica) (idset.IDSet, string) {
+			if len(rvrs) == 0 {
+				rvrs = []*v1alpha1.ReplicatedVolumeReplica{d0, d1, tb}
+			}
+			return computeActualTieBreakerReadiness(rv, rvrs)
+		}
+
+		// reportTieBreakerConnected makes the given diskful replicas report the tie-breaker as
+		// Connected — the other side of the "one fresh side is enough" rule.
+		reportTieBreakerConnected := func(rvrs ...*v1alpha1.ReplicatedVolumeReplica) {
+			for _, rvr := range rvrs {
+				rvr.Status.Peers = append(rvr.Status.Peers, v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+					Name: rvrName(2), Type: v1alpha1.ReplicaTypeTieBreaker,
+					ConnectionState: v1alpha1.ConnectionStateConnected,
+				})
+			}
+		}
+
+		It("reports ready when every gate passes", func() {
+			notReady, msg := readiness()
+			Expect(msg).To(BeEmpty())
+			Expect(notReady.IsEmpty()).To(BeTrue())
+		})
+
+		It("reports ready for a layout without tie-breakers", func() {
+			rv.Status.Datamesh.Members = rv.Status.Datamesh.Members[:2]
+			notReady, msg := readiness(d0, d1)
+			Expect(msg).To(BeEmpty())
+			Expect(notReady.IsEmpty()).To(BeTrue())
+		})
+
+		// Gate 1: members == active tie-breaker replicas.
+
+		It("gate 1: flags a tie-breaker member whose replica is terminating", func() {
+			now := metav1.Now()
+			tb.DeletionTimestamp = &now
+
+			notReady, msg := readiness()
+			Expect(msg).To(ContainSubstring("Datamesh tie-breaker members mismatch"))
+			Expect(msg).To(ContainSubstring("datamesh has [#2]"))
+			Expect(notReady).To(Equal(idset.Of(2)))
+		})
+
+		It("gate 1: flags an active tie-breaker replica that is not a datamesh member", func() {
+			rv.Status.Datamesh.Members = rv.Status.Datamesh.Members[:2]
+
+			notReady, msg := readiness()
+			Expect(msg).To(ContainSubstring("Datamesh tie-breaker members mismatch"))
+			Expect(notReady).To(Equal(idset.Of(2)))
+		})
+
+		// Gate 2: current datamesh revision applied.
+
+		It("gate 2: flags a tie-breaker that has not applied the datamesh revision", func() {
+			tb.Status.DatameshRevision = 0
+
+			notReady, msg := readiness()
+			Expect(msg).To(ContainSubstring("datamesh revision 0 applied, want 1"))
+			Expect(notReady).To(Equal(idset.Of(2)))
+		})
+
+		It("gate 2: accepts a tie-breaker that is ahead of the datamesh revision (cache skew)", func() {
+			tb.Status.DatameshRevision = 2
+
+			_, msg := readiness()
+			Expect(msg).To(BeEmpty())
+		})
+
+		// Gate 3: DRBDConfigured=True with a current ObservedGeneration.
+
+		It("gate 3: flags a tie-breaker without a DRBDConfigured condition", func() {
+			tb.Status.Conditions = nil
+
+			notReady, msg := readiness()
+			Expect(msg).To(ContainSubstring("DRBD is not configured"))
+			Expect(notReady).To(Equal(idset.Of(2)))
+		})
+
+		It("gate 3: flags a tie-breaker with DRBDConfigured=False", func() {
+			obju.SetStatusCondition(tb, metav1.Condition{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			})
+
+			_, msg := readiness()
+			Expect(msg).To(ContainSubstring("DRBD is not configured"))
+		})
+
+		It("gate 3: flags a tie-breaker whose DRBDConfigured is stale", func() {
+			tb.Generation = 2 // condition still observes generation 0
+
+			_, msg := readiness()
+			Expect(msg).To(ContainSubstring("DRBD is not configured"))
+		})
+
+		// Gate 4: every tie-breaker↔diskful connection confirmed by one fresh side.
+
+		It("gate 4: flags an unconfirmed connection to one of the diskful members", func() {
+			tb.Status.Peers = tb.Status.Peers[:1] // reports only the connection to #0
+
+			notReady, msg := readiness()
+			Expect(msg).To(ContainSubstring("connection to " + rvrName(1) + " is not confirmed"))
+			Expect(notReady).To(Equal(idset.Of(2)))
+		})
+
+		It("gate 4: accepts a connection confirmed by the diskful side alone", func() {
+			tb.Status.Peers = nil
+			reportTieBreakerConnected(d0, d1)
+
+			_, msg := readiness()
+			Expect(msg).To(BeEmpty())
+		})
+
+		It("gate 4: rejects a confirmation from a diskful side with a stale revision", func() {
+			tb.Status.Peers = nil
+			reportTieBreakerConnected(d0, d1)
+			d0.Status.DatameshRevision = 0
+			d1.Status.DatameshRevision = 0
+
+			_, msg := readiness()
+			Expect(msg).To(ContainSubstring("is not confirmed"))
+		})
+
+		It("gate 4: rejects a confirmation from a diskful side whose agent is not ready", func() {
+			tb.Status.Peers = nil
+			reportTieBreakerConnected(d0, d1)
+			for _, rvr := range []*v1alpha1.ReplicatedVolumeReplica{d0, d1} {
+				obju.SetStatusCondition(rvr, metav1.Condition{
+					Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+					Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+				})
+			}
+
+			_, msg := readiness()
+			Expect(msg).To(ContainSubstring("is not confirmed"))
+		})
+
+		It("gate 4: accepts a member without a replica object when the tie-breaker confirms it", func() {
+			// The peer replica is gone from the list; the tie-breaker's own fresh report is still
+			// a valid confirmation (the same rule the datamesh engine applies).
+			_, msg := readiness(d0, tb)
+			Expect(msg).To(BeEmpty())
+		})
+	})
+})

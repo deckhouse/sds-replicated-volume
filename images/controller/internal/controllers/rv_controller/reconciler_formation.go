@@ -30,6 +30,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -662,6 +663,21 @@ func (r *Reconciler) reconcileFormationStepEstablishConnectivity(
 			ReportChangedIf(changed)
 	}
 
+	// Verify the tie-breakers of the layout are operational, not merely present: a tie-breaker
+	// that has not applied the datamesh revision or has no confirmed connection to a diskful peer
+	// breaks the tie for nobody, and formation would publish a 2D+1TB volume with 2D protection.
+	// Same criteria as the datamesh guard that releases a leaving tie-breaker
+	// (computeActualTieBreakerReadiness → datamesh.IsTieBreakerOperational).
+	if notReadyTieBreakers, msg := computeActualTieBreakerReadiness(rv, *rvrs); msg != "" {
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notReadyTieBreakers,
+			"Tie-breaker is not operational yet, blocking datamesh formation") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, members.Difference(notReadyTieBreakers),
+			"Datamesh is forming, waiting for the tie-breaker to become operational") || changed
+		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, 30*time.Second).
+			ReportChangedIf(changed)
+	}
+
 	// Verify all diskful replicas are ready for data bootstrap:
 	// - backing volume in Inconsistent state (normal for freshly created volume before initial sync), and
 	// - Established replication with all diskful peers.
@@ -887,6 +903,27 @@ func (r *Reconciler) reconcileFormationStepBootstrapData(
 
 		return r.reconcileFormationRestartIfTimeoutPassed(rf.Ctx(), rv, rvrs, rsc, t, dataBootstrapTimeout).
 			ReportChangedIf(changed)
+	}
+
+	// Re-check tie-breaker readiness right before completing: the gate in establish-connectivity
+	// passed a whole data bootstrap ago, and a tie-breaker can lose its connections (or its node)
+	// while a multi-gigabyte resync runs. Completing here would publish a volume whose tie-breaker
+	// provides nothing.
+	//
+	// Unlike the other waits of this step, this branch does NOT go through
+	// reconcileFormationRestartIfTimeoutPassed: that helper measures elapsed time from the START
+	// of formation, which by now is almost always past the timeout, so a transient tie-breaker
+	// blip would immediately restart formation and delete replicas that are bootstrapped and
+	// UpToDate. Waiting is both cheaper and safer here; a tie-breaker that never recovers stays
+	// visible as an explicit wait message instead of silently completing.
+	if notReadyTieBreakers, msg := computeActualTieBreakerReadiness(rv, *rvrs); msg != "" {
+		changed = applyDatameshTransitionStepMessage(step, msg) || changed
+		changed = applyDatameshReplicaRequestMessages(rv, notReadyTieBreakers,
+			"Tie-breaker is not operational, blocking datamesh formation completion") || changed
+		changed = applyDatameshReplicaRequestMessages(rv, dmDiskful,
+			"Datamesh is forming, waiting for the tie-breaker to become operational") || changed
+
+		return rf.ContinueAndRequeue().ReportChangedIf(changed)
 	}
 
 	// All replicas are UpToDate — data bootstrap is complete, formation is finished!
@@ -1349,6 +1386,100 @@ func (r *Reconciler) reconcileAdoptStepExitMaintenance(
 // ──────────────────────────────────────────────────────────────────────────────
 // Formation helpers
 //
+
+// computeActualTieBreakerReadiness evaluates the tie-breaker readiness gates of create/v1
+// formation. It returns the tie-breakers that are not ready together with a wait message; the
+// message is empty exactly when every gate passes (including the case of a layout without
+// tie-breakers at all, e.g. r3).
+//
+// Why formation needs this at all: being a datamesh member does NOT make a tie-breaker a working
+// tie-breaker. The formation bulk-add only proves that the agents applied the configuration
+// revision, not that DRBD established the connections that make the tie break real. Without these
+// gates a 2D+1TB volume leaves formation reporting success while having no tiebreak protection —
+// the very first node failure then costs quorum.
+//
+// Gates:
+//
+//  1. the datamesh tie-breaker members are exactly the active (non-deleting) tie-breaker replicas;
+//  2. every tie-breaker has applied the current datamesh revision;
+//  3. every tie-breaker has DRBDConfigured=True with a current ObservedGeneration;
+//  4. every tie-breaker↔data-bearing-member connection is confirmed Connected by at least one side
+//     whose own report is fresh.
+//
+// Gates 2-4 are datamesh.IsTieBreakerOperational — the criterion the datamesh guard
+// guardTBSufficient applies before releasing a tie-breaker. Formation and convergence ask the same
+// question and share the same answer by construction.
+//
+// Nothing beyond these gates is required: a tie-breaker has no backing volume, no replication
+// state and no quorum of its own, and requiring a fresh report from BOTH sides would stall
+// formation on a single lagging agent.
+func computeActualTieBreakerReadiness(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (idset.IDSet, string) {
+	activeTieBreakers := idset.FromWhere(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker && rvr.DeletionTimestamp == nil
+	})
+	memberTieBreakers := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
+		return m.Type == v1alpha1.DatameshMemberTypeTieBreaker
+	})
+
+	// Empty result returned on every "all gates pass" path.
+	var noTieBreakers idset.IDSet
+
+	// Gate 1: the datamesh must know exactly the tie-breakers that exist. A member without an
+	// active replica (deleted or terminating) provides nothing; an active replica outside the
+	// datamesh is not part of the layout being formed.
+	if memberTieBreakers != activeTieBreakers {
+		return memberTieBreakers.Union(activeTieBreakers), fmt.Sprintf(
+			"Datamesh tie-breaker members mismatch: datamesh has [%s], but active tie-breaker replicas are [%s]",
+			memberTieBreakers.String(), activeTieBreakers.String(),
+		)
+	}
+	if activeTieBreakers.IsEmpty() {
+		return noTieBreakers, ""
+	}
+
+	// Peers of a tie-breaker: the data-bearing (full-mesh) members. Taken from the datamesh
+	// members, exactly like the datamesh engine does — a member whose replica object is missing
+	// stays in the list (nil RVR) so that its connection still has to be confirmed by the
+	// tie-breaker's own fresh report.
+	peers := make([]datamesh.TieBreakerPeer, 0, len(rv.Status.Datamesh.Members))
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if !m.Type.ConnectsToAllPeers() {
+			continue
+		}
+		peers = append(peers, datamesh.TieBreakerPeer{
+			ID:   m.ID(),
+			Name: m.Name,
+			RVR:  findRVRByName(rvrs, m.Name),
+		})
+	}
+
+	var (
+		notReady    idset.IDSet
+		diagnostics []string
+	)
+	for _, rvr := range rvrs {
+		if !activeTieBreakers.Contains(rvr.ID()) {
+			continue
+		}
+		if ok, why := datamesh.IsTieBreakerOperational(rvr, peers, rv.Status.DatameshRevision); !ok {
+			notReady.Add(rvr.ID())
+			diagnostics = append(diagnostics, fmt.Sprintf("%s: %s", rvr.Name, why))
+		}
+	}
+	if notReady.IsEmpty() {
+		return noTieBreakers, ""
+	}
+
+	slices.Sort(diagnostics)
+	return notReady, fmt.Sprintf(
+		"Waiting for tie-breakers [%s] to become operational: %s",
+		notReady.String(), strings.Join(diagnostics, "; "),
+	)
+}
 
 // generateSharedSecret generates a random DRBD shared secret.
 // DRBD shared-secret supports up to 64 characters.

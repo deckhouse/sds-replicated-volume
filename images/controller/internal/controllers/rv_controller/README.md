@@ -520,7 +520,8 @@ Adds preconfigured replicas to the datamesh and waits for DRBD peer connections.
 3. Set effective layout (FTT/GMDR from configuration) and quorum parameters
 4. Wait for all replicas to apply DRBD configuration (DRBDConfigured=True)
 5. Wait for all replicas to connect to each other (ConnectionState=Connected)
-6. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
+6. Wait for the tie-breakers of the layout to become **operational** (see [Tie-breaker readiness](#tie-breaker-readiness-in-createv1-formation))
+7. Wait for data bootstrap readiness (BackingVolume=Inconsistent + Replication=Established)
 
 #### Step 3: Bootstrap Data
 
@@ -533,12 +534,32 @@ Triggers initial data synchronization via DRBDResourceOperation and waits for co
    - Multiple replicas, thick provisioning: force-resync (full data synchronization)
 2. Wait for operation to succeed
 3. Wait for all replicas to reach UpToDate state
-4. Remove Formation transition (formation complete); requeue to enter normal-operation path
+4. Re-check tie-breaker readiness (see [Tie-breaker readiness](#tie-breaker-readiness-in-createv1-formation)); if it was lost during the bootstrap — wait, do not complete
+5. Remove Formation transition (formation complete); requeue to enter normal-operation path
 
 **Timeout calculation:**
 - Base: 1 minute
 - Force-resync (multi-replica thick provisioning): + volume size / 100 Mbit/s (worst-case bandwidth estimate)
 - Clear-bitmap (single replica or thin provisioning): base only
+
+#### Tie-breaker readiness in create/v1 formation
+
+A tie-breaker that is a datamesh **member** is not yet a **working** tie-breaker: adding it to the datamesh only proves that the agents applied the configuration revision, not that DRBD established the connections that make the tie break real. Completing formation at that point publishes a 2D+1TB volume with the protection of a bare 2D — the first node failure costs quorum.
+
+`computeActualTieBreakerReadiness` therefore gates formation on exactly four conditions:
+
+1. the datamesh tie-breaker members are exactly the active (non-deleting) tie-breaker replicas;
+2. every tie-breaker has applied the current `DatameshRevision` (`>=`: being ahead is cache skew, not staleness);
+3. every tie-breaker has `DRBDConfigured=True` with a current `ObservedGeneration`;
+4. every tie-breaker↔data-bearing-member connection is confirmed `Connected` by at least one side whose own report is fresh (agent ready and at the current revision).
+
+Nothing else is required: a tie-breaker has no backing volume, no replication state and no quorum of its own, and demanding a fresh report from *both* sides would stall formation on a single lagging agent.
+
+Gates 2-4 are `datamesh.IsTieBreakerOperational` — the very criterion the datamesh guard `guardTBSufficient` applies before releasing a leaving tie-breaker (see [datamesh/README.md](datamesh/README.md), "tie-breaker replacement"). Formation and convergence ask the same question and, by construction, cannot answer it differently.
+
+The check runs twice on the create/v1 path: as a gate in **Establish Connectivity** (a stalled tie-breaker there restarts formation on the usual timeout, exactly like a stalled diskful replica) and as a final re-check in **Bootstrap Data**, immediately before the Formation transition is removed — a data bootstrap can take minutes, and connectivity can be lost in the meantime. The final re-check only **waits** (it does not restart formation): the diskful replicas are already bootstrapped and UpToDate, and the restart helper measures elapsed time from the *start* of formation, so a transient blip would otherwise destroy a fully synchronized layout. A tie-breaker that never recovers stays visible as an explicit wait message.
+
+The **adopt/v1** path is deliberately NOT gated: adopt accepts pre-existing replicas as-is, even degraded ones, and normal operation heals them afterwards — gating it would keep such volumes in formation forever.
 
 #### Formation Restart
 
@@ -847,7 +868,7 @@ flowchart TD
 
 ### reconcileFormationStepEstablishConnectivity Details
 
-**Purpose:** Adds preconfigured replicas — diskful **and** tie-breakers — to the datamesh (with shared secret and quorum) in a single bulk-add, then waits for DRBD configuration, peer connections, and replication establishment among the **diskful** members. Tie-breakers are diskless and do not participate in the diskful connectivity/data-bootstrap gates; the volume leaves formation already at its target layout (e.g. 2D+1TB) and the tie-breaker's peer connections converge during normal operation. Quorum is computed by `computeTargetQuorum`, which counts only diskful voters, so the tie-breaker does not change the threshold — but it does make DRBD see an odd node count, which is what `q = floor(D/2)+1` assumes for an even-D layout.
+**Purpose:** Adds preconfigured replicas — diskful **and** tie-breakers — to the datamesh (with shared secret and quorum) in a single bulk-add, then waits for DRBD configuration, peer connections, and replication establishment among the **diskful** members, and finally for the tie-breakers to become operational ([Tie-breaker readiness](#tie-breaker-readiness-in-createv1-formation)). Tie-breakers are diskless, so they take no part in the *diskful* gates (backing volume, replication state) — but their own readiness is gated: the volume must leave formation at a target layout that actually works (e.g. 2D+1TB with a tie-breaker that is connected), not merely at one that is populated. Quorum is computed by `computeTargetQuorum`, which counts only diskful voters, so the tie-breaker does not change the threshold — but it does make DRBD see an odd node count, which is what `q = floor(D/2)+1` assumes for an even-D layout.
 
 **File:** `reconciler_formation.go`
 
@@ -874,8 +895,11 @@ flowchart TD
     CheckConfigured -->|Yes| CheckConnected{"All replicas connected<br/>to all peers?"}
     CheckConnected -->|No| WaitRestart3[Wait / restart if timeout]
 
-    CheckConnected -->|Yes| CheckBootstrapReady{"All replicas ready for<br/>data bootstrap?<br/>(Inconsistent + Established)"}
-    CheckBootstrapReady -->|No| WaitRestart4[Wait / restart if timeout]
+    CheckConnected -->|Yes| CheckTBReady{"Tie-breakers operational?<br/>computeActualTieBreakerReadiness<br/>(members, revision,<br/>DRBDConfigured, TB↔D connections)"}
+    CheckTBReady -->|No| WaitRestart4[Wait / restart if timeout]
+
+    CheckTBReady -->|Yes| CheckBootstrapReady{"All replicas ready for<br/>data bootstrap?<br/>(Inconsistent + Established)"}
+    CheckBootstrapReady -->|No| WaitRestart5[Wait / restart if timeout]
 
     CheckBootstrapReady -->|Yes| NextStep(["advanceFormationStep → Bootstrap data"])
 ```
@@ -899,7 +923,7 @@ flowchart TD
 
 ### reconcileFormationStepBootstrapData Details
 
-**Purpose:** Creates a DRBDResourceOperation to trigger initial data synchronization, waits for completion, and finalizes formation.
+**Purpose:** Creates a DRBDResourceOperation to trigger initial data synchronization, waits for completion, re-checks that the tie-breakers are still operational, and finalizes formation.
 
 **File:** `reconciler_formation.go`
 
@@ -927,7 +951,9 @@ flowchart TD
     CheckStatus -->|Succeeded| CheckUpToDate{"All replicas<br/>UpToDate?"}
 
     CheckUpToDate -->|No| WaitSync[Wait / restart if dataBootstrapTimeout]
-    CheckUpToDate -->|Yes| Complete["Remove Formation transition<br/>(formation complete!)"]
+    CheckUpToDate -->|Yes| CheckTBReady{"Tie-breakers still operational?<br/>computeActualTieBreakerReadiness"}
+    CheckTBReady -->|No| WaitTB["Wait (never restart:<br/>the layout is bootstrapped)"]
+    CheckTBReady -->|Yes| Complete["Remove Formation transition<br/>(formation complete!)"]
     Complete --> End([ContinueAndRequeue])
 ```
 

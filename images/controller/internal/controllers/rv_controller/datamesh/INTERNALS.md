@@ -576,6 +576,10 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
   current `ObservedGeneration`, and every FM connection confirmed by a fresh side). Completing
   `AddReplica(TB)` only proves that the agents applied the revision — see
   [TRANSITIONS.md](TRANSITIONS.md) § "TieBreaker replacement".
+  The criteria themselves live in `tiebreaker_readiness.go` (`IsTieBreakerOperational`, exported):
+  `rv_controller` formation gates on the same question before declaring a volume formed, and the
+  two must not answer it differently. `isTieBreakerOperational` is only the engine-side adapter
+  that resolves the expected peers from the replica contexts.
 
 **Attachment-specific guards:**
 

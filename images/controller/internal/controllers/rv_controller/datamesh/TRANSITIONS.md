@@ -877,6 +877,12 @@ Criterion 4 is the reason membership is not enough: `AddReplica(TB)` completes o
 `confirmFMPlusSubject`, which proves that the agents applied the configuration revision, not that
 DRBD connections were established.
 
+The same four criteria (2-4 plus "the replica exists and is not terminating") are exported as
+`datamesh.IsTieBreakerOperational` (`tiebreaker_readiness.go`) and are what `rv_controller`
+formation gates on before declaring a volume formed — a volume must not leave formation with a
+tie-breaker that this guard would consider useless (see the rv_controller README, "Tie-breaker
+readiness in create/v1 formation").
+
 Consequences, by design:
 
 - The window holds **two** tie-breakers (`2D+2TB`). DRBD has no dedicated "the tiebreaker" — all
