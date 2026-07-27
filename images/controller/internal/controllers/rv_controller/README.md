@@ -90,7 +90,7 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileFormation [Pure orchestration]
 │   │   ensureFormationTransition (find or create Formation transition with all steps)
 │   ├── (create/v1)
-│   │   ├── reconcileFormationStepPreconfigure [Pure orchestration] ← details
+│   │   ├── reconcileFormationStepPreconfigure [In-place reconciliation] ← details
 │   │   │   ├── create/delete RVRs (guards for deleting/misplaced, replica count management)
 │   │   │   ├── wait for deleting replicas cleanup
 │   │   │   ├── safety checks (addresses, eligible nodes, spec mismatch, backing volume size)
@@ -124,7 +124,7 @@ Reconcile (root) [Pure orchestration]
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
 ├── reconcileNormalOperation [Pure orchestration]
-│   ├── reconcileCreateAccessReplicas [Pure orchestration] ← details
+│   ├── reconcileCreateAccessReplicas [In-place reconciliation] ← details
 │   ├── datamesh.ProcessTransitions (membership, quorum, attachment, network)
 │   │   └── see datamesh/README.md
 │   ├── reconcileRVAConditionsFromDatameshReplicaContext [In-place reconciliation] ← details
@@ -135,7 +135,7 @@ Reconcile (root) [Pure orchestration]
 │   │   ├── isRVAAttachmentFieldsInSync + applyRVAAttachmentFields
 │   │   └── patchRVAStatus
 │   ├── reconcileDeleteAccessReplicas [Pure orchestration] ← details
-│   └── reconcileLayoutConvergence [Pure orchestration] (≤1 whitelisted action/pass; ContinueAndRequeue after acting)
+│   └── reconcileLayoutConvergence [Target-state driven] (≤1 whitelisted action/pass; ContinueAndRequeue after acting)
 │       ├── computeTargetLayoutAction (pure decision: P1 retype D→TB / P2 create TB / none; also drives the condition)
 │       │   ├── hasLayoutChangingTransition (classified by the transition's replica types, not by Group)
 │       │   ├── selectRetypeCandidate (exclude attached + gain-side zone placement + lose-side zone quorum; lexicographically last name)
@@ -143,8 +143,8 @@ Reconcile (root) [Pure orchestration]
 │       │   ├── countPendingRetypesToTieBreaker / countPendingTieBreakerCreations (idempotency vs stale cache)
 │       │   ├── computeActualPendingTieBreakerSchedulingFailure (current Scheduled=False → CannotConverge)
 │       │   └── isMemberAttached
-│       ├── P1: base := rvr.DeepCopy(); rvr.Spec.Type = TieBreaker + clear LVG/ThinPool; patchRVR  (ChangeRole → DMTE drives it)
-│       └── P2: createTieBreakerRVR (createRVR(..., TieBreaker, "")); AlreadyExists → Info + requeue
+│       ├── P1: base := rvr.DeepCopy(); applyRVRRetypeToTieBreaker (type=TieBreaker + clear LVG/ThinPool); patchRVR  (ChangeRole → DMTE drives it)
+│       └── P2: newRVR(..., TieBreaker, "") → SetControllerRef → createRVR → insertRVRSorted; AlreadyExists → Info + requeue
 ├── reconcileLayoutStatus [In-place reconciliation] (status.layout + LayoutConverged condition; SINGLE writer)
 │   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
@@ -354,8 +354,10 @@ Two whitelisted patterns (nothing else is ever acted upon):
   Among the remaining candidates it picks the lexicographically last RVR name. No admissible
   candidate → `CannotConverge`, with a reason distinguishing "violates zone placement" (gain side)
   from "losing a zone would lose quorum" (lose side).
-- **P2 heal** — `actualD == intendedD && actualTB < intendedTB`: create the missing tie-breaker via
-  `createTieBreakerRVR`. The scheduler places it and it joins the datamesh via the standard
+- **P2 heal** — `actualD == intendedD && actualTB < intendedTB`: create the missing tie-breaker
+  (`newRVR(..., TieBreaker, "")` → `SetControllerRef` → `createRVR` → `insertRVRSorted`; the name is
+  deterministic, so a stale-cache retry converges via `AlreadyExists`).
+  The scheduler places it and it joins the datamesh via the standard
   `tiebreaker/v1` plan. This also closes the "new r2 volume lives at 2D until healed" window and
   restores a manually deleted tie-breaker. While the created tie-breaker is not yet a member the
   report distinguishes progress from a verdict: only a **current** `Scheduled=False` (its
@@ -388,7 +390,7 @@ order). Two properties matter:
 
 | State | Action / report |
 |-------|-----------------|
-| Old tie-breaker terminating, no replacement | Create it (P2 `createTieBreakerRVR`); `Converging` |
+| Old tie-breaker terminating, no replacement | Create it (P2 `newRVR` → `createRVR`); `Converging` |
 | Replacement created, not a member yet | `Converging` |
 | Replacement carries a **current** `Scheduled=False` (no free eligible node) | `CannotConverge` with the scheduler's message; the old tie-breaker keeps working, the replacement RVR stays pending and is placed as soon as a node frees up |
 | Replacement joined the datamesh (operational or not) | `Converging`; releasing the old one is the guard's decision |
@@ -802,7 +804,7 @@ flowchart TD
 
 **Purpose:** Creates the replicas that make up the volume's target layout — diskful replicas **and**, for layouts with a tie-breaker (`TB > 0`, e.g. r2 = 2D+1TB), a diskless tie-breaker — and waits for all of them to become preconfigured (DRBD setup complete, ready for datamesh membership). Performs safety checks before advancing. Creating the tie-breaker here (rather than healing it afterwards via layout convergence) closes the window where a fresh r2 volume would live at 2D without a tie-breaker.
 
-**Tie-breaker count** comes from `ReplicatedVolumeConfiguration.IntendedLayout()` (the single source of truth), not a second formula. Diskful and tie-breaker replicas are created through the same `createRVR` path with no DMTE and no Access stage, so the volume never passes through a diskless→diskful transition.
+**Tie-breaker count** comes from `ReplicatedVolumeConfiguration.IntendedLayout()` (the single source of truth), not a second formula. Diskful and tie-breaker replicas are created through the same `newRVR` → `SetControllerRef` → `createRVR` → `insertRVRSorted` path with no DMTE and no Access stage, so the volume never passes through a diskless→diskful transition.
 
 **Behavior when a tie-breaker cannot be placed:** the tie-breaker RVR is scheduled by `rvr_scheduling_controller` like any other replica. If no node/zone can host it (e.g. fewer than three nodes for `Ignored`, three zones for `TransZonal`, or three nodes in the volume's zone for `Zonal`, or the `guardTransZonalTBPlacement` precondition rejects every zone that already holds a diskful voter), the scheduler sets `Scheduled=False` on the tie-breaker RVR. Formation surfaces this in the same scheduling-wait gate as diskful replicas (`scheduling failed [#N]` with the scheduler's message) and keeps waiting — it does not silently hang, and it does not advance to a 2D-only datamesh.
 
@@ -824,7 +826,7 @@ flowchart TD
 
     ComputeCount --> CheckClean{"No deleting and<br/>no misplaced?"}
     CheckClean -->|Yes| CreateLoop{"diskful.Len < D<br/>or tiebreakers.Len < TB?"}
-    CreateLoop -->|Yes| CreateRVR["createDiskfulRVR /<br/>createTieBreakerRVR"]
+    CreateLoop -->|Yes| CreateRVR["newRVR(Diskful / TieBreaker) →<br/>SetControllerRef → createRVR →<br/>insertRVRSorted"]
     CreateRVR -->|AlreadyExists| Requeue1([DoneAndRequeue])
     CreateRVR --> CreateLoop
     CheckClean -->|No| SkipCreate[Skip creation]
@@ -1260,7 +1262,7 @@ flowchart TD
 | 6 | Replica limit reached (32 RVRs) | Stop creation (break loop) |
 | 7 | Duplicate RVA on same node | Deduplicate (one creation per node) |
 
-All guards passed: create Access RVR via `createAccessRVR` (sets `spec.type=Access`, `spec.nodeName`). On `AlreadyExists`: requeue.
+All guards passed: create the Access RVR via `newRVR(..., Access, nodeName)` (sets `spec.type=Access`, `spec.nodeName`) → `SetControllerRef` → `createRVR` → `insertRVRSorted`. On `AlreadyExists`: requeue.
 
 **Data Flow:**
 

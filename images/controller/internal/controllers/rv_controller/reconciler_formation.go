@@ -143,7 +143,14 @@ func (r *Reconciler) reconcileFormation(
 // them to become preconfigured, and initializes datamesh configuration. The layout counts come from
 // ReplicatedVolumeConfiguration.IntendedLayout (single source of truth for D/TB).
 //
-// Reconcile pattern: Pure orchestration
+// The step works imperatively on the in-memory objects — it initializes datamesh fields on
+// rv.Status, creates the missing replicas one at a time (newRVR → SetControllerRef → createRVR →
+// insert into the caller's slice), trims the excess and gates on readiness — and reports whether
+// anything changed; the root Reconcile owns the patch. It is not a thin delegator (the only
+// sibling Reconcile calls are the restart escape hatch on timeout and the tail-call advancing to
+// the next formation step).
+//
+// Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileFormationStepPreconfigure(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
@@ -218,9 +225,17 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 	// deleted or misplaced. This prevents zombie accumulation: we wait for all cleanup to finish
 	// before creating new ones.
 	if deleting.IsEmpty() && misplaced.IsEmpty() {
+		// Diskful and tie-breaker replicas are created with an empty nodeName: the scheduler
+		// assigns the node.
 		for diskful.Len() < int(targetDiskfulCount) {
-			rvr, err := r.createDiskfulRVR(rf.Ctx(), rv, rvrs)
+			rvr, err := newRVR(rv, *rvrs, v1alpha1.ReplicaTypeDiskful, "")
 			if err != nil {
+				return rf.Failf(err, "creating diskful RVR")
+			}
+			if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
+				return rf.Failf(err, "creating diskful RVR")
+			}
+			if err := r.createRVR(rf.Ctx(), rvr); err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Stale cache: RVR was already created by a previous reconciliation. Requeue to pick it up.
 					rf.Log().Info("RVR already exists, requeueing")
@@ -228,11 +243,18 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 				}
 				return rf.Failf(err, "creating diskful RVR")
 			}
+			*rvrs = insertRVRSorted(*rvrs, rvr)
 			diskful.Add(rvr.ID())
 		}
 		for tiebreakers.Len() < int(targetTieBreakerCount) {
-			rvr, err := r.createTieBreakerRVR(rf.Ctx(), rv, rvrs)
+			rvr, err := newRVR(rv, *rvrs, v1alpha1.ReplicaTypeTieBreaker, "")
 			if err != nil {
+				return rf.Failf(err, "creating tie-breaker RVR")
+			}
+			if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
+				return rf.Failf(err, "creating tie-breaker RVR")
+			}
+			if err := r.createRVR(rf.Ctx(), rvr); err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Same stale-cache handling as diskful: requeue to pick up the created RVR.
 					rf.Log().Info("RVR already exists, requeueing")
@@ -240,6 +262,7 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 				}
 				return rf.Failf(err, "creating tie-breaker RVR")
 			}
+			*rvrs = insertRVRSorted(*rvrs, rvr)
 			tiebreakers.Add(rvr.ID())
 		}
 	}

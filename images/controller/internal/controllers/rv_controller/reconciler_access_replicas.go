@@ -21,6 +21,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
@@ -33,7 +34,11 @@ import (
 // reconcileCreateAccessReplicas creates Access RVRs for Active RVAs on nodes
 // that do not yet have any RVR (any type).
 //
-// Reconcile pattern: Pure orchestration
+// It walks the RVAs imperatively, deciding and creating one child replica at a time (guards →
+// newRVR → SetControllerRef → createRVR → insert into the caller's slice); it neither delegates to
+// other Reconcile methods nor computes a target set up front.
+//
+// Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileCreateAccessReplicas(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
@@ -92,14 +97,21 @@ func (r *Reconciler) reconcileCreateAccessReplicas(
 		}
 
 		// Create Access RVR.
-		_, err := r.createAccessRVR(rf.Ctx(), rv, rvrs, nodeName)
+		rvr, err := newRVR(rv, *rvrs, v1alpha1.ReplicaTypeAccess, nodeName)
 		if err != nil {
+			return rf.Failf(err, "creating Access RVR for node %s", nodeName)
+		}
+		if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
+			return rf.Failf(err, "creating Access RVR for node %s", nodeName)
+		}
+		if err := r.createRVR(rf.Ctx(), rvr); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				rf.Log().Info("Access RVR already exists, requeueing", "node", nodeName)
 				return rf.DoneAndRequeue()
 			}
 			return rf.Failf(err, "creating Access RVR for node %s", nodeName)
 		}
+		*rvrs = insertRVRSorted(*rvrs, rvr)
 
 		// Mark node as covered so duplicate RVAs on the same node produce only one creation.
 		rvrNodes[nodeName] = struct{}{}
