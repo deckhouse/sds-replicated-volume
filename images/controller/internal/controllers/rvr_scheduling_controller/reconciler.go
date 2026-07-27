@@ -604,9 +604,10 @@ type schedulingContext struct {
 	Size int64
 
 	// EligibleNodes are the candidate nodes from the RSP (a clone owned by this
-	// context), sorted by NodeName.
+	// context, down to each node's LVMVolumeGroups), sorted by NodeName.
 	// OccupiedNodes tracks nodes already assigned to an RVR in this Reconcile.
-	// AttachToNodes lists nodes where the volume must be attached (from RV).
+	// AttachToNodes lists nodes where the volume must be attached (from RVA
+	// objects, via getIntendedAttachments; a clone owned by this context).
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
 	OccupiedNodes map[string]struct{}
 	AttachToNodes []string
@@ -648,7 +649,10 @@ type schedulingContext struct {
 // All replica-type sets (All, Access, Diskful, TieBreaker, Scheduled)
 // and OccupiedNodes are computed in a single pass over rvrs; membership in
 // Scheduled is decided per replica type by isReplicaScheduled.
-// EligibleNodes are a clone of the RSP list, sorted by NodeName.
+// The returned context owns every slice it exposes: EligibleNodes is a clone of the RSP list
+// (each node's LVMVolumeGroups cloned as well), sorted by NodeName, and AttachToNodes is a clone
+// of the caller's list — consumers may mutate them without reaching back into the read-only
+// inputs.
 func computeSchedulingContext(
 	rv *v1alpha1.ReplicatedVolume,
 	rsp *v1alpha1.ReplicatedStoragePool,
@@ -657,8 +661,13 @@ func computeSchedulingContext(
 ) *schedulingContext {
 	// Safety sort: eligible nodes should arrive sorted from the API, but ensure it. The RSP is a
 	// read-only input, so sort a clone — sorting the slice in place would reorder the caller's
-	// (cached) object through the alias.
+	// (cached) object through the alias. Cloning the outer slice is not enough: every node carries
+	// its own LVMVolumeGroups slice, which would still share its backing array with the RSP, so
+	// clone those per node as well (their elements are plain values — no deeper level to copy).
 	eligibleNodes := slices.Clone(rsp.Status.EligibleNodes)
+	for i := range eligibleNodes {
+		eligibleNodes[i].LVMVolumeGroups = slices.Clone(eligibleNodes[i].LVMVolumeGroups)
+	}
 	slices.SortFunc(eligibleNodes, func(a, b v1alpha1.ReplicatedStoragePoolEligibleNode) int {
 		return cmp.Compare(a.NodeName, b.NodeName)
 	})
@@ -669,7 +678,7 @@ func computeSchedulingContext(
 		FailuresToTolerate:              rv.Status.Configuration.FailuresToTolerate,
 		GuaranteedMinimumDataRedundancy: rv.Status.Configuration.GuaranteedMinimumDataRedundancy,
 		VolumeAccess:                    rv.Status.Configuration.VolumeAccess,
-		AttachToNodes:                   attachToNodes,
+		AttachToNodes:                   slices.Clone(attachToNodes),
 		ReservationID:                   rv.GetAnnotations()[v1alpha1.SchedulingReservationIDAnnotationKey],
 		Size:                            rv.Spec.Size.Value(),
 		OccupiedNodes:                   make(map[string]struct{}, len(rvrs)),

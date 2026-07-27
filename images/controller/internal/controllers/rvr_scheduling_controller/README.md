@@ -218,9 +218,9 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 
 | Field | Source | Description |
 |-------|--------|-------------|
-| `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (a clone owned by the context, sorted by NodeName — the RSP is a read-only input) |
+| `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (a clone owned by the context — including each node's `LVMVolumeGroups` — sorted by NodeName; the RSP is a read-only input) |
 | `OccupiedNodes` | RVRs with `spec.nodeName != ""` | Nodes already used by any RVR |
-| `AttachToNodes` | RVA objects (via `getIntendedAttachments`) | Nodes preferred for attachment (sorted, deduplicated) |
+| `AttachToNodes` | RVA objects (via `getIntendedAttachments`) | Nodes preferred for attachment (sorted, deduplicated; a clone owned by the context) |
 | `ReservationID` | RV annotation or computed from LLV name | Scheduler-extender reservation key |
 | `Size` | `rv.Spec.Size` | Volume size in bytes |
 | `Topology` | `rv.Status.Configuration.Topology` | Zonal / TransZonal / Ignored |
@@ -348,8 +348,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([computeSchedulingContext]) --> SortNodes["Clone eligibleNodes from the RSP<br/>and sort the clone by NodeName"]
-    SortNodes --> InitCtx["Initialize context:<br/>topology, FTT, GMDR, volumeAccess,<br/>attachToNodes, reservationID, size"]
+    Start([computeSchedulingContext]) --> SortNodes["Clone eligibleNodes from the RSP<br/>with their LVMVolumeGroups<br/>and sort the clone by NodeName"]
+    SortNodes --> InitCtx["Initialize context:<br/>topology, FTT, GMDR, volumeAccess,<br/>attachToNodes (clone), reservationID, size"]
 
     InitCtx --> LoopRVR{For each RVR}
     LoopRVR -->|Done| ComputeZones[computeReplicasByZone]

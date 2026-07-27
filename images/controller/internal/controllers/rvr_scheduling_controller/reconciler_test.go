@@ -3759,8 +3759,42 @@ var _ = Describe("computeSchedulingContext", func() {
 		sctx := computeSchedulingContext(rv, rsp, nil, nil)
 
 		Expect(eligibleNodeNames(sctx.EligibleNodes)).To(Equal([]string{"node-a", "node-b"}))
+		Expect(sctx.EligibleNodes[0].LVMVolumeGroups[0].Name).To(Equal("vg-a"),
+			"each copied node must keep its own LVG list")
+		Expect(sctx.EligibleNodes[1].LVMVolumeGroups[0].Name).To(Equal("vg-b"),
+			"each copied node must keep its own LVG list")
 		Expect(eligibleNodeNames(rsp.Status.EligibleNodes)).To(Equal([]string{"node-b", "node-a"}),
 			"the RSP is a read-only input and must keep its own order")
+		Expect(rsp.Status.EligibleNodes[0].LVMVolumeGroups[0].Name).To(Equal("vg-b"),
+			"the RSP nodes must keep their own LVG lists")
+		Expect(rsp.Status.EligibleNodes[1].LVMVolumeGroups[0].Name).To(Equal("vg-a"),
+			"the RSP nodes must keep their own LVG lists")
+	})
+
+	It("owns every slice it returns, so consumers may mutate them freely", func() {
+		rv := newRV(defaultConfig())
+		rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+			[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+				makeNode("node-b", "zone-b", makeLVG("vg-b", true)),
+			})
+		attachToNodes := []string{"node-a", "node-b"}
+
+		sctx := computeSchedulingContext(rv, rsp, nil, attachToNodes)
+
+		for i := range sctx.EligibleNodes {
+			sctx.EligibleNodes[i].LVMVolumeGroups[0].Name = "vg-mutated"
+		}
+		for i := range sctx.AttachToNodes {
+			sctx.AttachToNodes[i] = "node-mutated"
+		}
+
+		Expect(rsp.Status.EligibleNodes[0].LVMVolumeGroups[0].Name).To(Equal("vg-a"),
+			"the RSP is a read-only input: its nested LVG list must not be reachable through the context")
+		Expect(rsp.Status.EligibleNodes[1].LVMVolumeGroups[0].Name).To(Equal("vg-b"),
+			"every node must be copied, not just the first one")
+		Expect(attachToNodes).To(Equal([]string{"node-a", "node-b"}),
+			"attachToNodes is a read-only input: the context must hold its own copy")
 	})
 
 	DescribeTable("classifies a replica with a node assigned by type",
