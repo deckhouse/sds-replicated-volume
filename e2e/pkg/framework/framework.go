@@ -84,6 +84,10 @@ type Framework struct {
 	podNameCache       map[podCacheKey]string
 	nsenterBinResolved string // protected by podCacheMu; resolved lazily by resolveNsenterBin
 	specCounters       map[any]int
+
+	// nodeRun overrides how node commands are executed. It stays nil against a
+	// real cluster (pod exec) and is set by helper unit tests to a stub runner.
+	nodeRun nodeRunner
 }
 
 // Setup creates an empty Framework and registers Ginkgo lifecycle hooks.
@@ -256,11 +260,15 @@ func (f *Framework) autoName(sample client.Object, name ...string) string {
 // in specCounters, separate from any client.Object type.
 type uniqueNameKey struct{}
 
-// UniqueName returns a per-spec unique name suitable for arbitrary resources
-// (not tied to a Kubernetes object type). Each call within the same spec
-// increments an independent counter, producing names like
-// "e2e-{runID}-{specHash}-a{attempt}-{suffix}" or
-// "e2e-{runID}-{specHash}-a{attempt}-{N}" when no suffix is given.
+// UniqueName returns a name unique to the current spec, suitable for arbitrary
+// resources (not tied to a Kubernetes object type).
+//
+// Without a suffix, each call increments an independent counter and therefore
+// returns a name of its own ("e2e-{runID}-{specHash}-a{attempt}-{N}"). A suffix
+// replaces that counter with a readable label
+// ("e2e-{runID}-{specHash}-a{attempt}-{suffix}"), which makes the name stable
+// within the spec — the same suffix always yields the same name. Callers that
+// need one name per call MUST NOT expect a fixed suffix to provide it.
 func (f *Framework) UniqueName(suffix ...string) string {
 	report := CurrentSpecReport()
 	h := fnv.New32a()

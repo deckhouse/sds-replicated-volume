@@ -18,6 +18,7 @@ package full
 
 import (
 	"sort"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -34,7 +35,14 @@ import (
 // with an explicit spec.replication and Ignored topology, waits until it is Ready,
 // and returns the handle. A dedicated RSC is required because the layout-migration
 // scenarios mutate spec.replication — the shared RSC cache must not be touched.
-func newMigrationRSC(ctx SpecContext, replication v1alpha1.ReplicatedStorageClassReplication) *fw.TestRSC {
+//
+// tune adjusts the builder before creation, for the scenarios that need a
+// different volume access mode or topology.
+func newMigrationRSC(
+	ctx SpecContext,
+	replication v1alpha1.ReplicatedStorageClassReplication,
+	tune ...func(*fw.TestRSC),
+) *fw.TestRSC {
 	GinkgoHelper()
 	trsc := f.TestRSC().
 		StorageType(v1alpha1.ReplicatedStoragePoolTypeLVMThin).
@@ -42,10 +50,62 @@ func newMigrationRSC(ctx SpecContext, replication v1alpha1.ReplicatedStorageClas
 		ReclaimPolicy(v1alpha1.RSCReclaimPolicyDelete).
 		Topology(v1alpha1.TopologyIgnored).
 		Replication(replication)
+	for _, t := range tune {
+		t(trsc)
+	}
 	trsc.Create(ctx)
 	trsc.Await(ctx, tkmatch.ConditionStatus(
 		v1alpha1.ReplicatedStorageClassCondReadyType, "True"))
 	return trsc
+}
+
+// placementLVGs turns discovery placements into the storage list of an RSC.
+func placementLVGs(placements []fw.DiskfulPlacement) []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups {
+	lvgs := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, 0, len(placements))
+	for _, p := range placements {
+		lvgs = append(lvgs, v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			Name:         p.LVGName,
+			ThinPoolName: p.ThinPoolName,
+		})
+	}
+	return lvgs
+}
+
+// placementNodes returns the node names of the placements, in their order.
+func placementNodes(placements []fw.DiskfulPlacement) []string {
+	nodes := make([]string, 0, len(placements))
+	for _, p := range placements {
+		nodes = append(nodes, p.NodeName)
+	}
+	return nodes
+}
+
+// rscPool returns a tracked handle to the storage pool the RSC computed for
+// itself. The pool is where eligible nodes are published, so a spec that claims
+// "exactly these nodes may host a replica" asserts on it.
+func rscPool(ctx SpecContext, trsc *fw.TestRSC) *fw.TestRSP {
+	GinkgoHelper()
+	trsc.Await(ctx, match.RSC.Custom("storage pool computed",
+		func(rsc *v1alpha1.ReplicatedStorageClass) bool {
+			return rsc.Status.StoragePoolName != ""
+		}))
+	trsp := f.TestRSPExact(trsc.Object().Status.StoragePoolName)
+	trsp.Get(ctx)
+	trsp.Await(ctx, tkmatch.Present())
+	return trsp
+}
+
+// usableEligibleNodes returns the sorted names of the pool's eligible nodes
+// that can actually take a replica right now.
+func usableEligibleNodes(trsp *fw.TestRSP) []string {
+	var nodes []string
+	for _, n := range trsp.Object().Status.EligibleNodes {
+		if n.NodeReady && n.AgentReady && !n.Unschedulable {
+			nodes = append(nodes, n.NodeName)
+		}
+	}
+	sort.Strings(nodes)
+	return nodes
 }
 
 // layoutOf returns the RV's reported actual layout string (e.g. "3D", "2D+1TB").
@@ -76,6 +136,34 @@ func memberNodesOfType(trv *fw.TestRV, t v1alpha1.DatameshMemberType) []string {
 		}
 	}
 	return nodes
+}
+
+// memberOnNodeIsDiskful matches an RV whose datamesh member on nodeName is a
+// plain Diskful member. Registered as a continuous invariant it fails the moment
+// that node is demoted — including the LiminalDiskful step of a demotion, where
+// DRBD is already diskless and a volumeAccess=Local workload would lose its data
+// path. A node that is not a member at all does not match either.
+func memberOnNodeIsDiskful(nodeName string) types.GomegaMatcher {
+	return match.RV.Custom("diskful member on "+nodeName, func(rv *v1alpha1.ReplicatedVolume) bool {
+		for i := range rv.Status.Datamesh.Members {
+			if rv.Status.Datamesh.Members[i].NodeName == nodeName {
+				return rv.Status.Datamesh.Members[i].Type == v1alpha1.DatameshMemberTypeDiskful
+			}
+		}
+		return false
+	})
+}
+
+// memberZones maps node name to the zone the datamesh reports for the member on
+// that node, restricted to members of the given type.
+func memberZones(trv *fw.TestRV, t v1alpha1.DatameshMemberType) map[string]string {
+	zones := map[string]string{}
+	for _, m := range trv.Object().Status.Datamesh.Members {
+		if m.Type == t {
+			zones[m.NodeName] = m.Zone
+		}
+	}
+	return zones
 }
 
 // rvrNames returns the sorted names of the RVRs currently tracked and present
@@ -168,13 +256,49 @@ func tieBreakerRVR(trv *fw.TestRV) *fw.TestRVR {
 	return found
 }
 
+// drbdResourceOn returns the kernel-side DRBD resource name of trv's replica
+// living on nodeName.
+func drbdResourceOn(trv *fw.TestRV, nodeName string) string {
+	GinkgoHelper()
+	return rvrOnNode(trv, nodeName).DRBDResourceName()
+}
+
+// drbdPeerNameOn returns the DRBD connection name under which trv's replica on
+// nodeName shows up in its peers' configuration.
+func drbdPeerNameOn(trv *fw.TestRV, nodeName string) string {
+	GinkgoHelper()
+	return fw.DRBDPeerName(rvrOnNode(trv, nodeName).ID())
+}
+
+// expectDRBDQuorum asserts on every diskful node that the kernel has quorum
+// right now and enforces exactly the threshold the datamesh published.
+//
+// rv.status.datamesh.quorum is what the control plane WANTS; drbdsetup is what
+// the data path actually obeys. A tie-breaker that is only a member on paper
+// would leave the two apart.
+func expectDRBDQuorum(ctx SpecContext, trv *fw.TestRV) {
+	GinkgoHelper()
+	want := strconv.Itoa(int(trv.Object().Status.Datamesh.Quorum))
+	for _, node := range memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful) {
+		res := drbdResourceOn(trv, node)
+		Expect(f.DRBDStatus(ctx, node, res).Quorum).To(BeTrue(),
+			"node %s has no DRBD quorum for %s", node, res)
+		Expect(f.DRBDConfig(ctx, node, res).Quorum).To(Equal(want),
+			"node %s enforces a quorum threshold other than the published %s", node, want)
+	}
+}
+
 // rvrOnNode returns the tracked RVR scheduled on the given node, failing the test
-// if none is found.
+// if none is found. Replicas that are already gone are skipped: their handle
+// still exists (the group keeps the history), but reading their object would
+// fail the spec.
 func rvrOnNode(trv *fw.TestRV, nodeName string) *fw.TestRVR {
 	GinkgoHelper()
 	for _, r := range trv.TestRVRs() {
-		obj := r.Object()
-		if obj != nil && obj.Spec.NodeName == nodeName {
+		if !r.IsPresent() {
+			continue
+		}
+		if r.Object().Spec.NodeName == nodeName {
 			return r
 		}
 	}

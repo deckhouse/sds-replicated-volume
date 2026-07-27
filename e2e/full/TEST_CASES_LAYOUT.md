@@ -3,8 +3,10 @@
 End-to-end tests for the r3→r2 auto-migration feature: layout comparison
 (`LayoutConverged` condition + `status.layout`), the narrow convergence whitelist
 (P1 retype Diskful→TieBreaker, P2 heal missing tie-breaker), tie-breaker creation
-at formation, the RSC aggregate (`status.volumes`, `ConfigurationRolledOut`), and
-the conservative RSC-update validation matrix.
+at formation and strict create-first tie-breaker replacement, the RSC aggregate
+(`status.volumes`, `ConfigurationRolledOut`), the rollout strategies, and the
+conservative RSC-update validation matrix. The migration is also exercised under
+the `Local` volume access and the `TransZonal` topology.
 
 The migration trigger is always an **in-place edit of `rsc.spec.replication`** on an
 existing ReplicatedStorageClass. `rv.spec.replicatedStorageClassName` is never
@@ -26,9 +28,13 @@ Covers: decomposition T-2.0.3 (direction r3→r2); verifies blocks 1+2.
 Spec: `Layout: r3->r2 migration by editing rsc.spec.replication` →
 `migrates a 3D volume to 2D+1TB (one diskful retyped to tie-breaker)`.
 
+Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Serial`
++ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
+
 Given: a dedicated RSC with `replication: ConsistencyAndAvailability`, a 3D volume
 (`LayoutConverged=True/Converged`, `status.layout=3D`), attached with I/O-safety
-invariants active.
+invariants active and a raw-device writer running on the attached node
+(`Framework.StartIOWorkload`).
 
 When: `rsc.spec.replication` is edited to `Availability`.
 
@@ -41,6 +47,9 @@ Then:
 - The retyped replica releases its backing LV (`status.backingVolume == nil`).
 - On the RSC, `ConfigurationRolledOut=True/RolledOutToAllVolumes` and
   `status.volumes.aligned == 1`.
+- ⚡ I/O continuity is proven on the data path, not only through conditions:
+  verified device writes advance before, during and after the retype (the
+  writer's sequence must move, without a stall or an early exit).
 - I/O-safety invariants (quorum correct, never I/O-suspended) hold throughout.
 
 ---
@@ -145,14 +154,17 @@ Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unles
 `Framework.RebootNode` (`systemctl reboot` through the sds-node-configurator pod's
 `nsenter`).
 
-Given: a healthy 2D+1TB volume with active I/O published on a surviving diskful
-node (not the one to be rebooted).
+Given: a healthy 2D+1TB volume with a raw-device writer running on a surviving
+diskful node (not the one to be rebooted).
 
 When: the other diskful node is rebooted.
 
 Then:
 - I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker): the RV stays
   `IOReady=True` and the attachment stays `Attached`.
+- ⚡ Verified device writes keep advancing while the node is down and after it
+  returns; the writer tolerates a longer heartbeat gap (90s) around the outage but
+  must never stall or exit.
 - After the node returns, its replica rejoins and reaches `Healthy`; the layout is
   intact (2D+1TB, `LayoutConverged=True/Converged`).
 
@@ -176,3 +188,197 @@ When / Then:
 - After both rejections the RSC spec is unchanged (topology `Ignored`, storage
   type `LVMThin`) and the volume layout is untouched (2D+1TB).
 - A subsequent legitimate `spec.replication` edit is accepted.
+
+---
+
+## 8. Local migration keeps the attached node diskful (E2E-LOCAL, ⚡ Disruptive)
+
+⚡ **With `volumeAccess: Local` the retype must never demote the node the workload runs on.**
+
+Covers: the `Local` guard of the retype candidate selection; verifies block 2.
+Spec: `Layout: r3->r2 migration with volumeAccess=Local` →
+`retypes a non-attached replica and keeps the attached node diskful`.
+
+Given: a dedicated RSC with `volumeAccess: Local` and `replication:
+ConsistencyAndAvailability`, a 3D volume attached on one of its diskful nodes,
+with a raw-device writer running there.
+
+When: `rsc.spec.replication` is edited to `Availability`.
+
+Then:
+- The migration completes: 2D+1TB, `LayoutConverged=True/Converged`, retype in
+  place (same RVR set, no `AddReplica`).
+- ⚡ The attached node is still a **Diskful** member — asserted as an `Always`
+  invariant for the whole migration window, not only at the end. A `Local` volume
+  whose local replica became a tie-breaker would be cut off from its own data.
+- The tie-breaker landed on some other node and released its backing LV.
+- Verified device writes advance before, during and after the retype; the
+  attachment stays `Attached`.
+
+---
+
+## 9. TransZonal migration puts the tie-breaker in the third zone (E2E-TZ, ⚡ Disruptive)
+
+⚡ **A 3D volume spread over three zones migrates to 2D+1TB with the tie-breaker holding the third zone.**
+
+Covers: verdict №19 (TransZonal retype); verifies blocks 1+2 under a zonal
+topology.
+Spec: `Layout: r3->r2 migration with TransZonal topology` →
+`migrates 3D in three zones to 2D+1TB with the tie-breaker in the third zone`.
+
+Given: three usable diskful nodes, each labelled into its own **synthetic zone**
+(`topology.kubernetes.io/zone`, unique per run). The spec is `Disruptive` and
+`Serial` because it mutates node labels; a `DeferCleanup` registered **before the
+first label write** restores the exact previous state of every touched node,
+including deleting the label on nodes that had none. A TransZonal RSC over those
+three zones holds a 3D volume — the actual zone spread is asserted **before** the
+migration (one diskful per synthetic zone). The volume is attached and a
+raw-device writer runs on the attached node.
+
+When: `rsc.spec.replication` is edited to `Availability`.
+
+Then:
+- ⚡ A `ChangeReplicaType` transition is actually observed — the spec does not
+  accept a volume that merely sits in `Converging` forever.
+- The volume reaches 2D+1TB with `LayoutConverged=True/Converged`, retype in
+  place (same RVR set).
+- ⚡ Zone coverage is preserved: the two diskful members occupy two distinct
+  zones, the tie-breaker holds the remaining third zone (and did not move
+  between zones).
+- Tie-break is intact at the DRBD level: `rv.status.datamesh.quorum == 2`, both
+  diskful nodes report `quorum` in `drbdsetup status` and are connected to the
+  tie-breaker peer.
+- Verified device writes advance before, during and after the retype.
+
+---
+
+## 10. Tie-breaker replacement, free node available (E2E-TB1)
+
+**Deleting a tie-breaker starts a strict create-first replacement: the new one joins before the old one leaves.**
+
+Covers: verdict №4 (strict create-first tie-breaker replacement); verifies block 2.
+Spec: `Layout: tie-breaker replacement` →
+`replaces a deleted tie-breaker create-first when a free node exists`.
+Requires **≥4 eligible nodes** (`require.MinNodes(2, 2)` — only two of them need
+storage): three are occupied by the volume, the fourth hosts the replacement. On
+smaller stands the spec skips.
+
+Given: a healthy 2D+1TB volume; both diskful nodes have the tie-breaker in their
+DRBD configuration (`drbdsetup show`) and report quorum.
+
+When: the tie-breaker RVR is deleted.
+
+Then:
+- ⚡ The **create-first window is actually observed**: at some point the datamesh
+  holds 4 members with 2 tie-breakers (`status.layout=2D+2TB`) while the deleted
+  one is still a member. The volume never drops to a single tie-breaker in
+  between.
+- The replacement is a different object — identified by **UID**, not name — and
+  lands on a node other than the old tie-breaker's.
+- ⚡ The replacement becomes operational on the data path: both diskful nodes are
+  polled until DRBD reports it as a connected peer. The departure of the old
+  tie-breaker is the deadline — finding it gone triggers one last fresh read of
+  both nodes, and only "gone while the replacement is still not connected" fails
+  the spec. (A departure is not a verdict by itself: membership comes from the
+  informer and the peer state from an exec, so on a fast run the release can
+  legitimately complete between two polls.)
+- Only then does the old tie-breaker leave: its RVR (that UID) disappears and it
+  is dropped from `status.datamesh.members`.
+- The volume returns to a converged 2D+1TB whose tie-breaker is the replacement;
+  on both diskful nodes DRBD now shows exactly the other diskful and the new
+  tie-breaker as peers, mirrored by `rvr.status.peers`.
+- ⚡ Tiebreak protection is never lost: an `Always` invariant requires every
+  snapshot to hold two diskful members **and at least one tie-breaker**, so a
+  bare 2D — where losing either diskful node freezes I/O — cannot occur even for
+  one observation. The quorum value stays 2 for the whole window, including
+  2D+2TB: tie-breakers do not vote, so the two diskful members are the only
+  voters. That value is not restated by the case's own matcher — the framework's
+  `QuorumCorrect` invariant checks the published quorum against the current
+  voter count on every snapshot, which together with the invariant above is
+  exactly "quorum is 2 throughout". DRBD-level quorum is re-verified at both
+  ends.
+
+---
+
+## 11. Tie-breaker replacement with no free node, and the manual escape (E2E-TB2, ⚡ Disruptive)
+
+⚡ **With every eligible node occupied, the deleted tie-breaker keeps serving quorum and the volume says `CannotConverge`; the documented manual escape ends the deadlock.**
+
+Covers: verdict №4 (the no-free-node branch) and validates the operator recipe in
+`debug_and_problem_solving.md`; verifies blocks 2+6.
+Spec: `Layout: tie-breaker replacement` →
+`keeps a terminating tie-breaker working when no node can host a replacement`.
+Runs on **any stand with ≥3 nodes** — it does not skip; instead it *creates* the
+no-free-node situation.
+
+Given: exactly three usable diskful nodes are carved out with a unique
+`e2e.deckhouse.io/node-scope` label (`DeferCleanup` registered before the first
+write, exact restore afterwards). A dedicated RSC pins both its storage (LVGs of
+those nodes) and its `nodeLabelSelector` to that scope — an LVG list alone would
+not be enough, since a tie-breaker needs no storage and could be placed anywhere.
+⚡ The eligible set of the generated RSP is asserted to be **exactly** those three
+nodes before anything is deleted: the spec fails rather than silently degrading
+into the free-node case. A 2D+1TB volume fills the whole set, is attached, and a
+raw-device writer runs on the attached node.
+
+When: the tie-breaker RVR is deleted.
+
+Then (phase 1 — the honest deadlock):
+- The volume reports `LayoutConverged=False/CannotConverge` with the scheduler's
+  own reason in the message (`cannot place a replacement`).
+- A replacement RVR **is** created (create-first is strict) but stays unplaced,
+  with `Scheduled=False/SchedulingFailed` and an empty `spec.nodeName`.
+- ⚡ The old tie-breaker is `terminating but operational`: still a datamesh
+  member, still present in the DRBD configuration of **both** diskful nodes, so
+  quorum is still 3-way. Verified device writes keep advancing.
+- ⚡ This state is **stable, not slowly converging**: an `Always` invariant holds
+  it (`CannotConverge` + the old member present) across a long stretch of
+  sustained I/O.
+
+Then (phase 2 — the documented manual escape):
+- Pre-conditions from the recipe are asserted first: both diskful replicas
+  `Healthy` and `UpToDate`, `rvr.status.quorum == true` on both, the D↔D
+  connection confirmed at the DRBD level, and I/O alive.
+- The finalizer is removed from the terminating tie-breaker by hand (⚡ the one
+  place in the suite where this is allowed — see `RUNNING.md`).
+- The member becomes an orphan and is force-removed **once the peers stop seeing
+  it**; the spec waits for that with a generous timeout instead of demanding it
+  be instantaneous.
+- The old tie-breaker is gone from `status.datamesh.members` and from the DRBD
+  configuration of both diskful nodes.
+- P2 places the pending replacement on the freed node; the volume returns to
+  2D+1TB with `LayoutConverged=True/Converged`, and DRBD on both diskful nodes
+  shows the other diskful plus the new tie-breaker.
+- `rv.status.datamesh.quorum == 2` is an `Always` invariant of the whole spec,
+  cross-checked at the DRBD level at both ends; the writer never stalls.
+
+---
+
+## 12. NewVolumesOnly holds existing volumes (E2E-NVO)
+
+**`configurationRolloutStrategy: NewVolumesOnly` holds existing volumes at their layout and says so; switching to `RollingUpdate` releases them.**
+
+Covers: verdict №2 (the strategy used to be inert); verifies block 5.
+Spec: `Layout: NewVolumesOnly holds existing volumes` →
+`holds the old volume at 3D, creates new ones as 2D+1TB, and releases the hold on
+RollingUpdate`.
+
+Given: an r3 RSC with `configurationRolloutStrategy.type: NewVolumesOnly` and one
+3D volume created before the edit.
+
+When: `rsc.spec.replication` is edited to `Availability`, a second volume is
+created, and only afterwards the strategy is switched to `RollingUpdate`.
+
+Then:
+- The old volume is **held, not silently stale**:
+  `ConfigurationReady=False/NewerConfigurationHeld` and `status.layout=3D`. ⚡ The
+  hold is asserted as an `Always` invariant across the formation of the second
+  volume, not just sampled once.
+- The RSC is honest about it: `ConfigurationRolledOut=False/ConfigurationRolloutDisabled`
+  and `status.volumes.staleConfiguration == 1`.
+- The volume created **after** the edit gets the new configuration: 2D+1TB with
+  `ConfigurationReady=True/Ready`.
+- After the switch to `RollingUpdate` the held volume migrates: 2D+1TB,
+  `ConfigurationReady=True/Ready`, and the RSC reports
+  `ConfigurationRolledOut=True/RolledOutToAllVolumes` with
+  `status.volumes.aligned == 2`.

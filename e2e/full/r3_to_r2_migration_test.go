@@ -37,8 +37,12 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 	Label(fw.LabelSlow), Label(fw.LabelFeatureMembership), func() {
 
 		// E2E-1 — migrate a single 3D volume to 2D+1TB (blocks 1+2).
+		//
+		// Disruptive: the spec writes to the raw DRBD device through the I/O
+		// workload, which is what turns "I/O survives the retype" from a
+		// condition reading into a statement about the data path.
 		It("migrates a 3D volume to 2D+1TB (one diskful retyped to tie-breaker)",
-			SpecTimeout(10*time.Minute), require.MinNodes(3), func(ctx SpecContext) {
+			SpecTimeout(15*time.Minute), Label(fw.LabelDisruptive), require.MinNodes(3), func(ctx SpecContext) {
 				By("creating an r3 storage class and a 3D volume")
 				trsc := newMigrationRSC(ctx, v1alpha1.ReplicationConsistencyAndAvailability)
 
@@ -58,6 +62,10 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
+				By("writing to the raw device and proving the writes land before the migration")
+				io := startVolumeIO(ctx, trv, trva)
+				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
+
 				By("recording the replica set and guarding against any resync (AddReplica)")
 				rvrsBefore := rvrNames(trv)
 				trv.Always(noActiveAddReplica())
@@ -73,8 +81,15 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+
+				By("I/O keeps flowing while the retype is in flight")
+				ioDuring := ioProgressed(ctx, io, ioBefore)
+
 				trv.Await(ctx, migratedToR2())
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
+
+				By("I/O keeps flowing after the retype completed")
+				ioProgressed(ctx, io, ioDuring)
 
 				By("verifying no replica was added (retype in place, no resync)")
 				// The retype flips one existing RVR's spec.type; the RVR set is unchanged.

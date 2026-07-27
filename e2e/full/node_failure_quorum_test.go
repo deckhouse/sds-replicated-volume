@@ -60,6 +60,15 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
+				By("writing to the raw device on the surviving node")
+				// The reboot briefly disturbs replication, so allow a wider heartbeat
+				// gap than the default: a blip is not a stall, but a data path that
+				// stops for good still fails the checks below.
+				io := startVolumeIO(ctx, trv, trva, func(o *fw.IOWorkloadOptions) {
+					o.MaxHeartbeatGap = 90 * time.Second
+				})
+				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
+
 				victimRVR := rvrOnNode(trv, victim)
 
 				By("pinning the victim replica to Healthy before the reboot (Given: healthy volume)")
@@ -74,16 +83,22 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				trv.Always(match.RV.QuorumCorrect())
 
 				By("rebooting the other diskful node")
-				f.RebootNode(ctx, victim)
+				// RebootNode returns as soon as the reboot is proven to have started, so
+				// the outage itself can be observed; the handle is what completion is
+				// awaited on further down.
+				reboot := f.RebootNode(ctx, victim)
 
 				By("waiting for the outage to actually take effect (victim replica leaves Healthy)")
-				// RebootNode is fire-and-forget, so we must observe the failure on a fresh
-				// snapshot before asserting survival — otherwise the assertions below would
-				// match the stale pre-reboot state and prove nothing.
+				// We must observe the failure on a fresh snapshot before asserting
+				// survival — otherwise the assertions below would match the stale
+				// pre-reboot state and prove nothing.
 				victimRVR.Await(ctx, tkmatch.PhaseNot(
 					string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
 
 				By("I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker)")
+				// Verified device writes during the outage, not just conditions: the
+				// sequence has to advance while the victim node is down.
+				ioDuring := ioProgressed(ctx, io, ioBefore)
 				trv.Await(ctx, tkmatch.ConditionStatus(
 					v1alpha1.ReplicatedVolumeCondIOReadyType, "True"))
 				trva.Await(ctx, tkmatch.ConditionReason(
@@ -91,8 +106,12 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
 				By("the rebooted replica rejoins and catches up after the node returns")
+				reboot.AwaitCompleted(ctx)
 				victimRVR.Await(ctx,
 					tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+
+				By("I/O kept flowing across the whole outage")
+				ioProgressed(ctx, io, ioDuring)
 
 				By("the layout is intact and converged after recovery")
 				trv.Await(ctx, match.RV.Members(3))

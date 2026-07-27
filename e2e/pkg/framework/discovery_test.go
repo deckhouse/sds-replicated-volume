@@ -190,6 +190,48 @@ var _ = Describe("AnyDiskfulNode", func() {
 	})
 })
 
+var _ = Describe("UsableDiskfulPlacements", func() {
+	It("returns one placement per node, ordered by node name", func() {
+		d := thinDiscovery(
+			eligibleNode("n3", lvg("vg3", "tp0")),
+			eligibleNode("n1", lvg("vg1", "tp0"), lvg("vg1b", "tp0")),
+			eligibleNode("n2", lvg("vg2", "tp0")),
+		)
+		Expect(d.UsableDiskfulPlacements()).To(Equal([]DiskfulPlacement{
+			{NodeName: "n1", LVGName: "vg1", ThinPoolName: "tp0"},
+			{NodeName: "n2", LVGName: "vg2", ThinPoolName: "tp0"},
+			{NodeName: "n3", LVGName: "vg3", ThinPoolName: "tp0"},
+		}))
+	})
+
+	It("skips nodes without a usable LVG and unusable nodes", func() {
+		d := thinDiscovery(
+			eligibleNode("no-lvg"),
+			eligibleNode("only-bad-lvg",
+				v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{Name: "bad", Ready: false}),
+			v1alpha1.ReplicatedStoragePoolEligibleNode{
+				NodeName: "unsched", NodeReady: true, AgentReady: true, Unschedulable: true,
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolEligibleNodeLVMVolumeGroup{lvg("vg", "")},
+			},
+			eligibleNode("good", lvg("vg", "")),
+		)
+		Expect(d.UsableDiskfulPlacements()).To(Equal([]DiskfulPlacement{
+			{NodeName: "good", LVGName: "vg"},
+		}))
+	})
+
+	It("returns nothing when no node has storage", func() {
+		Expect(thinDiscovery(eligibleNode("n1")).UsableDiskfulPlacements()).To(BeEmpty())
+	})
+
+	It("works via From for thick pool", func() {
+		d := thickDiscovery(eligibleNode("k1", lvg("vg-thick", "")))
+		Expect(d.From(thick).UsableDiskfulPlacements()).To(Equal([]DiskfulPlacement{
+			{NodeName: "k1", LVGName: "vg-thick"},
+		}))
+	})
+})
+
 var _ = Describe("AnyDiskfulPlacement", func() {
 	It("returns placement with node and LVG", func() {
 		d := thinDiscovery(

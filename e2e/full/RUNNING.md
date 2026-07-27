@@ -21,6 +21,28 @@ cluster shape than `e2e/agent`.
   cleanup-path bugs. Forced cleanup is only acceptable after a
   framework-side timeout that we already understand (see "Forced
   cleanup" below).
+  - **One deliberate exception lives in the suite itself**: the spec
+    `Layout: tie-breaker replacement` → `keeps a terminating tie-breaker
+    working when no node can host a replacement`
+    (`tb_replacement_test.go`, E2E-TB2) removes the finalizer of the
+    terminating tie-breaker RVR by hand. That is not a shortcut around a
+    slow controller — the deadlock it escapes is *by design*: with every
+    eligible node occupied, strict create-first cannot place a
+    replacement, and the controller deliberately keeps the terminating
+    tie-breaker serving quorum instead of dropping it. The manual escape
+    is the operator recipe documented in
+    `sds-replicated-volume/debug_and_problem_solving.md`, and the spec
+    exists to validate that recipe end to end (pre-conditions → finalizer
+    → orphan → ForceRemove → P2 recreates the tie-breaker).
+    **Do not copy this into other specs**: anywhere else, a finalizer that
+    does not go away on its own is a bug to report, not to patch out.
+- **Some specs mutate node labels** (`topology.kubernetes.io/zone`,
+  `e2e.deckhouse.io/node-scope`) to build synthetic zones or to carve out
+  an exact eligible set. They are `Disruptive` + `Serial` and restore the
+  previous state — including deleting labels that did not exist before —
+  via a `DeferCleanup` registered before the first write. If a run is
+  killed mid-spec, check for leftovers:
+  `kubectl get nodes -L topology.kubernetes.io/zone -l e2e.deckhouse.io/node-scope`.
 - Don't assume the cluster matches `HEAD`. CRD drift, controller and
   agent image drift vs. local `git HEAD`, and base-image kernel/userspace
   drift are the most common causes of failure from a fresh build.

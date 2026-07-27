@@ -82,6 +82,61 @@ var nsenterCandidates = []string{
 
 const lvmBin = "/opt/deckhouse/sds/bin/lvm.static"
 
+// nodeRunner is the seam through which framework helpers reach a node. The
+// production implementation execs into pods (podRunner); helper unit tests
+// substitute a stub via the Framework.nodeRun field, so helper logic can be
+// exercised without a cluster.
+type nodeRunner interface {
+	// HostRun executes cmd in the host namespaces of nodeName. A transport
+	// error against a cached pod is retried once with a fresh pod lookup, so
+	// cmd MUST be safe to execute twice.
+	HostRun(ctx context.Context, nodeName string, cmd []string, displayCmd string) (ExecResult, error)
+
+	// HostRunNoRetry executes cmd in the host namespaces of nodeName exactly
+	// once. Use it for commands that must never run twice. A non-nil error is
+	// always a transport error (a non-zero exit code is reported in the
+	// ExecResult), and the ExecResult still carries whatever output arrived
+	// before the connection broke.
+	HostRunNoRetry(ctx context.Context, nodeName string, cmd []string, displayCmd string) (ExecResult, error)
+
+	// DrbdsetupRun executes `drbdsetup <args>` in the agent pod on nodeName.
+	DrbdsetupRun(ctx context.Context, nodeName string, args ...string) (ExecResult, error)
+}
+
+// runner returns the node runner in use: the stub injected by a unit test, or
+// the pod-exec implementation.
+func (f *Framework) runner() nodeRunner {
+	if f.nodeRun != nil {
+		return f.nodeRun
+	}
+	return podRunner{f: f}
+}
+
+// podRunner implements nodeRunner on top of Kubernetes pod exec.
+type podRunner struct {
+	f *Framework
+}
+
+func (r podRunner) HostRun(ctx context.Context, nodeName string, cmd []string, displayCmd string) (ExecResult, error) {
+	hostCmd, err := r.f.hostCmd(ctx, nodeName, cmd)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	return r.f.execOnNode(ctx, sncTarget, nodeName, hostCmd, displayCmd)
+}
+
+func (r podRunner) HostRunNoRetry(ctx context.Context, nodeName string, cmd []string, displayCmd string) (ExecResult, error) {
+	hostCmd, err := r.f.hostCmd(ctx, nodeName, cmd)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	return r.f.execOnNodeNoRetry(ctx, sncTarget, nodeName, hostCmd, displayCmd)
+}
+
+func (r podRunner) DrbdsetupRun(ctx context.Context, nodeName string, args ...string) (ExecResult, error) {
+	return r.f.Drbdsetup(ctx, nodeName, args...)
+}
+
 // Drbdsetup executes `drbdsetup <args>` inside the agent pod running on
 // nodeName and returns the result. Transport errors are returned as err;
 // non-zero exit codes are reflected in ExecResult.ExitCode (not as errors).
@@ -91,34 +146,23 @@ func (f *Framework) Drbdsetup(ctx context.Context, nodeName string, args ...stri
 	return f.execOnNode(ctx, agentTarget, nodeName, cmd, "drbdsetup "+strings.Join(args, " "))
 }
 
-// RebootNode reboots the host of nodeName by running `systemctl reboot` on the
-// node via nsenter inside the sds-node-configurator pod. It is used only by
-// Disruptive specs to simulate a node outage; the node is expected to come back
-// on its own, after which its replica rejoins the datamesh.
-//
-// The reboot tears down the sds-node-configurator pod mid-exec, so the resulting
-// transport error is expected and intentionally ignored. Goroutine-safe.
-func (f *Framework) RebootNode(ctx context.Context, nodeName string) {
-	GinkgoHelper()
-	nsenter, err := f.resolveNsenterBin(ctx, nodeName)
-	if err != nil {
-		Fail(fmt.Sprintf("reboot: resolving nsenter on node %q: %v", nodeName, err))
-	}
-	cmd := []string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "systemctl", "reboot"}
-	_, _ = f.execOnNode(ctx, sncTarget, nodeName, cmd, "systemctl reboot")
-}
-
 // LVM executes `lvm.static <args>` on the host of nodeName via nsenter
 // inside the sds-node-configurator pod and returns the result.
 // Goroutine-safe.
 func (f *Framework) LVM(ctx context.Context, nodeName string, args ...string) (ExecResult, error) {
+	cmd := append([]string{lvmBin}, args...)
+	return f.runner().HostRun(ctx, nodeName, cmd, "lvm "+strings.Join(args, " "))
+}
+
+// hostCmd prefixes cmd with the nsenter invocation that moves it into the host
+// namespaces of nodeName.
+func (f *Framework) hostCmd(ctx context.Context, nodeName string, cmd []string) ([]string, error) {
 	nsenter, err := f.resolveNsenterBin(ctx, nodeName)
 	if err != nil {
-		return ExecResult{}, err
+		return nil, err
 	}
-	cmd := []string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", lvmBin}
-	cmd = append(cmd, args...)
-	return f.execOnNode(ctx, sncTarget, nodeName, cmd, "lvm "+strings.Join(args, " "))
+	hostCmd := []string{nsenter, "-t", "1", "-m", "-u", "-i", "-n", "-p", "--"}
+	return append(hostCmd, cmd...), nil
 }
 
 // resolveNsenterBin returns the nsenter binary path present in the
@@ -175,6 +219,28 @@ func (f *Framework) execOnNode(ctx context.Context, target podTarget, nodeName s
 		}
 		result, transportErr = f.doExec(ctx, target, podName, nodeName, cmd, displayCmd)
 	}
+	if transportErr != nil {
+		return result, fmt.Errorf("exec in pod %q on node %q (cmd: %s): %w\nstdout: %s\nstderr: %s",
+			podName, nodeName, strings.Join(cmd, " "), transportErr, result.Stdout, result.Stderr)
+	}
+
+	return result, nil
+}
+
+// execOnNodeNoRetry is execOnNode without the retry: the command is executed
+// at most once, so a command that must never run twice (a reboot, a spawn of a
+// singleton process) cannot be duplicated by a transport error.
+//
+// A non-nil error is always a transport error — the caller cannot tell whether
+// the command ran, and MUST decide from the partial output carried in the
+// returned ExecResult.
+func (f *Framework) execOnNodeNoRetry(ctx context.Context, target podTarget, nodeName string, cmd []string, displayCmd string) (ExecResult, error) {
+	podName, _, err := f.findPodOnNode(ctx, target, nodeName)
+	if err != nil {
+		return ExecResult{}, err
+	}
+
+	result, transportErr := f.doExec(ctx, target, podName, nodeName, cmd, displayCmd)
 	if transportErr != nil {
 		return result, fmt.Errorf("exec in pod %q on node %q (cmd: %s): %w\nstdout: %s\nstderr: %s",
 			podName, nodeName, strings.Join(cmd, " "), transportErr, result.Stdout, result.Stderr)

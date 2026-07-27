@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 
 	. "github.com/onsi/ginkgo/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -167,6 +168,37 @@ type DiskfulPlacement struct {
 	NodeName     string
 	LVGName      string
 	ThinPoolName string // empty for thick pools
+}
+
+// UsableDiskfulPlacements returns one placement for every usable node of the
+// scoped RSP that has at least one usable LVG, ordered by node name.
+//
+// AnyDiskfulPlacement draws at random, which is right when a spec just needs
+// "some node". Specs that reason about a FIXED set of nodes — building zones out
+// of node labels, pinning a storage class to exactly three nodes — need the whole
+// set and need it to be the same on every read.
+func (ps *PoolScope) UsableDiskfulPlacements() []DiskfulPlacement {
+	rsp := ps.trsp.Object()
+	var out []DiskfulPlacement
+	for i := range rsp.Status.EligibleNodes {
+		n := &rsp.Status.EligibleNodes[i]
+		if !nodeUsable(n) {
+			continue
+		}
+		for j := range n.LVMVolumeGroups {
+			if !lvgUsable(&n.LVMVolumeGroups[j]) {
+				continue
+			}
+			out = append(out, DiskfulPlacement{
+				NodeName:     n.NodeName,
+				LVGName:      n.LVMVolumeGroups[j].Name,
+				ThinPoolName: n.LVMVolumeGroups[j].ThinPoolName,
+			})
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NodeName < out[j].NodeName })
+	return out
 }
 
 // AnyNode returns a random eligible ready node name from the scoped RSP,
