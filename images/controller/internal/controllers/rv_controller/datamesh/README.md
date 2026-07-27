@@ -25,7 +25,9 @@ The controller manages the full lifecycle of a datamesh:
   backing volume growth and DRBD resize across all diskful members.
 - **Failure recovery** — when a node is permanently lost (removed from
   Kubernetes), the controller automatically force-detaches and force-removes
-  the dead member, then restores the target layout by creating new replicas.
+  the dead member. Re-creating what was lost is automatic for TieBreakers
+  only; a lost Diskful replica is replaced manually (see
+  [Current limitations](#current-limitations)).
 
 All operations are performed as structured, multi-step **transitions** that
 maintain safety guarantees at every intermediate step. See
@@ -39,17 +41,37 @@ see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §6.
 The following capabilities are described in this documentation but **not yet
 implemented**. They are planned for the near term:
 
-- **Automatic replica creation during normal operation.** Currently, replicas
-  are created automatically only during initial volume formation (and Access
-  replicas for attachment). After formation, replicas are never created
-  automatically — this includes failure recovery (replacement after
-  ForceRemove), layout transitions (adding replicas for a new FTT/GMDR),
-  and configuration rollout. To trigger the desired operation, it is
-  sufficient to create a replica with the target type (or change the type of
-  an existing one) — the scheduler will assign the node and storage, and the
-  rest (datamesh membership, DRBD configuration, data synchronization)
-  happens fully automatically. Once automatic replica creation is
-  implemented, all these scenarios will require no manual steps at all.
+- **Automatic Diskful replica creation during normal operation.** After
+  formation, the controller never creates a **Diskful** replica on its own.
+  This covers failure recovery (replacing a Diskful member that was
+  force-removed together with its node), layout changes that need more diskful
+  voters (raising FTT or GMDR), and storage pool migration. To trigger the
+  desired operation, it is sufficient to create a replica with the target type
+  (or change the type of an existing one) — the scheduler will assign the node
+  and storage, and the rest (datamesh membership, DRBD configuration, data
+  synchronization) happens fully automatically. Once automatic Diskful creation
+  is implemented, these scenarios will require no manual steps at all.
+
+  What **is** created automatically after formation:
+
+  - **Access** replicas for attachment (§9) — created on a node that requests
+    an attachment and has no replica yet, and deleted again once they become
+    unused (no active RVA) or redundant (another member on the same node).
+  - **TieBreaker** replicas, by the layout convergence loop in `rv_controller`:
+    a missing TieBreaker is created whenever the diskful count already matches
+    the intended layout (heal — e.g. a TieBreaker whose RVR is already gone, or
+    an adopted volume that entered normal operation at 2D under an r2
+    configuration), and a TieBreaker whose RVR is being deleted gets its
+    replacement created while the old one is still working (strict
+    create-first, see §8).
+
+  Convergence also **retypes** one Diskful into the missing TieBreaker on the
+  r3→r2 path (3D → 2D+1TB) — a type change of an existing replica, not a new
+  one. It never creates a Diskful replica and never deletes a replica or its
+  data; a layout mismatch outside those cases is reported as
+  `LayoutConverged=False/TransitionUnsupported` and waits for manual
+  intervention. For the full decision order and the reported reasons, see the
+  `rv_controller` README, "Layout convergence".
 
 - **EventuallyLocal VolumeAccess mode.** The EventuallyLocal mode (which
   automatically migrates a Diskful replica to the node where the volume is
@@ -75,8 +97,19 @@ determines the layout (how many replicas, what quorum settings) and placement
 
 - **Auto mode** (default) — the RV references a **ReplicatedStorageClass**
   (RSC). The RSC specifies the configuration parameters, and the controller
-  derives the RV configuration from it. When the RSC changes, the new
-  configuration is gradually rolled out to all volumes of that RSC.
+  derives the RV configuration from it. What happens to volumes that already
+  exist when the RSC changes is decided by the class rollout strategy
+  (`rsc.spec.configurationRolloutStrategy`; a strategy the class controller has
+  not defaulted yet reads as `RollingUpdate`):
+
+  | Strategy | Effect on existing volumes |
+  |----------|----------------------------|
+  | **RollingUpdate** (default) | Every volume of that class receives the new configuration and starts the corresponding layout transition (§8). Volumes pick it up as they reconcile; `maxParallel` throttling is not implemented, so the rollout is not staged. |
+  | **NewVolumesOnly** | Only volumes created afterwards get the new configuration. A volume that already has one keeps both its configuration and the generation it came from, and reports `ConfigurationReady=False/NewerConfigurationHeld`. Nothing gates on that condition — the volume keeps operating on its own configuration. The escape is to switch the strategy to `RollingUpdate` or to recreate the volume, never a silent replacement. |
+
+  Generation tracking (`ConfigurationGeneration` vs `ConfigurationObservedGeneration`)
+  and the RSC status freshness gate are described in the `rv_controller` README,
+  "reconcileRVConfiguration".
 
 - **Manual mode** — the configuration is specified directly on the RV, without
   an RSC reference.
@@ -590,13 +623,20 @@ transitioning to the new layout. Specifically:
 
 - **FTT / GMDR changes** trigger a layout transition (§8). The transition
   follows the edge-by-edge path through the layout graph, maintaining safety
-  at every intermediate step.
+  at every intermediate step. Steps that need an additional **Diskful** voter
+  wait for that replica to be created manually (see
+  [Current limitations](#current-limitations)); a missing TieBreaker is created
+  by convergence, and the r3→r2 step retypes a Diskful into it.
 - **Storage pool changes** are accepted. New replicas are created on the new
   pool. Existing replicas remain on their current pool
   (`SatisfyEligibleNodes` will report the mismatch). Full migration of
   existing replicas between pools is not yet implemented.
-- **Topology changes** are accepted. The controller redistributes replicas
-  according to the new zone requirements.
+- **Topology changes** are accepted: the new zone requirements apply to every
+  placement decision from that moment on (scheduling of new replicas, zone
+  guards). Redistributing the **existing** Diskful replicas across zones needs
+  new Diskful replicas and therefore follows the same manual path (see
+  [Current limitations](#current-limitations) and
+  [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §5).
 - **VolumeAccess changes** affect future attachment decisions and new replica
   creation. Existing replicas of incompatible types are not automatically
   converted — they are removed through normal cleanup when no longer needed
@@ -604,10 +644,12 @@ transitioning to the new layout. Specifically:
 
 ### RSC rollout
 
-When the RSC configuration changes, all RVs referencing that RSC eventually
-receive the update. The controller detects configuration drift during
-reconciliation and begins a transition to the new layout. Multiple RVs may
-transition concurrently if their RSC changed.
+Which volumes receive an RSC configuration change is decided by the class
+rollout strategy (§2): under `RollingUpdate` every RV referencing that RSC
+does, under `NewVolumesOnly` only volumes created afterwards. A volume that
+receives the update detects the drift during reconciliation and begins a
+transition to the new layout. Multiple RVs may transition concurrently —
+`maxParallel` throttling is not implemented.
 
 ---
 

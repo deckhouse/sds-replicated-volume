@@ -709,12 +709,18 @@ When a node is permanently lost, the following chain executes automatically:
    - **ForceRemoveReplica** (removes the dead member from the datamesh
      without waiting for confirmation from the dead node).
 4. **Layout restoration** — after ForceRemove, the datamesh has fewer
-   replicas than the layout requires. The normal membership dispatcher
-   creates AddReplica transitions to restore the target layout. The
-   scheduling controller places the new replicas on available nodes.
+   replicas than the layout requires. A missing **TieBreaker** is re-created
+   automatically by layout convergence in `rv_controller`. A missing
+   **Diskful** replica is not: create an RVR with the target type (see
+   [README.md](README.md), "Current limitations"), and the scheduling
+   controller places it on an available node. Once the replica exists, the
+   membership dispatcher creates the AddReplica transition that joins it to
+   the datamesh and starts the resynchronization.
 
-The entire chain — from node deletion to layout restoration — is fully
-automatic and requires no manual intervention.
+Everything up to and including the removal of the dead member is fully
+automatic. Re-creating a lost **Diskful** replica is the one manual step —
+the rest of the chain (scheduling, join, resynchronization) then runs on its
+own.
 
 ### Deckhouse fencing integration
 

@@ -463,9 +463,11 @@ or its data** (freeing the retyped replica's LLV is the ordered redundancy reduc
 generic backing-volume reconcile in rvr_controller once member *and* spec are TieBreaker). A race
 with manual RVR operations (a user retyping/creating a replica in parallel) can push the layout
 outside the whitelist (e.g. an extra tie-breaker) → `TransitionUnsupported`, and convergence safely
-stops. The rollout applies to all volumes of a class at once; `configurationRolloutStrategy`
-(maxParallel/NewVolumesOnly) is not yet honored — safe for r3→r2 (no resync), a blocker for future
-resync-bearing transitions.
+stops. Which volumes migrate is decided upstream, by the configuration rollout
+(`reconcileRVConfiguration`): under `NewVolumesOnly` a volume that already has a configuration
+never sees the new layout at all, while under `RollingUpdate` every volume of the class does — at
+once, because `maxParallel` throttling is not implemented. Unstaged is safe for r3→r2 (no resync),
+but a blocker for future resync-bearing transitions.
 
 Migration monitoring:
 
