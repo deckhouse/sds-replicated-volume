@@ -43,27 +43,32 @@ func SetupLLVFinalizerDownUp(
 
 // SetupLLVFinalizerDownUpDiskless exercises Down → Up+Diskless and asserts
 // the LLV finalizer is released on Down and stays absent when returning
-// as Diskless.
+// as Diskless. drbdrConfiguredTimeout bounds the wait for the agent to
+// converge the Up+Diskless mutation.
 func SetupLLVFinalizerDownUpDiskless(
 	e envtesting.E,
 	cl client.WithWatch,
 	drbdr *v1alpha1.DRBDResource,
 	llvName string,
+	drbdrConfiguredTimeout DRBDRConfiguredTimeout,
 ) {
 	drbdr = SetupStateDown(e, cl, drbdr)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
 
-	setupStateUpDiskless(e, cl, drbdr)
+	setupStateUpDiskless(e, cl, drbdr, drbdrConfiguredTimeout)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
 }
 
 // SetupLLVFinalizerDownUpDownUpDiskless exercises Down → Up → Down →
 // Up+Diskless and asserts correct finalizer state at each step.
+// drbdrConfiguredTimeout bounds the wait for the agent to converge the
+// Up+Diskless mutation.
 func SetupLLVFinalizerDownUpDownUpDiskless(
 	e envtesting.E,
 	cl client.WithWatch,
 	drbdr *v1alpha1.DRBDResource,
 	llvName string,
+	drbdrConfiguredTimeout DRBDRConfiguredTimeout,
 ) {
 	drbdr = SetupStateDown(e, cl, drbdr)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
@@ -74,21 +79,21 @@ func SetupLLVFinalizerDownUpDownUpDiskless(
 	drbdr = SetupStateDown(e, cl, drbdr)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
 
-	setupStateUpDiskless(e, cl, drbdr)
+	setupStateUpDiskless(e, cl, drbdr, drbdrConfiguredTimeout)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
 }
 
 // SetupLLVFinalizerDownDisklessThenUp exercises Down → clear spec (while
 // Down) → Up and asserts the finalizer stays absent throughout.
+// drbdrConfiguredTimeout bounds the wait for the agent to converge the
+// spec-clearing patch.
 func SetupLLVFinalizerDownDisklessThenUp(
 	e envtesting.E,
 	cl client.WithWatch,
 	drbdr *v1alpha1.DRBDResource,
 	llvName string,
+	drbdrConfiguredTimeout DRBDRConfiguredTimeout,
 ) {
-	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
-	e.Options(&drbdrConfiguredTimeout)
-
 	drbdr = SetupStateDown(e, cl, drbdr)
 	AssertLLVHasNoAgentFinalizer(e, cl, llvName)
 
@@ -118,10 +123,8 @@ func setupStateUpDiskless(
 	e envtesting.E,
 	cl client.WithWatch,
 	drbdr *v1alpha1.DRBDResource,
+	drbdrConfiguredTimeout DRBDRConfiguredTimeout,
 ) {
-	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
-	e.Options(&drbdrConfiguredTimeout)
-
 	kubetesting.SetupResourcePatch(
 		e.ScopeWithTimeout(drbdrConfiguredTimeout.Duration),
 		cl,

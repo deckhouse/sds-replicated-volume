@@ -36,8 +36,13 @@ import (
 var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 	Label(fw.LabelSlow), Label(fw.LabelFeatureStatus), func() {
 
+		// Disruptive: the spec writes to the raw DRBD device through the I/O
+		// workload, which is what turns "the volume keeps serving I/O while the
+		// mismatch is reported" from a condition reading into a statement about
+		// the data path.
 		It("reports TransitionUnsupported for an r2->r3 upsize and leaves the layout intact",
-			SpecTimeout(10*time.Minute), require.MinNodes(2, 1), func(ctx SpecContext) {
+			SpecTimeout(15*time.Minute), Label(fw.LabelDisruptive), require.MinNodes(2, 1),
+			func(ctx SpecContext) {
 				By("creating an r2 storage class and a 2D+1TB volume")
 				trsc := newMigrationRSC(ctx, v1alpha1.ReplicationAvailability)
 
@@ -49,6 +54,21 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+
+				By("attaching the volume on a diskful node")
+				diskfulNodes := memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful)
+				Expect(diskfulNodes).To(HaveLen(2))
+				trva := trv.Attach(ctx, diskfulNodes[0])
+				trva.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+
+				By("writing to the raw device and proving the writes land before the edit")
+				// The writer starts before the unsupported edit so the same
+				// process spans the whole mismatch window: a data path that
+				// stops when the layout diverges cannot hide behind a restart.
+				io := startVolumeIO(ctx, trv, trva)
+				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
 
 				rvrCountBefore := trv.RVRCount()
 
@@ -75,6 +95,10 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				By("verifying the volume stays healthy and serving I/O despite the mismatch")
 				trv.Await(ctx, tkmatch.ConditionStatus(
 					v1alpha1.ReplicatedVolumeCondIOReadyType, "True"))
+				// Verified device writes inside the mismatch window, not only
+				// the condition: the sequence has to advance while the volume
+				// reports TransitionUnsupported.
+				ioDuring := ioProgressed(ctx, io, ioBefore)
 
 				By("verifying the RSC aggregate is honestly not rolled out")
 				trsc.Await(ctx, tkmatch.ConditionStatus(
@@ -89,5 +113,8 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+
+				By("I/O kept flowing across the mismatch window and the revert")
+				ioProgressed(ctx, io, ioDuring)
 			})
 	})

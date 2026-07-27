@@ -14,19 +14,24 @@ changed (that path is out of scope until verdict D-3). Replication modes map to
 FTT/GMDR as: `ConsistencyAndAvailability` = FTT1/GMDR1 → **3D**;
 `Availability` = FTT1/GMDR0 → **2D+1TB**.
 
+Each case is titled with the text of its Ginkgo `It` verbatim; the line right
+below the title carries the case identifier, its position in this document, the
+`Disruptive` mark where it applies, and the `Describe` container the spec lives
+in (a container usually holds more than one case).
+
 Run against a real cluster (`e2e/full`, Ginkgo). These specs are written and
 compiled here; the actual run happens on the stand. Non-obvious cases are
 marked with ⚡.
 
 ---
 
-## 1. r3→r2 migration of a single volume (E2E-1)
+## migrates a 3D volume to 2D+1TB (one diskful retyped to tie-breaker)
+
+E2E-1 · case 1 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration by editing rsc.spec.replication`
 
 **Editing `rsc.spec.replication` migrates a 3D volume to 2D+1TB via one in-place retype.**
 
 Covers: decomposition T-2.0.3 (direction r3→r2); verifies blocks 1+2.
-Spec: `Layout: r3->r2 migration by editing rsc.spec.replication` →
-`migrates a 3D volume to 2D+1TB (one diskful retyped to tie-breaker)`.
 
 Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Serial`
 + lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
@@ -54,13 +59,13 @@ Then:
 
 ---
 
-## 2. New r2 volume forms directly as 2D+1TB (E2E-2)
+## forms a new r2 volume directly as 2D+1TB (no post-formation doctoring)
+
+E2E-2 · case 2 · Describe: `Layout: tie-breaker at formation and healing`
 
 **A fresh r2 volume includes the tie-breaker at formation, not as a later DMTE step.**
 
 Covers: decomposition T-1.1.2 (e2e part) and T-1.1.3 (auto-2D+1TB part); verifies block 3.
-Spec: `Layout: tie-breaker at formation and healing` →
-`forms a new r2 volume directly as 2D+1TB (no post-formation doctoring)`.
 
 Given: an r2 storage class (FTT1/GMDR0 = `Availability`); at least 3 nodes so a
 tie-breaker can be placed.
@@ -77,13 +82,13 @@ Then:
 
 ---
 
-## 3. Deleted tie-breaker is healed (E2E-3)
+## heals a deleted tie-breaker via the P2 add-TB pattern
+
+E2E-3 · case 3 · Describe: `Layout: tie-breaker at formation and healing`
 
 **Convergence recreates a manually deleted tie-breaker (P2 add-TB pattern).**
 
 Covers: decomposition T-2.1.2 (P2 path); verifies block 2.
-Spec: `Layout: tie-breaker at formation and healing` →
-`heals a deleted tie-breaker via the P2 add-TB pattern`.
 
 Given: a healthy 2D+1TB volume.
 
@@ -96,16 +101,22 @@ Then:
 
 ---
 
-## 4. Unsupported divergence is reported, not acted upon (E2E-4)
+## reports TransitionUnsupported for an r2->r3 upsize and leaves the layout intact
+
+E2E-4 · case 4 · ⚡ Disruptive · Describe: `Layout: unsupported divergence is reported, not acted upon`
 
 ⚡ **An r2→r3 upsize is reported as `TransitionUnsupported` with exact arithmetic and triggers no action.**
 
 Covers: decomposition T-2.2.1 (e2e part); negative case for future US-2.4; verifies block 1.
-Spec: `Layout: unsupported divergence is reported, not acted upon` →
-`reports TransitionUnsupported for an r2->r3 upsize and leaves the layout intact`.
+
+Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Serial`
++ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
 
 Given: an r2 storage class (`replication: Availability`), a 2D+1TB volume,
-`LayoutConverged=True/Converged`.
+`LayoutConverged=True/Converged`, attached on one of its diskful nodes with a
+raw-device writer running there (`Framework.StartIOWorkload`) — the writer is
+started **before** the unsupported edit, so one process spans the whole mismatch
+window.
 
 When: `rsc.spec.replication` is edited to `ConsistencyAndAvailability` (upsize —
 outside the convergence whitelist).
@@ -115,20 +126,24 @@ Then:
   arithmetic `have 2D+1TB, want 3D`.
 - The replica composition is untouched: no new RVR, still 2D+1TB (2 Diskful + 1
   TieBreaker), RVR count unchanged.
+- ⚡ The volume keeps serving on the data path, not only in its conditions:
+  `IOReady=True` and verified device writes advance while the mismatch is
+  reported, without a stall or an early exit.
 - The RSC aggregate is honestly not rolled out (`ConfigurationRolledOut=False`,
   `status.volumes.aligned == 0`).
 - Reverting `replication` to `Availability` returns `LayoutConverged` to
   `True/Converged` — no stale latch, no flapping.
+- Verified device writes advance again after the revert, from the same writer.
 
 ---
 
-## 5. Mass migration of a whole class (E2E-5)
+## migrates all volumes of a class with a single rsc.spec.replication edit
+
+E2E-5 · case 5 · Describe: `Layout: r3->r2 migration by editing rsc.spec.replication`
 
 **One `rsc.spec.replication` edit migrates every volume of the class.**
 
 Covers: decomposition T-2.0.3 ("mass migration" part); verifies blocks 1+2.
-Spec: `Layout: r3->r2 migration by editing rsc.spec.replication` →
-`migrates all volumes of a class with a single rsc.spec.replication edit`.
 
 Given: an r3 storage class with N volumes (N=3), I/O on a subset.
 
@@ -142,13 +157,14 @@ Then:
 
 ---
 
-## 6. r2 volume survives a diskful node outage (E2E-6, ⚡ Disruptive)
+## keeps I/O on quorum 2/3 while a diskful node reboots, then recovers
+
+E2E-6 · case 6 · ⚡ Disruptive · Describe: `Layout: r2 volume survives a diskful node outage`
 
 ⚡ **A 2D+1TB volume keeps quorum (2/3) when a diskful node is rebooted, and recovers.**
 
 Covers: decomposition T-1.1.3 ("disruptive" part) and the Epic 1 criterion; verifies block 3.
-Spec: `Layout: r2 volume survives a diskful node outage` →
-`keeps I/O on quorum 2/3 while a diskful node reboots, then recovers`.
+
 Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unless
 `E2E_ALLOW_DISRUPTIVE=true`. Node reboot is performed via
 `Framework.RebootNode` (`systemctl reboot` through the sds-node-configurator pod's
@@ -170,13 +186,13 @@ Then:
 
 ---
 
-## 7. Incompatible RSC updates are rejected (E2E-7)
+## rejects storage/topology changes and accepts a replication edit
+
+E2E-7 · case 7 · Describe: `Layout: incompatible ReplicatedStorageClass updates are rejected`
 
 **Storage/topology changes are rejected with a field-naming error; replication edits pass.**
 
 Covers: decomposition T-2.0.1 (e2e negative) and the RSC part of US-2.3; verifies block 4.
-Spec: `Layout: incompatible ReplicatedStorageClass updates are rejected` →
-`rejects storage/topology changes and accepts a replication edit`.
 
 Given: an r2 storage class with an existing 2D+1TB volume.
 
@@ -191,13 +207,13 @@ When / Then:
 
 ---
 
-## 8. Local migration keeps the attached node diskful (E2E-LOCAL, ⚡ Disruptive)
+## retypes a non-attached replica and keeps the attached node diskful
+
+E2E-LOCAL · case 8 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with volumeAccess=Local`
 
 ⚡ **With `volumeAccess: Local` the retype must never demote the node the workload runs on.**
 
 Covers: the `Local` guard of the retype candidate selection; verifies block 2.
-Spec: `Layout: r3->r2 migration with volumeAccess=Local` →
-`retypes a non-attached replica and keeps the attached node diskful`.
 
 Given: a dedicated RSC with `volumeAccess: Local` and `replication:
 ConsistencyAndAvailability`, a 3D volume attached on one of its diskful nodes,
@@ -217,14 +233,14 @@ Then:
 
 ---
 
-## 9. TransZonal migration puts the tie-breaker in the third zone (E2E-TZ, ⚡ Disruptive)
+## migrates 3D in three zones to 2D+1TB with the tie-breaker in the third zone
+
+E2E-TZ · case 9 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with TransZonal topology`
 
 ⚡ **A 3D volume spread over three zones migrates to 2D+1TB with the tie-breaker holding the third zone.**
 
 Covers: verdict №19 (TransZonal retype); verifies blocks 1+2 under a zonal
 topology.
-Spec: `Layout: r3->r2 migration with TransZonal topology` →
-`migrates 3D in three zones to 2D+1TB with the tie-breaker in the third zone`.
 
 Given: three usable diskful nodes, each labelled into its own **synthetic zone**
 (`topology.kubernetes.io/zone`, unique per run). The spec is `Disruptive` and
@@ -252,13 +268,14 @@ Then:
 
 ---
 
-## 10. Tie-breaker replacement, free node available (E2E-TB1)
+## replaces a deleted tie-breaker create-first when a free node exists
+
+E2E-TB1 · case 10 · Describe: `Layout: tie-breaker replacement`
 
 **Deleting a tie-breaker starts a strict create-first replacement: the new one joins before the old one leaves.**
 
 Covers: verdict №4 (strict create-first tie-breaker replacement); verifies block 2.
-Spec: `Layout: tie-breaker replacement` →
-`replaces a deleted tie-breaker create-first when a free node exists`.
+
 Requires **≥4 eligible nodes** (`require.MinNodes(2, 2)` — only two of them need
 storage): three are occupied by the volume, the fourth hosts the replacement. On
 smaller stands the spec skips.
@@ -300,14 +317,15 @@ Then:
 
 ---
 
-## 11. Tie-breaker replacement with no free node, and the manual escape (E2E-TB2, ⚡ Disruptive)
+## keeps a terminating tie-breaker working when no node can host a replacement
+
+E2E-TB2 · case 11 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 ⚡ **With every eligible node occupied, the deleted tie-breaker keeps serving quorum and the volume says `CannotConverge`; the documented manual escape ends the deadlock.**
 
 Covers: verdict №4 (the no-free-node branch) and validates the operator recipe in
 `debug_and_problem_solving.md`; verifies blocks 2+6.
-Spec: `Layout: tie-breaker replacement` →
-`keeps a terminating tie-breaker working when no node can host a replacement`.
+
 Runs on **any stand with ≥3 nodes** — it does not skip; instead it *creates* the
 no-free-node situation.
 
@@ -354,14 +372,13 @@ Then (phase 2 — the documented manual escape):
 
 ---
 
-## 12. NewVolumesOnly holds existing volumes (E2E-NVO)
+## holds the old volume at 3D, creates new ones as 2D+1TB, and releases the hold on RollingUpdate
+
+E2E-NVO · case 12 · Describe: `Layout: NewVolumesOnly holds existing volumes`
 
 **`configurationRolloutStrategy: NewVolumesOnly` holds existing volumes at their layout and says so; switching to `RollingUpdate` releases them.**
 
 Covers: verdict №2 (the strategy used to be inert); verifies block 5.
-Spec: `Layout: NewVolumesOnly holds existing volumes` →
-`holds the old volume at 3D, creates new ones as 2D+1TB, and releases the hold on
-RollingUpdate`.
 
 Given: an r3 RSC with `configurationRolloutStrategy.type: NewVolumesOnly` and one
 3D volume created before the edit.
