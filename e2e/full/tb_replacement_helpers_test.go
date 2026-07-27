@@ -28,7 +28,6 @@ import (
 	gtypes "github.com/onsi/gomega/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apitypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
@@ -201,22 +200,6 @@ func awaitEligibleNodes(ctx SpecContext, trsp *fw.TestRSP, want []string) {
 		}
 		return fmt.Errorf("pool %s reports eligible nodes %v, want exactly %v", trsp.Name(), got, expected)
 	}).WithTimeout(tbReplacementTimeout).WithPolling(tbReplacementPoll).Should(Succeed())
-}
-
-// removeRVRFinalizers strips every finalizer from the replica with a direct
-// merge patch.
-//
-// This is the manual escape from debug_and_problem_solving.md, and it is the
-// one place in the suite allowed to remove a finalizer by hand (see
-// RUNNING.md). The tracked Update helper cannot be used: dropping the last
-// finalizer of an object that already has a deletion timestamp makes it vanish,
-// and Update would then wait for a resourceVersion nobody will ever publish.
-func removeRVRFinalizers(ctx SpecContext, trvr *fw.TestRVR) {
-	GinkgoHelper()
-	rvr := &v1alpha1.ReplicatedVolumeReplica{ObjectMeta: metav1.ObjectMeta{Name: trvr.Name()}}
-	patch := client.RawPatch(apitypes.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`))
-	Expect(client.IgnoreNotFound(f.Client.Patch(ctx, rvr, patch))).To(Succeed(),
-		"removing the finalizers of %s", trvr.Name())
 }
 
 // ---------------------------------------------------------------------------

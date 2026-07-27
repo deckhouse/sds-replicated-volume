@@ -19,6 +19,7 @@ package framework
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -80,38 +81,19 @@ func (s nodeLabelSnapshot) String() string {
 func (f *Framework) SetNodeLabel(ctx context.Context, key string, valueByNode map[string]string) {
 	GinkgoHelper()
 
-	if key == "" {
-		Fail("SetNodeLabel: label key must not be empty")
-	}
-
-	// Snapshot every node first, so a single DeferCleanup covers all of them.
-	nodes := slices.Sorted(maps.Keys(valueByNode))
-	snapshots := make([]nodeLabelSnapshot, 0, len(nodes))
-	for _, nodeName := range nodes {
-		node, err := f.getNodeLive(ctx, nodeName)
-		if err != nil {
-			Fail(fmt.Sprintf("SetNodeLabel: reading node %q: %v", nodeName, err))
-		}
-		snapshots = append(snapshots, snapshotNodeLabel(node, key))
+	plan, err := planNodeLabel(ctx, f, key, valueByNode)
+	if err != nil {
+		Fail(fmt.Sprintf("SetNodeLabel: %v", err))
 	}
 
 	DeferCleanup(func(cleanupCtx SpecContext) {
-		for _, snap := range snapshots {
-			if err := f.restoreNodeLabel(cleanupCtx, snap); err != nil {
-				Fail(fmt.Sprintf("SetNodeLabel cleanup: restoring %s: %v", snap, err))
-			}
-			fmt.Fprintf(GinkgoWriter, "[%s] [node-label] restored %s\n",
-				time.Now().Format("15:04:05.000"), snap)
+		if err := plan.restore(cleanupCtx, f); err != nil {
+			Fail(fmt.Sprintf("SetNodeLabel cleanup: %v", err))
 		}
 	})
 
-	for _, nodeName := range nodes {
-		if err := f.patchNodeLabel(ctx, nodeName, key, valueByNode[nodeName], true); err != nil {
-			Fail(fmt.Sprintf("SetNodeLabel: labelling node %q with %s=%s: %v",
-				nodeName, key, valueByNode[nodeName], err))
-		}
-		fmt.Fprintf(GinkgoWriter, "[%s] [node-label] %s: %s=%s\n",
-			time.Now().Format("15:04:05.000"), nodeName, key, valueByNode[nodeName])
+	if err := plan.apply(ctx, f); err != nil {
+		Fail(fmt.Sprintf("SetNodeLabel: %v", err))
 	}
 }
 
@@ -119,11 +101,10 @@ func (f *Framework) SetNodeLabel(ctx context.Context, key string, valueByNode ma
 // is present at all.
 func (f *Framework) NodeLabel(ctx context.Context, nodeName, key string) (string, bool) {
 	GinkgoHelper()
-	node, err := f.getNodeLive(ctx, nodeName)
+	snap, err := readNodeLabel(ctx, f, nodeName, key)
 	if err != nil {
-		Fail(fmt.Sprintf("reading node %q: %v", nodeName, err))
+		Fail(err.Error())
 	}
-	snap := snapshotNodeLabel(node, key)
 	return snap.Value, snap.Existed
 }
 
@@ -131,15 +112,95 @@ func (f *Framework) NodeLabel(ctx context.Context, nodeName, key string) (string
 // Core
 // ---------------------------------------------------------------------------
 
+// nodeLabelAPI is the seam the label cores reach the cluster through: one live
+// Node read and one label write. *Framework implements it against the API
+// server; unit tests substitute a stub, which is what makes the whole
+// snapshot/restore lifecycle testable without a cluster.
+type nodeLabelAPI interface {
+	getNodeLive(ctx context.Context, nodeName string) (*corev1.Node, error)
+	patchNodeLabel(ctx context.Context, nodeName, key, value string, set bool) error
+}
+
+// nodeLabelPlan is the read phase of SetNodeLabel: the nodes in a deterministic
+// order, the value each of them gets, and the state to put back afterwards.
+//
+// Writing goes exclusively through a plan, so a label can never be changed
+// before the snapshot that undoes it was taken.
+type nodeLabelPlan struct {
+	key       string
+	nodes     []string
+	values    map[string]string
+	snapshots []nodeLabelSnapshot
+}
+
+// planNodeLabel validates the request and snapshots the label on EVERY node
+// before anything is written.
+func planNodeLabel(
+	ctx context.Context,
+	api nodeLabelAPI,
+	key string,
+	valueByNode map[string]string,
+) (nodeLabelPlan, error) {
+	if key == "" {
+		return nodeLabelPlan{}, errors.New("label key must not be empty")
+	}
+
+	nodes := slices.Sorted(maps.Keys(valueByNode))
+	snapshots := make([]nodeLabelSnapshot, 0, len(nodes))
+	for _, nodeName := range nodes {
+		snap, err := readNodeLabel(ctx, api, nodeName, key)
+		if err != nil {
+			return nodeLabelPlan{}, err
+		}
+		snapshots = append(snapshots, snap)
+	}
+
+	return nodeLabelPlan{key: key, nodes: nodes, values: maps.Clone(valueByNode), snapshots: snapshots}, nil
+}
+
+// apply writes the planned value to every node, in the planned order.
+func (p nodeLabelPlan) apply(ctx context.Context, api nodeLabelAPI) error {
+	for _, nodeName := range p.nodes {
+		value := p.values[nodeName]
+		if err := api.patchNodeLabel(ctx, nodeName, p.key, value, true); err != nil {
+			return fmt.Errorf("labelling node %q with %s=%s: %w", nodeName, p.key, value, err)
+		}
+		fmt.Fprintf(GinkgoWriter, "[%s] [node-label] %s: %s=%s\n",
+			time.Now().Format("15:04:05.000"), nodeName, p.key, value)
+	}
+	return nil
+}
+
+// restore puts the label back exactly as the plan found it — a label that
+// existed goes back to its old value, a label that did not exist is removed.
+//
+// Every node of the plan is restored, including the ones a partially failed
+// apply never reached: their snapshot is simply written back unchanged, which
+// is cheaper than tracking who was written and correct either way.
+func (p nodeLabelPlan) restore(ctx context.Context, api nodeLabelAPI) error {
+	for _, snap := range p.snapshots {
+		if err := api.patchNodeLabel(ctx, snap.NodeName, snap.Key, snap.Value, snap.Existed); err != nil {
+			return fmt.Errorf("restoring %s: %w", snap, err)
+		}
+		fmt.Fprintf(GinkgoWriter, "[%s] [node-label] restored %s\n",
+			time.Now().Format("15:04:05.000"), snap)
+	}
+	return nil
+}
+
+// readNodeLabel reads one label off a live Node.
+func readNodeLabel(ctx context.Context, api nodeLabelAPI, nodeName, key string) (nodeLabelSnapshot, error) {
+	node, err := api.getNodeLive(ctx, nodeName)
+	if err != nil {
+		return nodeLabelSnapshot{}, fmt.Errorf("reading node %q: %w", nodeName, err)
+	}
+	return snapshotNodeLabel(node, key), nil
+}
+
 // snapshotNodeLabel captures the current state of one label on one node.
 func snapshotNodeLabel(node *corev1.Node, key string) nodeLabelSnapshot {
 	value, existed := node.GetLabels()[key]
 	return nodeLabelSnapshot{NodeName: node.GetName(), Key: key, Value: value, Existed: existed}
-}
-
-// restoreNodeLabel puts one label back exactly as the snapshot describes it.
-func (f *Framework) restoreNodeLabel(ctx context.Context, snap nodeLabelSnapshot) error {
-	return f.patchNodeLabel(ctx, snap.NodeName, snap.Key, snap.Value, snap.Existed)
 }
 
 // patchNodeLabel sets (set=true) or removes (set=false) one label on a node.

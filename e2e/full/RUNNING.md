@@ -34,7 +34,8 @@ cluster shape than `e2e/agent`.
     `sds-replicated-volume/debug_and_problem_solving.md`, and the spec
     exists to validate that recipe end to end (pre-conditions → finalizer
     → orphan → ForceRemove → P2 recreates the tie-breaker).
-    **Do not copy this into other specs**: anywhere else, a finalizer that
+    **Do not copy this into other specs**: the framework exports the escape
+    hatch as `TestRVR.RemoveFinalizers`, but anywhere else a finalizer that
     does not go away on its own is a bug to report, not to patch out.
 - **Some specs mutate node labels** (`topology.kubernetes.io/zone`,
   `e2e.deckhouse.io/node-scope`) to build synthetic zones or to carve out

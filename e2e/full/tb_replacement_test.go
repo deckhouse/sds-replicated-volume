@@ -262,7 +262,7 @@ var _ = Describe("Layout: tie-breaker replacement",
 
 				By("applying the manual escape: removing the finalizer by hand")
 				stable.Disable()
-				removeRVRFinalizers(ctx, oldTB)
+				oldTB.RemoveFinalizers(ctx)
 				awaitRVRGone(ctx, oldTB, oldUID)
 
 				By("the orphaned member is force-removed once the peers stop seeing it")
