@@ -58,16 +58,32 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		}
 	})
 
+	// alignedRV is a volume that observed and applied the current configuration and reports
+	// every tracked condition as True for its current generation.
+	alignedRV := func(name string) rvView {
+		return rvView{
+			name:                            name,
+			configurationGeneration:         1,
+			configurationObservedGeneration: 1,
+			conditions: rvViewConditions{
+				satisfyEligibleNodes: condTrue(),
+				configurationReady:   condTrue(),
+				layoutConverged:      condTrue(),
+			},
+		}
+	}
+
 	It("returns zero counts for empty RV list", func() {
 		counters := computeActualVolumesSummary(rsc, nil)
 
 		Expect(*counters.Total).To(Equal(int32(0)))
+		Expect(*counters.PendingObservation).To(Equal(int32(0)))
 		Expect(*counters.Aligned).To(Equal(int32(0)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
 	})
 
-	It("counts total volumes (RVs without configurationObservedGeneration are considered acknowledged)", func() {
+	It("counts volumes that recorded no observed generation as pending", func() {
 		rvs := []rvView{
 			{name: "rv-1"},
 			{name: "rv-2"},
@@ -76,163 +92,84 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		counters := computeActualVolumesSummary(rsc, rvs)
 
 		Expect(*counters.Total).To(Equal(int32(2)))
+		Expect(*counters.PendingObservation).To(Equal(int32(2)))
+		Expect(*counters.Aligned).To(Equal(int32(0)))
+		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
 	})
 
-	It("counts aligned volumes when all conditions are true", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReady:        true,
-					layoutConvergedKnown:      true,
-					layoutConverged:           true,
-				},
-			},
-		}
-
-		counters := computeActualVolumesSummary(rsc, rvs)
+	It("counts aligned volumes when all tracked conditions are true", func() {
+		counters := computeActualVolumesSummary(rsc, []rvView{alignedRV("rv-1")})
 
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 	})
 
 	It("does not count a volume with LayoutConverged present and false as aligned; counts it as stale", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 1,
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReadyKnown:   true,
-					configurationReady:        true,
-					layoutConvergedKnown:      true,
-					layoutConverged:           false, // layout has not converged
-				},
-			},
-		}
+		rv := alignedRV("rv-1")
+		rv.conditions.layoutConverged = condFalse()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
 		Expect(*counters.Aligned).To(Equal(int32(0)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
 
-	It("does not count a volume with absent LayoutConverged as aligned or stale", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 1,
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReadyKnown:   true,
-					configurationReady:        true,
-					// LayoutConverged absent: not yet evaluated (e.g. still forming).
-				},
-			},
-		}
+	It("counts a volume with absent LayoutConverged as pending", func() {
+		// LayoutConverged is only written post-formation. A volume still forming has produced
+		// no verdict, which is a pending state — never a silent "rolled out".
+		rv := alignedRV("rv-1")
+		rv.conditions.layoutConverged = condMissing()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
+		Expect(*counters.PendingObservation).To(Equal(int32(1)))
 		Expect(*counters.Aligned).To(Equal(int32(0)))
 		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
 	})
 
 	It("counts configuration not aligned volumes (configurationReady present and false)", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 1, // Matches rsc.Status.ConfigurationGeneration.
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReadyKnown:   true,
-					configurationReady:        false,
-				},
-			},
-		}
+		rv := alignedRV("rv-1")
+		rv.conditions.configurationReady = condFalse()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
 
 	It("counts eligible nodes not aligned volumes (satisfyEligibleNodes present and false)", func() {
-		rvs := []rvView{
-			{
-				name: "rv-1",
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      false,
-					configurationReady:        true,
-				},
-			},
-		}
+		rv := alignedRV("rv-1")
+		rv.conditions.satisfyEligibleNodes = condFalse()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(1)))
 	})
 
 	It("does not count RVs with absent SatisfyEligibleNodes condition as in conflict", func() {
-		rvs := []rvView{
-			{
-				name: "rv-1",
-				conditions: rvViewConditions{
-					// SatisfyEligibleNodes condition is absent (not yet evaluated).
-					satisfyEligibleNodesKnown: false,
-					satisfyEligibleNodes:      false,
-				},
-			},
-		}
+		rv := alignedRV("rv-1")
+		rv.conditions.satisfyEligibleNodes = condMissing()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(0)))
 	})
 
-	It("returns total and inConflictWithEligibleNodes when RV has not acknowledged (mismatched configurationGeneration)", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 99, // Mismatch - RSC has 1 (non-zero to distinguish from "unset")
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      false, // nodesOK=false
-					configurationReady:        true,
-				},
-			},
-		}
+	It("reports every counter even when a volume is pending", func() {
+		pending := alignedRV("rv-1")
+		pending.configurationObservedGeneration = 99 // Mismatch: RSC published generation 1.
+		pending.conditions.satisfyEligibleNodes = condFalse()
 
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{pending, alignedRV("rv-2")})
 
-		Expect(*counters.Total).To(Equal(int32(1)))
+		Expect(*counters.Total).To(Equal(int32(2)))
 		Expect(*counters.PendingObservation).To(Equal(int32(1)))
-		Expect(counters.Aligned).To(BeNil())
-		Expect(counters.StaleConfiguration).To(BeNil())
-		// inConflictWithEligibleNodes is calculated regardless of acknowledgment
+		Expect(*counters.Aligned).To(Equal(int32(1)))
+		Expect(*counters.StaleConfiguration).To(Equal(int32(0)))
+		// inConflictWithEligibleNodes is calculated regardless of the rollout category.
 		Expect(*counters.InConflictWithEligibleNodes).To(Equal(int32(1)))
 	})
 
 	It("returns all counters when all RVs have acknowledged", func() {
-		rvs := []rvView{
-			{
-				name:                            "rv-1",
-				configurationObservedGeneration: 1,
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReady:        true,
-					layoutConvergedKnown:      true,
-					layoutConverged:           true,
-				},
-			},
-		}
-
-		counters := computeActualVolumesSummary(rsc, rvs)
+		counters := computeActualVolumesSummary(rsc, []rvView{alignedRV("rv-1")})
 
 		Expect(*counters.Total).To(Equal(int32(1)))
 		Expect(*counters.Aligned).To(Equal(int32(1)))
@@ -795,52 +732,10 @@ var _ = Describe("isConfigurationInSync", func() {
 	})
 })
 
-var _ = Describe("computeRollingStrategiesConfiguration", func() {
-	It("returns (0, 0) when both policies are not RollingUpdate/RollingRepair", func() {
+var _ = Describe("isEligibleNodesConflictResolutionEnabled", func() {
+	It("is enabled for RollingRepair", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
-				},
-				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.EligibleNodesConflictResolutionManual,
-				},
-			},
-		}
-
-		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
-
-		Expect(rollouts).To(Equal(int32(0)))
-		Expect(conflicts).To(Equal(int32(0)))
-	})
-
-	It("returns maxParallel for rollouts when ConfigurationRolloutStrategy is RollingUpdate", func() {
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
-						MaxParallel: 5,
-					},
-				},
-				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.EligibleNodesConflictResolutionManual,
-				},
-			},
-		}
-
-		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
-
-		Expect(rollouts).To(Equal(int32(5)))
-		Expect(conflicts).To(Equal(int32(0)))
-	})
-
-	It("returns maxParallel for conflicts when EligibleNodesConflictResolutionStrategy is RollingRepair", func() {
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
-				},
 				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
 					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
@@ -850,70 +745,60 @@ var _ = Describe("computeRollingStrategiesConfiguration", func() {
 			},
 		}
 
-		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
-
-		Expect(rollouts).To(Equal(int32(0)))
-		Expect(conflicts).To(Equal(int32(10)))
+		Expect(isEligibleNodesConflictResolutionEnabled(rsc)).To(BeTrue())
 	})
 
-	It("returns both maxParallel values when both policies are rolling", func() {
+	It("is disabled for Manual", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
-					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
-						MaxParallel: 3,
-					},
-				},
-				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
-					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
-						MaxParallel: 7,
-					},
-				},
-			},
-		}
-
-		rollouts, conflicts := computeRollingStrategiesConfiguration(rsc)
-
-		Expect(rollouts).To(Equal(int32(3)))
-		Expect(conflicts).To(Equal(int32(7)))
-	})
-
-	It("panics when ConfigurationRolloutStrategy is RollingUpdate but RollingUpdate config is nil", func() {
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
-					Type:          v1alpha1.ConfigurationRolloutRollingUpdate,
-					RollingUpdate: nil,
-				},
 				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionManual,
 				},
 			},
 		}
 
-		Expect(func() {
-			computeRollingStrategiesConfiguration(rsc)
-		}).To(Panic())
+		Expect(isEligibleNodesConflictResolutionEnabled(rsc)).To(BeFalse())
 	})
 
-	It("panics when EligibleNodesConflictResolutionStrategy is RollingRepair but RollingRepair config is nil", func() {
+	It("is enabled when the strategy has not been defaulted yet", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{}
+
+		Expect(isEligibleNodesConflictResolutionEnabled(rsc)).To(BeTrue())
+	})
+})
+
+var _ = Describe("isConfigurationRolloutEnabled", func() {
+	It("is enabled for RollingUpdate", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
+					Type: v1alpha1.ConfigurationRolloutRollingUpdate,
+					RollingUpdate: &v1alpha1.ReplicatedStorageClassConfigurationRollingUpdateStrategy{
+						MaxParallel: 5,
+					},
+				},
+			},
+		}
+
+		Expect(isConfigurationRolloutEnabled(rsc)).To(BeTrue())
+	})
+
+	It("is disabled for NewVolumesOnly", func() {
 		rsc := &v1alpha1.ReplicatedStorageClass{
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
 					Type: v1alpha1.ConfigurationRolloutNewVolumesOnly,
 				},
-				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type:          v1alpha1.EligibleNodesConflictResolutionRollingRepair,
-					RollingRepair: nil,
-				},
 			},
 		}
 
-		Expect(func() {
-			computeRollingStrategiesConfiguration(rsc)
-		}).To(Panic())
+		Expect(isConfigurationRolloutEnabled(rsc)).To(BeFalse())
+	})
+
+	It("is enabled when the strategy has not been defaulted yet", func() {
+		rsc := &v1alpha1.ReplicatedStorageClass{}
+
+		Expect(isConfigurationRolloutEnabled(rsc)).To(BeTrue())
 	})
 })
 
@@ -923,30 +808,36 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		rsc *v1alpha1.ReplicatedStorageClass
 	)
 
-	// makeAcknowledgedRV creates an rvView that has acknowledged the RSC configuration.
+	// makeAcknowledgedRV creates an rvView that has observed and applied the RSC configuration.
 	// Its layout is reported as converged (the common healthy case); tests that need an
 	// unconverged layout construct the rvView explicitly.
 	makeAcknowledgedRV := func(name string, configOK, nodesOK bool) rvView {
+		configReady := condTrue()
+		if !configOK {
+			configReady = condFalse()
+		}
+		satisfyEligibleNodes := condTrue()
+		if !nodesOK {
+			satisfyEligibleNodes = condFalse()
+		}
 		return rvView{
 			name:                            name,
+			configurationGeneration:         1,
 			configurationObservedGeneration: 1,
 			conditions: rvViewConditions{
-				satisfyEligibleNodesKnown: true,
-				satisfyEligibleNodes:      nodesOK,
-				configurationReadyKnown:   true,
-				configurationReady:        configOK,
-				layoutConvergedKnown:      true,
-				layoutConverged:           true,
+				satisfyEligibleNodes: satisfyEligibleNodes,
+				configurationReady:   configReady,
+				layoutConverged:      condTrue(),
 			},
 		}
 	}
 
-	// makePendingRV creates an rvView that has NOT acknowledged the RSC configuration
+	// makePendingRV creates an rvView that has NOT observed the RSC configuration
 	// and has no conditions yet (brand-new RV that hasn't been evaluated).
 	makePendingRV := func(name string) rvView {
 		return rvView{
 			name:                            name,
-			configurationObservedGeneration: 99, // Non-zero mismatch with RSC's 1 (0 means "unset", treated as acknowledged)
+			configurationObservedGeneration: 99, // Mismatch with the RSC's published generation 1.
 		}
 	}
 
@@ -954,7 +845,8 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 		ctx = flow.BeginRootReconcile(context.Background()).Ctx()
 		rsc = &v1alpha1.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-rsc",
+				Name:       "test-rsc",
+				Generation: 1,
 			},
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ConfigurationRolloutStrategy: &v1alpha1.ReplicatedStorageClassConfigurationRolloutStrategy{
@@ -1023,20 +915,11 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 	})
 
 	It("sets ConfigurationRolledOut to False with an honest message when a volume's layout has not converged", func() {
+		notConverged := makeAcknowledgedRV("rv-2", true, true)
+		notConverged.conditions.layoutConverged = condFalse() // layout not converged → stale
 		rvs := []rvView{
 			makeAcknowledgedRV("rv-1", true, true), // fully converged
-			{
-				name:                            "rv-2",
-				configurationObservedGeneration: 1,
-				conditions: rvViewConditions{
-					satisfyEligibleNodesKnown: true,
-					satisfyEligibleNodes:      true,
-					configurationReadyKnown:   true,
-					configurationReady:        true,
-					layoutConvergedKnown:      true,
-					layoutConverged:           false, // layout not converged → stale
-				},
-			},
+			notConverged,
 		}
 
 		outcome := ensureVolumeSummaryAndConditions(ctx, rsc, rvs)

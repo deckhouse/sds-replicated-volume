@@ -168,10 +168,25 @@ Editing `spec.replication` of an existing ReplicatedStorageClass changes the int
 
 **Requirements.** The `2D+1TB` layout needs a node for the tie-breaker in addition to the two diskful nodes: at least 3 nodes for `Ignored` topology, at least 3 zones for `TransZonal`, or at least 3 nodes in the volume's zone for `Zonal`. These match the `3D` requirements, so r3→r2 does not raise them.
 
+**Limiting the rollout to new volumes.** By default (`configurationRolloutStrategy.type: RollingUpdate`) a configuration edit applies to every volume of the class. Set the strategy to `NewVolumesOnly` to apply it to newly created volumes only:
+
+```shell
+kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"configurationRolloutStrategy":{"type":"NewVolumesOnly","rollingUpdate":null}}}'
+```
+
+Volumes that already have a configuration then keep it. Such a volume observes the new configuration (so the class is not stuck waiting for it) but does not apply it, and reports:
+
+```shell
+kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationReady")]}{.status}/{.reason}: {.message}{end}{"\n"}'
+# False/NewerConfigurationHeld: ... has a newer configuration (generation N); the volume keeps its configuration (generation M) ...
+```
+
+Held volumes are counted in `status.volumes.staleConfiguration` of the class, and `ConfigurationRolledOut` becomes `False/ConfigurationRolloutDisabled`. The hold is deliberate and persists even if the held configuration later stops matching the cluster: to release a volume, switch the strategy back to `RollingUpdate` (all held volumes roll out through the normal path) or recreate the volume. Switching from `RollingUpdate` to `NewVolumesOnly` never rolls anything back — configuration already applied stays applied.
+
 **Limitations.**
 
 - There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `LayoutConverged=False/TransitionUnsupported` and performs no action — it requires manual intervention.
-- The edit applies to every volume of the class at once; a gradual or opt-in rollout (`configurationRolloutStrategy` `maxParallel`/`NewVolumesOnly`) is not yet implemented.
+- Under `RollingUpdate` the edit applies to every volume of the class at once: throttling the rollout (`configurationRolloutStrategy.rollingUpdate.maxParallel`) is not yet implemented.
 
 #### Deleting the ReplicatedStorageClass resource
 

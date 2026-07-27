@@ -242,8 +242,13 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 | Status | Reason | When |
 |--------|--------|------|
 | True | Ready | Configuration is valid and matches the source |
-| False | WaitingForStorageClass | RSC not found or RSC configuration not ready (Auto mode only) |
+| False | WaitingForStorageClass | RSC not found, RSC configuration not ready, or RSC has not published a configuration for its current `metadata.generation` yet (Auto mode only) |
+| False | NewerConfigurationHeld | The RSC has a newer configuration, but `configurationRolloutStrategy.type=NewVolumesOnly` keeps this volume on the one it already has (Auto mode only) |
 | False | InvalidConfiguration | Configuration is invalid: RSP not found or TransZonal zone count mismatch |
+
+`NewerConfigurationHeld` is a reporting state, not a block: nothing gates on `ConfigurationReady`,
+so the volume keeps operating on its own configuration. The class-level aggregate counts such a
+volume as `staleConfiguration` (see `rsc_controller`).
 
 ### LayoutConverged
 
@@ -569,9 +574,14 @@ When formation stalls (any safety check fails or progress timeout is exceeded), 
 2. Log error (formation timed out)
 3. Delete formation DRBDResourceOperation if exists
 4. Delete all replicas (with finalizer removal)
-5. Reset all status fields (Configuration, ConfigurationGeneration, ConfigurationObservedGeneration, DatameshRevision, Datamesh, BaselineGuaranteedMinimumDataRedundancy, transitions, DatameshReplicaRequests)
-6. Re-derive configuration via `reconcileRVConfiguration` (to avoid ConfigurationReady condition flicker)
+5. Reset the datamesh status fields (DatameshRevision, Datamesh, BaselineGuaranteedMinimumDataRedundancy, transitions, DatameshReplicaRequests)
+6. Re-derive configuration via `reconcileRVConfiguration` (formation starts from scratch, so a pending configuration change is picked up here if the rollout strategy allows it)
 7. Requeue for fresh start
+
+**The configuration fields are deliberately NOT reset.** `Configuration == nil` is the marker of
+"this volume never received a configuration", which the `NewVolumesOnly` rollout strategy uses to
+tell new volumes from existing ones. Clearing it on restart would make a restarting volume look
+brand new and let it silently adopt a configuration that was explicitly held back from it.
 
 ### adopt/v1 Formation
 
@@ -1170,8 +1180,8 @@ During create formation, callers do NOT call this function (config is frozen). D
 flowchart TD
     Start([Start]) --> ComputeIntended["Compute intended config:<br/>Auto: from RSC<br/>Manual: from Spec.ManualConfiguration"]
 
-    ComputeIntended --> CheckAutoSource{"Auto mode:<br/>RSC exists + has config?"}
-    CheckAutoSource -->|"RSC nil or no config"| SetWaiting["False: WaitingForStorageClass"]
+    ComputeIntended --> CheckAutoSource{"Auto mode:<br/>RSC exists + has config +<br/>published for current generation?"}
+    CheckAutoSource -->|"RSC nil, no config,<br/>or status behind spec"| SetWaiting["False: WaitingForStorageClass"]
     SetWaiting --> End([Return])
     CheckAutoSource -->|OK| ContentCheck
 
@@ -1180,7 +1190,10 @@ flowchart TD
     UpdateGen --> SetReady1["True: Ready"]
     SetReady1 --> End
 
-    ContentCheck -->|No| CheckTransZonal{"TransZonal topology?"}
+    ContentCheck -->|No| CheckHold{"NewVolumesOnly AND<br/>volume already has a config?"}
+    CheckHold -->|Yes| Hold["Observe only:<br/>ConfigurationObservedGeneration = intended<br/>False: NewerConfigurationHeld"]
+    Hold --> End
+    CheckHold -->|No| CheckTransZonal{"TransZonal topology?"}
     CheckTransZonal -->|Yes| LoadRSP["Load RSP zone count"]
     LoadRSP --> RSPNotFound{"RSP not found?"}
     RSPNotFound -->|Yes| SetInvalid1["False: InvalidConfiguration<br/>(RSP not found)"]
@@ -1197,10 +1210,14 @@ flowchart TD
 ```
 
 **Generation tracking:**
-- Auto mode: `ConfigurationGeneration` = RSC's `Status.ConfigurationGeneration` (used by rsc_controller for rollout tracking)
-- Manual mode: `ConfigurationGeneration` = 0 (no RSC rollout tracking)
+- Auto mode: `ConfigurationGeneration` = the RSC configuration generation whose **content** is stored in `rv.Status.Configuration`; `ConfigurationObservedGeneration` = the newest RSC configuration generation the volume has seen. The two differ exactly while a newer configuration is held back by `NewVolumesOnly`.
+- Manual mode: both are 0 (no RSC rollout tracking)
 
-**Content-based fast path:** Instead of generation-based skipping, the function compares `*rv.Status.Configuration == *intended` (struct equality on 5 scalar fields). This avoids generation collision bugs when switching between Auto and Manual modes.
+**RSC status freshness:** the RSC configuration is read only when `rsc.status.configurationGeneration == rsc.metadata.generation`. While the class controller has not accepted the latest spec edit, its status still carries the previous generation; applying it would hand a volume a configuration the user has already replaced — and under `NewVolumesOnly` the volume would hold that superseded configuration forever, because it stops being "new" the moment it gets one. The wait resolves itself: the RV watches RSC `status.configurationGeneration`, so the next publish triggers a reconcile. A spec edit the class controller never accepts (invalid configuration) keeps volumes waiting — deliberately, instead of silently provisioning from a stale configuration.
+
+**NewVolumesOnly (observe, do not apply):** when the class rollout strategy is `NewVolumesOnly` and the volume already has a configuration whose content differs from the intended one, the volume keeps both its content and its `ConfigurationGeneration`, advances `ConfigurationObservedGeneration` (so the class aggregate does not hang in "pending observation"), and reports `ConfigurationReady=False/NewerConfigurationHeld`. A nil strategy — the class controller has not written the default yet — counts as `RollingUpdate`. Strategy transitions need no extra handling: `NewVolumesOnly → RollingUpdate` rolls held volumes out through the normal path, and `RollingUpdate → NewVolumesOnly` rolls nothing back. The hold applies even if the intended configuration is invalid: the volume is not "fixed" silently, the escape is a strategy switch or a volume recreation.
+
+**Content-based fast path:** Instead of generation-based skipping, the function compares `*rv.Status.Configuration == *intended` (struct equality on 5 scalar fields). This avoids generation collision bugs when switching between Auto and Manual modes. It runs before the `NewVolumesOnly` hold on purpose: equal content means the volume is already aligned with the new generation, so there is nothing to hold back.
 
 **Data Flow:**
 
@@ -1209,14 +1226,16 @@ flowchart TD
 | `rv.Spec.ConfigurationMode` | Auto or Manual |
 | `rv.Spec.ManualConfiguration` | Manual mode source (guaranteed present by CEL) |
 | `rsc` | ReplicatedStorageClass (may be nil; Auto mode only) |
+| `rsc.Generation` / `rsc.Status.ConfigurationGeneration` | Freshness gate: the published configuration must belong to the current spec generation |
+| `rsc.Spec.ConfigurationRolloutStrategy` | Rollout strategy (nil = RollingUpdate) |
 | `rsc.Status.Configuration` | RSC configuration (Auto mode source) |
 | RSP (loaded via `getRSPZoneCount`) | Zone count for TransZonal validation |
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.Configuration` | Set/updated configuration |
-| `rv.Status.ConfigurationGeneration` | RSC generation (Auto) or 0 (Manual) |
-| `rv.Status.ConfigurationObservedGeneration` | Same as ConfigurationGeneration |
+| `rv.Status.Configuration` | Set/updated configuration (unchanged while a newer one is held) |
+| `rv.Status.ConfigurationGeneration` | RSC generation the stored content came from (Auto) or 0 (Manual) |
+| `rv.Status.ConfigurationObservedGeneration` | Newest RSC generation seen; equal to ConfigurationGeneration unless a newer configuration is held |
 | `ConfigurationReady` condition | Reports configuration state |
 
 ---

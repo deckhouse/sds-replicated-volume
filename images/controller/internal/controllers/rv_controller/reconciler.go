@@ -1365,8 +1365,15 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 //
 // Generation semantics by mode:
 //   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
-//   - Manual mode: ConfigurationGeneration = rv.Generation (any spec field bumps it;
-//     deep-compare prevents false-positive config updates)
+//   - Manual mode: both generations stay 0 — the configuration comes from the volume spec, so
+//     there is no storage class rollout to track. Content equality (not generations) decides
+//     whether the stored configuration needs an update.
+//
+// In Auto mode the RSC configuration is read only when the class has published it for its
+// current spec generation, and it is applied only when the class rollout strategy allows it
+// (see the NewVolumesOnly branch). ConfigurationGeneration always names the generation the
+// stored content came from; ConfigurationObservedGeneration names the newest generation the
+// volume has seen. The two differ exactly while a newer configuration is held back.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileRVConfiguration(
@@ -1383,6 +1390,10 @@ func (r *Reconciler) reconcileRVConfiguration(
 	// intended is a read-only pointer (no DeepCopy); clone only when writing to status.
 	var intended *v1alpha1.ReplicatedVolumeConfiguration
 	var intendedGeneration int64
+	// holdNewerConfiguration reports that the storage class rolls its configuration out to new
+	// volumes only, so a volume that already has one must keep it. It is set in the Auto branch
+	// only, and therefore implies rsc != nil.
+	holdNewerConfiguration := false
 
 	switch rv.Spec.ConfigurationMode {
 	case v1alpha1.ReplicatedVolumeConfigurationModeManual:
@@ -1402,11 +1413,27 @@ func (r *Reconciler) reconcileRVConfiguration(
 				fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name))
 			return rf.Continue().ReportChangedIf(changed)
 		}
+		// The published configuration must describe the storage class as it is now. Until the
+		// class controller accepts the latest spec edit, status still carries the previous
+		// generation: applying it would hand a volume a configuration the user has already
+		// replaced — and under NewVolumesOnly the volume would then hold that superseded
+		// configuration forever, because it stops being "new" the moment it gets one.
+		// Waiting is safe: the RV watches RSC status changes, so the next publish wakes us up.
+		if rsc.Status.ConfigurationGeneration != rsc.Generation {
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+				fmt.Sprintf("ReplicatedStorageClass %q has not published a configuration for generation %d yet (published generation: %d)",
+					rsc.Name, rsc.Generation, rsc.Status.ConfigurationGeneration))
+			return rf.Continue().ReportChangedIf(changed)
+		}
 		intended = rsc.Status.Configuration
 		intendedGeneration = rsc.Status.ConfigurationGeneration
+		holdNewerConfiguration = rsc.Spec.ConfigurationRolloutStrategy.GetType() == v1alpha1.ConfigurationRolloutNewVolumesOnly
 	}
 
 	// Fast-path: config content matches intended → update generation tracking, skip the rest.
+	// This runs before the NewVolumesOnly hold on purpose: equal content means the volume is
+	// already aligned with the new generation, so there is nothing to hold back.
 	if rv.Status.Configuration != nil && *rv.Status.Configuration == *intended {
 		if rv.Status.ConfigurationGeneration != intendedGeneration {
 			rv.Status.ConfigurationGeneration = intendedGeneration
@@ -1421,6 +1448,33 @@ func (r *Reconciler) reconcileRVConfiguration(
 		changed = applyConfigurationReadyCondTrue(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady,
 			"Configuration is ready") || changed
+		return rf.Continue().ReportChangedIf(changed)
+	}
+
+	// NewVolumesOnly: observe the new configuration but do not apply it.
+	//
+	// The volume keeps both its configuration content and the generation that content came
+	// from (they are always consistent), while ConfigurationObservedGeneration advances so the
+	// storage class aggregate does not hang in "pending observation" forever. The held state is
+	// reported honestly as ConfigurationReady=False: the condition means "configuration matches
+	// the storage class", and here it deliberately does not. Nothing gates on this condition —
+	// the volume keeps operating on its own configuration.
+	//
+	// The hold is deliberate and applies even when the held configuration later becomes
+	// unsatisfiable: the escape is to switch the strategy to RollingUpdate or recreate the
+	// volume, never a silent replacement.
+	if holdNewerConfiguration && rv.Status.Configuration != nil {
+		if rv.Status.ConfigurationObservedGeneration != intendedGeneration {
+			rv.Status.ConfigurationObservedGeneration = intendedGeneration
+			changed = true
+		}
+
+		changed = applyConfigurationReadyCondFalse(rv,
+			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonNewerConfigurationHeld,
+			fmt.Sprintf("ReplicatedStorageClass %q has a newer configuration (generation %d); "+
+				"the volume keeps its configuration (generation %d) because the rollout strategy is %s",
+				rsc.Name, intendedGeneration, rv.Status.ConfigurationGeneration,
+				v1alpha1.ConfigurationRolloutNewVolumesOnly)) || changed
 		return rf.Continue().ReportChangedIf(changed)
 	}
 

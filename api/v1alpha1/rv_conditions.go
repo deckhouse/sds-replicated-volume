@@ -24,6 +24,7 @@ const (
 	ReplicatedVolumeCondConfigurationReadyType                                 = "ConfigurationReady"
 	ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress = "ConfigurationRolloutInProgress" // Configuration rollout is in progress.
 	ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration           = "InvalidConfiguration"           // Configuration is invalid (e.g. TransZonal zone count mismatch).
+	ReplicatedVolumeCondConfigurationReadyReasonNewerConfigurationHeld         = "NewerConfigurationHeld"         // A newer storage class configuration exists but is intentionally not applied to this volume.
 	ReplicatedVolumeCondConfigurationReadyReasonReady                          = "Ready"                          // Configuration is ready.
 	ReplicatedVolumeCondConfigurationReadyReasonStaleConfiguration             = "StaleConfiguration"             // Configuration does not match storage class (stale).
 	ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass         = "WaitingForStorageClass"         // Waiting for storage class to be ready.

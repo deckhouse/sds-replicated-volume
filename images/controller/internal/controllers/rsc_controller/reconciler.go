@@ -623,6 +623,10 @@ func ensureConfiguration(
 //
 // Sets ConfigurationRolledOut and VolumesSatisfyEligibleNodes conditions based on
 // volume counters (StaleConfiguration, InConflictWithEligibleNodes, PendingObservation).
+//
+// ConfigurationRolledOut precedence follows the mutually exclusive volume categories:
+// any pending volume → Unknown (we do not know yet); otherwise any stale volume → False;
+// otherwise True, which by the category invariant means aligned == tracked volumes.
 func ensureVolumeSummaryAndConditions(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -635,11 +639,12 @@ func ensureVolumeSummaryAndConditions(
 	summary := computeActualVolumesSummary(rsc, rvs)
 	changed := applyVolumesSummary(rsc, summary)
 
-	maxParallelConfigurationRollouts, maxParallelConflictResolutions := computeRollingStrategiesConfiguration(rsc)
+	configurationRolloutEnabled := isConfigurationRolloutEnabled(rsc)
+	conflictResolutionEnabled := isEligibleNodesConflictResolutionEnabled(rsc)
 
 	// Apply VolumesSatisfyEligibleNodes condition (calculated regardless of acknowledgment).
 	if *rsc.Status.Volumes.InConflictWithEligibleNodes > 0 {
-		if maxParallelConflictResolutions > 0 {
+		if conflictResolutionEnabled {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress,
 				"Not implemented",
@@ -672,7 +677,7 @@ func ensureVolumeSummaryAndConditions(
 	if *rsc.Status.Volumes.StaleConfiguration > 0 {
 		staleMsg := fmt.Sprintf("%d volume(s) not yet aligned with the storage class configuration",
 			*rsc.Status.Volumes.StaleConfiguration)
-		if maxParallelConfigurationRollouts > 0 {
+		if configurationRolloutEnabled {
 			changed = applyConfigurationRolledOutCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutReasonConfigurationRolloutInProgress,
 				staleMsg,
@@ -699,19 +704,49 @@ func ensureVolumeSummaryAndConditions(
 
 // rvView is a lightweight projection of ReplicatedVolume fields used by this controller.
 type rvView struct {
-	name                            string
-	replicatedStoragePoolName       string
+	name              string
+	configurationMode v1alpha1.ReplicatedVolumeConfigurationMode
+	// replicatedStoragePoolName is the pool of the configuration the volume currently runs.
+	replicatedStoragePoolName string
+	// configurationGeneration is the RSC configuration generation the volume has applied.
+	configurationGeneration int64
+	// configurationObservedGeneration is the newest RSC configuration generation the volume has seen.
+	// It runs ahead of configurationGeneration exactly while a newer configuration is held back.
 	configurationObservedGeneration int64
 	conditions                      rvViewConditions
 }
 
+// rvViewCondition projects the parts of a volume condition the aggregation needs.
+type rvViewCondition struct {
+	present bool
+	status  metav1.ConditionStatus
+	// current reports that the condition was written for the volume's current generation;
+	// a condition left over from an older generation carries no verdict about the volume now.
+	current bool
+}
+
 type rvViewConditions struct {
-	satisfyEligibleNodesKnown bool // true when SatisfyEligibleNodes condition is present
-	satisfyEligibleNodes      bool // true when SatisfyEligibleNodes condition is present and True
-	configurationReadyKnown   bool // true when ConfigurationReady condition is present
-	configurationReady        bool // true when ConfigurationReady condition is present and True
-	layoutConvergedKnown      bool // true when LayoutConverged condition is present
-	layoutConverged           bool // true when LayoutConverged condition is present and True
+	satisfyEligibleNodes rvViewCondition
+	configurationReady   rvViewCondition
+	layoutConverged      rvViewCondition
+}
+
+// hasNoVerdict reports that the condition says nothing about the current state of the volume:
+// it is absent, it is Unknown, or it was written for an older generation.
+func (c rvViewCondition) hasNoVerdict() bool {
+	return !c.present || !c.current || c.status == metav1.ConditionUnknown
+}
+
+// isFalse reports that the condition explicitly denies the property it describes.
+func (c rvViewCondition) isFalse() bool {
+	return c.present && c.status == metav1.ConditionFalse
+}
+
+// isPresentAndNotTrue reports that the volume has been evaluated and the property does not hold.
+// Unlike hasNoVerdict/isFalse it ignores generation freshness, matching the conflict counter
+// semantics: a known conflict stays reported until the volume proves otherwise.
+func (c rvViewCondition) isPresentAndNotTrue() bool {
+	return c.present && c.status != metav1.ConditionTrue
 }
 
 // newRVView creates an rvView from a ReplicatedVolume.
@@ -719,14 +754,13 @@ type rvViewConditions struct {
 func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 	view := rvView{
 		name:                            unsafeRV.Name,
+		configurationMode:               unsafeRV.Spec.ConfigurationMode,
+		configurationGeneration:         unsafeRV.Status.ConfigurationGeneration,
 		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
 		conditions: rvViewConditions{
-			satisfyEligibleNodesKnown: objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
-			satisfyEligibleNodes:      objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
-			configurationReadyKnown:   objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
-			configurationReady:        objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
-			layoutConvergedKnown:      objutilv1.HasStatusCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
-			layoutConverged:           objutilv1.IsStatusConditionPresentAndTrue(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
+			satisfyEligibleNodes: newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			configurationReady:   newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			layoutConverged:      newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
 		},
 	}
 
@@ -737,24 +771,34 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 	return view
 }
 
-// computeRollingStrategiesConfiguration determines max parallel limits for configuration rollouts and conflict resolutions.
-// Returns 0 for a strategy if it's not set to RollingUpdate/RollingRepair type (meaning disabled).
-func computeRollingStrategiesConfiguration(rsc *v1alpha1.ReplicatedStorageClass) (maxParallelConfigurationRollouts, maxParallelConflictResolutions int32) {
-	if rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ConfigurationRolloutRollingUpdate {
-		if rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate == nil {
-			panic("ConfigurationRolloutStrategy.RollingUpdate is nil but Type is RollingUpdate; API validation should prevent this")
-		}
-		maxParallelConfigurationRollouts = rsc.Spec.ConfigurationRolloutStrategy.RollingUpdate.MaxParallel
+// newRVViewCondition projects a single condition of the volume.
+func newRVViewCondition(unsafeRV *v1alpha1.ReplicatedVolume, condType string) rvViewCondition {
+	cond := objutilv1.GetStatusCondition(unsafeRV, condType)
+	if cond == nil {
+		return rvViewCondition{}
 	}
-
-	if rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.EligibleNodesConflictResolutionRollingRepair {
-		if rsc.Spec.EligibleNodesConflictResolutionStrategy.RollingRepair == nil {
-			panic("EligibleNodesConflictResolutionStrategy.RollingRepair is nil but Type is RollingRepair; API validation should prevent this")
-		}
-		maxParallelConflictResolutions = rsc.Spec.EligibleNodesConflictResolutionStrategy.RollingRepair.MaxParallel
+	return rvViewCondition{
+		present: true,
+		status:  cond.Status,
+		current: cond.ObservedGeneration == unsafeRV.Generation,
 	}
+}
 
-	return maxParallelConfigurationRollouts, maxParallelConflictResolutions
+// isConfigurationRolloutEnabled reports whether configuration changes are rolled out to volumes
+// that already have a configuration. A strategy the controller has not defaulted yet counts as
+// RollingUpdate — the default it is about to write.
+func isConfigurationRolloutEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Spec.ConfigurationRolloutStrategy.GetType() == v1alpha1.ConfigurationRolloutRollingUpdate
+}
+
+// isEligibleNodesConflictResolutionEnabled reports whether volumes placed on non-eligible nodes
+// are repaired automatically. A strategy the controller has not defaulted yet counts as
+// RollingRepair — the default it is about to write.
+//
+// Both strategies are read by type only: throttling (maxParallel) is not implemented for either
+// of them, so the parameter cannot change the reported state.
+func isEligibleNodesConflictResolutionEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
+	return rsc.Spec.EligibleNodesConflictResolutionStrategy.GetType() == v1alpha1.EligibleNodesConflictResolutionRollingRepair
 }
 
 // makeConfiguration computes the intended configuration from RSC spec.
@@ -968,8 +1012,8 @@ func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.Repl
 	hasPendingObservation := rsc.Status.Volumes.PendingObservation != nil && *rsc.Status.Volumes.PendingObservation > 0
 	hasNodeConflicts := rsc.Status.Volumes.InConflictWithEligibleNodes != nil && *rsc.Status.Volumes.InConflictWithEligibleNodes > 0
 
-	configRolloutEnabled := rsc.Spec.ConfigurationRolloutStrategy.Type == v1alpha1.ConfigurationRolloutRollingUpdate
-	nodesRepairEnabled := rsc.Spec.EligibleNodesConflictResolutionStrategy.Type == v1alpha1.EligibleNodesConflictResolutionRollingRepair
+	configRolloutEnabled := isConfigurationRolloutEnabled(rsc)
+	nodesRepairEnabled := isEligibleNodesConflictResolutionEnabled(rsc)
 
 	if (hasStaleConfig || hasPendingObservation) && configRolloutEnabled {
 		hasActiveAutoFix = true
@@ -1205,13 +1249,84 @@ func isConfigurationInSync(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return rsc.Status.Configuration != nil && rsc.Status.ConfigurationGeneration == rsc.Generation
 }
 
-// computeActualVolumesSummary computes volume statistics from RV conditions.
+// rvConfigurationCategory is the rollout category of a tracked volume.
+// The categories are mutually exclusive and exhaustive: every tracked volume falls into
+// exactly one of them, so pendingObservation + staleConfiguration + aligned == trackedTotal.
+type rvConfigurationCategory int
+
+const (
+	// rvConfigurationCategoryPending: the volume has produced no verdict about the current
+	// storage class configuration yet.
+	rvConfigurationCategoryPending rvConfigurationCategory = iota
+	// rvConfigurationCategoryStale: the volume has produced a verdict and it is "not aligned".
+	rvConfigurationCategoryStale
+	// rvConfigurationCategoryAligned: the volume runs the current configuration and reports
+	// every tracked condition as True.
+	rvConfigurationCategoryAligned
+)
+
+// computeActualRVConfigurationCategory classifies one tracked volume into exactly one category.
 //
-// InConflictWithEligibleNodes is always calculated (regardless of acknowledgment).
-// If any RV hasn't acknowledged the current RSC state (name/configurationGeneration mismatch),
-// returns Total, PendingObservation, and InConflictWithEligibleNodes with Aligned/StaleConfiguration as nil -
-// because we don't know the real counts for those until all RVs acknowledge.
-// RVs without status.storageClass are considered acknowledged (to avoid flapping on new volumes).
+// The chain is a short-circuit ladder — pending → stale → aligned, first match wins. The order
+// is normative: there are two tracked conditions, so a volume with one Unknown and one False
+// would otherwise match two categories; pending wins because "we do not know yet" is weaker
+// than any verdict. The ladder is exhaustive by construction — a volume that is neither pending
+// nor stale has observed the current generation, applied it, and reports both tracked
+// conditions present, current and True.
+//
+// Tracked conditions form the configuration axis only: ConfigurationReady and LayoutConverged.
+// SatisfyEligibleNodes is deliberately NOT part of it — placement conflicts are a separate
+// concern with a separate counter, strategy and condition, and a volume can perfectly run the
+// current configuration while sitting on a node that is no longer eligible.
+//
+// Extension point: a new category (for example a maintenance "suspended" one) is added as
+// another rung at its precedence position; the counters and the invariant follow automatically.
+func computeActualRVConfigurationCategory(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) rvConfigurationCategory {
+	if isRVConfigurationPending(rsc, rv) {
+		return rvConfigurationCategoryPending
+	}
+	if isRVConfigurationStale(rsc, rv) {
+		return rvConfigurationCategoryStale
+	}
+	return rvConfigurationCategoryAligned
+}
+
+// isRVConfigurationPending reports that the volume owes a verdict about the current storage
+// class configuration: it has not observed that configuration, or one of the tracked conditions
+// carries no verdict (absent, Unknown, or written for an older volume generation).
+//
+// An unset observed generation is NOT treated as acknowledgment: a volume that never recorded
+// what it saw has not seen anything, and absence of data must never be read as completion.
+func isRVConfigurationPending(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
+	if rv.configurationObservedGeneration != rsc.Status.ConfigurationGeneration {
+		return true
+	}
+	return rv.conditions.configurationReady.hasNoVerdict() || rv.conditions.layoutConverged.hasNoVerdict()
+}
+
+// isRVConfigurationStale reports that the volume gave its verdict and the verdict is
+// "not aligned": it still runs an older configuration (for example one held back by the
+// NewVolumesOnly rollout strategy), or a tracked condition is False.
+//
+// Precondition: the volume is not pending.
+func isRVConfigurationStale(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
+	return rv.configurationGeneration != rsc.Status.ConfigurationGeneration ||
+		rv.conditions.configurationReady.isFalse() ||
+		rv.conditions.layoutConverged.isFalse()
+}
+
+// isRVTrackedByRSCRollout reports whether the volume takes part in this storage class rollout.
+// Manual-mode volumes carry their configuration in their own spec, so the class neither rolls
+// anything out to them nor waits for them.
+func isRVTrackedByRSCRollout(rv *rvView) bool {
+	return rv.configurationMode != v1alpha1.ReplicatedVolumeConfigurationModeManual
+}
+
+// computeActualVolumesSummary computes volume statistics from RV state.
+//
+// Tracked (Auto-mode) volumes are classified into exactly one rollout category each, so all
+// three counters are always reported and always sum up to the number of tracked volumes.
+// InConflictWithEligibleNodes is a separate axis and is counted for every volume.
 func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvView) v1alpha1.ReplicatedStorageClassVolumesSummary {
 	total := int32(len(rvs))
 	var pendingObservation, aligned, staleConfiguration, inConflictWithEligibleNodes int32
@@ -1225,33 +1340,23 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 			usedStoragePoolNames[rv.replicatedStoragePoolName] = struct{}{}
 		}
 
-		// Check nodes condition regardless of acknowledgment.
-		// Only count as "in conflict" if the condition is present and not True.
-		// Missing condition means the RV hasn't been evaluated yet.
-		if rv.conditions.satisfyEligibleNodesKnown && !rv.conditions.satisfyEligibleNodes {
+		// Placement conflicts are counted for every volume, tracked or not: a missing
+		// condition means the volume has not been evaluated yet and is not a conflict.
+		if rv.conditions.satisfyEligibleNodes.isPresentAndNotTrue() {
 			inConflictWithEligibleNodes++
 		}
 
-		// Count unobserved volumes (aligned/staleConfiguration require acknowledgment).
-		if !isRSCConfigurationAcknowledgedByRV(rsc, rv) {
-			pendingObservation++
+		if !isRVTrackedByRSCRollout(rv) {
 			continue
 		}
 
-		// Aligned requires ConfigurationReady AND SatisfyEligibleNodes AND LayoutConverged,
-		// all present and True. A volume whose layout has not converged (or is not yet
-		// evaluated) is not aligned.
-		if rv.conditions.configurationReady && rv.conditions.satisfyEligibleNodes && rv.conditions.layoutConverged {
-			aligned++
-		}
-
-		// Count as "stale" when a tracked condition is present and not True: either the
-		// configuration is not ready, or the layout has not converged. A missing condition
-		// means the RV has not been evaluated yet (e.g. LayoutConverged is only written
-		// post-formation) and is not counted — consistent with the ConfigurationReady rule.
-		if (rv.conditions.configurationReadyKnown && !rv.conditions.configurationReady) ||
-			(rv.conditions.layoutConvergedKnown && !rv.conditions.layoutConverged) {
+		switch computeActualRVConfigurationCategory(rsc, rv) {
+		case rvConfigurationCategoryPending:
+			pendingObservation++
+		case rvConfigurationCategoryStale:
 			staleConfiguration++
+		case rvConfigurationCategoryAligned:
+			aligned++
 		}
 	}
 
@@ -1262,35 +1367,14 @@ func computeActualVolumesSummary(rsc *v1alpha1.ReplicatedStorageClass, rvs []rvV
 	}
 	slices.Sort(usedPoolNames)
 
-	// If any volumes haven't observed, return Total, PendingObservation, and InConflictWithEligibleNodes.
-	// We don't know the real counts for aligned/staleConfiguration until all RVs observe.
-	if pendingObservation > 0 {
-		return v1alpha1.ReplicatedStorageClassVolumesSummary{
-			Total:                       &total,
-			PendingObservation:          &pendingObservation,
-			InConflictWithEligibleNodes: &inConflictWithEligibleNodes,
-			UsedStoragePoolNames:        usedPoolNames,
-		}
-	}
-
-	zero := int32(0)
 	return v1alpha1.ReplicatedStorageClassVolumesSummary{
 		Total:                       &total,
-		PendingObservation:          &zero,
+		PendingObservation:          &pendingObservation,
 		Aligned:                     &aligned,
 		StaleConfiguration:          &staleConfiguration,
 		InConflictWithEligibleNodes: &inConflictWithEligibleNodes,
 		UsedStoragePoolNames:        usedPoolNames,
 	}
-}
-
-// isRSCConfigurationAcknowledgedByRV checks if the RV has acknowledged
-// the current RSC configuration.
-func isRSCConfigurationAcknowledgedByRV(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
-	if rv.configurationObservedGeneration == 0 {
-		return true
-	}
-	return rv.configurationObservedGeneration == rsc.Status.ConfigurationGeneration
 }
 
 // applyVolumesSummary applies volume summary to rsc.Status.Volumes.

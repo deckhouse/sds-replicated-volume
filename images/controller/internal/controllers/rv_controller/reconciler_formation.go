@@ -985,18 +985,21 @@ func (r *Reconciler) reconcileFormationRestartIfTimeoutPassed(
 		}
 	}
 
-	// Reset configuration and datamesh state, then immediately re-derive
-	// configuration so the ConfigurationReady condition does not flicker.
-	rv.Status.Configuration = nil
-	rv.Status.ConfigurationGeneration = 0
-	rv.Status.ConfigurationObservedGeneration = 0
+	// Reset datamesh state only.
+	//
+	// The configuration fields (Configuration and both generations) are deliberately preserved:
+	// a nil Configuration is the marker of "this volume never received a configuration", which
+	// the NewVolumesOnly rollout strategy uses to tell new volumes from existing ones. Wiping
+	// them here would make a restarting volume look brand new and let it silently adopt a
+	// configuration that was explicitly held back from it.
 	rv.Status.DatameshRevision = 0
 	rv.Status.Datamesh = v1alpha1.ReplicatedVolumeDatamesh{}
 	rv.Status.BaselineGuaranteedMinimumDataRedundancy = 0
 	rv.Status.DatameshTransitions = nil
 	rv.Status.DatameshReplicaRequests = nil
 
-	// Re-derive configuration from source (Configuration is nil after reset).
+	// Re-derive the configuration: the restart starts formation from scratch, so this is the
+	// point where a pending configuration change (allowed by the rollout strategy) is picked up.
 	outcome = r.reconcileRVConfiguration(rf.Ctx(), rv, rsc)
 	if outcome.ShouldReturn() {
 		return outcome

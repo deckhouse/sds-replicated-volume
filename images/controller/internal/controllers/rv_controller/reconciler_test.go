@@ -83,7 +83,7 @@ func newTestRSP(name string) *v1alpha1.ReplicatedStoragePool {
 // newRSCWithConfiguration creates a RSC with valid configuration for tests.
 func newRSCWithConfiguration(name string) *v1alpha1.ReplicatedStorageClass {
 	return &v1alpha1.ReplicatedStorageClass{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Status: v1alpha1.ReplicatedStorageClassStatus{
 			ConfigurationGeneration: 1,
 			Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
@@ -509,7 +509,7 @@ var _ = Describe("Reconciler", func() {
 	Describe("Configuration initialization", func() {
 		It("initializes configuration from RSC and sets ConfigurationReady to Ready", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 5},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 5,
 					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
@@ -640,7 +640,7 @@ var _ = Describe("Reconciler", func() {
 
 		It("updates configuration when RSC generation changes (normal operation)", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 10},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 10,
 					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
@@ -704,7 +704,7 @@ var _ = Describe("Reconciler", func() {
 
 		It("sets Ready condition when generation matches RSC (normal operation)", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 5},
 				Status: v1alpha1.ReplicatedStorageClassStatus{
 					ConfigurationGeneration: 5,
 					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
@@ -4791,7 +4791,7 @@ var _ = Describe("Root Reconcile layout convergence status persistence", func() 
 			ReplicatedStoragePoolName:       "test-pool",
 		}
 		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 1},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
 				ConfigurationGeneration: 1,
 				Configuration:           cfg.DeepCopy(),
@@ -4879,7 +4879,7 @@ var _ = Describe("Root Reconcile tie-breaker replacement", func() {
 	deletingTBCluster := func(ctx context.Context) (*Reconciler, *v1alpha1.ReplicatedVolume) {
 		cfg := r2Config()
 		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 1},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
 				ConfigurationGeneration: 1,
 				Configuration:           cfg.DeepCopy(),

@@ -67,8 +67,11 @@ func rspPredicates() []predicate.Predicate {
 
 // rvPredicates returns predicates for ReplicatedVolume events.
 // Filters to only react to changes in:
+//   - metadata.generation (the volume aggregate classifies conditions by freshness, i.e. by
+//     condition ObservedGeneration against metadata.generation)
 //   - spec.replicatedStorageClassName (storage class reference)
-//   - status.configurationObservedGeneration (observed RSC state for acknowledgment tracking)
+//   - status.configurationGeneration (the configuration generation the volume applied)
+//   - status.configurationObservedGeneration (the newest configuration generation it has seen)
 //   - ConfigurationReady condition
 //   - SatisfyEligibleNodes condition
 //   - LayoutConverged condition (feeds the aligned/stale volume aggregate)
@@ -77,6 +80,18 @@ func rvPredicates() []predicate.Predicate {
 		predicate.TypedFuncs[client.Object]{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				// Be conservative if objects are nil.
+				if e.ObjectOld == nil || e.ObjectNew == nil {
+					return true
+				}
+
+				// Generation change (spec updates): reconciliation is condition-driven and
+				// reads condition ObservedGeneration, so a bumped generation alone already
+				// changes how every condition of this volume is classified.
+				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
+					return true
+				}
+
 				oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
 				newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
 				if !okOld || !okNew || oldRV == nil || newRV == nil {
@@ -85,6 +100,11 @@ func rvPredicates() []predicate.Predicate {
 
 				// Storage class reference change.
 				if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+					return true
+				}
+
+				// Applied configuration generation change.
+				if oldRV.Status.ConfigurationGeneration != newRV.Status.ConfigurationGeneration {
 					return true
 				}
 

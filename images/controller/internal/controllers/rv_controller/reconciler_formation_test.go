@@ -1790,7 +1790,7 @@ var _ = Describe("Formation: BootstrapData", func() {
 
 	It("uses force-resync for thick multi-replica setup", func(ctx SpecContext) {
 		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 1},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
 				ConfigurationGeneration: 1,
 				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
@@ -2653,7 +2653,7 @@ var _ = Describe("Formation: Adopt", func() {
 
 	It("populates all member types including TieBreaker and Access", func(ctx SpecContext) {
 		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 1},
 			Status: v1alpha1.ReplicatedStorageClassStatus{
 				ConfigurationGeneration: 1,
 				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{

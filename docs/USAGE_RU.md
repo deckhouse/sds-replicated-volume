@@ -163,10 +163,25 @@ spec:
 
 **Требования.** Для layout `2D+1TB` кроме двух diskful-узлов нужен узел под tie-breaker: не менее 3 узлов для топологии `Ignored`, не менее 3 зон для `TransZonal` либо не менее 3 узлов в зоне тома для `Zonal`. Это те же требования, что и для `3D`, поэтому миграция r3→r2 их не повышает.
 
+**Раскатка только на новые тома.** По умолчанию (`configurationRolloutStrategy.type: RollingUpdate`) правка конфигурации применяется ко всем томам класса. Чтобы она применялась только к вновь создаваемым томам, переключите стратегию на `NewVolumesOnly`:
+
+```shell
+kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"configurationRolloutStrategy":{"type":"NewVolumesOnly","rollingUpdate":null}}}'
+```
+
+Тома, у которых конфигурация уже есть, сохраняют её. Такой том видит новую конфигурацию (класс не зависает в ожидании тома), но не применяет её, и репортит:
+
+```shell
+kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationReady")]}{.status}/{.reason}: {.message}{end}{"\n"}'
+# False/NewerConfigurationHeld: ... has a newer configuration (generation N); the volume keeps its configuration (generation M) ...
+```
+
+Такие тома попадают в счётчик `status.volumes.staleConfiguration` класса, а `ConfigurationRolledOut` становится `False/ConfigurationRolloutDisabled`. Удержание намеренное и сохраняется, даже если удерживаемая конфигурация перестала соответствовать кластеру: чтобы выпустить том из этого состояния, переключите стратегию обратно на `RollingUpdate` (все удерживаемые тома раскатаются обычным путём) либо пересоздайте том. Переключение с `RollingUpdate` на `NewVolumesOnly` ничего не откатывает — уже применённая конфигурация остаётся применённой.
+
 **Ограничения.**
 
 - Автоматического обратного пути нет: изменение `replication` в сторону большего числа реплик (r2→r3) репортится на каждом томе как `LayoutConverged=False/TransitionUnsupported` и не выполняет никаких действий — требуется ручная разборка.
-- Правка применяется сразу ко всем томам класса; постепенная или выборочная раскатка (`configurationRolloutStrategy` `maxParallel`/`NewVolumesOnly`) пока не реализована.
+- При `RollingUpdate` правка применяется сразу ко всем томам класса: ограничение параллельности раскатки (`configurationRolloutStrategy.rollingUpdate.maxParallel`) пока не реализовано.
 
 #### Удаление ресурса ReplicatedStorageClass
 

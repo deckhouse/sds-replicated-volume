@@ -410,6 +410,19 @@ const (
 
 func (t ReplicatedStorageClassConfigurationRolloutStrategyType) String() string { return string(t) }
 
+// GetType returns the effective configuration rollout strategy type.
+//
+// The field is optional: the controller fills the default on the first reconcile, so a nil
+// strategy only means "not defaulted yet". Consumers MUST treat that state as RollingUpdate,
+// which is the default this controller writes; assuming NewVolumesOnly instead would freeze
+// configuration rollout during the window before defaults are persisted.
+func (s *ReplicatedStorageClassConfigurationRolloutStrategy) GetType() ReplicatedStorageClassConfigurationRolloutStrategyType {
+	if s == nil {
+		return ConfigurationRolloutRollingUpdate
+	}
+	return s.Type
+}
+
 // ReplicatedStorageClassConfigurationRollingUpdateStrategy configures parameters for rolling update configuration rollout strategy.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassConfigurationRollingUpdateStrategy struct {
@@ -446,6 +459,19 @@ const (
 
 func (t ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType) String() string {
 	return string(t)
+}
+
+// GetType returns the effective eligible nodes conflict resolution strategy type.
+//
+// The field is optional: the controller fills the default on the first reconcile, so a nil
+// strategy only means "not defaulted yet". Consumers MUST treat that state as RollingRepair,
+// which is the default this controller writes; assuming Manual instead would report conflict
+// resolution as disabled during the window before defaults are persisted.
+func (s *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy) GetType() ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType {
+	if s == nil {
+		return EligibleNodesConflictResolutionRollingRepair
+	}
+	return s.Type
 }
 
 // ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair configures parameters for rolling repair conflict resolution strategy.
