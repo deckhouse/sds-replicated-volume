@@ -52,7 +52,7 @@ properties:
 
           If the parameter is omitted, LINSTOR nodes are placed on all nodes.
 
-          **Caution!** Changing this parameter does not redistribute existing data. If a node with data no longer matches the `nodeSelector`, data on that node becomes inaccessible.
+          > **Caution.** Changing this parameter does not redistribute existing data. If a node with data no longer matches the `nodeSelector`, data on that node becomes inaccessible.
   storageClassLabelIgnoredPrefixes:
     type: array
     default:
