@@ -103,13 +103,14 @@ moduleStatus: preview
   
    {{< alert level="warning" >}}
    Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
-   
+
    Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
-   
+
    Если требуется убрать ресурсы модуля с узла не удаляя сам узел из кластера, то необходимо:
-   
+
    1. Вручную на любом из master-узлов запустить [скрипт эвакуации данных](./faq.html#%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%80%D0%B5%D1%81%D1%83%D1%80%D1%81%D0%BE%D0%B2-%D1%81-%D1%83%D0%B7%D0%BB%D0%B0-%D0%B1%D0%B5%D0%B7-%D1%83%D0%B4%D0%B0%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-%D1%81%D0%B0%D0%BC%D0%BE%D0%B3%D0%BE-%D1%83%D0%B7%D0%BB%D0%B0) `/opt/deckhouse/sbin/evict.sh` с параметром `--delete-resources-only`.
    1. После эвакуации даных удалить с узла лейблы и удалить ноду из LINSTOR:
+
       ```shell
       export NODE_NAME=<node-name>
       
@@ -119,6 +120,7 @@ moduleStatus: preview
       
       kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
       ```
+
    {{< /alert >}}
   
 1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
