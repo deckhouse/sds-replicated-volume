@@ -12,7 +12,7 @@ To create a Storage Pool, configure [LVMVolumeGroup](/modules/sds-node-configura
 
 Supported access modes: `RWO`; `RWX` — only in DVP. Data synchronization during volume replication runs in synchronous mode only; asynchronous mode is not supported.
 
-The module supports the `LVM` and `LVMThin` modes. Learn more about the differences [in the FAQ](./faq.html#what-is-difference-between-lvm-and-lvmthin).
+The module supports the `LVM` and `LVMThin` modes. Learn more about the differences [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
 
 After you enable the module, create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
