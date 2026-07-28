@@ -8,148 +8,138 @@ description: "Использование и примеры работы sds-repl
 Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
 {{< /alert >}}
 
-После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse создайте `ReplicatedStoragePool` и `ReplicatedStorageClass` по инструкции ниже.
 
 ## Конфигурация модуля
 
-Конфигурацию выполняет контроллер `sds-replicated-volume-controller` с использованием пользовательских ресурсов [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и [ReplicatedStorageClass](./cr.html#replicatedstorageclass). Для создания Storage Pool требуется, чтобы на узлах кластера были заранее настроены [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) и LVM Thin Pool. Настройку LVM обеспечивает модуль [`sds-node-configurator`](/modules/sds-node-configurator/).
+Конфигурацию выполняет контроллер `sds-replicated-volume-controller` с использованием пользовательских ресурсов [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и [ReplicatedStorageClass](./cr.html#replicatedstorageclass). Для создания Storage Pool заранее настройте на узлах кластера [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) и LVM Thin Pool. Настройку LVM обеспечивает модуль [`sds-node-configurator`](/modules/sds-node-configurator/).
 
 ### Настройка LVM
 
-Примеры конфигурации можно найти в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
+Примеры конфигурации можно найти в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html). В результате настройки в кластере появятся ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), необходимые для дальнейшей конфигурации.
 
 ### Работа с ресурсами ReplicatedStoragePool
 
 #### Создание ресурса ReplicatedStoragePool
 
-Чтобы создать Storage Pool, выполните следующие шаги:
+1. Создайте ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполните поле [`spec`](./cr.html#replicatedstoragepool-v1alpha1-spec), указав тип пула и используемые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
 
-- Для создания `Storage Pool` пользователь создаёт ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
+   Пример ресурса для классических LVM-томов (Thick):
 
-Пример ресурса для классических LVM-томов (Thick):
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+     - name: lvg-1
+     - name: lvg-2
+   ```
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data
-spec:
-  type: LVM
-  lvmVolumeGroups:
-  - name: lvg-1
-  - name: lvg-2
-```
+   Пример ресурса для Thin-томов LVM:
 
-Пример ресурса для Thin-томов LVM:
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: thin-data
+   spec:
+     type: LVMThin
+     lvmVolumeGroups:
+       - name: lvg-3
+         thinPoolName: thin-pool
+       - name: lvg-4
+         thinPoolName: thin-pool
+   ```
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: thin-data
-spec:
-  type: LVMThin
-  lvmVolumeGroups:
-    - name: lvg-3
-      thinPoolName: thin-pool
-    - name: lvg-4
-      thinPoolName: thin-pool
-```
+1. Дождитесь валидации конфигурации контроллером перед работой с бэкендом. При ошибке проверьте причину в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status).
 
-Перед работой с бэкендом контроллер провалидирует предоставленную ему конфигурацию и в случае ошибки предоставит информацию о причинах неудачи.
+   Для всех ресурсов [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), указанных в [`spec`](./cr.html#replicatedstoragepool-v1alpha1-spec) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool), должны соблюдаться следующие правила:
 
-Для всех ресурсов LVMVolumeGroup, указанных в `spec` ресурса ReplicatedStoragePool должны быть соблюдены следующие правила:
+   - Они должны быть на разных узлах. Не указывайте несколько ресурсов `LVMVolumeGroup`, расположенных на одном и том же узле.
+   - Все узлы должны иметь тип, отличный от `CloudEphemeral` ([«Типы узлов»](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2)).
 
-- Они должны быть на разных узлах. Запрещено указывать несколько ресурсов LVMVolumeGroup, которые расположены на одном и том же узле.
-- Все узлы должны иметь тип отличный от `CloudEphemeral` ([«Типы узлов»](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2)).
+1. Проверьте ход и результаты работы контроллера в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) созданного ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
-Информация о ходе и результатах работы контроллера доступна в поле `status` созданного ресурса `ReplicatedStoragePool`.
-
-Затем `sds-replicated-volume-controller` обработает заданный пользователем ресурс `ReplicatedStoragePool` и создаст соответствующий `Storage Pool` в бэкенде. Имя создаваемого `Storage Pool` будет совпадать с именем созданного ресурса `ReplicatedStoragePool`. `Storage Pool` будет создан на узлах, указанных в ресурсах LVMVolumeGroup.
+Контроллер `sds-replicated-volume-controller` обрабатывает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и создаёт соответствующий Storage Pool в бэкенде. Имя создаваемого Storage Pool совпадает с именем ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool). Storage Pool создаётся на узлах, указанных в ресурсах [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
 
 #### Обновление ресурса ReplicatedStoragePool
 
-В список `spec.lvmVolumeGroups` можно добавлять новые LVMVolumeGroup (фактически — добавлять новые узлы в Storage Pool).
+1. Добавьте новые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) в список [`spec.lvmVolumeGroups`](./cr.html#replicatedstoragepool-v1alpha1-spec-lvmvolumegroups) (фактически — добавьте новые узлы в Storage Pool).
 
-После внесения изменений `sds-replicated-volume-controller` провалидирует новую конфигурацию и при валидных данных выполнит необходимые операции по обновлению `Storage Pool` в бэкенде. Результаты операции также отобразятся в поле `status` ресурса `ReplicatedStoragePool`.
+1. Дождитесь валидации новой конфигурации контроллером `sds-replicated-volume-controller`. При валидных данных контроллер обновит Storage Pool в бэкенде.
 
-{{< alert level="warning" >}}
-Поле `spec.type` ресурса `ReplicatedStoragePool` **неизменяемое**.
-Контроллер не реагирует на внесенные пользователем изменения в поле `status` ресурса.
-{{< /alert >}}
+1. Проверьте результаты операции в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
+
+**Внимание.** Поле [`spec.type`](./cr.html#replicatedstoragepool-v1alpha1-spec-type) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool) **неизменяемое**. Контроллер не реагирует на изменения в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) ресурса.
 
 #### Удаление ресурса ReplicatedStoragePool
 
-В настоящий момент `sds-replicated-volume-controller` никак не обрабатывает удаление ресурсов ReplicatedStoragePool.
+1. При необходимости удалите ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
-> Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде.
-Если пользователь воссоздаст удалённый ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений.
-
-В поле `status.phase` созданного ресурса будет отображено значение `Created`.
+**Внимание.** В настоящий момент `sds-replicated-volume-controller` никак не обрабатывает удаление ресурсов [ReplicatedStoragePool](./cr.html#replicatedstoragepool). Удаление ресурса никак не затрагивает созданные по нему Storage Pool в бэкенде. Если воссоздать удалённый ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие Storage Pool уже созданы, и оставит их без изменений. В поле [`status.phase`](./cr.html#replicatedstoragepool-v1alpha1-status-phase) созданного ресурса будет отображено значение `Created`.
 
 ### Работа с ресурсами ReplicatedStorageClass
 
 #### Создание ресурса ReplicatedStorageClass
 
-Для создания StorageClass в Kubernetes пользователь создаёт ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) и заполняет поле `spec`, указывая необходимые параметры. (Ручное создание StorageClass для CSI-драйвера replicated.csi.storage.deckhouse.io запрещено).
+1. Создайте ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) и заполните поле [`spec`](./cr.html#replicatedstorageclass-v1alpha1-spec), указав необходимые параметры. Не создавайте StorageClass для CSI-драйвера `replicated.csi.storage.deckhouse.io` вручную.
 
-Пример ресурса для создания StorageClass c использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
+   Пример ресурса для создания StorageClass с использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: haclass
-spec:
-  storagePool: storage-pool-name
-  volumeAccess: Local
-  reclaimPolicy: Delete
-  topology: TransZonal
-  zones:
-  - zone-a
-  - zone-b
-  - zone-c
-```
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: haclass
+   spec:
+     storagePool: storage-pool-name
+     volumeAccess: Local
+     reclaimPolicy: Delete
+     topology: TransZonal
+     zones:
+     - zone-a
+     - zone-b
+     - zone-c
+   ```
 
-Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
+   Параметр [`replication`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication) не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
 
-Пример ресурса для создания StorageClass c разрешёнными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
+   Пример ресурса для создания StorageClass с разрешёнными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: testclass
-spec:
-  replication: None
-  storagePool: storage-pool-name
-  reclaimPolicy: Delete
-  topology: Ignored
-```
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: testclass
+   spec:
+     replication: None
+     storagePool: storage-pool-name
+     reclaimPolicy: Delete
+     topology: Ignored
+   ```
 
-Больше примеров с различными сценариями использования и схемами описаны [в документации](./layouts.html).
+   Больше примеров с различными сценариями использования и схемами описаны в [документации](./layouts.html).
 
-> Перед процессом создания StorageClass запустится процесс валидации предоставленной конфигурации.
-> В случае обнаружения ошибок StorageClass создан не будет, а в поле `status` ресурса ReplicatedStorageClass отобразится информация об ошибке.
+1. Дождитесь валидации конфигурации перед созданием StorageClass. При обнаружении ошибок StorageClass создан не будет; проверьте информацию об ошибке в поле [`status`](./cr.html#replicatedstorageclass-v1alpha1-status) ресурса [ReplicatedStorageClass](./cr.html#replicatedstorageclass).
 
-Результатом обработки ресурса ReplicatedStorageClass станет создание необходимого StorageClass в Kubernetes.
+1. Убедитесь, что `sds-replicated-volume-controller` создал соответствующий StorageClass в Kubernetes и что поле [`status`](./cr.html#replicatedstorageclass-v1alpha1-status) отражает результаты операций.
 
-{{< alert level="warning" >}}
-Все поля в `spec` ресурса ReplicatedStorageClass являются **неизменяемыми**.
-{{< /alert >}}
-
-Поле `status` будет обновляться контроллером `sds-replicated-volume-controller` для отображения информации о результатах проводимых операций.
+**Внимание.** Все поля в [`spec`](./cr.html#replicatedstorageclass-v1alpha1-spec) ресурса [ReplicatedStorageClass](./cr.html#replicatedstorageclass) являются **неизменяемыми**.
 
 #### Обновление ресурса ReplicatedStorageClass
 
-Поменять параметры StorageClass, созданного через ресурс ReplicatedStorageClass, на данный момент **невозможно**.
+Поменять параметры StorageClass, созданного через ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass), на данный момент **невозможно**.
 
 #### Удаление ресурса ReplicatedStorageClass
 
-Пользователь может удалить StorageClass в Kubernetes, удалив соответствующий ресурс ReplicatedStorageClass.
-`sds-replicated-volume-controller` отреагирует на удаление ресурса и выполнит все необходимые операции для корректного удаления дочернего StorageClass.
+1. Удалите ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass), чтобы удалить связанный StorageClass в Kubernetes.
 
-> `sds-replicated-volume-controller` выполнит удаление дочернего StorageClass только в случае, если в поле `status.phase` ресурса ReplicatedStorageClass будет указано значение `Created`. В иных случаях будет удалён только ресурс ReplicatedStorageClass, а дочерний StorageClass затронут не будет.
+1. Дождитесь, пока `sds-replicated-volume-controller` обнаружит удаление и выполнит все необходимые операции для корректного удаления дочернего StorageClass.
+
+**Внимание.** Контроллер `sds-replicated-volume-controller` удаляет дочерний StorageClass только если в поле [`status.phase`](./cr.html#replicatedstorageclass-v1alpha1-status-phase) ресурса [ReplicatedStorageClass](./cr.html#replicatedstorageclass) указано значение `Created`. В иных случаях будет удалён только ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass), а дочерний StorageClass затронут не будет.
 
 ## Дополнительные возможности для приложений
 
@@ -157,6 +147,6 @@ spec:
 
 В случае гиперконвергентной инфраструктуры может возникнуть задача по приоритетному размещению пода приложения на узлах, где необходимые ему данные хранилища расположены локально. Это позволит получить максимальную производительность хранилища.
 
-Для решения этой задачи модуль предоставляет специальный планировщик, который учитывает размещение данных в хранилище и старается размещать под в первую очередь на тех узлах, где данные доступны локально. Данный планировщик назначается автоматически для любого пода, использующего тома sds-replicated-volume.
+Для решения этой задачи модуль предоставляет специальный планировщик, который учитывает размещение данных в хранилище и старается размещать под в первую очередь на тех узлах, где данные доступны локально. Данный планировщик назначается автоматически для любого пода, использующего тома `sds-replicated-volume`.
 
-Data locality настраивается параметром `volumeAccess` при создании ресурса ReplicatedStorageClass.
+Data locality настраивается параметром [`volumeAccess`](./cr.html#replicatedstorageclass-v1alpha1-spec-volumeaccess) при создании ресурса [ReplicatedStorageClass](./cr.html#replicatedstorageclass).
