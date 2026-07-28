@@ -3,6 +3,22 @@
 useDefault = true
 
 [allowlist]
+regexTarget = "line"
 paths = [
   '''(?:^|/)images/.*\.patch$''',
+]
+regexes = [
+  # Go module checksums are public. The centralized gitleaks.base.toml already allowlists
+  # them, but the CI job drops that config whenever a module ships its own [extend] block,
+  # so the rule has to be repeated here for go.work.sum to pass the full-history scan.
+  '''h1:[A-Za-z0-9+/=]{12,}''',
+]
+stopwords = [
+  # The module's own namespace, read as an API key by the generic entropy rule
+  # (SecretNamespace in the rv and rvr reconcile configs).
+  "d8-sds-replicated-volume",
+  # Mock tokens in the JSON fixtures of the vendored LINSTOR CSI client tests,
+  # images/linstor-csi/src/pkg/client/linstor_test.go.
+  "6uwedER7tGEifV9WzGMf",
+  "0iTx8wUc7WfRFZ9f5clx",
 ]
