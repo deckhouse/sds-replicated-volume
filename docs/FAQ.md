@@ -161,7 +161,9 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
 
 Use the [`drbdPortRange`](./configuration.html#parameters-drbdportrange) setting. By default, DRBD resources use TCP ports 7000–7999. Override these values with [`minPort`](./configuration.html#parameters-drbdportrange-minport) and [`maxPort`](./configuration.html#parameters-drbdportrange-maxport).
 
-**Caution.** After changing the [`drbdPortRange`](./configuration.html#parameters-drbdportrange) parameters (`minPort` / `maxPort`), restart the LINSTOR controller — the new settings take effect only after a restart. Existing DRBD resources continue to use their previously assigned ports.
+{{< alert level="warning" >}}
+After changing the [`drbdPortRange`](./configuration.html#parameters-drbdportrange) parameters (`minPort` / `maxPort`), restart the LINSTOR controller — the new settings take effect only after a restart. Existing DRBD resources continue to use their previously assigned ports.
+{{< /alert >}}
 
 ## How to properly reboot a node with DRBD resources?
 

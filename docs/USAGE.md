@@ -73,13 +73,18 @@ The `sds-replicated-volume-controller` processes the [ReplicatedStoragePool](./c
 
 1. Check the results of the operation in the [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) field of the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource.
 
-**Caution.** The [`spec.type`](./cr.html#replicatedstoragepool-v1alpha1-spec-type) field of the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource is **immutable**. The controller does not respond to changes made in the [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) field of the resource.
+{{< alert level="warning" >}}
+The `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
+The controller does not respond to changes made by the user in the `status` field of the resource.
+{{< /alert >}}
 
 #### Deleting the ReplicatedStoragePool resource
 
-1. Delete the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource if needed.
+Delete the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource if needed.
 
-**Caution.** Currently, the `sds-replicated-volume-controller` does not handle the deletion of [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resources. Deleting a resource does not affect the Storage Pool created for it in the backend. If you recreate the deleted resource with the same name and configuration, the controller detects that the corresponding Storage Pools are already created and leaves them unchanged. The [`status.phase`](./cr.html#replicatedstoragepool-v1alpha1-status-phase) field of the created resource is set to `Created`.
+{{< alert level="warning" >}}
+Currently, the `sds-replicated-volume-controller` does not handle the deletion of [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resources. Deleting a resource does not affect the Storage Pool created for it in the backend. If you recreate the deleted resource with the same name and configuration, the controller detects that the corresponding Storage Pools are already created and leaves them unchanged. The [`status.phase`](./cr.html#replicatedstoragepool-v1alpha1-status-phase) field of the created resource is set to `Created`.
+{{< /alert >}}
 
 ### Using ReplicatedStorageClass resources
 
