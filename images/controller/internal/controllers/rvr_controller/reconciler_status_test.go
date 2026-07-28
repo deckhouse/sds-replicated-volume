@@ -2263,6 +2263,30 @@ var _ = Describe("ensureStatusQuorum", func() {
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
+
+	It("returns no change when already in sync and quorum thresholds are set", func() {
+		// Thresholds make the summary carry *int fields; each call allocates
+		// them anew, so only a by-value comparison keeps the second call a no-op.
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Quorum:                  bytePtr(2),
+					QuorumMinimumRedundancy: bytePtr(1),
+				},
+			},
+		}
+
+		// First call
+		outcome1 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

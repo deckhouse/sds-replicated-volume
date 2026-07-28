@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -443,8 +444,10 @@ func ensureStatusQuorum(
 		}
 	}
 
-	// Update QuorumSummary if it has changed.
-	if rvr.Status.QuorumSummary == nil || *rvr.Status.QuorumSummary != *summary {
+	// Update QuorumSummary if it has changed. Compared semantically: the struct
+	// carries pointer fields, and summary is rebuilt with fresh allocations on
+	// every call, so a plain struct comparison would always report a change.
+	if !equality.Semantic.DeepEqual(rvr.Status.QuorumSummary, summary) {
 		rvr.Status.QuorumSummary = summary
 		changed = true
 	}

@@ -3836,6 +3836,10 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 		ctx    context.Context
 		cl     client.Client
 		rec    *Reconciler
+
+		// rvrStatusPatches counts status-subresource patches issued for the RVR,
+		// including content-free ones the settle loop cannot see.
+		rvrStatusPatches int
 	)
 
 	// reconcileOnce runs a single reconciliation and returns the resulting RVR.
@@ -4011,11 +4015,20 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 			})
 		}
 
+		rvrStatusPatches = 0
 		cl = withPodIndex(testhelpers.WithLLVByRVROwnerIndex(
 			fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rv, rsp, rvr, drbdr, agentPod).
-				WithStatusSubresource(rvr, rv, rsp, drbdr),
+				WithStatusSubresource(rvr, rv, rsp, drbdr).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && subResourceName == "status" {
+							rvrStatusPatches++
+						}
+						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+					},
+				}),
 		)).Build()
 		rec = NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
 	})
@@ -4025,6 +4038,18 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 
 		Expect(settled.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
 		Expect(settled.Status.InitialQuorumReachedAt).NotTo(BeNil())
+	})
+
+	It("does not patch the status of a settled member at all", func() {
+		// The settle loop only proves the content stops changing; this guards the
+		// write level too — an ensure that mis-reports "changed" on identical data
+		// (e.g. a by-pointer comparison) produces a content-free patch every
+		// reconcile, invisible to content checks but a constant apiserver load.
+		settle()
+
+		before := rvrStatusPatches
+		reconcileOnce()
+		Expect(rvrStatusPatches).To(Equal(before))
 	})
 
 	It("records the latch for an old healthy member without other status churn", func() {
