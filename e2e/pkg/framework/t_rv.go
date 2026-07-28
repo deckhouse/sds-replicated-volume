@@ -406,6 +406,14 @@ func (t *TestRV) routeLLVEvent(_ string, eventType watch.EventType, llv *snc.LVM
 // the RV (QuorumCorrect) and all current+future RVRs (NeverLoseQuorum,
 // NeverCritical, NeverIOSuspended). Use WithoutSafetyInvariants to
 // temporarily disable them during disruptive operations.
+//
+// The checks differ in when they start applying:
+//   - QuorumCorrect, NeverCritical, NeverIOSuspended apply unconditionally, from the
+//     first snapshot of the object. A replica that is still joining the datamesh is
+//     reported as Progressing, not Critical, so its bring-up does not trip them.
+//   - NeverLoseQuorum is armed after the replica has been Healthy once: status.quorum
+//     is legitimately false while a replica joins, and only becomes an invariant once
+//     the replica has held quorum.
 func (t *TestRV) ActivateSafetyInvariants() {
 	t.swQuorumCorrect = tkmatch.NewSwitch(match.RV.QuorumCorrect())
 	t.Always(t.swQuorumCorrect)

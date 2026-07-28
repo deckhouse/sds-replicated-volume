@@ -55,9 +55,9 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				trv.Await(ctx, match.RV.FormationComplete())
 				// Assert composition WITHOUT an intervening Await(Members): a regression
 				// where formation finishes as 2D and the TB is doctored in later would
-				// make this fail (layout still "2D" at formation-complete) and would also
-				// trip the invariants above.
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+				// make this fail and would also trip the invariants above. The layout
+				// string is NOT asserted here — the controller publishes no layout while
+				// formation runs, so it is only readable on the converged snapshot below.
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
 
@@ -65,6 +65,7 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				trv.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				trva := trv.Attach(ctx, trv.OccupiedNodes()[0])
 				trva.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
@@ -94,14 +95,11 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				deleted.Await(ctx, tkmatch.Deleted())
 
 				By("observing convergence recreate the tie-breaker (P2)")
-				// LayoutConverged must first go through Converging (TB missing, P2 pending)
-				// on a fresh snapshot, then back to Converged once the new TB joins.
-				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
-				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+				// One atomic match instead of Converging-then-Converged: the snapshot has
+				// to report Converged with a tie-breaker that is not the deleted one, so
+				// the pre-deletion state cannot satisfy it and the transient Converging
+				// report does not have to be caught (see healedTieBreakerOtherThan).
+				trv.Await(ctx, healedTieBreakerOtherThan(deletedName))
 				trv.Await(ctx, match.RV.Members(3))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))

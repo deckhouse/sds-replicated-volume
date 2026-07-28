@@ -93,8 +93,18 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
 
 				By("verifying the volume stays healthy and serving I/O despite the mismatch")
-				trv.Await(ctx, tkmatch.ConditionStatus(
-					v1alpha1.ReplicatedVolumeCondIOReadyType, "True"))
+				// Readiness is reported per attachment and per replica, not on the RV.
+				// RVA Ready (reason Ready) means Attached=True and ReplicaReady=True and
+				// is the condition the CSI driver gates publishing on. ReplicaReady is a
+				// copy of the RVR Ready condition, so the replica assertion below is not
+				// extra coverage of the replica — it checks that the copy still tracks
+				// its source.
+				trva.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
+					v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady))
+				rvrOnNode(trv, diskfulNodes[0]).Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+					v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 				// Verified device writes inside the mismatch window, not only
 				// the condition: the sequence has to advance while the volume
 				// reports TransitionUnsupported.

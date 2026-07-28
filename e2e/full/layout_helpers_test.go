@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -218,6 +219,38 @@ func migratedToR2() types.GomegaMatcher {
 func noActiveAddReplica() types.GomegaMatcher {
 	return Not(match.RV.HasActiveTransition(
 		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica)))
+}
+
+// healedTieBreakerOtherThan matches an RV that reports LayoutConverged=True/Converged
+// while its single tie-breaker member is NOT the named one. The name is what makes the
+// match provably fresh: the pre-deletion snapshot carries the replaced tie-breaker and
+// can never satisfy it. That is why the spec does not wait for the transient Converging
+// report — convergence can publish it before an Await on the RV subscribes (the P2 heal
+// starts as soon as the replica is marked terminating), and a spec that demands the
+// transient hangs until its own timeout even though the heal succeeded.
+func healedTieBreakerOtherThan(replacedName string) types.GomegaMatcher {
+	return match.RV.Custom("converged with a tie-breaker other than "+replacedName,
+		func(rv *v1alpha1.ReplicatedVolume) bool {
+			cond := meta.FindStatusCondition(rv.Status.Conditions,
+				v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+			if cond == nil ||
+				cond.Status != metav1.ConditionTrue ||
+				cond.Reason != v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged {
+				return false
+			}
+
+			tieBreakers := 0
+			for _, m := range rv.Status.Datamesh.Members {
+				if m.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+					continue
+				}
+				if m.Name == replacedName {
+					return false
+				}
+				tieBreakers++
+			}
+			return tieBreakers == 1
+		})
 }
 
 // noActiveChangeReplicaType matches when the RV has NO active ChangeReplicaType

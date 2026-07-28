@@ -99,11 +99,18 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				// Verified device writes during the outage, not just conditions: the
 				// sequence has to advance while the victim node is down.
 				ioDuring := ioProgressed(ctx, io, ioBefore)
-				trv.Await(ctx, tkmatch.ConditionStatus(
-					v1alpha1.ReplicatedVolumeCondIOReadyType, "True"))
+				// Readiness is reported per attachment and per replica, not on the RV.
+				// RVA Ready (reason Ready) is strictly stronger than Attached=True — it
+				// also requires ReplicaReady=True — so the Attached assertion is covered.
+				// ReplicaReady is a copy of the RVR Ready condition; the replica
+				// assertion below checks that the copy still tracks its source across
+				// the outage.
 				trva.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
-					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+					v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
+					v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady))
+				rvrOnNode(trv, survivor).Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+					v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 
 				By("the rebooted replica rejoins and catches up after the node returns")
 				reboot.AwaitCompleted(ctx)

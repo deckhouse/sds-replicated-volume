@@ -73,8 +73,9 @@ tie-breaker can be placed.
 When: a volume is created.
 
 Then:
-- By `FormationComplete` the composition is already 2D+1TB (2 Diskful + 1
-  TieBreaker).
+- By `FormationComplete` the member composition is already 2 Diskful + 1
+  TieBreaker. The `status.layout` string is read later, on the converged
+  snapshot: no layout is published while formation runs.
 - ⚡ Neither `AddReplica` nor `ChangeReplicaType` transitions appear — the
   tie-breaker is part of the formation membership, not a post-formation doctoring
   step (so DMTE and bitmap-bug B-1 are never entered).
@@ -96,7 +97,9 @@ When: the tie-breaker RVR is deleted (`kubectl delete rvr`).
 
 Then:
 - Convergence recreates a tie-breaker via P2; the composition returns to 2D+1TB
-  (1 TieBreaker member, 3 members total).
+  (1 TieBreaker member, 3 members total), and the tie-breaker is a different one
+  than the deleted replica — which is also what proves the observation is not the
+  pre-deletion state.
 - `LayoutConverged` returns to `True/Converged`; data and I/O are untouched.
 
 ---
@@ -126,9 +129,11 @@ Then:
   arithmetic `have 2D+1TB, want 3D`.
 - The replica composition is untouched: no new RVR, still 2D+1TB (2 Diskful + 1
   TieBreaker), RVR count unchanged.
-- ⚡ The volume keeps serving on the data path, not only in its conditions:
-  `IOReady=True` and verified device writes advance while the mismatch is
-  reported, without a stall or an early exit.
+- ⚡ The volume keeps serving on the data path, not only in its conditions: the
+  attachment stays `Ready=True/Ready` (the condition the CSI driver gates
+  publishing on), the attached diskful replica stays `Ready=True/Ready`, and
+  verified device writes advance while the mismatch is reported, without a stall
+  or an early exit.
 - The RSC aggregate is honestly not rolled out (`ConfigurationRolledOut=False`,
   `status.volumes.aligned == 0`).
 - Reverting `replication` to `Availability` returns `LayoutConverged` to
@@ -145,7 +150,7 @@ E2E-5 · case 5 · Describe: `Layout: r3->r2 migration by editing rsc.spec.repli
 
 Covers: decomposition T-2.0.3 ("mass migration" part); verifies blocks 1+2.
 
-Given: an r3 storage class with N volumes (N=3), I/O on a subset.
+Given: an r3 storage class with N volumes (N=3), one volume attached.
 
 When: `rsc.spec.replication` is edited to `Availability` once.
 
@@ -176,8 +181,9 @@ diskful node (not the one to be rebooted).
 When: the other diskful node is rebooted.
 
 Then:
-- I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker): the RV stays
-  `IOReady=True` and the attachment stays `Attached`.
+- I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker): the
+  attachment stays `Ready=True/Ready` (which subsumes `Attached=True`) and the
+  surviving diskful replica stays `Ready=True/Ready`.
 - ⚡ Verified device writes keep advancing while the node is down and after it
   returns; the writer tolerates a longer heartbeat gap (90s) around the outage but
   must never stall or exit.
