@@ -13,6 +13,26 @@ cpu: 50m
 memory: 25Mi
 {{- end }}
 
+{{- define "drbd_current_version_regex" -}}
+^9\.[0-9]+\.[0-9]+([-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$
+{{- end }}
+
+{{- define "drbd_desired_version" -}}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane -}}
+{{ .Values.sdsReplicatedVolume.internal.drbdVersion }}
+{{- else -}}
+{{ .Values.sdsReplicatedVolume.internal.drbdLegacyVersion }}
+{{- end -}}
+{{- end }}
+
+{{- define "drbd_package_name" -}}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane -}}
+drbd
+{{- else -}}
+drbdLegacy
+{{- end -}}
+{{- end }}
+
 {{- define "linstor_resources_cleaner" }}
 cpu: 50m
 memory: 150Mi
@@ -260,7 +280,7 @@ spec:
         {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
-      - image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
+      - image: {{ include "helm_lib_module_image" (list . "drbdReactorLegacy") }}
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 3
