@@ -458,6 +458,47 @@ func ensureStatusQuorum(
 	return ef.Ok().ReportChangedIf(changed)
 }
 
+// ensureStatusInitialQuorumReachedAt maintains status.initialQuorumReachedAt — the
+// controller-owned latch recording the first time this controller saw the replica hold
+// quorum as a datamesh member.
+//
+// The latch is what lets the phase classifier tell a member that has not reached quorum yet
+// (still joining, so it cannot have frozen any I/O) apart from a member that lost quorum; the
+// two are indistinguishable on a single snapshot. See memberEverHadQuorum.
+//
+// It is scoped to one membership epoch: leaving the datamesh (datameshRevision back to 0)
+// clears it, so a replica that re-joins (e.g. a retype cycle) goes through joining again.
+//
+// Ordering: must run after ensureStatusQuorum, which mirrors drbdr.Status.Quorum into
+// rvr.Status.Quorum — the value this helper latches on.
+//
+// Exception: uses metav1.Now(). This is controller-owned state (persisted decision timestamp),
+// acceptable here because the value is set once per membership epoch and stabilized across
+// subsequent reconciliations.
+func ensureStatusInitialQuorumReachedAt(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-initial-quorum-reached-at")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	switch {
+	case rvr.Status.DatameshRevision == 0:
+		// Not a datamesh member — no membership epoch to remember.
+		if rvr.Status.InitialQuorumReachedAt != nil {
+			rvr.Status.InitialQuorumReachedAt = nil
+			changed = true
+		}
+	case rvr.Status.InitialQuorumReachedAt == nil && ptr.Deref(rvr.Status.Quorum, false):
+		rvr.Status.InitialQuorumReachedAt = ptr.To(metav1.Now())
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
 // ensureStatusDatameshRequestAndConfiguredCond determines what datamesh transition is pending
 // (join, leave, role change, or backing volume change) by comparing rvr.Spec to rvr.Status,
 // and updates status.datameshPending and the Configured condition accordingly.

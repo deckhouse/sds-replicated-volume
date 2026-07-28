@@ -18,6 +18,7 @@ package rvrcontroller
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -2261,6 +2262,106 @@ var _ = Describe("ensureStatusQuorum", func() {
 		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusInitialQuorumReachedAt tests
+//
+
+var _ = Describe("ensureStatusInitialQuorumReachedAt", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	// first is a fixed timestamp for a latch that was already recorded.
+	first := metav1.NewTime(time.Unix(1700000000, 0))
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("sets the latch when a member is first seen with quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(true)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.InitialQuorumReachedAt).NotTo(BeNil())
+	})
+
+	It("does not overwrite the latch on subsequent observations", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt.Time).To(Equal(first.Time))
+	})
+
+	It("keeps the latch when a member loses quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(false)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt.Time).To(Equal(first.Time))
+	})
+
+	It("does not set the latch for a member without quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(false)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("does not set the latch for a member with unknown quorum", func() {
+		rvr.Status.DatameshRevision = 5
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("does not set the latch for a non-member reporting quorum", func() {
+		// datameshRevision == 0: not a member, so there is no membership epoch to latch.
+		rvr.Status.Quorum = boolPtr(true)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("clears the latch when the replica leaves the datamesh", func() {
+		rvr.Status.DatameshRevision = 0
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
 	})
 })
 

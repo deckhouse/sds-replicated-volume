@@ -158,6 +158,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ensureStatusPeers(rf.Ctx(), rvr, drbdr),
 			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
 			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
+			// Latches the observed quorum; must follow ensureStatusQuorum.
+			ensureStatusInitialQuorumReachedAt(rf.Ctx(), rvr),
 
 			// Ensure conditions.
 			ensureConditionAttached(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
