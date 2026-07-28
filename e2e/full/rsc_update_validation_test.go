@@ -27,6 +27,7 @@ import (
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
 	"github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/match"
 	"github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/require"
+	tkmatch "github.com/deckhouse/sds-replicated-volume/lib/go/testkit/match"
 )
 
 // E2E-7 — the conservative r3->r2 update matrix (block 4): incompatible spec
@@ -43,6 +44,9 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				trv.Create(ctx)
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
+				trv.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("rejecting a storage-pool change (immutable once set)")
