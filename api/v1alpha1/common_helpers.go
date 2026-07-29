@@ -25,12 +25,11 @@ package v1alpha1
 //
 // IMPORTANT: This function assumes the name is already validated by kubebuilder markers.
 // Only use with validated names (ending with -0 to -31).
-func idFromName(name string) uint8 {
+
+func IDFromName(name string) uint8 {
 	l := len(name)
 	last := name[l-1] - '0'
 	prev := name[l-2] - '0'
-	// isDigit: 1 if prev ∈ [0,9], else 0
-	// Trick: prev + 246 overflows 8 bits (>=256) when prev >= 10
 	isDigit := uint8(1) ^ uint8((uint16(prev)+246)>>8)
 	return last + prev*10*isDigit
 }
