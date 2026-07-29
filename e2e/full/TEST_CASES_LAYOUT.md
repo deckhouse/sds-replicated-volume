@@ -223,12 +223,19 @@ Covers: decomposition T-2.0.1 (e2e negative) and the RSC part of US-2.3; verifie
 Given: an r2 storage class with an existing 2D+1TB volume.
 
 When / Then:
-- Changing `spec.storage` is rejected: error contains
-  `spec.storage is immutable once set` (webhook guard).
+- Changing `spec.storage.type` (LVMThin→LVM with thinPoolName still set) is
+  rejected by the CEL consistency guard: error contains `thinPoolName must not
+  be specified when type is LVM`. CRD validation (CEL) runs before validating
+  webhooks, so this probe never reaches the webhook — which is why the
+  immutability guard gets its own probe below.
+- Changing `spec.storage` composition (an entry's thinPoolName, schema-valid
+  and consistent) is rejected by the update webhook: error contains
+  `spec.storage is immutable once set`.
 - Changing `spec.topology` is rejected: error contains
   `spec.topology is immutable` (CEL transition rule).
-- After both rejections the RSC spec is unchanged (topology `Ignored`, storage
-  type `LVMThin`) and the volume layout is untouched (2D+1TB).
+- After the rejections the RSC spec is unchanged (topology `Ignored`, storage
+  type `LVMThin`, no bogus thinPoolName) and the volume layout is untouched
+  (2D+1TB).
 - A subsequent legitimate `spec.replication` edit is accepted.
 
 ---

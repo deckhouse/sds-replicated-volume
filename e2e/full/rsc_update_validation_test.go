@@ -49,9 +49,22 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
-				By("rejecting a storage-pool change (immutable once set)")
+				By("rejecting a storage type change (answered by the CEL consistency guard)")
+				// CRD validation (CEL) runs BEFORE validating webhooks. Flipping type
+				// to LVM while the lvmVolumeGroups entries still carry thinPoolName
+				// violates the cross-field CEL rule on spec.storage, so this probe is
+				// rejected by CEL — the webhook's immutability guard never gets a say.
 				trsc.UpdateExpect(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {
 					rsc.Spec.Storage.Type = v1alpha1.ReplicatedStoragePoolTypeLVM
+				}, MatchError(ContainSubstring("thinPoolName must not be specified when type is LVM")))
+
+				By("rejecting a storage composition change (immutable once set, webhook)")
+				// A mutation that no consistency rule claims first: changing an
+				// entry's thinPoolName keeps the object schema-valid and consistent,
+				// so the rejection can only come from the update webhook's
+				// "immutable once set" guard on spec.storage.
+				trsc.UpdateExpect(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {
+					rsc.Spec.Storage.LVMVolumeGroups[0].ThinPoolName = "e2e-bogus-pool"
 				}, MatchError(ContainSubstring("spec.storage is immutable once set")))
 
 				By("rejecting a topology change (immutable)")
@@ -62,6 +75,9 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				By("verifying the RSC spec and the volume layout are untouched")
 				Expect(trsc.Object().Spec.Topology).To(Equal(v1alpha1.TopologyIgnored))
 				Expect(trsc.Object().Spec.Storage.Type).To(Equal(v1alpha1.ReplicatedStoragePoolTypeLVMThin))
+				for _, g := range trsc.Object().Spec.Storage.LVMVolumeGroups {
+					Expect(g.ThinPoolName).NotTo(Equal("e2e-bogus-pool"))
+				}
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("accepting a legitimate replication edit")
