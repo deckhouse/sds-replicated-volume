@@ -466,6 +466,21 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Done()
 	}
 
+	// A ReplicatedVolume is still being restored from this snapshot: its replicas
+	// read from the per-replica snapshots below, so tearing them down now would
+	// pull the data out from under the restore. rv-controller drops the finalizer
+	// once the target finishes forming or starts deleting, and the deletion
+	// resumes from here.
+	if obju.HasFinalizer(rvs, v1alpha1.RVSRestoreSourceFinalizer) {
+		rf.Log().Info("[reconcileDelete] deferring cleanup: snapshot is still a restore source",
+			"rvsName", rvs.Name)
+		return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+			v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
+			"Waiting for a ReplicatedVolume being restored from this snapshot to finish",
+			false,
+			rvs.Status.SourceReplicaSnapshotName)
+	}
+
 	if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
 		return releaseOutcome
 	}

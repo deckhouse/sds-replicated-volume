@@ -40,6 +40,15 @@ const CSIControllerFinalizer = "sds-replicated-volume.deckhouse.io/csi-controlle
 
 const RVSControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvs-controller"
 
+// RVSRestoreSourceFinalizer is placed on a ReplicatedVolumeSnapshot that
+// currently serves as a data source (spec.dataSource) for a ReplicatedVolume
+// being restored from it. It is the snapshot-side counterpart of
+// [RVCloneSourceFinalizer]: while restore is in progress the target volume still
+// reads from the per-replica snapshots, so the snapshot must neither disappear
+// from the API nor have its children garbage-collected. Removed once the target
+// RV finishes formation or starts deleting itself.
+const RVSRestoreSourceFinalizer = "sds-replicated-volume.deckhouse.io/rvs-restore-source"
+
 const RVRSControllerFinalizer = "sds-replicated-volume.deckhouse.io/rvrs-controller"
 
 // StorageClassFinalizer is set on Kubernetes StorageClass objects managed by

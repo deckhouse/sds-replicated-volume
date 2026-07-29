@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvs_controller/snapmesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
@@ -624,4 +625,84 @@ func strSliceEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// Deleting a snapshot while a volume is still being restored from it must not
+// tear down the per-replica snapshots the restore reads from. rv-controller owns
+// the restore-source finalizer; until it is gone the cascade stays parked.
+func TestReconcileDeleteDefersWhileRestoreSourceFinalizerPresent(t *testing.T) {
+	ensureSnapmeshRegistry()
+
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	now := metav1.Now()
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "snap-1",
+			DeletionTimestamp: &now,
+			Finalizers: []string{
+				v1alpha1.RVSControllerFinalizer,
+				v1alpha1.RVSRestoreSourceFinalizer,
+			},
+		},
+		Spec: v1alpha1.ReplicatedVolumeSnapshotSpec{ReplicatedVolumeName: "rv-1"},
+		Status: v1alpha1.ReplicatedVolumeSnapshotStatus{
+			Phase:      v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
+			ReadyToUse: true,
+		},
+	}
+	child := &v1alpha1.ReplicatedVolumeReplicaSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1-rvr-0"},
+		Spec: v1alpha1.ReplicatedVolumeReplicaSnapshotSpec{
+			ReplicatedVolumeSnapshotName: "snap-1",
+			ReplicatedVolumeReplicaName:  "rvr-0",
+			NodeName:                     "node-a",
+		},
+	}
+
+	builder := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolumeSnapshot{}).
+		WithObjects(rvs, child)
+	builder = builder.WithIndex(&v1alpha1.ReplicatedVolumeReplicaSnapshot{}, indexes.IndexFieldRVRSBySnapshotName, func(obj client.Object) []string {
+		o, ok := obj.(*v1alpha1.ReplicatedVolumeReplicaSnapshot)
+		if !ok || o.Spec.ReplicatedVolumeSnapshotName == "" {
+			return nil
+		}
+		return []string{o.Spec.ReplicatedVolumeSnapshotName}
+	})
+
+	reconciler := &Reconciler{cl: builder.Build(), scheme: scheme}
+
+	if outcome := reconciler.reconcileDelete(context.Background(), rvs); outcome.Error() != nil {
+		t.Fatalf("reconcileDelete() error = %v", outcome.Error())
+	}
+
+	// The child snapshot must survive and keep no deletionTimestamp.
+	got := &v1alpha1.ReplicatedVolumeReplicaSnapshot{}
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: child.Name}, got); err != nil {
+		t.Fatalf("child RVRS was removed while the restore was still running: %v", err)
+	}
+	if got.DeletionTimestamp != nil {
+		t.Error("child RVRS marked for deletion while the restore was still running")
+	}
+
+	// Our own finalizer must stay, otherwise the RVS would vanish as soon as
+	// rv-controller drops the restore-source one.
+	gotRVS := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1"}, gotRVS); err != nil {
+		t.Fatalf("get RVS: %v", err)
+	}
+	if !obju.HasFinalizer(gotRVS, v1alpha1.RVSControllerFinalizer) {
+		t.Error("controller finalizer released while deletion was deferred")
+	}
+	if gotRVS.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting {
+		t.Errorf("phase = %q, want %q", gotRVS.Status.Phase, v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting)
+	}
+	if !contains(gotRVS.Status.Message, "restored") {
+		t.Errorf("message does not explain the wait: %q", gotRVS.Status.Message)
+	}
 }
