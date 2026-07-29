@@ -726,9 +726,9 @@ type rvViewCondition struct {
 }
 
 type rvViewConditions struct {
-	satisfyEligibleNodes rvViewCondition
-	configurationReady   rvViewCondition
-	layoutConverged      rvViewCondition
+	satisfyEligibleNodes      rvViewCondition
+	configurationReady        rvViewCondition
+	membershipLayoutConverged rvViewCondition
 }
 
 // hasNoVerdict reports that the condition says nothing about the current state of the volume:
@@ -758,9 +758,9 @@ func newRVView(unsafeRV *v1alpha1.ReplicatedVolume) rvView {
 		configurationGeneration:         unsafeRV.Status.ConfigurationGeneration,
 		configurationObservedGeneration: unsafeRV.Status.ConfigurationObservedGeneration,
 		conditions: rvViewConditions{
-			satisfyEligibleNodes: newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
-			configurationReady:   newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
-			layoutConverged:      newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondLayoutConvergedType),
+			satisfyEligibleNodes:      newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType),
+			configurationReady:        newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondConfigurationReadyType),
+			membershipLayoutConverged: newRVViewCondition(unsafeRV, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType),
 		},
 	}
 
@@ -1274,7 +1274,7 @@ const (
 // nor stale has observed the current generation, applied it, and reports both tracked
 // conditions present, current and True.
 //
-// Tracked conditions form the configuration axis only: ConfigurationReady and LayoutConverged.
+// Tracked conditions form the configuration axis only: ConfigurationReady and MembershipLayoutConverged.
 // SatisfyEligibleNodes is deliberately NOT part of it — placement conflicts are a separate
 // concern with a separate counter, strategy and condition, and a volume can perfectly run the
 // current configuration while sitting on a node that is no longer eligible.
@@ -1301,7 +1301,7 @@ func isRVConfigurationPending(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) 
 	if rv.configurationObservedGeneration != rsc.Status.ConfigurationGeneration {
 		return true
 	}
-	return rv.conditions.configurationReady.hasNoVerdict() || rv.conditions.layoutConverged.hasNoVerdict()
+	return rv.conditions.configurationReady.hasNoVerdict() || rv.conditions.membershipLayoutConverged.hasNoVerdict()
 }
 
 // isRVConfigurationStale reports that the volume gave its verdict and the verdict is
@@ -1312,7 +1312,7 @@ func isRVConfigurationPending(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) 
 func isRVConfigurationStale(rsc *v1alpha1.ReplicatedStorageClass, rv *rvView) bool {
 	return rv.configurationGeneration != rsc.Status.ConfigurationGeneration ||
 		rv.conditions.configurationReady.isFalse() ||
-		rv.conditions.layoutConverged.isFalse()
+		rv.conditions.membershipLayoutConverged.isFalse()
 }
 
 // isRVTrackedByRSCRollout reports whether the volume takes part in this storage class rollout.

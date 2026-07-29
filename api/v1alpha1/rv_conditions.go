@@ -47,16 +47,16 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondLayoutConvergedType indicates whether the actual datamesh layout
+	// ReplicatedVolumeCondMembershipLayoutConvergedType indicates whether the actual datamesh layout
 	// (diskful voters and tie-breakers) matches the layout intended by the volume's configuration.
 	//
 	// Reasons describe layout convergence state.
-	ReplicatedVolumeCondLayoutConvergedType                        = "LayoutConverged"
-	ReplicatedVolumeCondLayoutConvergedReasonCannotConverge        = "CannotConverge"        // A convergence pattern applies but no admissible candidate is available.
-	ReplicatedVolumeCondLayoutConvergedReasonConverged             = "Converged"             // Actual layout matches the intended layout, no active transition.
-	ReplicatedVolumeCondLayoutConvergedReasonConverging            = "Converging"            // A layout change is in flight: an active membership transition, a requested replica retype, or a pending tie-breaker creation; the layout has not settled on the intended one.
-	ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported = "TransitionUnsupported" // Layout mismatch with no supported automatic transition; manual intervention required.
-	ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting        = "VolumeDeleting"        // Volume is being deleted; layout convergence is not evaluated.
+	ReplicatedVolumeCondMembershipLayoutConvergedType                        = "MembershipLayoutConverged"
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge        = "CannotConverge"        // A convergence pattern applies but no admissible candidate is available.
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged             = "Converged"             // Actual layout matches the intended layout, no active transition.
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging            = "Converging"            // A layout change is in flight: an active membership transition, a requested replica retype, or a pending tie-breaker creation; the layout has not settled on the intended one.
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported = "TransitionUnsupported" // Layout mismatch with no supported automatic transition; manual intervention required.
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting        = "VolumeDeleting"        // Volume is being deleted; layout convergence is not evaluated.
 )
 
 const (

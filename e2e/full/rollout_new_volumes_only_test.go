@@ -56,9 +56,9 @@ var _ = Describe("Layout: NewVolumesOnly holds existing volumes",
 				oldRV.Await(ctx, match.RV.FormationComplete())
 				oldRV.Await(ctx, match.RV.Members(3))
 				oldRV.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(oldRV)).To(Equal(ptr.To("3D")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(oldRV)).To(Equal(ptr.To("3D")))
 
 				By("editing rsc.spec.replication to Availability")
 				trsc.Update(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {
@@ -96,7 +96,7 @@ var _ = Describe("Layout: NewVolumesOnly holds existing volumes",
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
 
 				By("the old volume is still held at 3D")
-				Expect(layoutOf(oldRV)).To(Equal(ptr.To("3D")))
+				Expect(membershipLayoutOf(oldRV)).To(Equal(ptr.To("3D")))
 				Expect(memberTypeCount(oldRV, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(3))
 
 				By("switching the strategy to RollingUpdate")
@@ -130,7 +130,7 @@ var _ = Describe("Layout: NewVolumesOnly holds existing volumes",
 // the newer storage class configuration is deliberately not applied.
 func heldAt3D() types.GomegaMatcher {
 	return match.RV.Custom("held at 3D", func(rv *v1alpha1.ReplicatedVolume) bool {
-		if rv.Status.Layout == nil || *rv.Status.Layout != "3D" {
+		if rv.Status.MembershipLayout == nil || *rv.Status.MembershipLayout != "3D" {
 			return false
 		}
 		for i := range rv.Status.Conditions {

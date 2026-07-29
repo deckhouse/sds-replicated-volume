@@ -347,7 +347,7 @@ func makeDatameshSingleStepTransition(
 //
 // Safety invariant: convergence NEVER creates a Diskful replica and NEVER deletes a replica or
 // its data. The decision is a pure compute helper (computeTargetLayoutAction), reused by the
-// LayoutConverged condition writer (reconcileLayoutStatus) so the condition and the action stay
+// MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and the action stay
 // in agreement; convergence itself never writes the condition (single-writer invariant) and
 // therefore discards the report half of that decision.
 //
@@ -355,7 +355,7 @@ func makeDatameshSingleStepTransition(
 // relative to our own write, so we requeue rather than rely on the watch (see
 // controller-reconciliation.mdc). The outcome is deliberately NON-terminal — the root Reconcile
 // must still reach its status patch, otherwise every status change computed in the acting pass
-// (including the LayoutConverged report for exactly this action) is dropped (see
+// (including the MembershipLayoutConverged report for exactly this action) is dropped (see
 // controller-reconciliation-flow.mdc, Continue* vs Done* with requeue). Mismatches outside the
 // whitelist are left untouched and reported honestly by the condition writer.
 //
@@ -384,7 +384,7 @@ func (r *Reconciler) reconcileLayoutConvergence(
 	}
 
 	// The report half of the decision belongs to reconcileLayoutStatus (single writer of the
-	// LayoutConverged condition); convergence acts on the target only.
+	// MembershipLayoutConverged condition); convergence acts on the target only.
 	targetAction, _ := computeTargetLayoutAction(rv, *rvrs, rvas)
 	switch targetAction.kind {
 	case layoutActionRetypeToTieBreaker:
@@ -432,10 +432,10 @@ func (r *Reconciler) reconcileLayoutConvergence(
 	}
 }
 
-// layoutConvergedVolumeDeletingMessage is the LayoutConverged message published on both deletion
+// membershipLayoutConvergedVolumeDeletingMessage is the MembershipLayoutConverged message published on both deletion
 // paths (the normal-operation writer via computeTargetLayoutAction, and the early
 // reconcileDeletion branch that an unattached RV reaches directly).
-const layoutConvergedVolumeDeletingMessage = "volume is being deleted; layout convergence suspended"
+const membershipLayoutConvergedVolumeDeletingMessage = "volume is being deleted; layout convergence suspended"
 
 // layoutActionKind enumerates the whitelisted layout-convergence actions.
 type layoutActionKind int
@@ -454,8 +454,8 @@ const (
 // targetLayoutAction is the pure decision of what (if anything) layout convergence should do this
 // pass. Computed by computeTargetLayoutAction and consumed by reconcileLayoutConvergence (to act).
 //
-// It carries the target only: the LayoutConverged report describing the same decision is a
-// separate output (layoutConvergedReport), so status-shaped report data is never mixed into the
+// It carries the target only: the MembershipLayoutConverged report describing the same decision is a
+// separate output (membershipLayoutConvergedReport), so status-shaped report data is never mixed into the
 // target artifact (see controller-reconcile-helper-compute.mdc, "Patch-domain separation").
 type targetLayoutAction struct {
 	kind layoutActionKind
@@ -463,18 +463,18 @@ type targetLayoutAction struct {
 	retypeRVRName string
 }
 
-// layoutConvergedReport is the published LayoutConverged report describing the convergence
+// membershipLayoutConvergedReport is the published MembershipLayoutConverged report describing the convergence
 // decision. Computed by computeTargetLayoutAction alongside the target and consumed by the
-// LayoutConverged condition writer (reconcileLayoutStatus), so the action and the condition never
+// MembershipLayoutConverged condition writer (reconcileLayoutStatus), so the action and the condition never
 // disagree.
-type layoutConvergedReport struct {
+type membershipLayoutConvergedReport struct {
 	status  metav1.ConditionStatus
 	reason  string
 	message string
 }
 
 // computeTargetLayoutAction decides the single whitelisted convergence action (if any) that moves
-// the actual datamesh layout toward the intended layout, and produces the LayoutConverged report
+// the actual datamesh layout toward the intended layout, and produces the MembershipLayoutConverged report
 // as a SEPARATE output (target and report are never mixed into one artifact).
 // It is pure (non-I/O, no mutation of inputs) and deterministic.
 //
@@ -512,13 +512,13 @@ func computeTargetLayoutAction(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
-) (targetLayoutAction, layoutConvergedReport) {
+) (targetLayoutAction, membershipLayoutConvergedReport) {
 	// 1. Deletion: convergence is not evaluated, and no action is ever taken.
 	if rv.DeletionTimestamp != nil {
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionUnknown,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting,
-			message: layoutConvergedVolumeDeletingMessage,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+			message: membershipLayoutConvergedVolumeDeletingMessage,
 		}
 	}
 
@@ -529,9 +529,9 @@ func computeTargetLayoutAction(
 
 	// 2. A layout-changing transition is already moving the composition → Converging, no new action.
 	if hasLayoutChangingTransition(rv) {
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("layout transition in progress: have %s, want %s", actualLayout, intendedLayout),
 		}
 	}
@@ -562,9 +562,9 @@ func computeTargetLayoutAction(
 			message = fmt.Sprintf("retype to tie-breaker pending on %s: have %s, want %s",
 				strings.Join(pending, ", "), actualLayout, intendedLayout)
 		}
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: message,
 		}
 	}
@@ -580,9 +580,9 @@ func computeTargetLayoutAction(
 
 	// 5. Converged: actual matches intended.
 	if actualD == intendedD && actualTB == intendedTB {
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionTrue,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 			message: fmt.Sprintf("layout converged: %s", actualLayout),
 		}
 	}
@@ -592,9 +592,9 @@ func computeTargetLayoutAction(
 	case actualD > intendedD && actualTB < intendedTB:
 		name, noCandidateReason := selectRetypeCandidate(rv, rvrs, rvas)
 		if name == "" {
-			return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 				status: metav1.ConditionFalse,
-				reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
 				message: fmt.Sprintf("cannot retype Diskful replica to tie-breaker (have %s, want %s): %s",
 					actualLayout, intendedLayout, noCandidateReason),
 			}
@@ -602,9 +602,9 @@ func computeTargetLayoutAction(
 		return targetLayoutAction{
 				kind:          layoutActionRetypeToTieBreaker,
 				retypeRVRName: name,
-			}, layoutConvergedReport{
+			}, membershipLayoutConvergedReport{
 				status: metav1.ConditionFalse,
-				reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 				message: fmt.Sprintf("retyping Diskful replica %s to tie-breaker: have %s, want %s",
 					name, actualLayout, intendedLayout),
 			}
@@ -616,30 +616,30 @@ func computeTargetLayoutAction(
 			// the current spec, not progress. Only a CURRENT Scheduled=False counts (see
 			// computeActualPendingTieBreakerSchedulingFailure).
 			if failure := computeActualPendingTieBreakerSchedulingFailure(rv, rvrs); failure != "" {
-				return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+				return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 					status: metav1.ConditionFalse,
-					reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge,
+					reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
 					message: fmt.Sprintf("cannot place tie-breaker replica (have %s, want %s): %s",
 						actualLayout, intendedLayout, failure),
 				}
 			}
-			return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 				status:  metav1.ConditionFalse,
-				reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+				reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 				message: fmt.Sprintf("tie-breaker creation pending: have %s, want %s", actualLayout, intendedLayout),
 			}
 		}
-		return targetLayoutAction{kind: layoutActionCreateTieBreaker}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionCreateTieBreaker}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("creating tie-breaker replica: have %s, want %s", actualLayout, intendedLayout),
 		}
 
 	// Outside the whitelist: report honestly, take no action.
 	default:
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status: metav1.ConditionFalse,
-			reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
 			message: fmt.Sprintf(
 				"layout mismatch: have %s, want %s; automatic transition is not supported, manual intervention required",
 				actualLayout, intendedLayout),
@@ -651,14 +651,14 @@ func computeTargetLayoutAction(
 // that are leaving (their RVR is being deleted), and returns (action, report, true) when the
 // tie-breaker replacement domain owns this pass. It returns (_, _, false) when nothing is leaving
 // or when the situation is outside its scope, letting the caller fall through to the plain
-// actual/intended comparison. Like its caller it keeps the target and the LayoutConverged report
+// actual/intended comparison. Like its caller it keeps the target and the MembershipLayoutConverged report
 // as separate outputs.
 //
 // Strict create-first: the datamesh only releases the old tie-breaker once its replacement is
 // operational (see the datamesh guard guardTBSufficient), so the replacement must be created
 // while the old one is still a member. The raw layout counts the terminating tie-breaker, so the
 // deficit is computed SEPARATELY here, over non-deleting tie-breakers only; computeActualLayout
-// stays raw and status.layout keeps reporting the honest composition (2D+2TB in the replacement
+// stays raw and status.membershipLayout keeps reporting the honest composition (2D+2TB in the replacement
 // window).
 //
 // State table:
@@ -680,17 +680,17 @@ func computeTargetTieBreakerReplacement(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	actualD, actualTB, intendedD, intendedTB int,
 	actualLayout, intendedLayout string,
-) (targetLayoutAction, layoutConvergedReport, bool) {
+) (targetLayoutAction, membershipLayoutConvergedReport, bool) {
 	leaving := deletingTieBreakerMemberNames(rv, rvrs)
 	if len(leaving) == 0 || actualD != intendedD {
-		return targetLayoutAction{}, layoutConvergedReport{}, false
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
 	}
 
 	// Tie-breakers that stay: the supply the intended layout can rely on.
 	availableTB := actualTB - len(leaving)
 	if availableTB > intendedTB {
 		// A surplus beyond the departure — outside this domain, report it honestly.
-		return targetLayoutAction{}, layoutConvergedReport{}, false
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
 	}
 
 	subject := fmt.Sprintf("tie-breaker %s is terminating", strings.Join(leaving, ", "))
@@ -711,9 +711,9 @@ func computeTargetTieBreakerReplacement(
 		case intendedTB > 0:
 			waiting = "its replacement joined the datamesh, waiting for it to leave"
 		}
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("%s: %s (%s)", subject, waiting, layouts),
 		}, true
 	}
@@ -725,23 +725,23 @@ func computeTargetTieBreakerReplacement(
 		// with every eligible node occupied the replacement cannot be placed, and strict
 		// create-first keeps the terminating tie-breaker working instead of releasing it.
 		if failure := computeActualPendingTieBreakerSchedulingFailure(rv, rvrs); failure != "" {
-			return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 				status: metav1.ConditionFalse,
-				reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
 				message: fmt.Sprintf("%s: cannot place a replacement (%s): %s",
 					subject, layouts, failure),
 			}, true
 		}
-		return targetLayoutAction{kind: layoutActionNone}, layoutConvergedReport{
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("%s: replacement tie-breaker creation pending (%s)", subject, layouts),
 		}, true
 	}
 
-	return targetLayoutAction{kind: layoutActionCreateTieBreaker}, layoutConvergedReport{
+	return targetLayoutAction{kind: layoutActionCreateTieBreaker}, membershipLayoutConvergedReport{
 		status:  metav1.ConditionFalse,
-		reason:  v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+		reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 		message: fmt.Sprintf("%s: creating a replacement (%s)", subject, layouts),
 	}, true
 }
@@ -1597,8 +1597,8 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 // Reconcile: layout status
 //
 
-// reconcileLayoutStatus is the SINGLE writer of the LayoutConverged condition and
-// status.layout. It compares the actual datamesh layout (diskful voters + tie-breakers)
+// reconcileLayoutStatus is the SINGLE writer of the MembershipLayoutConverged condition and
+// status.membershipLayout. It compares the actual datamesh layout (diskful voters + tie-breakers)
 // against the layout intended by the volume's configuration and reports whether they
 // have converged.
 //
@@ -1627,15 +1627,15 @@ func (r *Reconciler) reconcileLayoutStatus(
 
 	report := computeLayoutReport(rv, rvrs, rvas)
 
-	changed := applyLayout(rv, report.layout)
+	changed := applyMembershipLayout(rv, report.membershipLayout)
 	switch report.converged.status {
 	case metav1.ConditionTrue:
-		changed = applyLayoutConvergedCondTrue(rv, report.converged.reason, report.converged.message) || changed
+		changed = applyMembershipLayoutConvergedCondTrue(rv, report.converged.reason, report.converged.message) || changed
 	case metav1.ConditionUnknown:
 		// Deletion: we no longer evaluate convergence (see computeTargetLayoutAction).
-		changed = applyLayoutConvergedCondUnknown(rv, report.converged.reason, report.converged.message) || changed
+		changed = applyMembershipLayoutConvergedCondUnknown(rv, report.converged.reason, report.converged.message) || changed
 	default:
-		changed = applyLayoutConvergedCondFalse(rv, report.converged.reason, report.converged.message) || changed
+		changed = applyMembershipLayoutConvergedCondFalse(rv, report.converged.reason, report.converged.message) || changed
 	}
 
 	return rf.Continue().ReportChangedIf(changed)
@@ -1668,7 +1668,7 @@ func computeActualLayout(rv *v1alpha1.ReplicatedVolume) (diskful, tiebreakers in
 //
 // A membership transition is not enough by itself: Access and ShadowDiskful members are outside
 // the layout, so Add/Remove/ChangeReplicaType involving only those types must not be treated as
-// convergence progress (otherwise the LayoutConverged condition would flap on unrelated
+// convergence progress (otherwise the MembershipLayoutConverged condition would flap on unrelated
 // membership activity). The classification therefore goes by the REPLICA TYPES recorded in the
 // transition, which are always populated (see ReplicatedVolumeDatameshTransition).
 //
@@ -1699,18 +1699,18 @@ func isLayoutReplicaType(t v1alpha1.ReplicaType) bool {
 	return t == v1alpha1.ReplicaTypeDiskful || t == v1alpha1.ReplicaTypeTieBreaker
 }
 
-// layoutReport is the computed report driving status.layout and the LayoutConverged condition.
+// layoutReport is the computed report driving status.membershipLayout and the MembershipLayoutConverged condition.
 type layoutReport struct {
-	// layout mirrors the optional status.layout field: nil means "unset" (no layout to
+	// membershipLayout mirrors the optional status.membershipLayout field: nil means "unset" (no layout to
 	// publish), never the empty string. computeLayoutReport always fills it, because it only
 	// runs post-formation, where the member composition is known; the pointer keeps the
 	// "unset" state representable end-to-end so it is never conflated with "".
-	layout *string
-	// converged is the LayoutConverged report produced by the convergence decision.
-	converged layoutConvergedReport
+	membershipLayout *string
+	// converged is the MembershipLayoutConverged report produced by the convergence decision.
+	converged membershipLayoutConvergedReport
 }
 
-// computeLayoutReport produces the status.layout string and the LayoutConverged report by
+// computeLayoutReport produces the status.membershipLayout string and the MembershipLayoutConverged report by
 // reusing the convergence decision (computeTargetLayoutAction), so the reported reason always
 // matches what reconcileLayoutConvergence does this pass:
 //   - actual == intended                                   → True / Converged
@@ -1729,8 +1729,8 @@ func computeLayoutReport(
 	actualD, actualTB := computeActualLayout(rv)
 	_, convergedReport := computeTargetLayoutAction(rv, rvrs, rvas)
 	return layoutReport{
-		layout:    ptr.To(formatLayout(actualD, actualTB)),
-		converged: convergedReport,
+		membershipLayout: ptr.To(formatLayout(actualD, actualTB)),
+		converged:        convergedReport,
 	}
 }
 
@@ -1744,48 +1744,48 @@ func formatLayout(diskful, tiebreakers int) string {
 	return fmt.Sprintf("%dD+%dTB", diskful, tiebreakers)
 }
 
-// applyLayout sets status.layout (the actual datamesh layout string).
+// applyMembershipLayout sets status.membershipLayout (the actual datamesh layout string).
 //
-// status.layout is an optional scalar: nil (absent) means "not computed yet" and is NOT the
+// status.membershipLayout is an optional scalar: nil (absent) means "not computed yet" and is NOT the
 // same as the empty string, which is never a valid layout value. A nil layout therefore
 // clears the field instead of publishing "".
-func applyLayout(rv *v1alpha1.ReplicatedVolume, layout *string) bool {
-	if ptr.Equal(rv.Status.Layout, layout) {
+func applyMembershipLayout(rv *v1alpha1.ReplicatedVolume, layout *string) bool {
+	if ptr.Equal(rv.Status.MembershipLayout, layout) {
 		return false
 	}
 	if layout == nil {
-		rv.Status.Layout = nil
+		rv.Status.MembershipLayout = nil
 	} else {
 		// Copy the value instead of sharing the report's pointer (read-only input contract).
-		rv.Status.Layout = ptr.To(*layout)
+		rv.Status.MembershipLayout = ptr.To(*layout)
 	}
 	return true
 }
 
-// applyLayoutConvergedCondTrue sets the LayoutConverged condition to True.
-func applyLayoutConvergedCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+// applyMembershipLayoutConvergedCondTrue sets the MembershipLayoutConverged condition to True.
+func applyMembershipLayoutConvergedCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
 	return obju.SetStatusCondition(rv, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 		Status:  metav1.ConditionTrue,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyLayoutConvergedCondFalse sets the LayoutConverged condition to False.
-func applyLayoutConvergedCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+// applyMembershipLayoutConvergedCondFalse sets the MembershipLayoutConverged condition to False.
+func applyMembershipLayoutConvergedCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
 	return obju.SetStatusCondition(rv, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
 		Message: message,
 	})
 }
 
-// applyLayoutConvergedCondUnknown sets the LayoutConverged condition to Unknown.
-func applyLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+// applyMembershipLayoutConvergedCondUnknown sets the MembershipLayoutConverged condition to Unknown.
+func applyMembershipLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
 	return obju.SetStatusCondition(rv, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,
@@ -2016,9 +2016,9 @@ func (r *Reconciler) reconcileDeletion(
 	// last Converging/CannotConverge message — promising an action the deletion path will never
 	// perform. Unknown/VolumeDeleting states honestly that convergence is no longer evaluated.
 	base := rv.DeepCopy()
-	changed := applyLayoutConvergedCondUnknown(rv,
-		v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting,
-		layoutConvergedVolumeDeletingMessage)
+	changed := applyMembershipLayoutConvergedCondUnknown(rv,
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+		membershipLayoutConvergedVolumeDeletingMessage)
 	if len(rv.Status.Datamesh.Members) > 0 {
 		rv.Status.Datamesh.Members = nil
 		changed = true

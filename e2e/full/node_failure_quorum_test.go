@@ -45,9 +45,9 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				diskfulNodes := memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful)
 				Expect(diskfulNodes).To(HaveLen(2))
@@ -155,8 +155,8 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				By("the layout is intact and converged after recovery")
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 			})
 	})

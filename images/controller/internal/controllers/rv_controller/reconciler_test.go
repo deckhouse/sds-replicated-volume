@@ -3692,17 +3692,17 @@ var _ = Describe("formatLayout", func() {
 var _ = Describe("computeLayoutReport", func() {
 	It("reports Converged when actual matches intended (r2 = 2D+1TB)", func() {
 		report := layoutReportOf(layoutRV(1, 0, layoutMembers(2, 1), false))
-		Expect(report.layout).To(Equal(ptr.To("2D+1TB")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("2D+1TB")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 		Expect(report.converged.message).To(Equal("layout converged: 2D+1TB"))
 	})
 
 	It("reports Converged when actual matches intended (None = 1D)", func() {
 		report := layoutReportOf(layoutRV(0, 0, layoutMembers(1, 0), false))
-		Expect(report.layout).To(Equal(ptr.To("1D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("1D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 		Expect(report.converged.message).To(Equal("layout converged: 1D"))
 	})
 
@@ -3711,9 +3711,9 @@ var _ = Describe("computeLayoutReport", func() {
 		// counted layout momentarily equals the intended one while the transition is still
 		// running. Reporting Converged there would flip the condition to True and back.
 		report := layoutReportOf(layoutRV(1, 1, layoutMembers(3, 0), true))
-		Expect(report.layout).To(Equal(ptr.To("3D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("3D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("reports Converged when the active transition does not change the layout composition", func() {
@@ -3727,7 +3727,7 @@ var _ = Describe("computeLayoutReport", func() {
 		}}
 		report := layoutReportOf(rv)
 		Expect(report.converged.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 	})
 
 	It("reports Converging while a ForceRemoveReplica(Diskful) is active", func() {
@@ -3741,42 +3741,42 @@ var _ = Describe("computeLayoutReport", func() {
 		}}
 		report := layoutReportOf(rv)
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("reports Converging (P1 retype) for 3D at an r2 config (whitelist)", func() {
 		// Block 2: 3D at an r2 config is now a P1 retype candidate (was TransitionUnsupported
 		// in block 1). With three unattached Diskful RVRs the lexicographically last is chosen.
 		report := layoutReportOf(layoutRV(1, 0, layoutMembers(3, 0), false))
-		Expect(report.layout).To(Equal(ptr.To("3D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("3D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.converged.message).To(Equal("retyping Diskful replica rvr-2 to tie-breaker: have 3D, want 2D+1TB"))
 	})
 
 	It("reports Converging (P2 heal) for 2D at an r2 config (tie-breaker deficit)", func() {
 		// Block 2: 2D at an r2 config is now a P2 heal (create the missing tie-breaker).
 		report := layoutReportOf(layoutRV(1, 0, layoutMembers(2, 0), false))
-		Expect(report.layout).To(Equal(ptr.To("2D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("2D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.converged.message).To(Equal("creating tie-breaker replica: have 2D, want 2D+1TB"))
 	})
 
 	It("reports TransitionUnsupported when diskful count is insufficient (2D at an r3 config)", func() {
 		report := layoutReportOf(layoutRV(1, 1, layoutMembers(2, 0), false))
-		Expect(report.layout).To(Equal(ptr.To("2D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("2D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 		Expect(report.converged.message).To(Equal(
 			"layout mismatch: have 2D, want 3D; automatic transition is not supported, manual intervention required"))
 	})
 
 	It("reports Converging on a mismatch while a membership transition is active", func() {
 		report := layoutReportOf(layoutRV(1, 0, layoutMembers(3, 0), true))
-		Expect(report.layout).To(Equal(ptr.To("3D")))
+		Expect(report.membershipLayout).To(Equal(ptr.To("3D")))
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.converged.message).To(Equal("layout transition in progress: have 3D, want 2D+1TB"))
 	})
 
@@ -3791,7 +3791,7 @@ var _ = Describe("computeLayoutReport", func() {
 
 		report := layoutReportOf(rv)
 		Expect(report.converged.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.converged.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.converged.message).To(Equal("retyping Diskful replica rvr-2 to tie-breaker: have 3D, want 2D+1TB"))
 	})
 })
@@ -3903,19 +3903,19 @@ var _ = Describe("reconcileLayoutStatus", func() {
 		rec = NewReconciler(newClientBuilder(scheme).Build(), scheme)
 	})
 
-	It("sets status.layout and the LayoutConverged condition", func(ctx SpecContext) {
+	It("sets status.membershipLayout and the MembershipLayoutConverged condition", func(ctx SpecContext) {
 		rv := layoutRV(1, 1, layoutMembers(2, 0), false) // r3 config, actual 2D → unsupported (deficit)
 		members := rv.Status.Datamesh.Members
 		outcome := rec.reconcileLayoutStatus(ctx, rv, layoutRVRs(members), nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.Layout).To(Equal(ptr.To("2D")))
+		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("2D")))
 
-		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 	})
 
 	It("does not flap on repeated reconciles (idempotent, no patch churn)", func(ctx SpecContext) {
@@ -3923,11 +3923,11 @@ var _ = Describe("reconcileLayoutStatus", func() {
 		rvrs := layoutRVRs(rv.Status.Datamesh.Members)
 		Expect(rec.reconcileLayoutStatus(ctx, rv, rvrs, nil).DidChange()).To(BeTrue())
 
-		before := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType).DeepCopy()
+		before := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType).DeepCopy()
 		outcome := rec.reconcileLayoutStatus(ctx, rv, rvrs, nil)
 		Expect(outcome.DidChange()).To(BeFalse())
 
-		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(after.LastTransitionTime).To(Equal(before.LastTransitionTime))
 		Expect(after.Reason).To(Equal(before.Reason))
 		Expect(after.Message).To(Equal(before.Message))
@@ -3938,11 +3938,11 @@ var _ = Describe("reconcileLayoutStatus", func() {
 		outcome := rec.reconcileLayoutStatus(ctx, rv, nil, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeFalse())
-		Expect(obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)).To(BeNil())
-		Expect(rv.Status.Layout).To(BeNil(), "status.layout stays unset (nil), never an empty string")
+		Expect(obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)).To(BeNil())
+		Expect(rv.Status.MembershipLayout).To(BeNil(), "status.membershipLayout stays unset (nil), never an empty string")
 	})
 
-	It("sets LayoutConverged=Unknown/VolumeDeleting on the normal-operation deletion path", func(ctx SpecContext) {
+	It("sets MembershipLayoutConverged=Unknown/VolumeDeleting on the normal-operation deletion path", func(ctx SpecContext) {
 		// A deleting-but-still-attached RV keeps going through normal operation. Leaving a
 		// Converging message there would promise an action the deletion path never takes.
 		rv := layoutRV(1, 0, layoutMembers(3, 0), false) // r2 config, actual 3D → would be Converging
@@ -3953,10 +3953,10 @@ var _ = Describe("reconcileLayoutStatus", func() {
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 
-		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting))
 		Expect(cond.Message).To(Equal("volume is being deleted; layout convergence suspended"))
 	})
 })
@@ -3969,7 +3969,7 @@ var _ = Describe("reconcileLayoutStatus wiring", func() {
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 	})
 
-	It("does not set LayoutConverged while formation is in progress", func(ctx SpecContext) {
+	It("does not set MembershipLayoutConverged while formation is in progress", func(ctx SpecContext) {
 		rsc := newRSCWithConfiguration("rsc-1")
 		rsp := newTestRSP("test-pool")
 
@@ -4005,50 +4005,50 @@ var _ = Describe("reconcileLayoutStatus wiring", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)).
-			To(BeNil(), "LayoutConverged must not be written during formation")
-		Expect(updated.Status.Layout).
-			To(BeNil(), "status.layout must stay unset (nil), not an empty string, during formation")
+		Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)).
+			To(BeNil(), "MembershipLayoutConverged must not be written during formation")
+		Expect(updated.Status.MembershipLayout).
+			To(BeNil(), "status.membershipLayout must stay unset (nil), not an empty string, during formation")
 	})
 })
 
-var _ = Describe("applyLayout", func() {
+var _ = Describe("applyMembershipLayout", func() {
 	It("publishes the layout and is idempotent", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
 
-		Expect(applyLayout(rv, ptr.To("2D+1TB"))).To(BeTrue())
-		Expect(rv.Status.Layout).To(Equal(ptr.To("2D+1TB")))
-		Expect(applyLayout(rv, ptr.To("2D+1TB"))).To(BeFalse())
-		Expect(rv.Status.Layout).To(Equal(ptr.To("2D+1TB")))
+		Expect(applyMembershipLayout(rv, ptr.To("2D+1TB"))).To(BeTrue())
+		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("2D+1TB")))
+		Expect(applyMembershipLayout(rv, ptr.To("2D+1TB"))).To(BeFalse())
+		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("2D+1TB")))
 	})
 
 	It("does not share the report's pointer with the object", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
 		reported := ptr.To("3D")
 
-		Expect(applyLayout(rv, reported)).To(BeTrue())
-		Expect(rv.Status.Layout).NotTo(BeIdenticalTo(reported))
-		Expect(rv.Status.Layout).To(Equal(ptr.To("3D")))
+		Expect(applyMembershipLayout(rv, reported)).To(BeTrue())
+		Expect(rv.Status.MembershipLayout).NotTo(BeIdenticalTo(reported))
+		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("3D")))
 	})
 
 	It("treats a nil layout as unset and clears the field", func() {
 		// nil and "" are different states: nil means "not computed yet", and "" is never a
 		// valid layout, so clearing must not publish an empty string.
-		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{Layout: ptr.To("3D")}}
+		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{MembershipLayout: ptr.To("3D")}}
 
-		Expect(applyLayout(rv, nil)).To(BeTrue())
-		Expect(rv.Status.Layout).To(BeNil())
-		Expect(applyLayout(rv, nil)).To(BeFalse())
-		Expect(rv.Status.Layout).To(BeNil())
+		Expect(applyMembershipLayout(rv, nil)).To(BeTrue())
+		Expect(rv.Status.MembershipLayout).To(BeNil())
+		Expect(applyMembershipLayout(rv, nil)).To(BeFalse())
+		Expect(rv.Status.MembershipLayout).To(BeNil())
 	})
 
 	It("does not treat a stored empty string as already unset", func() {
 		// The pointer exists to keep "" and nil distinguishable: a stored "" is a value that
 		// still has to be cleared, not an alias for "unset".
-		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{Layout: ptr.To("")}}
+		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{MembershipLayout: ptr.To("")}}
 
-		Expect(applyLayout(rv, nil)).To(BeTrue())
-		Expect(rv.Status.Layout).To(BeNil())
+		Expect(applyMembershipLayout(rv, nil)).To(BeTrue())
+		Expect(rv.Status.MembershipLayout).To(BeNil())
 	})
 })
 
@@ -4100,7 +4100,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 	})
 
 	It("P1: plans a retype for 3D at an r2 config, picking the lexicographically last RVR", func() {
@@ -4109,7 +4109,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
 		Expect(action.retypeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)))
 		Expect(report.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("P1: is idempotent while a retype is already requested (spec flipped, no transition yet)", func() {
@@ -4120,7 +4120,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal("retype to tie-breaker requested: have 3D, want 2D+1TB"))
 	})
 
@@ -4142,7 +4142,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		// "have 3D, want 3D" would say nothing, so the message names the pending replica.
 		Expect(report.message).To(Equal(
 			"retype to tie-breaker pending on rv-1-2: the layout already matches the intended one (3D); " +
@@ -4157,7 +4157,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 		Expect(report.message).To(Equal("layout converged: 3D"))
 	})
 
@@ -4169,7 +4169,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal(
 			"retype to tie-breaker pending on rv-1-2: have 3D+1TB, want 2D+1TB"))
 	})
@@ -4185,7 +4185,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		}
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal("layout transition in progress: have 3D, want 2D+1TB"))
 	})
 
@@ -4215,7 +4215,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		}
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(ContainSubstring("all diskful replicas are attached"))
 	})
 
@@ -4244,7 +4244,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		}
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(ContainSubstring("without violating zone placement"))
 	})
 
@@ -4276,7 +4276,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(ContainSubstring("without violating zone placement"))
 	})
 
@@ -4285,7 +4285,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionCreateTieBreaker))
 		Expect(report.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("P2: is idempotent while a tie-breaker RVR already exists but is not yet a member", func() {
@@ -4297,7 +4297,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		})
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal("tie-breaker creation pending: have 2D, want 2D+1TB"))
 	})
 
@@ -4305,7 +4305,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 		Expect(report.message).To(Equal(
 			"layout mismatch: have 2D+1TB, want 3D; automatic transition is not supported, manual intervention required"))
 	})
@@ -4314,7 +4314,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		rv, rvrs := convergenceFixture(1, 2, 0)
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 	})
 
 	// ── №9: the scheduler's verdict on a pending tie-breaker ──────────────────
@@ -4356,7 +4356,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(ContainSubstring("no eligible node available"))
 	})
 
@@ -4366,7 +4366,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal("tie-breaker creation pending: have 2D, want 2D+1TB"))
 	})
 
@@ -4377,7 +4377,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 			"no eligible node available", 2)) // generation is 3 → stale
 
 		_, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("P2: reports Converging when Scheduled is Unknown (no verdict yet)", func() {
@@ -4386,7 +4386,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume, "waiting", 3))
 
 		_, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("P2: returns to Converging once the pending tie-breaker becomes Scheduled=True", func() {
@@ -4395,7 +4395,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled, "", 3))
 
 		_, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	// ── №17: deletion ─────────────────────────────────────────────────────────
@@ -4408,7 +4408,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionUnknown))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting))
 		Expect(report.message).To(Equal("volume is being deleted; layout convergence suspended"))
 	})
 
@@ -4441,7 +4441,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(ContainSubstring("zone would lose quorum"))
 	})
 
@@ -4480,7 +4480,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionCreateTieBreaker))
 		Expect(report.status).To(Equal(metav1.ConditionFalse))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal(
 			"tie-breaker rv-1-2 is terminating: creating a replacement (have 2D+1TB, want 2D+1TB)"))
 	})
@@ -4492,7 +4492,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal(
 			"tie-breaker rv-1-2 is terminating: replacement tie-breaker creation pending (have 2D+1TB, want 2D+1TB)"))
 	})
@@ -4509,7 +4509,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 		Expect(report.message).To(Equal(
 			"tie-breaker rv-1-2 is terminating: cannot place a replacement (have 2D+1TB, want 2D+1TB): " +
 				"rv-1-3: no eligible node available"))
@@ -4523,7 +4523,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 			"no eligible node available", 2)) // generation is 3 → stale
 
 		_, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	It("replacement: reports Converging once the replacement joined the datamesh (raw 2D+2TB)", func() {
@@ -4534,13 +4534,13 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal(
 			"tie-breaker rv-1-2 is terminating: its replacement joined the datamesh, " +
 				"waiting for it to leave (have 2D+2TB, want 2D+1TB)"))
 
-		// status.layout stays raw and honest during the replacement window.
-		Expect(computeLayoutReport(rv, rvrs, nil).layout).To(Equal(ptr.To("2D+2TB")))
+		// status.membershipLayout stays raw and honest during the replacement window.
+		Expect(computeLayoutReport(rv, rvrs, nil).membershipLayout).To(Equal(ptr.To("2D+2TB")))
 	})
 
 	It("replacement: a terminating tie-breaker the layout does not need is just awaited", func() {
@@ -4551,7 +4551,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(Equal(
 			"tie-breaker rv-1-3 is terminating: waiting for it to leave the datamesh (have 3D+1TB, want 3D)"))
 	})
@@ -4562,7 +4562,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 	})
 
 	It("replacement: a tie-breaker member whose RVR is gone is left to the orphan path", func() {
@@ -4575,7 +4575,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 	})
 
 	It("replacement: a terminating Diskful replica does not trigger a tie-breaker replacement", func() {
@@ -4585,7 +4585,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
 	})
 
 	It("replacement: an active layout-changing transition still wins over the deficit", func() {
@@ -4613,7 +4613,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 		Expect(report.message).To(HavePrefix("retype to tie-breaker pending on rv-1-0:"))
 	})
 
@@ -4625,7 +4625,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 		Expect(report.message).To(ContainSubstring("have 2D+3TB, want 2D+1TB"))
 	})
 
@@ -4635,7 +4635,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 	})
 
 	It("4D at an r2 config: plans exactly one retype, then reports Unsupported at 3D+1TB", func() {
@@ -4649,7 +4649,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		rv3, rvrs3 := convergenceFixture(0, 3, 1)
 		action, report := computeTargetLayoutAction(rv3, rvrs3, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 		Expect(report.message).To(Equal(
 			"layout mismatch: have 3D+1TB, want 2D+1TB; automatic transition is not supported, manual intervention required"))
 	})
@@ -4886,7 +4886,7 @@ var _ = Describe("Root Reconcile layout convergence status persistence", func() 
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 	})
 
-	It("persists status.layout and LayoutConverged on the pass that performs the retype", func(ctx SpecContext) {
+	It("persists status.membershipLayout and MembershipLayoutConverged on the pass that performs the retype", func(ctx SpecContext) {
 		// 3D at an r2 config: layout convergence retypes one Diskful RVR. A terminal
 		// outcome would make the root Reconcile return before patchRVStatus, dropping
 		// every status change computed in the same pass.
@@ -4948,11 +4948,11 @@ var _ = Describe("Root Reconcile layout convergence status persistence", func() 
 		// ...and so did the status computed in the same pass.
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
-		Expect(updated.Status.Layout).To(Equal(ptr.To("3D")))
-		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
-		Expect(cond).NotTo(BeNil(), "LayoutConverged computed in the acting pass must be persisted")
+		Expect(updated.Status.MembershipLayout).To(Equal(ptr.To("3D")))
+		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
+		Expect(cond).NotTo(BeNil(), "MembershipLayoutConverged computed in the acting pass must be persisted")
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 })
 
@@ -5082,11 +5082,11 @@ var _ = Describe("Root Reconcile tie-breaker replacement", func() {
 		Expect(deleting).To(HaveLen(1), "the old tie-breaker is still terminating")
 		Expect(live).To(HaveLen(1), "a replacement tie-breaker must be created while the old one leaves")
 
-		Expect(updated.Status.Layout).To(Equal(ptr.To("2D+1TB")), "status.layout reports the raw member composition")
-		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		Expect(updated.Status.MembershipLayout).To(Equal(ptr.To("2D+1TB")), "status.membershipLayout reports the raw member composition")
+		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 })
 
@@ -5120,7 +5120,7 @@ var _ = Describe("reconcileDeletion layout condition", func() {
 		return rec, fresh
 	}
 
-	It("sets LayoutConverged=Unknown/VolumeDeleting on the early deletion path", func(ctx SpecContext) {
+	It("sets MembershipLayoutConverged=Unknown/VolumeDeleting on the early deletion path", func(ctx SpecContext) {
 		// An unattached RV goes straight to reconcileDeletion, never through normal
 		// operation, so this branch must publish the condition itself.
 		rec, rv := deletingRV(ctx, layoutMembers(2, 1))
@@ -5132,10 +5132,10 @@ var _ = Describe("reconcileDeletion layout condition", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(rec.cl.Get(ctx, client.ObjectKey{Name: "rv-1"}, &updated)).To(Succeed())
 		Expect(updated.Status.Datamesh.Members).To(BeEmpty())
-		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting))
 		Expect(cond.Message).To(Equal("volume is being deleted; layout convergence suspended"))
 	})
 
@@ -5148,9 +5148,9 @@ var _ = Describe("reconcileDeletion layout condition", func() {
 
 		var updated v1alpha1.ReplicatedVolume
 		Expect(rec.cl.Get(ctx, client.ObjectKey{Name: "rv-1"}, &updated)).To(Succeed())
-		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonVolumeDeleting))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting))
 	})
 
 	It("is idempotent: a second pass reports no change", func(ctx SpecContext) {
@@ -5158,10 +5158,10 @@ var _ = Describe("reconcileDeletion layout condition", func() {
 		var rvrs []*v1alpha1.ReplicatedVolumeReplica
 
 		Expect(rec.reconcileDeletion(ctx, rv, nil, &rvrs).Error()).NotTo(HaveOccurred())
-		before := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType).DeepCopy()
+		before := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType).DeepCopy()
 
 		Expect(rec.reconcileDeletion(ctx, rv, nil, &rvrs).Error()).NotTo(HaveOccurred())
-		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(after.LastTransitionTime).To(Equal(before.LastTransitionTime))
 	})
 })

@@ -145,11 +145,11 @@ Reconcile (root) [Pure orchestration]
 │       │   └── isMemberAttached
 │       ├── P1: base := rvr.DeepCopy(); applyRVRRetypeToTieBreaker (type=TieBreaker + clear LVG/ThinPool); patchRVR  (ChangeRole → DMTE drives it)
 │       └── P2: newRVR(..., TieBreaker, "") → SetControllerRef → createRVR → insertRVRSorted; AlreadyExists → Info + requeue
-├── reconcileLayoutStatus [In-place reconciliation] (status.layout + LayoutConverged condition; SINGLE writer)
+├── reconcileLayoutStatus [In-place reconciliation] (status.membershipLayout + MembershipLayoutConverged condition; SINGLE writer)
 │   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
-│   ├── applyLayout + applyLayoutConvergedCondTrue/False/Unknown
-│   └── (not called during formation → LayoutConverged absent while forming)
+│   ├── applyMembershipLayout + applyMembershipLayoutConvergedCondTrue/False/Unknown
+│   └── (not called during formation → MembershipLayoutConverged absent while forming)
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -193,7 +193,7 @@ flowchart TD
     FormingRVAWaiting --> Finalizers
     CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
     UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + RVA conditions +<br/>reconcileLayoutConvergence)"]
-    NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.layout + LayoutConverged)"]
+    NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.membershipLayout + MembershipLayoutConverged)"]
     LayoutStatus --> Finalizers
 
     Finalizers["reconcileRVAMetadata +<br/>reconcileRVRFinalizers"]
@@ -214,7 +214,7 @@ TB (tie-breakers)   = 1  if D is even and FailuresToTolerate == D/2, else 0
 
 This is provided by `ReplicatedVolumeConfiguration.IntendedLayout()` in `api/v1alpha1/rv_types.go`,
 with the tie-breaker sub-formula exposed as `v1alpha1.TieBreakersForDiskful(diskful, ftt)`. It is
-the source of truth for the **layout comparison** (the `LayoutConverged` condition and the
+the source of truth for the **layout comparison** (the `MembershipLayoutConverged` condition and the
 tie-breaker guard reuse it). Placement decision: `IntendedLayout` is a pure, deterministic,
 context-free get-helper (no I/O, no cluster-state interpretation), so per `api-file-structure.mdc`
 it lives in `rv_types.go` (not `rv_custom_logic_that_should_not_be_here.go`).
@@ -250,7 +250,7 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 so the volume keeps operating on its own configuration. The class-level aggregate counts such a
 volume as `staleConfiguration` (see `rsc_controller`).
 
-### LayoutConverged
+### MembershipLayoutConverged
 
 Indicates whether the actual datamesh layout (diskful voters + tie-breakers) matches the layout
 intended by the configuration. Set by `reconcileLayoutStatus`, which is the **single writer** of
@@ -310,7 +310,7 @@ stays honest while it lasts.
 
 The unsupported message uses the exact layout arithmetic, e.g.
 `layout mismatch: have 3D, want 2D+1TB; automatic transition is not supported, manual intervention required`.
-`status.layout` holds the actual layout string (e.g. `3D`, `2D+1TB`; the `+NTB` suffix is omitted
+`status.membershipLayout` holds the actual layout string (e.g. `3D`, `2D+1TB`; the `+NTB` suffix is omitted
 when there are no tie-breakers) and is exposed as a priority-1 print column. The field is an
 optional scalar (`*string`): it stays **absent** until `reconcileLayoutStatus` first runs (i.e.
 throughout formation), and an empty string is never published — absent means "not computed yet".
@@ -329,7 +329,7 @@ the actual layout toward the intended one, then returns `ContinueAndRequeue` (th
 may be stale relative to our own write, so we requeue rather than rely on the watch). The outcome is
 deliberately **non-terminal**: the root `Reconcile` checks `ShouldReturn()` before `patchRVStatus`,
 so a terminal outcome here would drop every status change computed in the acting pass — including
-the `LayoutConverged` report describing that very action (`controller-reconciliation-flow.mdc`,
+the `MembershipLayoutConverged` report describing that very action (`controller-reconciliation-flow.mdc`,
 `Continue*` vs `Done*` with requeue). Preconditions: configuration acknowledged, formation complete
 (guaranteed by the caller), RV not deleting, and no active layout-changing transition.
 
@@ -400,7 +400,7 @@ is **not** an escape in branch B: the Leave request hits the very same `guardFTT
 hangs the same way, only with a terminating replica on top.
 
 In both branches the class-level aggregate keeps the volume out of `aligned` (a present and False
-`LayoutConverged` counts as `staleConfiguration`, see `rsc_controller`), so
+`MembershipLayoutConverged` counts as `staleConfiguration`, see `rsc_controller`), so
 `ConfigurationRolledOut` stays False until the replica is repaired.
 
 Branch B is **not covered by the layout alert**, which fires on `TransitionUnsupported` and
@@ -418,7 +418,7 @@ reporter). Tiebreak protection is therefore never lost, not even for a moment.
 Convergence supplies the replacement (`computeTargetTieBreakerReplacement`, step 4 of the decision
 order). Two properties matter:
 
-- `computeActualLayout` is **not** touched: `status.layout` keeps reporting the raw member
+- `computeActualLayout` is **not** touched: `status.membershipLayout` keeps reporting the raw member
   composition, so the replacement window is honestly shown as `2D+2TB`.
 - the replacement deficit is computed **separately**, as `intendedTB` minus the tie-breaker members
   whose RVR is *not* being deleted (`deletingTieBreakerMemberNames`), with in-flight creations
@@ -472,9 +472,9 @@ but a blocker for future resync-bearing transitions.
 Migration monitoring:
 
 ```sh
-# Per-volume layout and convergence reason (Layout is a priority-1 column, -o wide shows it):
+# Per-volume layout and convergence reason (MembershipLayout is a priority-1 column, -o wide shows it):
 kubectl get rv -o wide
-kubectl get rv <name> -o jsonpath='{.status.layout}{"  "}{range .status.conditions[?(@.type=="LayoutConverged")]}{.status}/{.reason}: {.message}{end}{"\n"}'
+kubectl get rv <name> -o jsonpath='{.status.membershipLayout}{"  "}{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{end}{"\n"}'
 
 # Class-wide rollout aggregate:
 kubectl get rsc <name> -o jsonpath='{.status.volumes}{"\n"}'

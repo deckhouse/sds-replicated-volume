@@ -81,9 +81,9 @@ var _ = Describe("Layout: r3->r2 migration with TransZonal topology",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("3D")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("3D")))
 				// One diskful per labelled node, each reporting the zone we set:
 				// without this the migration assertions below would say nothing
 				// about zones.

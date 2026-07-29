@@ -63,9 +63,9 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 
 				By("verifying the volume is converged and serves I/O")
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				trva := trv.Attach(ctx, trv.OccupiedNodes()[0])
 				trva.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
@@ -86,9 +86,9 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("attaching the volume and writing to the raw device")
 				trva := trv.Attach(ctx, memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful)[0])
@@ -114,7 +114,7 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				// report does not have to be caught (see healedTieBreakerOtherThan).
 				trv.Await(ctx, healedTieBreakerOtherThan(deletedName))
 				trv.Await(ctx, match.RV.Members(3))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
 
 				By("verifying the healed tie-breaker is a NEW RVR, not the deleted one")

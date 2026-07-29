@@ -109,12 +109,12 @@ func usableEligibleNodes(trsp *fw.TestRSP) []string {
 	return nodes
 }
 
-// layoutOf returns the RV's reported actual layout string (e.g. "3D", "2D+1TB").
-// status.layout is optional: an unset layout (formation not finished, nothing reported yet)
+// membershipLayoutOf returns the RV's reported actual layout string (e.g. "3D", "2D+1TB").
+// status.membershipLayout is optional: an unset layout (formation not finished, nothing reported yet)
 // is returned as nil, never as an empty string — assert with Equal(ptr.To("...")) so an
 // unreported layout can never satisfy an expectation.
-func layoutOf(trv *fw.TestRV) *string {
-	return trv.Object().Status.Layout
+func membershipLayoutOf(trv *fw.TestRV) *string {
+	return trv.Object().Status.MembershipLayout
 }
 
 // memberTypeCount counts current datamesh members of the given type.
@@ -185,12 +185,12 @@ func rvrNames(trv *fw.TestRV) []string {
 }
 
 // migratedToR2 matches an RV that has fully converged to the 2D+1TB layout:
-// LayoutConverged=True/Converged, status.layout=="2D+1TB", and exactly one
+// MembershipLayoutConverged=True/Converged, status.membershipLayout=="2D+1TB", and exactly one
 // tie-breaker member. Evaluated atomically on a single snapshot so it never
 // matches a stale pre-migration snapshot (3D/Converged) nor a mid-migration one.
 func migratedToR2() types.GomegaMatcher {
 	return match.RV.Custom("migrated to 2D+1TB", func(rv *v1alpha1.ReplicatedVolume) bool {
-		if rv.Status.Layout == nil || *rv.Status.Layout != "2D+1TB" {
+		if rv.Status.MembershipLayout == nil || *rv.Status.MembershipLayout != "2D+1TB" {
 			return false
 		}
 		tb := 0
@@ -204,9 +204,9 @@ func migratedToR2() types.GomegaMatcher {
 		}
 		for i := range rv.Status.Conditions {
 			c := &rv.Status.Conditions[i]
-			if c.Type == v1alpha1.ReplicatedVolumeCondLayoutConvergedType {
+			if c.Type == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType {
 				return c.Status == metav1.ConditionTrue &&
-					c.Reason == v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged
+					c.Reason == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged
 			}
 		}
 		return false
@@ -221,7 +221,7 @@ func noActiveAddReplica() types.GomegaMatcher {
 		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica)))
 }
 
-// healedTieBreakerOtherThan matches an RV that reports LayoutConverged=True/Converged
+// healedTieBreakerOtherThan matches an RV that reports MembershipLayoutConverged=True/Converged
 // while its single tie-breaker member is NOT the named one. The name is what makes the
 // match provably fresh: the pre-deletion snapshot carries the replaced tie-breaker and
 // can never satisfy it. That is why the spec does not wait for the transient Converging
@@ -232,10 +232,10 @@ func healedTieBreakerOtherThan(replacedName string) types.GomegaMatcher {
 	return match.RV.Custom("converged with a tie-breaker other than "+replacedName,
 		func(rv *v1alpha1.ReplicatedVolume) bool {
 			cond := meta.FindStatusCondition(rv.Status.Conditions,
-				v1alpha1.ReplicatedVolumeCondLayoutConvergedType)
+				v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 			if cond == nil ||
 				cond.Status != metav1.ConditionTrue ||
-				cond.Reason != v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged {
+				cond.Reason != v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged {
 				return false
 			}
 

@@ -208,7 +208,7 @@ func awaitEligibleNodes(ctx SpecContext, trsp *fw.TestRSP, want []string) {
 
 // tieBreakerReplacementWindow matches the create-first window: the tie-breaker
 // being replaced is STILL a datamesh member while a second one has already
-// joined, and status.layout reports that honestly as 2D+2TB.
+// joined, and status.membershipLayout reports that honestly as 2D+2TB.
 //
 // Evaluated on one snapshot, so it cannot be satisfied by a "before" and an
 // "after" observation of two different states.
@@ -227,7 +227,7 @@ func tieBreakerReplacementWindow(oldName string) gtypes.GomegaMatcher {
 				}
 			}
 			return tieBreakers == 2 && sawOld &&
-				rv.Status.Layout != nil && *rv.Status.Layout == "2D+2TB"
+				rv.Status.MembershipLayout != nil && *rv.Status.MembershipLayout == "2D+2TB"
 		})
 }
 
@@ -283,9 +283,9 @@ func cannotConvergeWithMember(memberName string) gtypes.GomegaMatcher {
 			}
 			for i := range rv.Status.Conditions {
 				c := &rv.Status.Conditions[i]
-				if c.Type == v1alpha1.ReplicatedVolumeCondLayoutConvergedType {
+				if c.Type == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType {
 					return c.Status == metav1.ConditionFalse &&
-						c.Reason == v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge
+						c.Reason == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge
 				}
 			}
 			return false

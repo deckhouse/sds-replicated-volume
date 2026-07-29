@@ -66,9 +66,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 			configurationGeneration:         1,
 			configurationObservedGeneration: 1,
 			conditions: rvViewConditions{
-				satisfyEligibleNodes: condTrue(),
-				configurationReady:   condTrue(),
-				layoutConverged:      condTrue(),
+				satisfyEligibleNodes:      condTrue(),
+				configurationReady:        condTrue(),
+				membershipLayoutConverged: condTrue(),
 			},
 		}
 	}
@@ -103,9 +103,9 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.Aligned).To(Equal(int32(1)))
 	})
 
-	It("does not count a volume with LayoutConverged present and false as aligned; counts it as stale", func() {
+	It("does not count a volume with MembershipLayoutConverged present and false as aligned; counts it as stale", func() {
 		rv := alignedRV("rv-1")
-		rv.conditions.layoutConverged = condFalse()
+		rv.conditions.membershipLayoutConverged = condFalse()
 
 		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
@@ -113,11 +113,11 @@ var _ = Describe("computeActualVolumesSummary", func() {
 		Expect(*counters.StaleConfiguration).To(Equal(int32(1)))
 	})
 
-	It("counts a volume with absent LayoutConverged as pending", func() {
-		// LayoutConverged is only written post-formation. A volume still forming has produced
+	It("counts a volume with absent MembershipLayoutConverged as pending", func() {
+		// MembershipLayoutConverged is only written post-formation. A volume still forming has produced
 		// no verdict, which is a pending state — never a silent "rolled out".
 		rv := alignedRV("rv-1")
-		rv.conditions.layoutConverged = condMissing()
+		rv.conditions.membershipLayoutConverged = condMissing()
 
 		counters := computeActualVolumesSummary(rsc, []rvView{rv})
 
@@ -825,9 +825,9 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 			configurationGeneration:         1,
 			configurationObservedGeneration: 1,
 			conditions: rvViewConditions{
-				satisfyEligibleNodes: satisfyEligibleNodes,
-				configurationReady:   configReady,
-				layoutConverged:      condTrue(),
+				satisfyEligibleNodes:      satisfyEligibleNodes,
+				configurationReady:        configReady,
+				membershipLayoutConverged: condTrue(),
 			},
 		}
 	}
@@ -916,7 +916,7 @@ var _ = Describe("ensureVolumeSummaryAndConditions", func() {
 
 	It("sets ConfigurationRolledOut to False with an honest message when a volume's layout has not converged", func() {
 		notConverged := makeAcknowledgedRV("rv-2", true, true)
-		notConverged.conditions.layoutConverged = condFalse() // layout not converged → stale
+		notConverged.conditions.membershipLayoutConverged = condFalse() // layout not converged → stale
 		rvs := []rvView{
 			makeAcknowledgedRV("rv-1", true, true), // fully converged
 			notConverged,

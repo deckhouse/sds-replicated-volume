@@ -1775,8 +1775,8 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		copy(*out, *in)
 	}
 	in.Datamesh.DeepCopyInto(&out.Datamesh)
-	if in.Layout != nil {
-		in, out := &in.Layout, &out.Layout
+	if in.MembershipLayout != nil {
+		in, out := &in.MembershipLayout, &out.MembershipLayout
 		*out = new(string)
 		**out = **in
 	}

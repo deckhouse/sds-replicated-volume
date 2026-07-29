@@ -253,12 +253,12 @@ pendingObservation + staleConfiguration + aligned == tracked volumes
 ```
 
 The tracked conditions form the *configuration axis* only: `ConfigurationReady` and
-`LayoutConverged`. `SatisfyEligibleNodes` is deliberately not part of it — a volume can run the
+`MembershipLayoutConverged`. `SatisfyEligibleNodes` is deliberately not part of it — a volume can run the
 current configuration perfectly while sitting on a node that is no longer eligible.
 
 | Category | Counter | Rule |
 |----------|---------|------|
-| pending | `PendingObservation` | `ConfigurationObservedGeneration != RSC.ConfigurationGeneration` (an unset `0` is **not** acknowledgment), **or** a tracked condition carries no verdict: absent, `Unknown` (e.g. `LayoutConverged=Unknown/VolumeDeleting`), or written for an older `metadata.generation` of the volume |
+| pending | `PendingObservation` | `ConfigurationObservedGeneration != RSC.ConfigurationGeneration` (an unset `0` is **not** acknowledgment), **or** a tracked condition carries no verdict: absent, `Unknown` (e.g. `MembershipLayoutConverged=Unknown/VolumeDeleting`), or written for an older `metadata.generation` of the volume |
 | stale | `StaleConfiguration` | otherwise: `ConfigurationGeneration != RSC.ConfigurationGeneration` (an older configuration is applied — for example held by `NewVolumesOnly`), **or** a tracked condition is `False` |
 | aligned | `Aligned` | otherwise: the current configuration generation is applied and both tracked conditions are `True` for the volume's current generation |
 
@@ -291,7 +291,7 @@ Other counters:
 |----------|--------|---------|
 | RSC | For() (primary) | — |
 | RSP | Generation change, EligibleNodesRevision change, Ready condition change | mapRSPToRSC (includes usedBy names for orphan cleanup) |
-| RV | metadata.generation change (condition freshness is generation-relative), spec.replicatedStorageClassName change, status.ConfigurationGeneration / status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes/LayoutConverged condition changes | rvEventHandler |
+| RV | metadata.generation change (condition freshness is generation-relative), spec.replicatedStorageClassName change, status.ConfigurationGeneration / status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes/MembershipLayoutConverged condition changes | rvEventHandler |
 
 ## Indexes
 

@@ -51,9 +51,9 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("attaching the volume on a diskful node")
 				diskfulNodes := memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful)
@@ -77,17 +77,17 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 					rsc.Spec.Replication = v1alpha1.ReplicationConsistencyAndAvailability //nolint:staticcheck // deliberate unsupported edit
 				})
 
-				By("observing LayoutConverged=False/TransitionUnsupported with the exact arithmetic")
+				By("observing MembershipLayoutConverged=False/TransitionUnsupported with the exact arithmetic")
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonTransitionUnsupported))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 				trv.Await(ctx, tkmatch.ConditionStatus(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType, "False"))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType, "False"))
 				trv.Await(ctx, tkmatch.ConditionMessageContains(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType, "have 2D+1TB, want 3D"))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType, "have 2D+1TB, want 3D"))
 
 				By("verifying the replica composition is untouched (no new RVR / diskful)")
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 				Expect(trv.RVRCount()).To(Equal(rvrCountBefore))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
@@ -115,14 +115,14 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 					v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType, "False"))
 				trsc.Await(ctx, match.RSC.VolumesAligned(0))
 
-				By("reverting to Availability and observing LayoutConverged recover to Converged")
+				By("reverting to Availability and observing MembershipLayoutConverged recover to Converged")
 				trsc.Update(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {
 					rsc.Spec.Replication = v1alpha1.ReplicationAvailability //nolint:staticcheck // revert
 				})
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("I/O kept flowing across the mismatch window and the revert")
 				ioProgressed(ctx, io, ioDuring)

@@ -69,7 +69,7 @@ implemented**. They are planned for the near term:
   r3→r2 path (3D → 2D+1TB) — a type change of an existing replica, not a new
   one. It never creates a Diskful replica and never deletes a replica or its
   data; a layout mismatch outside those cases is reported as
-  `LayoutConverged=False/TransitionUnsupported` and waits for manual
+  `MembershipLayoutConverged=False/TransitionUnsupported` and waits for manual
   intervention. For the full decision order and the reported reasons, see the
   `rv_controller` README, "Layout convergence".
 
@@ -440,7 +440,7 @@ released**. There is never a moment without tiebreak protection.
 
 | State | What happens |
 |-------|--------------|
-| Old TieBreaker terminating, no replacement | Layout convergence creates a replacement RVR; `LayoutConverged=False/Converging` |
+| Old TieBreaker terminating, no replacement | Layout convergence creates a replacement RVR; `MembershipLayoutConverged=False/Converging` |
 | Replacement created, not scheduled | `Converging`; a **current** `Scheduled=False` (no free eligible node) → `CannotConverge` with the scheduler's message |
 | Replacement joined the datamesh, not operational yet | `Converging`; the old TieBreaker is still held by `guardTBSufficient` |
 | Replacement operational | The guard lets the old one leave; the layout is honestly reported as `2D+2TB` while it does |

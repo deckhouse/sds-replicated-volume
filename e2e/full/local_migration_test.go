@@ -52,9 +52,9 @@ var _ = Describe("Layout: r3->r2 migration with volumeAccess=Local",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("3D")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("3D")))
 
 				By("attaching the volume on one of the diskful nodes")
 				trv.ActivateSafetyInvariants()
@@ -83,8 +83,8 @@ var _ = Describe("Layout: r3->r2 migration with volumeAccess=Local",
 
 				By("converging to 2D+1TB")
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 
 				By("I/O keeps flowing while the retype is in flight")
 				ioDuring := ioProgressed(ctx, io, ioBefore)

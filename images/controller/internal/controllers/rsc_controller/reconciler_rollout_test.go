@@ -43,7 +43,7 @@ func condFalse() rvViewCondition {
 }
 
 // condUnknown is a condition written for the volume's current generation, reporting Unknown
-// (for example LayoutConverged=Unknown/VolumeDeleting).
+// (for example MembershipLayoutConverged=Unknown/VolumeDeleting).
 func condUnknown() rvViewCondition {
 	return rvViewCondition{present: true, status: metav1.ConditionUnknown, current: true}
 }
@@ -131,15 +131,15 @@ var _ = Describe("computeActualRVConfigurationCategory", func() {
 	})
 
 	// newTrackedRV builds an Auto-mode volume with the given generation state and conditions.
-	newTrackedRV := func(name string, applied, observed int64, configReady, layoutConverged rvViewCondition) rvView {
+	newTrackedRV := func(name string, applied, observed int64, configReady, membershipLayoutConverged rvViewCondition) rvView {
 		return rvView{
 			name:                            name,
 			configurationGeneration:         applied,
 			configurationObservedGeneration: observed,
 			conditions: rvViewConditions{
-				satisfyEligibleNodes: condTrue(),
-				configurationReady:   configReady,
-				layoutConverged:      layoutConverged,
+				satisfyEligibleNodes:      condTrue(),
+				configurationReady:        configReady,
+				membershipLayoutConverged: membershipLayoutConverged,
 			},
 		}
 	}
@@ -161,7 +161,7 @@ var _ = Describe("computeActualRVConfigurationCategory", func() {
 			Expect(computeActualRVConfigurationCategory(rsc, &rv)).To(Equal(rvConfigurationCategoryPending))
 		})
 
-		It("classifies LayoutConverged=Unknown (volume deleting) as pending", func() {
+		It("classifies MembershipLayoutConverged=Unknown (volume deleting) as pending", func() {
 			rv := newTrackedRV("rv-1", publishedGeneration, publishedGeneration, condTrue(), condUnknown())
 			Expect(computeActualRVConfigurationCategory(rsc, &rv)).To(Equal(rvConfigurationCategoryPending))
 		})
@@ -363,37 +363,37 @@ var _ = Describe("newRVView", func() {
 	It("leaves an absent condition unset", func() {
 		view := newRVView(newRV())
 
-		Expect(view.conditions.layoutConverged).To(Equal(rvViewCondition{}))
-		Expect(view.conditions.layoutConverged.hasNoVerdict()).To(BeTrue())
+		Expect(view.conditions.membershipLayoutConverged).To(Equal(rvViewCondition{}))
+		Expect(view.conditions.membershipLayoutConverged.hasNoVerdict()).To(BeTrue())
 	})
 
 	It("marks a condition written for the current generation as current", func() {
 		rv := newRV()
 		rv.Status.Conditions = []metav1.Condition{{
-			Type:               v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+			Type:               v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+			Reason:             v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 			ObservedGeneration: 3,
 		}}
 
 		view := newRVView(rv)
 
-		Expect(view.conditions.layoutConverged).To(Equal(condTrue()))
+		Expect(view.conditions.membershipLayoutConverged).To(Equal(condTrue()))
 	})
 
 	It("marks a condition left over from an older generation as not current", func() {
 		rv := newRV()
 		rv.Status.Conditions = []metav1.Condition{{
-			Type:               v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+			Type:               v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+			Reason:             v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 			ObservedGeneration: 2,
 		}}
 
 		view := newRVView(rv)
 
-		Expect(view.conditions.layoutConverged).To(Equal(condStale()))
-		Expect(view.conditions.layoutConverged.hasNoVerdict()).To(BeTrue())
+		Expect(view.conditions.membershipLayoutConverged).To(Equal(condStale()))
+		Expect(view.conditions.membershipLayoutConverged.hasNoVerdict()).To(BeTrue())
 	})
 
 	It("classifies a real held volume as stale", func() {
@@ -411,9 +411,9 @@ var _ = Describe("newRVView", func() {
 				ObservedGeneration: 3,
 			},
 			{
-				Type:               v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+				Type:               v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 				Status:             metav1.ConditionTrue,
-				Reason:             v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+				Reason:             v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 				ObservedGeneration: 3,
 			},
 		}
@@ -456,9 +456,9 @@ var _ = Describe("ConfigurationRolledOut rollout strategy reason", func() {
 			configurationGeneration:         1,
 			configurationObservedGeneration: 2,
 			conditions: rvViewConditions{
-				satisfyEligibleNodes: condTrue(),
-				configurationReady:   condFalse(),
-				layoutConverged:      condTrue(),
+				satisfyEligibleNodes:      condTrue(),
+				configurationReady:        condFalse(),
+				membershipLayoutConverged: condTrue(),
 			},
 		}
 	}

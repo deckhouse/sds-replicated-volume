@@ -45,9 +45,9 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("rejecting a storage type change (answered by the CEL consistency guard)")
 				// CRD validation (CEL) runs BEFORE validating webhooks. Flipping type
@@ -78,7 +78,7 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 				for _, g := range trsc.Object().Spec.Storage.LVMVolumeGroups {
 					Expect(g.ThinPoolName).NotTo(Equal("e2e-bogus-pool"))
 				}
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				By("accepting a legitimate replication edit")
 				trsc.Update(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {

@@ -444,7 +444,7 @@ var _ = Describe("rvPredicates", func() {
 			}
 		})
 
-		It("returns true when LayoutConverged condition changes", func() {
+		It("returns true when MembershipLayoutConverged condition changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
@@ -454,9 +454,9 @@ var _ = Describe("rvPredicates", func() {
 					ConfigurationObservedGeneration: 1,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 							Status: metav1.ConditionFalse,
-							Reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverging,
+							Reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 						},
 					},
 				},
@@ -470,9 +470,9 @@ var _ = Describe("rvPredicates", func() {
 					ConfigurationObservedGeneration: 1,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 							Status: metav1.ConditionTrue,
-							Reason: v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged,
+							Reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 						},
 					},
 				},

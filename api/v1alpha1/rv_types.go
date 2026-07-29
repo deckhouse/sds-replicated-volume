@@ -33,7 +33,7 @@ import (
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="Layout",type=string,JSONPath=".status.layout",priority=1
+// +kubebuilder:printcolumn:name="MembershipLayout",type=string,JSONPath=".status.membershipLayout",priority=1
 // +kubebuilder:printcolumn:name="ConfigurationReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='ConfigurationReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 // +kubebuilder:printcolumn:name="StorageClass",type=string,priority=1,JSONPath=".spec.replicatedStorageClassName"
@@ -160,7 +160,7 @@ type ReplicatedVolumeConfiguration struct {
 //	diskful     = FailuresToTolerate + GuaranteedMinimumDataRedundancy + 1
 //	tiebreakers = TieBreakersForDiskful(diskful, FailuresToTolerate)
 //
-// This is the source of truth for the layout comparison (the LayoutConverged condition and the
+// This is the source of truth for the layout comparison (the MembershipLayoutConverged condition and the
 // tie-breaker guard reuse it). Note that some formation-time code still duplicates the diskful
 // count formula (e.g. computeIntendedDiskfulReplicaCount); those are not yet unified.
 func (c ReplicatedVolumeConfiguration) IntendedLayout() (diskful, tiebreakers int) {
@@ -227,14 +227,14 @@ type ReplicatedVolumeStatus struct {
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
 
-	// Layout is a short, human-readable representation of the actual datamesh layout
+	// MembershipLayout is a short, human-readable representation of the actual datamesh layout
 	// (diskful voters and tie-breakers), e.g. "3D" or "2D+1TB". Derived from the datamesh
-	// members; freely produced (not an enum). See the LayoutConverged condition for whether
+	// members; freely produced (not an enum). See the MembershipLayoutConverged condition for whether
 	// it matches the intended layout.
 	// Unset (absent) while the layout has not been computed yet: during formation the
 	// controller does not report a layout at all. An empty string is never published.
 	// +optional
-	Layout *string `json:"layout,omitempty"`
+	MembershipLayout *string `json:"membershipLayout,omitempty"`
 
 	// EffectiveLayout describes the real-time protection level and health
 	// of the datamesh, based on observable cluster state.

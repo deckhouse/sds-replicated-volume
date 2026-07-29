@@ -1,7 +1,7 @@
 # E2E Layout Convergence & r3→r2 Migration Test Cases
 
 End-to-end tests for the r3→r2 auto-migration feature: layout comparison
-(`LayoutConverged` condition + `status.layout`), the narrow convergence whitelist
+(`MembershipLayoutConverged` condition + `status.membershipLayout`), the narrow convergence whitelist
 (P1 retype Diskful→TieBreaker, P2 heal missing tie-breaker), tie-breaker creation
 at formation and strict create-first tie-breaker replacement, the RSC aggregate
 (`status.volumes`, `ConfigurationRolledOut`), the rollout strategies, and the
@@ -37,16 +37,16 @@ Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Seria
 + lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
 
 Given: a dedicated RSC with `replication: ConsistencyAndAvailability`, a 3D volume
-(`LayoutConverged=True/Converged`, `status.layout=3D`), attached with I/O-safety
+(`MembershipLayoutConverged=True/Converged`, `status.membershipLayout=3D`), attached with I/O-safety
 invariants active and a raw-device writer running on the attached node
 (`Framework.StartIOWorkload`).
 
 When: `rsc.spec.replication` is edited to `Availability`.
 
 Then:
-- `LayoutConverged` moves `False/Converging` → `True/Converged` (no flapping).
+- `MembershipLayoutConverged` moves `False/Converging` → `True/Converged` (no flapping).
 - Exactly one diskful is retyped to a tie-breaker; the composition is 2D+1TB
-  (`status.layout=2D+1TB`, 2 Diskful + 1 TieBreaker members, still 3 members).
+  (`status.membershipLayout=2D+1TB`, 2 Diskful + 1 TieBreaker members, still 3 members).
 - ⚡ No `AddReplica` transition ever fires — the migration is a retype, not a
   resync.
 - The retyped replica releases its backing LV (`status.backingVolume == nil`).
@@ -74,12 +74,12 @@ When: a volume is created.
 
 Then:
 - By `FormationComplete` the member composition is already 2 Diskful + 1
-  TieBreaker. The `status.layout` string is read later, on the converged
+  TieBreaker. The `status.membershipLayout` string is read later, on the converged
   snapshot: no layout is published while formation runs.
 - ⚡ Neither `AddReplica` nor `ChangeReplicaType` transitions appear — the
   tie-breaker is part of the formation membership, not a post-formation doctoring
   step (so DMTE and bitmap-bug B-1 are never entered).
-- `LayoutConverged=True/Converged`; the volume serves I/O.
+- `MembershipLayoutConverged=True/Converged`; the volume serves I/O.
 
 ---
 
@@ -103,7 +103,7 @@ Then:
   (1 TieBreaker member, 3 members total), and the tie-breaker is a different one
   than the deleted replica — which is also what proves the observation is not the
   pre-deletion state.
-- `LayoutConverged` returns to `True/Converged`.
+- `MembershipLayoutConverged` returns to `True/Converged`.
 - ⚡ Verified device writes keep advancing through the healing; the io-workload's
   historical gap check (every progress wait + the whole journal at cleanup) turns
   the writer into a continuous availability claim for the entire spec, not a pair
@@ -123,7 +123,7 @@ Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Seria
 + lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
 
 Given: an r2 storage class (`replication: Availability`), a 2D+1TB volume,
-`LayoutConverged=True/Converged`, attached on one of its diskful nodes with a
+`MembershipLayoutConverged=True/Converged`, attached on one of its diskful nodes with a
 raw-device writer running there (`Framework.StartIOWorkload`) — the writer is
 started **before** the unsupported edit, so one process spans the whole mismatch
 window.
@@ -132,7 +132,7 @@ When: `rsc.spec.replication` is edited to `ConsistencyAndAvailability` (upsize �
 outside the convergence whitelist).
 
 Then:
-- `LayoutConverged=False/TransitionUnsupported`; the message contains the exact
+- `MembershipLayoutConverged=False/TransitionUnsupported`; the message contains the exact
   arithmetic `have 2D+1TB, want 3D`.
 - The replica composition is untouched: no new RVR, still 2D+1TB (2 Diskful + 1
   TieBreaker), RVR count unchanged.
@@ -143,7 +143,7 @@ Then:
   or an early exit.
 - The RSC aggregate is honestly not rolled out (`ConfigurationRolledOut=False`,
   `status.volumes.aligned == 0`).
-- Reverting `replication` to `Availability` returns `LayoutConverged` to
+- Reverting `replication` to `Availability` returns `MembershipLayoutConverged` to
   `True/Converged` — no stale latch, no flapping.
 - Verified device writes advance again after the revert, from the same writer.
 
@@ -162,7 +162,7 @@ Given: an r3 storage class with N volumes (N=3), one volume attached.
 When: `rsc.spec.replication` is edited to `Availability` once.
 
 Then:
-- Every volume converges to 2D+1TB (`LayoutConverged=True/Converged`, 1 tie-breaker
+- Every volume converges to 2D+1TB (`MembershipLayoutConverged=True/Converged`, 1 tie-breaker
   each); no `AddReplica`/resync on any volume.
 - The RSC aggregate reaches `status.volumes.aligned == N` and
   `staleConfiguration == 0` without stalling; `ConfigurationRolledOut=True`.
@@ -208,7 +208,7 @@ Then:
 - After the node returns, its replica rejoins and reaches `Healthy`; the
   surviving replicas return to `Healthy` with no invariant violation recorded
   (the closing Awaits surface violations from snapshots no assertion looked
-  at); the layout is intact (2D+1TB, `LayoutConverged=True/Converged`).
+  at); the layout is intact (2D+1TB, `MembershipLayoutConverged=True/Converged`).
 
 ---
 
@@ -255,7 +255,7 @@ with a raw-device writer running there.
 When: `rsc.spec.replication` is edited to `Availability`.
 
 Then:
-- The migration completes: 2D+1TB, `LayoutConverged=True/Converged`, retype in
+- The migration completes: 2D+1TB, `MembershipLayoutConverged=True/Converged`, retype in
   place (same RVR set, no `AddReplica`).
 - ⚡ The attached node is still a **Diskful** member — asserted as an `Always`
   invariant for the whole migration window, not only at the end. A `Local` volume
@@ -289,7 +289,7 @@ When: `rsc.spec.replication` is edited to `Availability`.
 Then:
 - ⚡ A `ChangeReplicaType` transition is actually observed — the spec does not
   accept a volume that merely sits in `Converging` forever.
-- The volume reaches 2D+1TB with `LayoutConverged=True/Converged`, retype in
+- The volume reaches 2D+1TB with `MembershipLayoutConverged=True/Converged`, retype in
   place (same RVR set).
 - ⚡ Zone coverage is preserved: the two diskful members occupy two distinct
   zones, the tie-breaker holds the remaining third zone (and did not move
@@ -323,7 +323,7 @@ When: the tie-breaker RVR is deleted.
 
 Then:
 - ⚡ The **create-first window is actually observed**: at some point the datamesh
-  holds 4 members with 2 tie-breakers (`status.layout=2D+2TB`) while the deleted
+  holds 4 members with 2 tie-breakers (`status.membershipLayout=2D+2TB`) while the deleted
   one is still a member. The volume never drops to a single tie-breaker in
   between.
 - The replacement is a different object — identified by **UID**, not name — and
@@ -382,7 +382,7 @@ raw-device writer runs on the attached node.
 When: the tie-breaker RVR is deleted.
 
 Then (phase 1 — the honest deadlock):
-- The volume reports `LayoutConverged=False/CannotConverge` with the scheduler's
+- The volume reports `MembershipLayoutConverged=False/CannotConverge` with the scheduler's
   own reason in the message (`cannot place a replacement`).
 - A replacement RVR **is** created (create-first is strict) but stays unplaced,
   with `Scheduled=False/SchedulingFailed` and an empty `spec.nodeName`.
@@ -405,7 +405,7 @@ Then (phase 2 — the documented manual escape):
 - The old tie-breaker is gone from `status.datamesh.members` and from the DRBD
   configuration of both diskful nodes.
 - P2 places the pending replacement on the freed node; the volume returns to
-  2D+1TB with `LayoutConverged=True/Converged`, and DRBD on both diskful nodes
+  2D+1TB with `MembershipLayoutConverged=True/Converged`, and DRBD on both diskful nodes
   shows the other diskful plus the new tie-breaker.
 - `rv.status.datamesh.quorum == 2` is an `Always` invariant of the whole spec,
   cross-checked at the DRBD level at both ends; the writer never stalls.
@@ -428,7 +428,7 @@ created, and only afterwards the strategy is switched to `RollingUpdate`.
 
 Then:
 - The old volume is **held, not silently stale**:
-  `ConfigurationReady=False/NewerConfigurationHeld` and `status.layout=3D`. ⚡ The
+  `ConfigurationReady=False/NewerConfigurationHeld` and `status.membershipLayout=3D`. ⚡ The
   hold is asserted as an `Always` invariant across the formation of the second
   volume, not just sampled once.
 - The RSC is honest about it: `ConfigurationRolledOut=False/ConfigurationRolloutDisabled`

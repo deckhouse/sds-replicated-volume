@@ -896,7 +896,7 @@ Consequences, by design:
   switch (verified in the DRBD sources, `drbd_state.c`, `calc_quorum`).
 - If no free eligible node exists, the replacement cannot be placed (the terminating tie-breaker
   still occupies its own node — `OccupiedNodes` plus `guardNoMemberOnSameNode`). The volume then
-  reports `LayoutConverged=False/CannotConverge` with the scheduler's message and the old
+  reports `MembershipLayoutConverged=False/CannotConverge` with the scheduler's message and the old
   tie-breaker keeps working, terminating but alive. Nothing else is blocked: only the deletion
   waits. The manual escape is to remove the finalizer from the terminating RVR, which turns it
   into an orphan (force-removed without tie-breaker guards) and lets a replacement be scheduled

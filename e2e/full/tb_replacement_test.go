@@ -60,9 +60,9 @@ var _ = Describe("Layout: tie-breaker replacement",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				trv.ActivateSafetyInvariants()
 				// Strict create-first as a continuous claim: the volume must
@@ -134,7 +134,7 @@ var _ = Describe("Layout: tie-breaker replacement",
 
 				By("the volume is back to a converged 2D+1TB with the new tie-breaker")
 				// Same end-state matcher the migration specs use: layout
-				// 2D+1TB, exactly one tie-breaker, LayoutConverged=Converged.
+				// 2D+1TB, exactly one tie-breaker, MembershipLayoutConverged=Converged.
 				trv.Await(ctx, migratedToR2())
 				Expect(tieBreakerRVR(trv).Object().GetUID()).To(Equal(newTB.Object().GetUID()))
 
@@ -204,9 +204,9 @@ var _ = Describe("Layout: tie-breaker replacement",
 				trv.Await(ctx, match.RV.FormationComplete())
 				trv.Await(ctx, match.RV.Members(3))
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
-				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
 
 				trv.ActivateSafetyInvariants()
 				trv.Always(match.RV.Quorum(2))
@@ -232,10 +232,10 @@ var _ = Describe("Layout: tie-breaker replacement",
 
 				By("the volume reports CannotConverge with the scheduler's own reason")
 				trv.Await(ctx, tkmatch.ConditionReason(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonCannotConverge))
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
 				trv.Await(ctx, tkmatch.ConditionMessageContains(
-					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 					"cannot place a replacement"))
 
 				replacement := awaitTieBreakerReplacement(ctx, trv, oldUID)

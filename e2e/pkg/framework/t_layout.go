@@ -61,7 +61,7 @@ func (l TestLayout) intendedLayout() (diskful, tiebreakers int) {
 // completes. The framework MUST NOT create the tie-breaker by hand: doing so
 // would race the controller's formation and, once formation also adds one, leave
 // an excess TieBreaker that the layout converger reports as
-// LayoutConverged=TransitionUnsupported.
+// MembershipLayoutConverged=TransitionUnsupported.
 //
 //	Phase 1: Create RV (MaxAttachments = Attached)
 //	Phase 2: Await formation complete (D + TB members present)
