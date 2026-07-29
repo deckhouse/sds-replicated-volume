@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -304,7 +303,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	// authoritative spec.storage and only drop the deprecated storagePool; when the two
 	// disagree, surface the conflict honestly instead of silently overwriting.
 	if rsc.Spec.Storage != nil {
-		conflict := !reflect.DeepEqual(rsc.Spec.Storage, migratedStorage)
+		conflict := !isStorageInSync(rsc, migratedStorage)
 
 		rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: dropping deprecated field, keeping authoritative spec.storage
 		if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
@@ -341,6 +340,32 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	}
 
 	return rf.Continue()
+}
+
+// isStorageInSync reports whether spec.storage already describes the target storage.
+//
+// spec.storage.lvmVolumeGroups is a listType=map keyed by name, so element order carries no
+// meaning — the apiserver and server-side apply are free to reorder it. A positional comparison
+// would therefore report a difference for two lists that describe the same storage, so the
+// groups are compared as a set. Clones are sorted to keep both inputs read-only.
+func isStorageInSync(rsc *v1alpha1.ReplicatedStorageClass, target *v1alpha1.ReplicatedStorageClassStorage) bool {
+	storage := rsc.Spec.Storage
+	if storage == nil || target == nil {
+		return storage == target
+	}
+	if storage.Type != target.Type {
+		return false
+	}
+
+	byName := func(a, b v1alpha1.ReplicatedStoragePoolLVMVolumeGroups) int {
+		return strings.Compare(a.Name, b.Name)
+	}
+	current := slices.Clone(storage.LVMVolumeGroups)
+	intended := slices.Clone(target.LVMVolumeGroups)
+	slices.SortFunc(current, byName)
+	slices.SortFunc(intended, byName)
+
+	return slices.Equal(current, intended)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

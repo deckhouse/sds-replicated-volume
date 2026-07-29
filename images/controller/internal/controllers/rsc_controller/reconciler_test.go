@@ -1243,6 +1243,57 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
 		})
 
+		It("does not report a conflict when spec.Storage lists the same LVGs in another order", func() {
+			// spec.storage.lvmVolumeGroups is a listType=map keyed by name, so its order
+			// carries no meaning: the apiserver and server-side apply are free to reorder it.
+			// A legacy object whose list happens to be ordered differently from the RSP it
+			// migrates from describes exactly the same storage and must not be flagged as a
+			// conflict.
+			// Type LVM keeps thinPoolName absent on both sides, which is what the CEL
+			// rules on ReplicatedStorageClassStorage / ReplicatedStoragePoolSpec require.
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool: "rsp-1",
+					Storage: &v1alpha1.ReplicatedStorageClassStorage{
+						Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{Name: "lvg-2"},
+							{Name: "lvg-1"},
+						},
+					},
+				},
+			}
+			rsp := &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					Type: v1alpha1.ReplicatedStoragePoolTypeLVM,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{Name: "lvg-1"},
+						{Name: "lvg-2"},
+					},
+				},
+			}
+			cl = testhelpers.WithRSPByUsedByRSCNameIndex(testhelpers.WithRVByReplicatedStorageClassNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rsc, rsp).
+				WithStatusSubresource(rsc, &v1alpha1.ReplicatedStoragePool{}))).
+				Build()
+			rec = NewReconciler(cl)
+
+			_, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: "rsc-1"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedRSC v1alpha1.ReplicatedStorageClass
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "rsc-1"}, &updatedRSC)).To(Succeed())
+
+			Expect(updatedRSC.Status.Phase).NotTo(Equal(v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration))
+			// Equivalent content is not a conflict: reconcile continued (finalizer added).
+			Expect(updatedRSC.Finalizers).To(ContainElement(v1alpha1.RSCControllerFinalizer))
+		})
+
 		It("keeps already-set spec.Storage and clears storagePool with an honest condition on content conflict", func() {
 			// Legacy object with both fields set, but storage disagrees with the RSP the
 			// deprecated storagePool points to. storage is immutable once set, so it must not
