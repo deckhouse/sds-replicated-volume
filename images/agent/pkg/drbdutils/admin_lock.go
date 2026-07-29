@@ -50,6 +50,13 @@ var ForceUnlockArgs = func(resource string) []string {
 	return []string{"force-unlock", resource}
 }
 
+// adminLockGateKnownError classifies the rejection every administrative command
+// gets while the resource is held by someone else's admin lock. Applied by
+// executeCommand to all commands, because the kernel-side gate is not specific to
+// any one of them: while a snapshot holds the lock, resize, attach, connect and
+// the rest all come back with this.
+var adminLockGateKnownError = KnownError{ExitCode: 10, OutputSubstring: "(176)", JoinErr: ErrLockHeld}
+
 var LockKnownErrors = []KnownError{
 	{ExitCode: 10, OutputSubstring: "(158)", JoinErr: ErrLockResourceNotFound},
 	{ExitCode: 10, OutputSubstring: "(176)", JoinErr: ErrLockHeld},

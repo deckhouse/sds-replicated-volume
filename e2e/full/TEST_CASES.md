@@ -262,3 +262,90 @@ Assert:
 Volume cloning is implemented as an internal snapshot + restore pipeline
 inside the controller. The resulting RV must behave identically to a
 snapshot-restored RV from the user's perspective.
+
+---
+
+## 12. RVS deletion deferred while a volume is restored from it
+
+⚡ **Deleting a snapshot mid-restore does not pull data out from under the target.**
+
+Setup: 2D RV via `SetupLayout`, `SetupRVS` on it, then a new RV with
+`spec.dataSource.kind=ReplicatedVolumeSnapshot`.
+
+Action: delete the RVS while the target is still forming.
+
+Assert:
+
+- The RVS gains `RVSRestoreSourceFinalizer` as soon as the target starts forming.
+- After `Delete`, the RVS reports `Deleting` but does not disappear, and its
+  `ReplicatedVolumeReplicaSnapshot` children still exist.
+- The restore completes: `FormationComplete`, `NoActiveTransitions`, all RVRs
+  `Healthy`.
+- Only then does the RVS disappear, together with every child.
+
+A finalizer alone would keep the object but not the children — rvs-controller has
+to defer its own cascade too, otherwise the per-replica snapshots the restore
+reads from are deleted while it runs.
+
+---
+
+## 13. RVS not pinned before it is Ready
+
+⚡ **Regression guard for a deadlock plus a leaked cluster-wide admin lock.**
+
+Setup: 2D RV, create an RVS and wait for `InProgress` (not Ready), then create an
+RV restoring from that unfinished snapshot.
+
+Action: delete the RVS.
+
+Assert:
+
+- The RVS is deleted promptly — nothing is pinned, because the restore-source
+  finalizer is only held on a Ready snapshot.
+- No orphan `DRBDResource` / `DRBDResourceOperation` named after the RVS remains,
+  i.e. the admin-lock operation went with it.
+
+Pinning an unsettled snapshot used to deadlock both sides: once the RVS has a
+deletionTimestamp its controller stops advancing prepare/sync, so it could never
+become Ready, so the restore could never finish, so the finalizer was never
+dropped — and the DRBD admin lock stayed held on every node, blocking
+administrative operations on the source volume until the target was deleted by
+hand.
+
+---
+
+## 14. RVS outlives its source ReplicatedVolume
+
+**A finished snapshot stays restorable after the source volume is deleted.**
+
+Setup: 2D RV via `SetupLayout`, `SetupRVS` on it.
+
+Action: delete the source RV and wait until it is gone.
+
+Assert:
+
+- The RVS stays `Ready` / `ReadyToUse=true` — losing the source does not
+  invalidate it.
+- A new RV restoring from it still reaches `FormationComplete` with
+  `status.datamesh.size` ≥ the original size.
+
+The data lives in the per-replica snapshots, which the RVS owns rather than the
+volume. Being able to restore after the source claim is gone is the whole point of
+a snapshot, and the VolumeSnapshot API guarantees that independence — a snapshot
+that dies with its PVC is useless as a backup.
+
+---
+
+## 15. Unfinished RVS fails when its source disappears
+
+**An in-flight snapshot cannot survive losing the replicas it is being taken from.**
+
+Setup: 2D RV, create an RVS and wait for `InProgress`.
+
+Action: delete the source RV.
+
+Assert: the RVS reaches `Failed` with `readyToUse=false`.
+
+The mirror image of case 14: prepare and sync both read from the source replicas,
+so an unfinished snapshot has nothing left to finish with. Only a snapshot that
+already reached Ready is self-sufficient.
