@@ -478,12 +478,21 @@ func rvrNames(rvrs []*v1alpha1.ReplicatedVolumeReplica) []string {
 }
 
 func TestFindThickDiskfulReplica(t *testing.T) {
+	// A scheduled replica always carries a volume group; the thin pool name is
+	// what distinguishes thin from thick.
 	thin := func(name, node string) *v1alpha1.ReplicatedVolumeReplica {
 		rvr := mkRVRWithName(name, node, v1alpha1.ReplicaTypeDiskful)
+		rvr.Spec.LVMVolumeGroupName = "lvg-1"
 		rvr.Spec.LVMVolumeGroupThinPoolName = "thin-1"
 		return rvr
 	}
 	thick := func(name, node string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := mkRVRWithName(name, node, v1alpha1.ReplicaTypeDiskful)
+		rvr.Spec.LVMVolumeGroupName = "lvg-1"
+		return rvr
+	}
+	// Not placed by the scheduler yet: both fields empty, backing type unknown.
+	unscheduled := func(name, node string) *v1alpha1.ReplicatedVolumeReplica {
 		return mkRVRWithName(name, node, v1alpha1.ReplicaTypeDiskful)
 	}
 
@@ -520,6 +529,18 @@ func TestFindThickDiskfulReplica(t *testing.T) {
 		{
 			name: "nil entries are skipped",
 			rvrs: []*v1alpha1.ReplicatedVolumeReplica{nil, thin("rvr-0", "node-a")},
+			want: "",
+		},
+		{
+			// Regression: an unscheduled replica used to read as thick, which
+			// failed a snapshot of a thin volume permanently.
+			name: "unscheduled diskful replica is not judged thick",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{thin("rvr-0", "node-a"), unscheduled("rvr-1", "node-b")},
+			want: "",
+		},
+		{
+			name: "only unscheduled replicas",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{unscheduled("rvr-0", "node-a")},
 			want: "",
 		},
 	}
@@ -704,5 +725,90 @@ func TestReconcileDeleteDefersWhileRestoreSourceFinalizerPresent(t *testing.T) {
 	}
 	if !contains(gotRVS.Status.Message, "restored") {
 		t.Errorf("message does not explain the wait: %q", gotRVS.Status.Message)
+	}
+}
+
+// A finished snapshot must outlive the volume it was taken from — restoring after
+// the source PVC is gone is the point of having a snapshot. See the
+// VolumeSnapshot API: a snapshot is independent of its source claim.
+func TestReconcileNormalKeepsReadySnapshotWhenSourceVolumeIsGone(t *testing.T) {
+	ensureSnapmeshRegistry()
+
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1", Finalizers: []string{v1alpha1.RVSControllerFinalizer}},
+		Spec:       v1alpha1.ReplicatedVolumeSnapshotSpec{ReplicatedVolumeName: "rv-gone"},
+		Status: v1alpha1.ReplicatedVolumeSnapshotStatus{
+			Phase:                     v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
+			ReadyToUse:                true,
+			SourceReplicaSnapshotName: "snap-1-rvr-0",
+		},
+	}
+
+	builder := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolumeSnapshot{}).
+		WithObjects(rvs)
+	builder = indextest.WithRVRByReplicatedVolumeNameIndex(builder)
+	reconciler := &Reconciler{cl: builder.Build(), scheme: scheme}
+
+	if outcome := reconciler.reconcileNormal(context.Background(), rvs); outcome.Error() != nil {
+		t.Fatalf("reconcileNormal() error = %v", outcome.Error())
+	}
+
+	got := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1"}, got); err != nil {
+		t.Fatalf("get RVS: %v", err)
+	}
+	if got.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseReady {
+		t.Errorf("phase = %q, want it to stay %q", got.Status.Phase, v1alpha1.ReplicatedVolumeSnapshotPhaseReady)
+	}
+	if !got.Status.ReadyToUse {
+		t.Error("readyToUse = false, want the snapshot to remain restorable")
+	}
+	if got.Status.SourceReplicaSnapshotName != "snap-1-rvr-0" {
+		t.Errorf("sourceReplicaSnapshotName = %q, want it preserved", got.Status.SourceReplicaSnapshotName)
+	}
+}
+
+// An unfinished snapshot has nothing left to finish with: prepare and sync both
+// need the source replicas.
+func TestReconcileNormalFailsUnfinishedSnapshotWhenSourceVolumeIsGone(t *testing.T) {
+	ensureSnapmeshRegistry()
+
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1", Finalizers: []string{v1alpha1.RVSControllerFinalizer}},
+		Spec:       v1alpha1.ReplicatedVolumeSnapshotSpec{ReplicatedVolumeName: "rv-gone"},
+		Status: v1alpha1.ReplicatedVolumeSnapshotStatus{
+			Phase: v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing,
+		},
+	}
+
+	builder := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolumeSnapshot{}).
+		WithObjects(rvs)
+	builder = indextest.WithRVRByReplicatedVolumeNameIndex(builder)
+	reconciler := &Reconciler{cl: builder.Build(), scheme: scheme}
+
+	if outcome := reconciler.reconcileNormal(context.Background(), rvs); outcome.Error() != nil {
+		t.Fatalf("reconcileNormal() error = %v", outcome.Error())
+	}
+
+	got := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1"}, got); err != nil {
+		t.Fatalf("get RVS: %v", err)
+	}
+	if got.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseFailed {
+		t.Errorf("phase = %q, want %q", got.Status.Phase, v1alpha1.ReplicatedVolumeSnapshotPhaseFailed)
 	}
 }

@@ -832,3 +832,20 @@ func WaitForReplicatedVolumeSnapshotDeleted(
 		}
 	}
 }
+
+// IsReplicatedVolumeSnapshotRestoreSource reports whether a ReplicatedVolume is
+// still being restored from this snapshot. While that is the case the controller
+// deliberately keeps the snapshot and its per-replica children alive, so deleting
+// it has to wait.
+//
+// A missing snapshot is not in use: it is already gone.
+func IsReplicatedVolumeSnapshotRestoreSource(ctx context.Context, kc client.Client, name string) (bool, error) {
+	rvs, err := GetReplicatedVolumeSnapshot(ctx, kc, name)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get ReplicatedVolumeSnapshot %s: %w", name, err)
+	}
+	return slices.Contains(rvs.Finalizers, srv.RVSRestoreSourceFinalizer), nil
+}

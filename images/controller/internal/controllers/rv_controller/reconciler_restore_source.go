@@ -65,7 +65,12 @@ func (r *Reconciler) reconcileRestoreSourceFinalizer(
 		return rf.Continue()
 	}
 
-	needFinalizer := rv.DeletionTimestamp == nil
+	// Only a Ready snapshot is worth holding. Pinning one that has not settled
+	// deadlocks both sides: once the RVS has a deletionTimestamp its controller
+	// stops advancing prepare/sync, so it can never become Ready, so this
+	// formation can never finish, so the finalizer is never dropped.
+	needFinalizer := rv.DeletionTimestamp == nil &&
+		source.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady
 	if needFinalizer {
 		if forming, _ := isFormationInProgress(rv); !forming {
 			needFinalizer = false

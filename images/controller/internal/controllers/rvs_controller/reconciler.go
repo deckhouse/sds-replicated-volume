@@ -96,6 +96,18 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Fail(err)
 	}
 	if rv == nil {
+		// A finished snapshot outlives its source volume. Its data lives in the
+		// ReplicatedVolumeReplicaSnapshots, which this RVS owns rather than the
+		// volume, so a restore is still possible — and being able to restore after
+		// the source PVC is gone is the whole point of a snapshot. Failing it here
+		// would make every snapshot of a volume useless the moment that volume is
+		// deleted, which contradicts the VolumeSnapshot API: a VolumeSnapshot is
+		// independent of its source claim.
+		if rvs.Status.Phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady {
+			return rf.Continue()
+		}
+		// An unfinished snapshot, on the other hand, has nothing left to finish
+		// with: prepare and sync both need the source replicas.
 		return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
 			v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
 			"ReplicatedVolume not found",
@@ -466,11 +478,20 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Done()
 	}
 
+	// Release the admin lock first, unconditionally. Holding a cluster-wide lock
+	// is never required to keep the per-replica snapshots alive, and deferring
+	// below without releasing it would leave the lock held for as long as the
+	// restore runs — blocking administrative operations on the source volume on
+	// every node.
+	if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
+		return releaseOutcome
+	}
+
 	// A ReplicatedVolume is still being restored from this snapshot: its replicas
 	// read from the per-replica snapshots below, so tearing them down now would
-	// pull the data out from under the restore. rv-controller drops the finalizer
-	// once the target finishes forming or starts deleting, and the deletion
-	// resumes from here.
+	// pull the data out from under the restore. rv-controller only holds this
+	// finalizer on a Ready snapshot, so the restore can always finish; it drops
+	// the finalizer then, and the deletion resumes from here.
 	if obju.HasFinalizer(rvs, v1alpha1.RVSRestoreSourceFinalizer) {
 		rf.Log().Info("[reconcileDelete] deferring cleanup: snapshot is still a restore source",
 			"rvsName", rvs.Name)
@@ -479,10 +500,6 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, rvs *v1alpha1.Replicat
 			"Waiting for a ReplicatedVolume being restored from this snapshot to finish",
 			false,
 			rvs.Status.SourceReplicaSnapshotName)
-	}
-
-	if releaseOutcome := r.reconcileReleaseAdminLock(rf.Ctx(), rvs); releaseOutcome.ShouldReturn() {
-		return releaseOutcome
 	}
 
 	ownedDRBDRs, err := r.getOwnedDRBDResources(rf.Ctx(), rvs)
@@ -664,12 +681,21 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 // --- RVR ---
 
 // findThickDiskfulReplica returns the name of the first diskful replica backed
-// by a thick LV (no thin pool), or "" when every diskful replica is thin.
-// Diskless replicas carry no backing volume and are skipped.
+// by a thick LV (no thin pool), or "" when no such replica is found.
+//
+// Diskless replicas carry no backing volume and are skipped. So are replicas the
+// scheduler has not placed yet: an empty thin-pool name only means "thick" once
+// the replica has a volume group, which is how rvr-scheduling-controller itself
+// tells the two apart. Judging an unplaced replica as thick would fail a snapshot
+// of a perfectly thin volume — permanently, since the check runs while
+// prepareRevision is still 0.
 func findThickDiskfulReplica(rvrs []*v1alpha1.ReplicatedVolumeReplica) string {
 	for _, rvr := range rvrs {
 		if rvr == nil || rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			continue
+		}
+		if rvr.Spec.LVMVolumeGroupName == "" {
+			continue // not scheduled yet: the backing volume type is unknown
 		}
 		if rvr.Spec.LVMVolumeGroupThinPoolName == "" {
 			return rvr.Name

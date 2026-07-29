@@ -536,3 +536,126 @@ func TestCreateVolume_FreshCreate_WaitFails_DeletionTimestamp_DoesNotDelete(t *t
 		t.Fatalf("CSI finalizer must be preserved when CreateVolume skips Delete, finalizers=%v", got.Finalizers)
 	}
 }
+
+// ── snapshot gating and error codes ──────────────────────────────────────────
+
+func newSnapshotTestDriver(t *testing.T, cl client.Client, snapshotsEnabled bool) *Driver {
+	t.Helper()
+	d := newTestDriver(t, cl, 5*time.Second)
+	d.snapshotsEnabled = snapshotsEnabled
+	return d
+}
+
+func TestControllerGetCapabilities_SnapshotCapabilitiesFollowTheSwitch(t *testing.T) {
+	has := func(t *testing.T, enabled bool, want csi.ControllerServiceCapability_RPC_Type) bool {
+		t.Helper()
+		d := newSnapshotTestDriver(t, newTestFakeClient(), enabled)
+		resp, err := d.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
+		if err != nil {
+			t.Fatalf("ControllerGetCapabilities() error = %v", err)
+		}
+		for _, c := range resp.Capabilities {
+			if c.GetRpc().GetType() == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, capability := range []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+	} {
+		if !has(t, true, capability) {
+			t.Errorf("%v not advertised while snapshots are enabled", capability)
+		}
+		if has(t, false, capability) {
+			t.Errorf("%v advertised while snapshots are disabled", capability)
+		}
+	}
+
+	// LIST_SNAPSHOTS is deliberately never advertised.
+	if has(t, true, csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS) {
+		t.Error("LIST_SNAPSHOTS advertised but not implemented")
+	}
+}
+
+func TestSnapshotRPCsReturnUnimplementedWhenDisabled(t *testing.T) {
+	d := newSnapshotTestDriver(t, newTestFakeClient(), false)
+
+	if _, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name: "snap-1", SourceVolumeId: "pvc-1",
+	}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateSnapshot code = %v, want Unimplemented", status.Code(err))
+	}
+
+	if _, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "snap-1",
+	}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("DeleteSnapshot code = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// The CSI CreateVolume error table has no UNIMPLEMENTED entry: the content source
+// is an argument of this call, so an unsupported one is INVALID_ARGUMENT.
+func TestCreateVolume_ContentSourceWhenDisabled_ReturnsInvalidArgument(t *testing.T) {
+	d := newSnapshotTestDriver(t, newTestFakeClient(), false)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:               "pvc-restored",
+		VolumeCapabilities: []*csi.VolumeCapability{{}},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{SnapshotId: "snap-1"},
+			},
+		},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateVolume code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+// A snapshot a volume is still being restored from must be reported as in use
+// rather than blocking until the sidecar deadline expires.
+func TestDeleteSnapshot_RestoreSourceInUse_ReturnsFailedPrecondition(t *testing.T) {
+	cl := newTestFakeClient()
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "snap-1",
+			Finalizers: []string{
+				v1alpha1.RVSControllerFinalizer,
+				v1alpha1.RVSRestoreSourceFinalizer,
+			},
+		},
+		Spec: v1alpha1.ReplicatedVolumeSnapshotSpec{ReplicatedVolumeName: "pvc-1"},
+	}
+	if err := cl.Create(context.Background(), rvs); err != nil {
+		t.Fatalf("create RVS: %v", err)
+	}
+
+	d := newSnapshotTestDriver(t, cl, true)
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{SnapshotId: "snap-1"})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("DeleteSnapshot code = %v, want FailedPrecondition", status.Code(err))
+	}
+
+	// The snapshot must still be there: we refused, we did not start deleting.
+	got := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := cl.Get(context.Background(), client.ObjectKey{Name: "snap-1"}, got); err != nil {
+		t.Fatalf("RVS was touched despite the refusal: %v", err)
+	}
+	if got.DeletionTimestamp != nil {
+		t.Error("RVS marked for deletion despite FailedPrecondition")
+	}
+}
+
+// A snapshot nobody restores from deletes normally.
+func TestDeleteSnapshot_NotInUse_Proceeds(t *testing.T) {
+	cl := newTestFakeClient()
+	d := newSnapshotTestDriver(t, cl, true)
+
+	// Absent snapshot: deletion is idempotent, so this must succeed.
+	if _, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{SnapshotId: "snap-absent"}); err != nil {
+		t.Fatalf("DeleteSnapshot() error = %v, want success for an already-absent snapshot", err)
+	}
+}

@@ -57,10 +57,13 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	var dataSource *srv.VolumeDataSource
 	if cs := request.VolumeContentSource; cs != nil {
-		// Restore and clone both go through the snapshot machinery, so they are
-		// unavailable for the same reason.
+		// Restore and clone both go through the snapshot machinery, so both are
+		// unavailable when snapshots are off. The CSI spec's CreateVolume error
+		// table has no UNIMPLEMENTED entry — the content source is an argument of
+		// this call, so an unsupported one is INVALID_ARGUMENT.
 		if !d.snapshotsEnabled {
-			return nil, errSnapshotsDisabled()
+			return nil, status.Error(codes.InvalidArgument,
+				"volume content source is not supported: snapshots are disabled, they require LVMLogicalVolumeSnapshot from sds-node-configurator")
 		}
 		switch s := cs.Type.(type) {
 		case *csi.VolumeContentSource_Snapshot:
@@ -631,6 +634,18 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshot
 
 	snapshotID := request.SnapshotId
 	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] Deleting snapshot", traceID, snapshotID))
+
+	// A snapshot a volume is still being restored from cannot be removed yet. Say
+	// so instead of blocking until the sidecar's timeout expires: the controller
+	// holds the object until the restore finishes, so waiting here would burn the
+	// whole RPC deadline and then report a generic Internal error.
+	if inUse, err := utils.IsReplicatedVolumeSnapshotRestoreSource(ctx, d.cl, snapshotID); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to check whether snapshot is in use: %v", err)
+	} else if inUse {
+		d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] snapshot is in use as a restore source", traceID, snapshotID))
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"snapshot %s is in use as a restore source for a volume that is still being created", snapshotID)
+	}
 
 	err := utils.DeleteReplicatedVolumeSnapshot(ctx, d.cl, d.log, traceID, snapshotID)
 	if err != nil {

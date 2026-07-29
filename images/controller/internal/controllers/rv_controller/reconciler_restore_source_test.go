@@ -176,6 +176,30 @@ var _ = Describe("reconcileRestoreSourceFinalizer", func() {
 		Expect(obju.HasFinalizer(getRVS(ctx, cl, source.Name), v1alpha1.RVSRestoreSourceFinalizer)).To(BeFalse())
 	})
 
+	// Regression: pinning a snapshot that has not settled deadlocks both sides —
+	// once the RVS is deleting, its controller stops advancing prepare/sync, so it
+	// can never become Ready, so this formation can never finish, so the finalizer
+	// is never dropped and the admin lock stays held.
+	DescribeTable("does not add the finalizer to a snapshot that is not Ready",
+		func(ctx SpecContext, phase v1alpha1.ReplicatedVolumeSnapshotPhase) {
+			source := makeSourceRVS()
+			source.Status.Phase = phase
+			source.Status.ReadyToUse = false
+			target := makeTargetForming("rv-target", source.Name)
+			cl := newClientBuilder(scheme).WithObjects(source, target).Build()
+			rec := NewReconciler(cl, scheme)
+
+			Expect(rec.reconcileRestoreSourceFinalizer(ctx, target).Error()).NotTo(HaveOccurred())
+
+			Expect(obju.HasFinalizer(getRVS(ctx, cl, source.Name), v1alpha1.RVSRestoreSourceFinalizer)).To(BeFalse())
+		},
+		Entry("Pending", v1alpha1.ReplicatedVolumeSnapshotPhasePending),
+		Entry("InProgress", v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress),
+		Entry("Synchronizing", v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing),
+		Entry("Failed", v1alpha1.ReplicatedVolumeSnapshotPhaseFailed),
+		Entry("Deleting", v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting),
+	)
+
 	// Holding a deleting snapshot open forever helps nobody: the restore either
 	// completes with what it has or fails.
 	It("does not add the finalizer to an RVS that is already deleting", func(ctx SpecContext) {
