@@ -120,12 +120,12 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvrs *v1alpha1.Replica
 	}
 
 	switch llvs.Status.Phase {
-	case "Created":
+	case snc.PhaseCreated:
 		return r.reconcileRVRSStatus(rf.Ctx(), rvrs,
 			v1alpha1.ReplicatedVolumeReplicaSnapshotPhaseReady,
 			"Snapshot created successfully",
 			true, llvsName)
-	case "Failed":
+	case snc.PhaseFailed:
 		msg := "Snapshot creation failed"
 		if llvs.Status.Reason != "" {
 			msg = llvs.Status.Reason
