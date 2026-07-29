@@ -27,8 +27,16 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd.git  /drbd
+    # Pinned by commit rather than by a drbd-<version> tag: the admin-lock
+    # feature this version carries has not been tagged in 3p-drbd yet. The
+    # commit still has to build a source tree whose REL_VERSION equals the DRBD
+    # version in oss.yaml, because the tarball name below and the runtime
+    # version check in templates/linstor-node/daemonset.yaml both derive from it.
+    - git init /drbd
     - cd /drbd
+    - git remote add origin {{ $.Root.SOURCE_REPO }}/deckhouse/3p-drbd.git
+    - git fetch --depth 1 origin {{ $.Root.DRBD_COMMIT }}
+    - git checkout --detach FETCH_HEAD
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
