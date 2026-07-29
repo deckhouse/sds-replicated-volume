@@ -326,22 +326,56 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 	// Remove all finalizers from LLVs so they can be deleted from Kubernetes
 	// even though the underlying LV is still held open by the renamed DRBD
 	// resource. sds-node-configurator cannot lvremove a busy LV, so its
-	// finalizer would block deletion indefinitely. This recreates the
+	// finalizer would normally block deletion indefinitely. This recreates the
 	// "LVM device exists, but no LLV object" state expected by the adopt test.
 	//
-	// We first wait for each LLV to receive a deletionTimestamp (meaning the
-	// controller has processed the RVR deletion and requested LLV removal).
-	// Without this wait, we may race with the controller and see stale LLVs.
+	// We first wait for each LLV to start deleting (the controller has
+	// processed the RVR deletion and requested LLV removal) — without this
+	// wait we may race with the controller and see stale LLVs. The strip
+	// itself goes through a raw client with NotFound tolerated: under
+	// parallel load sds-node-configurator sometimes completes the deletion
+	// on its own first, and losing that race is fine — the LLV object being
+	// gone is exactly the state this step is after. What must NOT be assumed
+	// away is the on-disk LV; its survival is verified explicitly below.
 	for _, m := range members {
-		if m.llv != nil {
-			m.llv.Await(ctx, tkmatch.IsDeleting())
-			m.llv.Update(ctx, func(llv *snc.LVMLogicalVolume) {
-				llv.SetFinalizers(nil)
-			})
+		if m.llv == nil {
+			continue
 		}
+		m.llv.Await(ctx, tkmatch.IsDeleting())
+
+		// Merge-patch, not Get+Update: it carries no resourceVersion, so it
+		// cannot conflict with sds-node-configurator's concurrent updates of
+		// the same LLV (phase/finalizer churn is heavy under parallel load).
+		llvName := m.llv.Name()
+		target := &snc.LVMLogicalVolume{}
+		target.SetName(llvName)
+		err := t.f.Client.Patch(ctx, target,
+			client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`)))
+		Expect(client.IgnoreNotFound(err)).To(Succeed(),
+			"stripping finalizers on LLV %s", llvName)
+
+		m.llv.Await(ctx, tkmatch.Deleted())
 	}
 
 	t.Await(ctx, tkmatch.Deleted())
+
+	// The adopt scenario's precondition is "the LV exists on disk, but no
+	// object references it". The strip above guarantees the second half;
+	// verify the first half instead of assuming it — if anything ever manages
+	// to remove the busy LV (or to skip removal while still dropping the LLV,
+	// which would orphan nothing here but break the scenario), the spec must
+	// fail at this point with an explicit message, not later with a
+	// mysterious adopt failure.
+	for _, m := range members {
+		if m.lvDevPath == "" {
+			continue
+		}
+		res, err := t.f.LVM(ctx, m.nodeName, "lvs", m.lvDevPath)
+		Expect(err).To(Succeed(), "checking preexisting LV %s on %s", m.lvDevPath, m.nodeName)
+		Expect(res.ExitCode).To(Equal(0),
+			"preexisting LV %s vanished from node %s: the emulated state requires the LV to survive the LLV deletion",
+			m.lvDevPath, m.nodeName)
+	}
 
 	// --- Re-promote replicas that were attached (parallel) ---
 
