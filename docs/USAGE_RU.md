@@ -141,6 +141,111 @@ spec:
 
 > `sds-replicated-volume-controller` выполнит удаление дочернего StorageClass только в случае, если в поле `status.phase` ресурса ReplicatedStorageClass будет указано значение `Created`. В иных случаях будет удалён только ресурс ReplicatedStorageClass, а дочерний StorageClass затронут не будет.
 
+## Работа со снимками
+
+Снимок (snapshot) фиксирует состояние тома на определённый момент времени. По снимку можно создать новый том — так откатывают данные или получают копию для тестирования.
+
+{{< alert level="info" >}}
+Требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/). Ресурс VolumeSnapshotClass с именем `sds-replicated-volume` модуль создаёт автоматически.
+{{< /alert >}}
+
+{{< alert level="warning" >}}
+Снимки поддерживаются только для томов, размещённых в [ReplicatedStoragePool](./cr.html#replicatedstoragepool) типа `LVMThin`. Снимок тома из пула типа `LVM` (thick) будет отклонён: ресурс ReplicatedVolumeSnapshot перейдёт в фазу `Failed` с сообщением о том, что том не является thin-provisioned.
+
+Снимок создаётся без остановки записи, поэтому он crash-consistent (согласован на уровне сбоя — его содержимое эквивалентно состоянию после внезапного отключения питания). Если приложению требуется согласованный снимок, перед созданием остановите запись (или заморозьте файловую систему).
+{{< /alert >}}
+
+### Создание снимка
+
+Создайте ресурс VolumeSnapshot, указав PersistentVolumeClaim, снимок которого нужно получить:
+
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: my-data-snapshot
+  namespace: default
+spec:
+  volumeSnapshotClassName: sds-replicated-volume
+  source:
+    persistentVolumeClaimName: my-data
+```
+
+Проверьте, что снимок готов к использованию:
+
+```shell
+d8 k get volumesnapshot my-data-snapshot
+```
+
+Снимок готов, когда в поле `READYTOUSE` появится значение `true`. Внутри модуль создаёт снимок на каждой дисковой реплике тома и синхронизирует отстающие реплики, поэтому для тома с несколькими репликами это занимает больше времени, чем снимок одиночного диска.
+
+Ход выполнения можно посмотреть по соответствующему ресурсу ReplicatedVolumeSnapshot:
+
+```shell
+d8 k get replicatedvolumesnapshot
+```
+
+Его поле `status.phase` проходит значения `Pending` → `InProgress` (снимки создаются на репликах) → `Synchronizing` (отстающие реплики догоняют) → `Ready`.
+
+### Восстановление тома из снимка
+
+Создайте PersistentVolumeClaim, указав снимок в качестве источника данных. Размер восстанавливаемого тома должен быть не меньше размера исходного, а StorageClass — созданным через ресурс ReplicatedStorageClass:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-data-restored
+  namespace: default
+spec:
+  storageClassName: my-replicated-storage-class
+  dataSource:
+    apiGroup: snapshot.storage.k8s.io
+    kind: VolumeSnapshot
+    name: my-data-snapshot
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+Восстановленный том проходит обычную процедуру формирования и не зависит от снимка: последующее удаление снимка на него не влияет.
+
+### Клонирование тома
+
+Том можно создать напрямую из другого PersistentVolumeClaim, без предварительного создания снимка:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-data-clone
+  namespace: default
+spec:
+  storageClassName: my-replicated-storage-class
+  dataSource:
+    kind: PersistentVolumeClaim
+    name: my-data
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+Исходный том и клон должны использовать один и тот же ReplicatedStorageClass. Клонирование реализовано как внутренний снимок с последующим восстановлением, поэтому к нему применимы те же требования к thin-provisioning и та же оговорка о согласованности данных.
+
+### Удаление снимка
+
+Удалите ресурс VolumeSnapshot:
+
+```shell
+d8 k delete volumesnapshot my-data-snapshot
+```
+
+Модуль удалит снимки реплик на всех узлах. На тома, уже восстановленные из этого снимка, удаление не влияет.
+
 ## Дополнительные возможности для приложений
 
 ### Размещение приложения «поближе» к данным (data locality)
