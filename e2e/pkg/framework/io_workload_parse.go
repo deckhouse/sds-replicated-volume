@@ -159,6 +159,21 @@ func (j ioJournal) last() *ioBeat {
 	return &j.Beats[len(j.Beats)-1]
 }
 
+// maxInterBeatGap returns the largest distance between two consecutive beats
+// in the observed tail, and the beat that ended that gap. Zero and nil with
+// fewer than two beats. This is what makes stalls HISTORICAL evidence: a
+// freeze that ended before the probe still shows as a gap between the last
+// pre-freeze and the first post-freeze beat, for as long as that boundary
+// stays within the observed tail.
+func (j ioJournal) maxInterBeatGap() (gap time.Duration, endedBy *ioBeat) {
+	for i := 1; i < len(j.Beats); i++ {
+		if d := j.Beats[i].At.Sub(j.Beats[i-1].At); d > gap {
+			gap, endedBy = d, &j.Beats[i]
+		}
+	}
+	return gap, endedBy
+}
+
 // malformedRecordError marks a record that could not be parsed at all. The
 // tail may have caught the writer mid-append, so this is tolerated on the last
 // line — unlike a semantic violation such as a non-monotonic sequence, which

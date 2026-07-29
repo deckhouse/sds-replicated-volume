@@ -73,8 +73,13 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 			})
 
 		// E2E-3 — a deleted tie-breaker is healed by the P2 convergence pattern (block 2).
+		//
+		// Disruptive because of the raw-device writer: healing must be invisible
+		// to the data path, and that is proven by verified writes flowing through
+		// the whole cycle (the io-workload's historical gap check covers every
+		// moment between the explicit probes).
 		It("heals a deleted tie-breaker via the P2 add-TB pattern",
-			SpecTimeout(10*time.Minute), require.MinNodes(2, 1), func(ctx SpecContext) {
+			Label(fw.LabelDisruptive), SpecTimeout(10*time.Minute), require.MinNodes(2, 1), func(ctx SpecContext) {
 				By("creating a healthy 2D+1TB volume")
 				trv := f.TestRV().FTT(1).GMDR(0)
 				trv.Create(ctx)
@@ -84,6 +89,14 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedType,
 					v1alpha1.ReplicatedVolumeCondLayoutConvergedReasonConverged))
 				Expect(layoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+
+				By("attaching the volume and writing to the raw device")
+				trva := trv.Attach(ctx, memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful)[0])
+				trva.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+				io := startVolumeIO(ctx, trv, trva)
+				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
 
 				By("deleting the tie-breaker RVR and waiting for it to actually leave the datamesh")
 				deleted := tieBreakerRVR(trv)
@@ -106,5 +119,8 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 
 				By("verifying the healed tie-breaker is a NEW RVR, not the deleted one")
 				Expect(tieBreakerRVR(trv).Name()).NotTo(Equal(deletedName))
+
+				By("I/O kept flowing through the healing")
+				ioProgressed(ctx, io, ioBefore)
 			})
 	})

@@ -493,6 +493,35 @@ var _ = Describe("IOWorkload observation", func() {
 		Expect(st.Gap).To(BeNumerically(">", ioWorkloadDefaultMaxGap))
 	})
 
+	It("keeps a stall visible after writes resume (historical gap)", func() {
+		node := newFakeIONode()
+		w, _ := startedWorkload(node)
+
+		// The data path freezes for longer than tolerated, then recovers: the
+		// writer never dies, and by the time anyone probes it is writing
+		// again. The gap between the last pre-freeze and the first post-freeze
+		// beat is the only remaining evidence.
+		node.nowMS += (ioWorkloadDefaultMaxGap + time.Second).Milliseconds()
+		node.beat()
+		node.beat()
+		st := mustObserve(ctx, w)
+
+		Expect(st.Stalled).To(BeFalse(), "the last write is fresh — the stall is over")
+		Expect(st.GapExceeded).To(BeTrue())
+		Expect(st.MaxObservedGap).To(BeNumerically(">", ioWorkloadDefaultMaxGap))
+	})
+
+	It("fails a progress wait on a stall that already ended", func() {
+		node := newFakeIONode()
+		w, _ := startedWorkload(node)
+
+		node.nowMS += (ioWorkloadDefaultMaxGap + time.Second).Milliseconds()
+		node.beat()
+		_, err := w.awaitProgress(ctx, 1)
+
+		Expect(err).To(MatchError(ContainSubstring("stalled for")))
+	})
+
 	It("does not call a terminated writer stalled", func() {
 		node := newFakeIONode()
 		w, _ := startedWorkload(node)
@@ -681,6 +710,18 @@ var _ = Describe("IOWorkload cleanup", func() {
 		err := w.cleanup(ctx)
 
 		Expect(err).To(MatchError(ContainSubstring("completed no verified write")))
+	})
+
+	It("fails when the run contained a stall, even after a clean stop", func() {
+		node := newFakeIONode()
+		w, _ := startedWorkload(node)
+		node.nowMS += (ioWorkloadDefaultMaxGap + time.Second).Milliseconds()
+		node.beat()
+
+		err := w.cleanup(ctx)
+
+		Expect(err).To(MatchError(ContainSubstring("stalled for")))
+		Expect(node.purged).To(BeTrue(), "the verdict must not leave the writer's files behind")
 	})
 
 	It("is safe when the writer already exited on its own", func() {

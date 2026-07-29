@@ -83,6 +83,7 @@ func ioAlive(ctx SpecContext, w *fw.IOWorkload) fw.IOWorkloadStatus {
 	Expect(st.Terminated).To(BeNil(), "io workload %s terminated: %s", w.RunID(), st)
 	Expect(st.Running).To(BeTrue(), "io workload %s is not running: %s", w.RunID(), st)
 	Expect(st.Stalled).To(BeFalse(), "io workload %s stalled: %s", w.RunID(), st)
+	Expect(st.GapExceeded).To(BeFalse(), "io workload %s stalled earlier in the run: %s", w.RunID(), st)
 	Expect(st.LastSequence).To(BeNumerically(">=", 0),
 		"io workload %s has not verified a single write: %s", w.RunID(), st)
 	return st
@@ -118,6 +119,7 @@ func ioProgressedBy(
 	Expect(st.Terminated).To(BeNil(), "io workload %s terminated: %s", w.RunID(), st)
 	Expect(st.Running).To(BeTrue(), "io workload %s is not running: %s", w.RunID(), st)
 	Expect(st.Stalled).To(BeFalse(), "io workload %s stalled: %s", w.RunID(), st)
+	Expect(st.GapExceeded).To(BeFalse(), "io workload %s stalled earlier in the run: %s", w.RunID(), st)
 	Expect(st.LastSequence).To(BeNumerically(">=", prev.LastSequence+writes),
 		"io workload %s did not advance past sequence %d: %s", w.RunID(), prev.LastSequence, st)
 	return st

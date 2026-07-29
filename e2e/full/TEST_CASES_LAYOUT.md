@@ -85,13 +85,16 @@ Then:
 
 ## heals a deleted tie-breaker via the P2 add-TB pattern
 
-E2E-3 · case 3 · Describe: `Layout: tie-breaker at formation and healing`
+E2E-3 · case 3 · ⚡ Disruptive · Describe: `Layout: tie-breaker at formation and healing`
 
 **Convergence recreates a manually deleted tie-breaker (P2 add-TB pattern).**
 
 Covers: decomposition T-2.1.2 (P2 path); verifies block 2.
 
-Given: a healthy 2D+1TB volume.
+Labelled `Disruptive` because of the raw-device writer.
+
+Given: a healthy 2D+1TB volume, attached on a diskful node with a raw-device
+writer running from before the deletion.
 
 When: the tie-breaker RVR is deleted (`kubectl delete rvr`).
 
@@ -100,7 +103,11 @@ Then:
   (1 TieBreaker member, 3 members total), and the tie-breaker is a different one
   than the deleted replica — which is also what proves the observation is not the
   pre-deletion state.
-- `LayoutConverged` returns to `True/Converged`; data and I/O are untouched.
+- `LayoutConverged` returns to `True/Converged`.
+- ⚡ Verified device writes keep advancing through the healing; the io-workload's
+  historical gap check (every progress wait + the whole journal at cleanup) turns
+  the writer into a continuous availability claim for the entire spec, not a pair
+  of point probes.
 
 ---
 
@@ -176,19 +183,32 @@ Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unles
 `nsenter`).
 
 Given: a healthy 2D+1TB volume with a raw-device writer running on a surviving
-diskful node (not the one to be rebooted).
+diskful node (not the one to be rebooted). Quorum-survival invariants are armed
+per replica on the surviving diskful and the tie-breaker — `NeverLoseQuorum`,
+`NeverCritical`, `NeverIOSuspended` — plus `QuorumThresholdCorrect` on the RV.
+The victim replica is deliberately NOT armed: it legitimately dips while its
+node is down and briefly reports Critical while it rejoins.
 
 When: the other diskful node is rebooted.
 
 Then:
+- ⚡ I/O is proven to advance AFTER DRBD declares the dead peer (the survivor
+  reports `FullyConnected=False/PartiallyConnected`), not merely after the
+  kubelet notices the reboot: quorum is only re-evaluated at the DRBD
+  declaration, and a volume that freezes at that moment must fail here.
 - I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker): the
   attachment stays `Ready=True/Ready` (which subsumes `Attached=True`) and the
   surviving diskful replica stays `Ready=True/Ready`.
 - ⚡ Verified device writes keep advancing while the node is down and after it
-  returns; the writer tolerates a longer heartbeat gap (90s) around the outage but
-  must never stall or exit.
-- After the node returns, its replica rejoins and reaches `Healthy`; the layout is
-  intact (2D+1TB, `LayoutConverged=True/Converged`).
+  returns; the writer tolerates a longer heartbeat gap (90s) around the outage
+  but must never stall or exit — a stall longer than that anywhere in the run
+  fails the spec even if writes resumed (historical gap check, enforced by the
+  io-workload framework on every progress wait and over the whole journal at
+  cleanup).
+- After the node returns, its replica rejoins and reaches `Healthy`; the
+  surviving replicas return to `Healthy` with no invariant violation recorded
+  (the closing Awaits surface violations from snapshots no assertion looked
+  at); the layout is intact (2D+1TB, `LayoutConverged=True/Converged`).
 
 ---
 
@@ -276,18 +296,21 @@ Then:
 
 ## replaces a deleted tie-breaker create-first when a free node exists
 
-E2E-TB1 · case 10 · Describe: `Layout: tie-breaker replacement`
+E2E-TB1 · case 10 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 **Deleting a tie-breaker starts a strict create-first replacement: the new one joins before the old one leaves.**
 
 Covers: verdict №4 (strict create-first tie-breaker replacement); verifies block 2.
+
+Labelled `Disruptive` because of the raw-device writer.
 
 Requires **≥4 eligible nodes** (`require.MinNodes(2, 2)` — only two of them need
 storage): three are occupied by the volume, the fourth hosts the replacement. On
 smaller stands the spec skips.
 
 Given: a healthy 2D+1TB volume; both diskful nodes have the tie-breaker in their
-DRBD configuration (`drbdsetup show`) and report quorum.
+DRBD configuration (`drbdsetup show`) and report quorum; the volume is attached
+on a diskful node with a raw-device writer running from before the deletion.
 
 When: the tie-breaker RVR is deleted.
 
@@ -316,10 +339,14 @@ Then:
   one observation. The quorum value stays 2 for the whole window, including
   2D+2TB: tie-breakers do not vote, so the two diskful members are the only
   voters. That value is not restated by the case's own matcher — the framework's
-  `QuorumCorrect` invariant checks the published quorum against the current
+  `QuorumThresholdCorrect` invariant checks the published quorum against the current
   voter count on every snapshot, which together with the invariant above is
   exactly "quorum is 2 throughout". DRBD-level quorum is re-verified at both
   ends.
+- ⚡ Verified device writes keep advancing from before the deletion, once the
+  replacement is operational, and at the end of the cycle; the io-workload's
+  historical gap check (every progress wait + the whole journal at cleanup)
+  makes the entire replacement window a continuous availability claim.
 
 ---
 

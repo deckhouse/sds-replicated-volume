@@ -48,8 +48,12 @@ var _ = Describe("Layout: tie-breaker replacement",
 		// being replaced, one free for its replacement. Only the first two need
 		// storage, hence 2 diskful + 2 extra. require.MinNodes skips the spec
 		// with an explicit reason on smaller clusters.
+		//
+		// Disruptive because of the raw-device writer: the replacement must be
+		// invisible to the data path, and that is proven by verified writes
+		// flowing through the whole cycle, not just by conditions.
 		It("replaces a deleted tie-breaker create-first when a free node exists",
-			SpecTimeout(20*time.Minute), require.MinNodes(2, 2), func(ctx SpecContext) {
+			Label(fw.LabelDisruptive), SpecTimeout(20*time.Minute), require.MinNodes(2, 2), func(ctx SpecContext) {
 				By("creating a healthy 2D+1TB volume")
 				trv := f.TestRV().FTT(1).GMDR(0)
 				trv.Create(ctx)
@@ -66,7 +70,7 @@ var _ = Describe("Layout: tie-breaker replacement",
 				// released only once a replacement is a member. The quorum
 				// value stays 2 for the whole window — tie-breakers do not
 				// vote, so the two diskful members are the only voters even
-				// while there are two tie-breakers — and the QuorumCorrect
+				// while there are two tie-breakers — and the QuorumThresholdCorrect
 				// invariant activated above pins it to the current voter count
 				// on every snapshot; this matcher adds the membership half.
 				trv.Always(tiebreakHeld())
@@ -86,6 +90,18 @@ var _ = Describe("Layout: tie-breaker replacement",
 						"node %s does not have the tie-breaker configured: %s", node, cfg)
 				}
 				expectDRBDQuorum(ctx, trv)
+
+				By("attaching the volume and writing to the raw device")
+				// The writer runs from before the deletion to the end of the spec:
+				// together with the io-workload's historical gap check this makes
+				// the whole replacement window a continuous availability claim, not
+				// a pair of point probes.
+				trva := trv.Attach(ctx, diskfulNodes[0])
+				trva.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+				io := startVolumeIO(ctx, trv, trva)
+				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
 
 				By("deleting the tie-breaker replica")
 				oldTB.Delete(ctx)
@@ -109,6 +125,9 @@ var _ = Describe("Layout: tie-breaker replacement",
 				// tie-breaker leaving while they still do not is the failure.
 				awaitReplacementOperational(ctx, trv, diskfulNodes, oldName, newPeer)
 
+				By("I/O keeps flowing once the replacement is operational")
+				ioBefore = ioProgressed(ctx, io, ioBefore)
+
 				By("waiting for the replaced tie-breaker to leave")
 				awaitRVRGone(ctx, oldTB, oldUID)
 				awaitDatameshMemberGone(ctx, trv, oldName)
@@ -128,6 +147,11 @@ var _ = Describe("Layout: tie-breaker replacement",
 						rvrOnNode(trv, otherThan(diskfulNodes, node)).Name(), newTB.Name()))
 				}
 				expectDRBDQuorum(ctx, trv)
+
+				By("I/O never stopped")
+				// The final progress check plus the workload cleanup's whole-journal
+				// gap verification covers every moment since the writer started.
+				ioProgressed(ctx, io, ioBefore)
 			})
 
 		// E2E-TB2 — the no-free-node case and the manual escape that ends it.

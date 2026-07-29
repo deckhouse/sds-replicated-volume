@@ -242,7 +242,7 @@ func tieBreakerReplacementWindow(oldName string) gtypes.GomegaMatcher {
 // The quorum value is not restated here because it never moves: tie-breakers
 // are not voters (DatameshMemberType.IsVoter), so the two diskful members are
 // the only voters and the correct quorum is 2 in every snapshot this matcher
-// accepts — including the 2D+2TB window. The framework's QuorumCorrect
+// accepts — including the 2D+2TB window. The framework's QuorumThresholdCorrect
 // invariant checks the published quorum against the current voter count, so the
 // two invariants together are exactly "quorum is 2 throughout".
 func tiebreakHeld() gtypes.GomegaMatcher {

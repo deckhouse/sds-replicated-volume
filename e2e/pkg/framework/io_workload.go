@@ -41,6 +41,12 @@ const (
 
 	ioWorkloadJournalTail   = 40
 	ioWorkloadSpawnAttempts = 3
+
+	// ioWorkloadJournalFull is the tail size used for the final verification:
+	// large enough to cover every beat a spec-length run can produce, so a
+	// stall anywhere in the run is found even when its boundary has long left
+	// the regular probe tail.
+	ioWorkloadJournalFull = 1 << 20
 )
 
 // runIDRe and devicePathRe keep run ids and device paths to characters that are
@@ -87,6 +93,10 @@ type IOWorkloadOptions struct {
 
 	// MaxHeartbeatGap is the longest tolerated distance between the node's
 	// clock and the last verified write before the workload counts as stalled.
+	// The same bound applies HISTORICALLY, to the distance between any two
+	// consecutive verified writes: a stall longer than this fails the workload
+	// even when writes have resumed by the time anyone looks (checked on every
+	// progress wait and, over the whole journal, at cleanup).
 	MaxHeartbeatGap time.Duration
 
 	// StartTimeout bounds the wait for the first verified write, StopTimeout
@@ -120,6 +130,16 @@ type IOWorkloadStatus struct {
 	Gap     time.Duration
 	Stalled bool
 
+	// MaxObservedGap is the largest distance between two consecutive verified
+	// writes in the observed journal tail. Unlike Gap it is historical: a
+	// stall that already ended still shows here for as long as its boundary
+	// stays within the observed tail (and always at the final verification,
+	// which reads the whole journal). GapExceeded says it went over
+	// MaxHeartbeatGap — the writer stopped writing for longer than the spec
+	// tolerates at some point, even if it is writing again now.
+	MaxObservedGap time.Duration
+	GapExceeded    bool
+
 	// Terminated is set once the writer wrote its last record.
 	Terminated *IOWorkloadTermination
 
@@ -140,6 +160,9 @@ func (s IOWorkloadStatus) String() string {
 	}
 	if s.Stalled {
 		parts = append(parts, "stalled")
+	}
+	if s.GapExceeded {
+		parts = append(parts, fmt.Sprintf("stalled-for=%s", s.MaxObservedGap.Truncate(time.Millisecond)))
 	}
 	if s.Terminated != nil {
 		parts = append(parts, fmt.Sprintf("terminated(failed=%t)=%q", s.Terminated.Failed, s.Terminated.Message))
@@ -500,10 +523,16 @@ func (w *IOWorkload) spawnUntilRunning(ctx context.Context) error {
 	return fmt.Errorf("spawning the writer on node %q: %w", w.opts.NodeName, lastErr)
 }
 
-// observe runs one probe and turns it into a status.
+// observe runs one probe over the regular journal tail.
 func (w *IOWorkload) observe(ctx context.Context) (IOWorkloadStatus, error) {
+	return w.observeTail(ctx, ioWorkloadJournalTail)
+}
+
+// observeTail runs one probe over the given journal tail and turns it into a
+// status.
+func (w *IOWorkload) observeTail(ctx context.Context, tailLines int) (IOWorkloadStatus, error) {
 	res, err := w.f.runner().HostRun(ctx, w.opts.NodeName,
-		w.probeCommand(ioWorkloadJournalTail), "io-workload probe "+w.opts.RunID)
+		w.probeCommand(tailLines), "io-workload probe "+w.opts.RunID)
 	if err != nil {
 		return IOWorkloadStatus{}, fmt.Errorf("probing the writer: %w", err)
 	}
@@ -530,6 +559,10 @@ func (w *IOWorkload) statusFrom(p ioProbe) IOWorkloadStatus {
 		st.Gap = p.Now.Sub(beat.At)
 		st.Stalled = p.Journal.Termination == nil && st.Gap > w.opts.MaxHeartbeatGap
 	}
+	if gap, endedBy := p.Journal.maxInterBeatGap(); endedBy != nil {
+		st.MaxObservedGap = gap
+		st.GapExceeded = gap > w.opts.MaxHeartbeatGap
+	}
 	if t := p.Journal.Termination; t != nil {
 		st.Terminated = &IOWorkloadTermination{Failed: t.Failed, At: t.At, Message: t.Message}
 	}
@@ -549,6 +582,12 @@ func (w *IOWorkload) awaitProgress(ctx context.Context, minWrites int64) (IOWork
 		func(st IOWorkloadStatus) (bool, error) {
 			if st.Terminated != nil && st.Terminated.Failed {
 				return false, fmt.Errorf("the writer failed: %s", st.Terminated.Message)
+			}
+			// A stall boundary visible in the tail is final evidence: the writer
+			// stopped for longer than tolerated, no later progress undoes that.
+			if st.GapExceeded {
+				return false, fmt.Errorf("the writer stalled for %s (tolerated max %s): %s",
+					st.MaxObservedGap.Truncate(time.Millisecond), w.opts.MaxHeartbeatGap, st)
 			}
 			return st.LastSequence >= target, nil
 		})
@@ -648,7 +687,10 @@ func (w *IOWorkload) cleanup(ctx context.Context) error {
 
 	stopErr := w.stop(ctx)
 
-	final, obsErr := w.observe(ctx)
+	// The final observation reads the WHOLE journal, not the regular tail:
+	// this is where a stall anywhere in the run — even one that ended long
+	// before the last probe — becomes a verdict.
+	final, obsErr := w.observeTail(ctx, ioWorkloadJournalFull)
 	var verifyErr error
 	if obsErr == nil {
 		verifyErr = w.verifyFinal(final)
@@ -665,7 +707,10 @@ func (w *IOWorkload) cleanup(ctx context.Context) error {
 }
 
 // verifyFinal is the last continuity check: the workload must have written
-// something, and must not have ended on an I/O or identity failure.
+// something, must not have ended on an I/O or identity failure, and must not
+// have stalled beyond MaxHeartbeatGap at any point of the run. The caller
+// hands it a full-journal observation, so the stall check covers the whole
+// run, not just the last probe's tail.
 func (w *IOWorkload) verifyFinal(st IOWorkloadStatus) error {
 	switch {
 	case st.Terminated != nil && st.Terminated.Failed:
@@ -678,6 +723,9 @@ func (w *IOWorkload) verifyFinal(st IOWorkloadStatus) error {
 		return nil
 	case st.LastSequence < 0:
 		return fmt.Errorf("the writer completed no verified write (journal: %s)", w.journalPath())
+	case st.GapExceeded:
+		return fmt.Errorf("the writer stalled for %s during the run (tolerated max %s; journal: %s)",
+			st.MaxObservedGap.Truncate(time.Millisecond), w.opts.MaxHeartbeatGap, w.journalPath())
 	}
 	return nil
 }

@@ -70,17 +70,32 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				ioBefore := ioProgressed(ctx, io, ioAlive(ctx, io))
 
 				victimRVR := rvrOnNode(trv, victim)
+				survivorRVR := rvrOnNode(trv, survivor)
+				tbRVR := tieBreakerRVR(trv)
 
 				By("pinning the victim replica to Healthy before the reboot (Given: healthy volume)")
 				// Establish a fresh Healthy baseline so the PhaseNot(Healthy) below can only
 				// pass on a real reboot-induced dip, not a pre-existing transient non-Healthy state.
 				victimRVR.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
 
-				// Keep the RV-level quorum invariant active for the whole outage — this
-				// is the primary "quorum 2/3 holds" check. We do NOT disable it (only the
-				// victim replica's per-replica health is expected to dip, and we assert
-				// that dip explicitly instead of guarding against it).
-				trv.Always(match.RV.QuorumCorrect())
+				By("arming quorum-survival invariants on the surviving replicas")
+				// The RV-level threshold arithmetic must stay correct for the whole
+				// outage; whether quorum is actually HELD is kernel truth and is
+				// asserted per replica below.
+				trv.Always(match.RV.QuorumThresholdCorrect())
+				// The survivors must ride through the outage on quorum 2/3: neither
+				// the surviving diskful nor the tie-breaker may lose quorum, report
+				// Critical, or have its I/O suspended at any point. The victim is
+				// deliberately NOT armed — it legitimately dips while its node is
+				// down (and briefly reports Critical while it rejoins). Each armed
+				// object gets a closing Await after recovery, which is what surfaces
+				// a violation recorded on a snapshot no assertion looked at.
+				for _, r := range []*fw.TestRVR{survivorRVR, tbRVR} {
+					r.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+					r.Always(match.RVR.NeverLoseQuorum())
+					r.Always(match.RVR.NeverCritical())
+					r.Always(match.RVR.NeverIOSuspended())
+				}
 
 				By("rebooting the other diskful node")
 				// RebootNode returns as soon as the reboot is proven to have started, so
@@ -95,9 +110,20 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				victimRVR.Await(ctx, tkmatch.PhaseNot(
 					string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
 
+				By("waiting for DRBD to declare the dead peer (survivor sees 1 of 2 peers)")
+				// The kubelet notices the reboot within seconds, but DRBD keeps the
+				// peer alive until its ping timeout (~a minute) — and quorum is only
+				// re-evaluated at that declaration. I/O through the outage is proven
+				// only by writes that land AFTER it; probing earlier would pass on a
+				// volume that freezes the moment the peer is declared dead.
+				survivorRVR.Await(ctx, tkmatch.ConditionReason(
+					v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+					v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected))
+
 				By("I/O keeps flowing on quorum 2/3 (surviving diskful + tie-breaker)")
 				// Verified device writes during the outage, not just conditions: the
-				// sequence has to advance while the victim node is down.
+				// sequence has to advance while the victim node is down and provably
+				// dead to DRBD.
 				ioDuring := ioProgressed(ctx, io, ioBefore)
 				// Readiness is reported per attachment and per replica, not on the RV.
 				// RVA Ready (reason Ready) is strictly stronger than Attached=True — it
@@ -108,7 +134,7 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				trva.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeAttachmentCondReadyType,
 					v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady))
-				rvrOnNode(trv, survivor).Await(ctx, tkmatch.ConditionReason(
+				survivorRVR.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 					v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 
@@ -116,6 +142,12 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				reboot.AwaitCompleted(ctx)
 				victimRVR.Await(ctx,
 					tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+
+				By("the surviving replicas held quorum through the whole outage")
+				// These closing Awaits also surface any invariant violation the armed
+				// survivors recorded on snapshots no assertion happened to look at.
+				survivorRVR.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
+				tbRVR.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
 
 				By("I/O kept flowing across the whole outage")
 				ioProgressed(ctx, io, ioDuring)
