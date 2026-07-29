@@ -250,20 +250,30 @@ func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResour
 }
 
 // ensureOperationStatusFailed sets Phase=Failed, CompletedAt, Message. Caller passes completedAt.
-func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
+func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, reason, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusFailed")
 	defer ef.OnEnd(&outcome)
-	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed || op.Status.Message != message
+	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed ||
+		op.Status.Message != message ||
+		op.Status.Reason != reason
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseFailed
 	op.Status.CompletedAt = &completedAt
 	op.Status.Message = message
+	op.Status.Reason = reason
 	return ef.Ok().ReportChangedIf(changed)
 }
 
 // failOperationAndPatch sets operation status to Failed with message and patches. Returns ensure error or patch error.
 func (r *OperationReconciler) failOperationAndPatch(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string) error {
+	return r.failOperationWithReasonAndPatch(ctx, op, "", message)
+}
+
+// failOperationWithReasonAndPatch is failOperationAndPatch with a
+// machine-readable reason, so an orchestrator can tell a permanent failure
+// apart from a transient one without parsing the message.
+func (r *OperationReconciler) failOperationWithReasonAndPatch(ctx context.Context, op *v1alpha1.DRBDResourceOperation, reason, message string) error {
 	base := op.DeepCopy()
-	outcome := ensureOperationStatusFailed(ctx, op, message, metav1.NewTime(time.Now()))
+	outcome := ensureOperationStatusFailed(ctx, op, reason, message, metav1.NewTime(time.Now()))
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}

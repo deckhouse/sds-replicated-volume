@@ -140,6 +140,13 @@ spec:
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
                 type: string
+              reason:
+                description: |-
+                  Reason is a machine-readable, CamelCase cause for the current phase.
+                  It lets an orchestrator distinguish a permanent failure (which must not
+                  be retried) from a transient one, without parsing Message.
+                maxLength: 128
+                type: string
               result:
                 maxLength: 1024
                 type: string

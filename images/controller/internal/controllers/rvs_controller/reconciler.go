@@ -105,6 +105,24 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, rvs *v1alpha1.Replicat
 		return rf.Fail(err)
 	}
 
+	// Reject a snapshot of a thick volume before any work starts. Snapshots are
+	// taken as LVMLogicalVolumeSnapshots, which sds-node-configurator only
+	// creates for thin LVs; without this check the request would be accepted and
+	// then fail late and per-replica with a low-level "Source LLV is not Thin"
+	// message, after the CSI call has already blocked for its whole timeout.
+	// Checked once, before the first prepare round, so neither an in-flight nor
+	// an already-completed snapshot is affected.
+	if rvs.Status.PrepareRevision == 0 {
+		if thickReplica := findThickDiskfulReplica(rvrs); thickReplica != "" {
+			return r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+				v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
+				fmt.Sprintf("ReplicatedVolume %q is not thin-provisioned (replica %q has no thin pool); "+
+					"snapshots require a storage pool of type LVMThin", rv.Name, thickReplica),
+				false,
+				rvs.Status.SourceReplicaSnapshotName)
+		}
+	}
+
 	childRVRSs, err := r.getChildRVRSs(rf.Ctx(), rvs.Name)
 	if err != nil {
 		return rf.Fail(err)
@@ -615,6 +633,21 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 }
 
 // --- RVR ---
+
+// findThickDiskfulReplica returns the name of the first diskful replica backed
+// by a thick LV (no thin pool), or "" when every diskful replica is thin.
+// Diskless replicas carry no backing volume and are skipped.
+func findThickDiskfulReplica(rvrs []*v1alpha1.ReplicatedVolumeReplica) string {
+	for _, rvr := range rvrs {
+		if rvr == nil || rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		if rvr.Spec.LVMVolumeGroupThinPoolName == "" {
+			return rvr.Name
+		}
+	}
+	return ""
+}
 
 func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	list := &v1alpha1.ReplicatedVolumeReplicaList{}

@@ -91,7 +91,16 @@ func (r *OperationReconciler) reconcileLockAdmin(ctx context.Context, op *v1alph
 	log.FromContext(ctx).Info("admin_lock: acquiring", "resource", resName, "nodeID", dr.Spec.NodeID)
 
 	if err := drbdutils.ExecuteLock(ctx, resName); err != nil {
-		if patchErr := r.failOperationAndPatch(ctx, op, fmt.Sprintf("ExecuteLock: %v", err)); patchErr != nil {
+		// A peer that does not advertise DRBD_FF_ADMIN_LOCK cannot be made to
+		// support it by retrying, so mark the failure permanent and let the
+		// orchestrator surface it instead of looping.
+		reason := ""
+		if errors.Is(err, drbdutils.ErrLockNotSupported) {
+			reason = v1alpha1.DRBDResourceOperationReasonAdminLockNotSupported
+			log.FromContext(ctx).Error(err, "admin_lock: not supported by the running DRBD kernel module",
+				"resource", resName, "nodeID", dr.Spec.NodeID)
+		}
+		if patchErr := r.failOperationWithReasonAndPatch(ctx, op, reason, fmt.Sprintf("ExecuteLock: %v", err)); patchErr != nil {
 			return rf.Fail(patchErr)
 		}
 		return rf.Done()
@@ -131,11 +140,17 @@ func (r *OperationReconciler) handleLockAdminDeletion(
 		log.FromContext(ctx).Info("admin_lock: releasing on finalizer", "resource", resName, "nodeID", nodeID)
 
 		if err := drbdutils.ExecuteUnlock(ctx, resName, &nodeID, nil); err != nil {
+			// ErrLockNotSupported is treated as "nothing to release": a module
+			// that does not advertise DRBD_FF_ADMIN_LOCK cannot be holding a
+			// lock (e.g. it was reloaded or downgraded after we acquired one).
+			// Failing here instead would strand the finalizer forever and hang
+			// deletion of whatever owns this operation.
 			if !errors.Is(err, drbdutils.ErrNotLockHolder) &&
-				!errors.Is(err, drbdutils.ErrLockNotHeld) {
+				!errors.Is(err, drbdutils.ErrLockNotHeld) &&
+				!errors.Is(err, drbdutils.ErrLockNotSupported) {
 				return rf.Fail(fmt.Errorf("ExecuteUnlock: %w", err))
 			}
-			log.FromContext(ctx).Info("admin_lock: unlock idempotent (lock not ours / not held)",
+			log.FromContext(ctx).Info("admin_lock: unlock idempotent (lock not ours / not held / not supported)",
 				"resource", resName, "reason", err.Error())
 		} else {
 			log.FromContext(ctx).Info("admin_lock: released on finalizer", "resource", resName)

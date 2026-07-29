@@ -88,6 +88,33 @@ func (r *Reconciler) reconcileAcquireAdminLock(
 			}
 			return rf.Continue()
 		case v1alpha1.DRBDOperationPhaseFailed:
+			// A permanent failure must not be retried: the DRBD kernel module has
+			// to be upgraded first. Surface it on the RVS so the cause is visible
+			// instead of the snapshot sitting in an endless retry loop.
+			if op.Status.Reason == v1alpha1.DRBDResourceOperationReasonAdminLockNotSupported {
+				const msg = "DRBD admin lock is not supported by the running kernel module on all peers " +
+					"(DRBD_FF_ADMIN_LOCK not advertised); snapshots require a newer DRBD version"
+				rf.Log().Error(nil, "admin-lock: not supported, failing the snapshot",
+					"op", op.Name, "message", op.Status.Message)
+				if condOutcome := r.reconcileAdminLockCondition(rf.Ctx(), rvs,
+					metav1.ConditionFalse,
+					v1alpha1.ReplicatedVolumeSnapshotCondAdminLockedReasonNotSupported,
+					msg,
+				); condOutcome.ShouldReturn() {
+					return condOutcome
+				}
+				if statusOutcome := r.reconcileStatus(rf.Ctx(), rvs, rvs.Status.Datamesh,
+					v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
+					msg,
+					false,
+					rvs.Status.SourceReplicaSnapshotName,
+				); statusOutcome.Error() != nil {
+					return rf.Fail(statusOutcome.Error())
+				}
+				// Terminal: stop the acquire/prepare chain instead of continuing.
+				// The op is deliberately left in place so it is not recreated.
+				return rf.Done()
+			}
 			if op.Status.CompletedAt != nil {
 				elapsed := time.Since(op.Status.CompletedAt.Time)
 				if elapsed < adminLockFailedRequeueAfter {

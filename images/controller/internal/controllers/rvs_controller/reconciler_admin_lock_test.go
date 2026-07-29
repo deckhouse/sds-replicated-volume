@@ -406,6 +406,76 @@ func TestReconcileAcquireAdminLockDeletesFailedOpForRetry(t *testing.T) {
 	}
 }
 
+// A Failed op carrying the AdminLockNotSupported reason is permanent: the op
+// must be kept (not deleted for a retry) and the RVS must go to Failed, so the
+// snapshot does not sit in an endless retry loop against a kernel module that
+// cannot grow the feature.
+func TestReconcileAcquireAdminLockNotSupportedFailsSnapshot(t *testing.T) {
+	scheme := adminLockTestScheme(t)
+	rvs := adminLockMakeRVS()
+	rv := adminLockMakeRV(mkMember("rvr-0", true))
+	rvr := mkRVRWithName("rvr-0", "node-a", v1alpha1.ReplicaTypeDiskful)
+	dr := adminLockMakeUpDRBDR("rvr-0")
+	op := &v1alpha1.DRBDResourceOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: adminLockOpName(rvs)},
+		Spec: v1alpha1.DRBDResourceOperationSpec{
+			NodeName:         "node-a",
+			DRBDResourceName: "rvr-0",
+			Type:             v1alpha1.DRBDResourceOperationLockAdmin,
+		},
+		Status: v1alpha1.DRBDResourceOperationStatus{
+			Phase:   v1alpha1.DRBDOperationPhaseFailed,
+			Reason:  v1alpha1.DRBDResourceOperationReasonAdminLockNotSupported,
+			Message: "ExecuteLock: a peer does not advertise DRBD_FF_ADMIN_LOCK",
+		},
+	}
+
+	r := &Reconciler{
+		cl:     adminLockNewClient(scheme, rvs, rv, dr, op),
+		scheme: scheme,
+	}
+
+	outcome := r.reconcileAcquireAdminLock(context.Background(), rvs, rv, []*v1alpha1.ReplicatedVolumeReplica{rvr})
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected a terminal outcome for an unsupported admin lock")
+	}
+	if outcome.Error() != nil {
+		t.Fatalf("unexpected error: %v", outcome.Error())
+	}
+
+	// The op must survive: deleting it would start the retry loop over.
+	got := &v1alpha1.DRBDResourceOperation{}
+	if err := r.cl.Get(context.Background(), client.ObjectKey{Name: adminLockOpName(rvs)}, got); err != nil {
+		t.Fatalf("expected the Failed op to be kept, got err: %v", err)
+	}
+
+	gotRVS := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := r.cl.Get(context.Background(), client.ObjectKey{Name: rvs.Name}, gotRVS); err != nil {
+		t.Fatalf("get RVS: %v", err)
+	}
+	if gotRVS.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseFailed {
+		t.Errorf("RVS phase = %q, want %q", gotRVS.Status.Phase, v1alpha1.ReplicatedVolumeSnapshotPhaseFailed)
+	}
+	if gotRVS.Status.ReadyToUse {
+		t.Error("RVS readyToUse = true, want false")
+	}
+	if !contains(gotRVS.Status.Message, "DRBD_FF_ADMIN_LOCK") {
+		t.Errorf("RVS message does not name the missing feature flag: %q", gotRVS.Status.Message)
+	}
+
+	cond := findCondition(gotRVS.Status.Conditions)
+	if cond == nil {
+		t.Fatal("AdminLocked condition not set")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("AdminLocked status = %q, want False", cond.Status)
+	}
+	if cond.Reason != v1alpha1.ReplicatedVolumeSnapshotCondAdminLockedReasonNotSupported {
+		t.Errorf("AdminLocked reason = %q, want %q", cond.Reason,
+			v1alpha1.ReplicatedVolumeSnapshotCondAdminLockedReasonNotSupported)
+	}
+}
+
 func TestComputeAdminLockReadiness(t *testing.T) {
 	rvrDiskful0 := mkRVRWithName("rvr-0", "node-a", v1alpha1.ReplicaTypeDiskful)
 	rvrDiskful1 := mkRVRWithName("rvr-1", "node-b", v1alpha1.ReplicaTypeDiskful)

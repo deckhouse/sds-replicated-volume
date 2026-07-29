@@ -312,17 +312,21 @@ func TestReconcileNormalRoutesSnapshotCreationThroughPrepare(t *testing.T) {
 	primary := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{Name: "rvr-0"},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: "rv-1",
-			Type:                 v1alpha1.ReplicaTypeDiskful,
-			NodeName:             "node-a",
+			ReplicatedVolumeName:       "rv-1",
+			Type:                       v1alpha1.ReplicaTypeDiskful,
+			NodeName:                   "node-a",
+			LVMVolumeGroupName:         "lvg-1",
+			LVMVolumeGroupThinPoolName: "thin-1",
 		},
 	}
 	secondary := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: "rv-1",
-			Type:                 v1alpha1.ReplicaTypeDiskful,
-			NodeName:             "node-b",
+			ReplicatedVolumeName:       "rv-1",
+			Type:                       v1alpha1.ReplicaTypeDiskful,
+			NodeName:                   "node-b",
+			LVMVolumeGroupName:         "lvg-1",
+			LVMVolumeGroupThinPoolName: "thin-1",
 		},
 	}
 
@@ -470,6 +474,141 @@ func rvrNames(rvrs []*v1alpha1.ReplicatedVolumeReplica) []string {
 		names[i] = rvr.Name
 	}
 	return names
+}
+
+func TestFindThickDiskfulReplica(t *testing.T) {
+	thin := func(name, node string) *v1alpha1.ReplicatedVolumeReplica {
+		rvr := mkRVRWithName(name, node, v1alpha1.ReplicaTypeDiskful)
+		rvr.Spec.LVMVolumeGroupThinPoolName = "thin-1"
+		return rvr
+	}
+	thick := func(name, node string) *v1alpha1.ReplicatedVolumeReplica {
+		return mkRVRWithName(name, node, v1alpha1.ReplicaTypeDiskful)
+	}
+
+	tests := []struct {
+		name string
+		rvrs []*v1alpha1.ReplicatedVolumeReplica
+		want string
+	}{
+		{
+			name: "no replicas",
+			want: "",
+		},
+		{
+			name: "all diskful replicas thin",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{thin("rvr-0", "node-a"), thin("rvr-1", "node-b")},
+			want: "",
+		},
+		{
+			name: "one diskful replica thick",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{thin("rvr-0", "node-a"), thick("rvr-1", "node-b")},
+			want: "rvr-1",
+		},
+		{
+			// Diskless replicas have no backing volume at all, so a missing
+			// thin pool on them says nothing about the volume.
+			name: "diskless replicas without thin pool are ignored",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{
+				thin("rvr-0", "node-a"),
+				mkRVRWithName("rvr-1", "node-b", v1alpha1.ReplicaTypeAccess),
+				mkRVRWithName("rvr-2", "node-c", v1alpha1.ReplicaTypeTieBreaker),
+			},
+			want: "",
+		},
+		{
+			name: "nil entries are skipped",
+			rvrs: []*v1alpha1.ReplicatedVolumeReplica{nil, thin("rvr-0", "node-a")},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := findThickDiskfulReplica(tt.rvrs); got != tt.want {
+				t.Errorf("findThickDiskfulReplica() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A snapshot of a thick volume must be rejected up front, before the admin lock
+// is taken or any RVRS is created, because sds-node-configurator only snapshots
+// thin LVs.
+func TestReconcileNormalRejectsThickVolume(t *testing.T) {
+	ensureSnapmeshRegistry()
+
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	rvs := &v1alpha1.ReplicatedVolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1"},
+		Spec:       v1alpha1.ReplicatedVolumeSnapshotSpec{ReplicatedVolumeName: "rv-1"},
+	}
+	rv := &v1alpha1.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+		Status: v1alpha1.ReplicatedVolumeStatus{
+			Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+				Members: []v1alpha1.DatameshMember{
+					{Name: "rvr-0", NodeName: "node-a", Attached: true},
+				},
+			},
+		},
+	}
+	// Diskful, but backed by a thick LV: no thin pool.
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
+		ObjectMeta: metav1.ObjectMeta{Name: "rvr-0"},
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+			ReplicatedVolumeName: "rv-1",
+			Type:                 v1alpha1.ReplicaTypeDiskful,
+			NodeName:             "node-a",
+			LVMVolumeGroupName:   "lvg-1",
+		},
+	}
+
+	builder := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolumeSnapshot{}).
+		WithObjects(rvs, rv, rvr)
+	builder = indextest.WithRVRByReplicatedVolumeNameIndex(builder)
+
+	reconciler := &Reconciler{cl: builder.Build(), scheme: scheme}
+
+	if outcome := reconciler.reconcileNormal(context.Background(), rvs); outcome.Error() != nil {
+		t.Fatalf("reconcileNormal() error = %v", outcome.Error())
+	}
+
+	got := &v1alpha1.ReplicatedVolumeSnapshot{}
+	if err := reconciler.cl.Get(context.Background(), client.ObjectKey{Name: "snap-1"}, got); err != nil {
+		t.Fatalf("get RVS: %v", err)
+	}
+	if got.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseFailed {
+		t.Errorf("phase = %q, want %q", got.Status.Phase, v1alpha1.ReplicatedVolumeSnapshotPhaseFailed)
+	}
+	if got.Status.ReadyToUse {
+		t.Error("readyToUse = true, want false")
+	}
+	if !contains(got.Status.Message, "LVMThin") {
+		t.Errorf("message should point at the required pool type, got %q", got.Status.Message)
+	}
+
+	// No admin lock op and no per-replica snapshot may have been created.
+	opList := &v1alpha1.DRBDResourceOperationList{}
+	if err := reconciler.cl.List(context.Background(), opList); err != nil {
+		t.Fatalf("list ops: %v", err)
+	}
+	if len(opList.Items) != 0 {
+		t.Errorf("expected no DRBDResourceOperation, got %d", len(opList.Items))
+	}
+	rvrsList := &v1alpha1.ReplicatedVolumeReplicaSnapshotList{}
+	if err := reconciler.cl.List(context.Background(), rvrsList); err != nil {
+		t.Fatalf("list RVRS: %v", err)
+	}
+	if len(rvrsList.Items) != 0 {
+		t.Errorf("expected no ReplicatedVolumeReplicaSnapshot, got %d", len(rvrsList.Items))
+	}
 }
 
 func strSliceEqual(a, b []string) bool {

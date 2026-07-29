@@ -108,6 +108,13 @@ type DRBDResourceOperationStatus struct {
 	// +optional
 	Result string `json:"result,omitempty"`
 
+	// Reason is a machine-readable, CamelCase cause for the current phase.
+	// It lets an orchestrator distinguish a permanent failure (which must not
+	// be retried) from a transient one, without parsing Message.
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
@@ -127,6 +134,16 @@ const (
 	DRBDOperationPhaseSucceeded DRBDOperationPhase = "Succeeded"
 	// DRBDOperationPhaseFailed indicates the operation failed.
 	DRBDOperationPhaseFailed DRBDOperationPhase = "Failed"
+)
+
+// Reasons for DRBDResourceOperationStatus.Reason.
+const (
+	// DRBDResourceOperationReasonAdminLockNotSupported means the running DRBD
+	// kernel module (locally or on a peer) does not advertise
+	// DRBD_FF_ADMIN_LOCK, so the cluster-wide admin lock cannot be taken. This
+	// is a permanent failure until the module is upgraded — retrying cannot
+	// help.
+	DRBDResourceOperationReasonAdminLockNotSupported = "AdminLockNotSupported"
 )
 
 // +kubebuilder:object:generate=true

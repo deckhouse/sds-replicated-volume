@@ -33,6 +33,7 @@ const (
 	ReplicatedVolumeSnapshotCondAdminLockedReasonClusterNotReady   = "ClusterNotReady"   // Pre-check failed: not all replicas are UpToDate/Established yet.
 	ReplicatedVolumeSnapshotCondAdminLockedReasonHolderUnready     = "HolderUnready"     // DRBDResource of the chosen holder is missing or not Up yet.
 	ReplicatedVolumeSnapshotCondAdminLockedReasonNoHolder          = "NoHolder"          // No diskful member in the datamesh to host the lock.
+	ReplicatedVolumeSnapshotCondAdminLockedReasonNotSupported      = "NotSupported"      // Running DRBD kernel module does not advertise DRBD_FF_ADMIN_LOCK; permanent until upgraded.
 	ReplicatedVolumeSnapshotCondAdminLockedReasonReleased          = "Released"          // Lock released; snapshot reached a terminal phase or is being deleted.
 	ReplicatedVolumeSnapshotCondAdminLockedReasonReleasing         = "Releasing"         // LockAdmin DRBDOp deleted; waiting for the agent to drain the finalizer.
 	ReplicatedVolumeSnapshotCondAdminLockedReasonRetryingTransient = "RetryingTransient" // Previous LockAdmin DRBDOp ended in Failed; retrying with a fresh op.
