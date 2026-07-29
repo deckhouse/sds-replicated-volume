@@ -192,26 +192,33 @@ func (r *Reconciler) reconcileDRBDR(
 	// addresses patch settled the resourceVersion.
 	statusBase := drbdr.DeepCopy()
 
-	// Phase 4: Write-ahead the LLV finalizer-release list. Recording which LLV
-	// we (will) hold a finalizer on BEFORE adding the finalizer (Phase 5) or
-	// attaching a disk (Phase 6) is what makes the finalizer impossible to leak:
-	// Phase 9 will not drop our DRBDResource finalizer while this list is
-	// non-empty.
-	intendedLLVFinalizersToRelease, llvListOutcome := r.reconcileLLVFinalizersToRelease(
+	// Phase 4: Write-ahead the backing-volume finalizer-release lists. Recording
+	// which LLV / LLVS we (will) hold a finalizer on BEFORE adding the finalizer
+	// (Phase 5) or attaching a disk (Phase 6) is what makes the finalizer
+	// impossible to leak: Phase 9 will not drop our DRBDResource finalizer while
+	// either list is non-empty.
+	intendedLLVFinalizersToRelease, intendedLLVSFinalizersToRelease, llvListOutcome := r.reconcileBackingFinalizersToRelease(
 		rf.Ctx(), drbdr, upAndNotInCleanup, maintenanceMode)
 	if llvListOutcome.ShouldReturn() {
 		return llvListOutcome
 	}
 
-	// Phase 5: Add our finalizer to the LLV we are about to attach (Up +
-	// Diskful, outside maintenance). It is already tracked by Phase 4. The
-	// currently attached disk is passed so a deleting LLV we already hold
-	// attached stays the intended disk (no spurious detach); teardown is driven
-	// by spec, observed here as upAndNotInCleanup=false or Type=Diskless.
+	// Phase 5: Add our finalizer to the backing volume we are about to attach
+	// (Up + Diskful, outside maintenance). It is already tracked by Phase 4.
+	// A snapshot-backed resource (spec.lvmLogicalVolumeSnapshotName set, used by
+	// snapshot sync) attaches the LLVS instead of the LLV; the two are mutually
+	// exclusive. For the LLV path the currently attached disk is passed so a
+	// deleting LLV we already hold attached stays the intended disk (no spurious
+	// detach); teardown is driven by spec, observed here as
+	// upAndNotInCleanup=false or Type=Diskless.
 	var intendedDisk string
 	var llvErr error
 	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful && upAndNotInCleanup {
-		intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName, actualBackingDisk(aState))
+		if drbdr.Spec.LVMLogicalVolumeSnapshotName != "" {
+			intendedDisk, llvErr = r.reconcileLLVSFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeSnapshotName)
+		} else {
+			intendedDisk, llvErr = r.reconcileLLVFinalizerAdd(rf.Ctx(), drbdr.Spec.LVMLogicalVolumeName, actualBackingDisk(aState))
+		}
 	}
 
 	// Phase 6: Converge the on-node DRBD state to the intended state, then
@@ -263,6 +270,25 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 	intendedLLVFinalizersToRelease = kept
 
+	// Same release rule for snapshot backing volumes. currentDiskLLVS is the
+	// LLVS still attached to DRBD (empty once detached), so an attached snapshot
+	// is never released out from under the kernel.
+	currentDiskLLVS := r.computeActualLLVSName(rf.Ctx(), aState)
+	keptLLVS := make([]string, 0, len(intendedLLVSFinalizersToRelease))
+	for _, llvs := range intendedLLVSFinalizersToRelease {
+		keep := (upAndNotInCleanup && llvs == drbdr.Spec.LVMLogicalVolumeSnapshotName) || llvs == currentDiskLLVS
+		if !keep {
+			if releaseErr := r.releaseLLVSFinalizer(rf.Ctx(), llvs); releaseErr != nil {
+				llvErr = errors.Join(llvErr, releaseErr)
+				keep = true // release failed; retry next reconcile
+			}
+		}
+		if keep {
+			keptLLVS = append(keptLLVS, llvs)
+		}
+	}
+	intendedLLVSFinalizersToRelease = keptLLVS
+
 	// Phase 8: Report status (lvmLogicalVolumeName mirrors the actual disk) and
 	// patch it. The pending-release list is written after ensureReportState,
 	// which may initialize ActiveConfiguration.
@@ -270,7 +296,9 @@ func (r *Reconciler) reconcileDRBDR(
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
-	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = intendedLLVFinalizersToRelease
+	ac := ensureActiveConfiguration(drbdr)
+	ac.LLVFinalizersToRelease = intendedLLVFinalizersToRelease
+	ac.LLVSFinalizersToRelease = intendedLLVSFinalizersToRelease
 
 	// Compute pending metric observations before patching, then observe them
 	// only after the status state they describe has been committed.
@@ -291,14 +319,14 @@ func (r *Reconciler) reconcileDRBDR(
 	}
 
 	// Phase 9: Drop our DRBDResource finalizer only once fully torn down: every
-	// owed LLV finalizer released (else the LLV finalizer leaks) AND the on-node
-	// resource gone (else we orphan it). Maintenance is not special-cased — a
-	// pending detach/down simply keeps the actual state from reaching "torn
-	// down", so we hold the finalizer until it runs. A nil aState means the
-	// status query failed; reconcileErr is set and we requeue rather than assume
-	// teardown.
+	// owed LLV / LLVS finalizer released (else that finalizer leaks) AND the
+	// on-node resource gone (else we orphan it). Maintenance is not
+	// special-cased — a pending detach/down simply keeps the actual state from
+	// reaching "torn down", so we hold the finalizer until it runs. A nil aState
+	// means the status query failed; reconcileErr is set and we requeue rather
+	// than assume teardown.
 	drbdResourceGone := !aState.IsZero() && !aState.ResourceExists()
-	if len(intendedLLVFinalizersToRelease) == 0 && drbdResourceGone {
+	if len(intendedLLVFinalizersToRelease) == 0 && len(intendedLLVSFinalizersToRelease) == 0 && drbdResourceGone {
 		if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 			if finalizerOutcome.Error() != nil {
 				reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
@@ -311,6 +339,7 @@ func (r *Reconciler) reconcileDRBDR(
 	} else if !upAndNotInCleanup {
 		rf.Log().Info("Deferring DRBDResource finalizer removal until DRBD teardown completes",
 			"pendingLLVFinalizersToRelease", intendedLLVFinalizersToRelease,
+			"pendingLLVSFinalizersToRelease", intendedLLVSFinalizersToRelease,
 			"drbdResourceGone", drbdResourceGone)
 	}
 
@@ -499,49 +528,210 @@ func (r *Reconciler) reconcileLLVFinalizerAdd(ctx context.Context, llvName strin
 	return formatLVMDevicePath(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode), nil
 }
 
-// reconcileLLVFinalizersToRelease maintains the write-ahead set of LVMLogicalVolume
-// names whose agent finalizer this DRBDResource owes a release for, stored in
-// status.ActiveConfiguration.LLVFinalizersToRelease. It records the LLV we are
-// about to attach (and add a finalizer to in Phase 5) BEFORE doing either, so a
-// crash can never strand a finalizer: Phase 9 will not drop our DRBDResource
-// finalizer while this list is non-empty. Entries are removed only in Phase 7,
-// after the finalizer is released.
+func (r *Reconciler) patchLLVS(ctx context.Context, obj, base *snc.LVMLogicalVolumeSnapshot) error {
+	return r.cl.Patch(ctx, obj, client.MergeFrom(base))
+}
+
+// reconcileLLVSFinalizerAdd adds AgentFinalizer to an LVMLogicalVolumeSnapshot
+// and returns its device path. Used for resources backed by a snapshot rather
+// than a plain LLV: during snapshot sync a temporary DRBDResource is attached to
+// the LLVS so the data can be pulled from it.
 //
-// If the set grew it is persisted and the reconcile requeues, so the remaining
-// phases proceed from durable state.
-func (r *Reconciler) reconcileLLVFinalizersToRelease(
+// Unlike the LLV path there is no attached-disk fallback for a deleting LLVS: a
+// snapshot that is going away cannot serve as a sync source, so the caller gets
+// an error and keeps reconciling until the spec drives teardown.
+func (r *Reconciler) reconcileLLVSFinalizerAdd(ctx context.Context, llvsName string) (diskPath string, err error) {
+	if llvsName == "" {
+		return "", nil
+	}
+
+	llvs, err := r.getLVMLogicalVolumeSnapshot(ctx, llvsName)
+	if err != nil {
+		return "", ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+	}
+	if llvs == nil {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q not found", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeUnavailable,
+		)
+	}
+
+	if llvs.DeletionTimestamp != nil {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q is being deleted", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeDeleting,
+		)
+	}
+
+	if !obju.HasFinalizer(llvs, v1alpha1.AgentFinalizer) {
+		llvsBase := llvs.DeepCopy()
+		obju.AddFinalizer(llvs, v1alpha1.AgentFinalizer)
+		if err := r.patchLLVS(ctx, llvs, llvsBase); err != nil {
+			return "", flow.Wrapf(err, "adding finalizer on LLVS %q", llvs.Name)
+		}
+	}
+
+	if llvs.Status == nil || llvs.Status.ActualVGNameOnTheNode == "" {
+		return "", ConfiguredReasonError(
+			fmt.Errorf("LVMLogicalVolumeSnapshot %q status not ready (VG name missing)", llvsName),
+			v1alpha1.DRBDResourceCondConfiguredReasonBackingVolumeUnavailable,
+		)
+	}
+
+	devPath := formatLVMDevicePath(llvs.Status.ActualVGNameOnTheNode, llvsName)
+
+	// Thin snapshot LVs are created with the skip-activation flag set, so the
+	// device node does not exist until we activate it explicitly (-K overrides
+	// skip-activation). Idempotent: only runs while the node is absent.
+	if _, statErr := os.Stat(devPath); os.IsNotExist(statErr) {
+		lvPath := llvs.Status.ActualVGNameOnTheNode + "/" + llvsName
+		cmd := drbdutils.ExecCommandContext(ctx, "/sbin/lvchange", "-ay", "-K", lvPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", ConfiguredReasonError(
+				fmt.Errorf("activating snapshot LV %s: %w; output: %s", lvPath, err, string(out)),
+				v1alpha1.DRBDResourceCondConfiguredReasonAttachFailed,
+			)
+		}
+	}
+
+	return devPath, nil
+}
+
+func (r *Reconciler) releaseLLVSFinalizer(ctx context.Context, llvsName string) error {
+	llvs, err := r.getLVMLogicalVolumeSnapshot(ctx, llvsName)
+	if err != nil {
+		return flow.Wrapf(err, "getting LLVS %q for finalizer release", llvsName)
+	}
+	if llvs == nil {
+		return nil
+	}
+
+	if obju.HasFinalizer(llvs, v1alpha1.AgentFinalizer) {
+		llvsBase := llvs.DeepCopy()
+		obju.RemoveFinalizer(llvs, v1alpha1.AgentFinalizer)
+		if err := r.patchLLVS(ctx, llvs, llvsBase); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				return nil
+			}
+			return flow.Wrapf(err, "releasing finalizer on LLVS %q", llvsName)
+		}
+	}
+
+	return nil
+}
+
+// computeActualLLVSName reverse-computes the LVMLogicalVolumeSnapshot name from
+// the DRBD actual backing disk path. Returns empty if DRBD has no disk attached
+// or the disk is not an LLVS. Unlike LLVs, an LLVS device is named after the
+// object itself (/dev/{actualVGNameOnTheNode}/{llvsName}), so the lookup is a
+// direct Get rather than a scan of the node's volume groups.
+func (r *Reconciler) computeActualLLVSName(ctx context.Context, aState ActualDRBDState) string {
+	if aState.IsZero() || len(aState.Volumes()) == 0 {
+		return ""
+	}
+	actualDisk := aState.Volumes()[0].BackingDisk()
+	if actualDisk == "" {
+		return ""
+	}
+
+	parts := strings.Split(actualDisk, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" {
+		return ""
+	}
+	vgName, lvName := parts[2], parts[3]
+
+	llvs, err := r.getLVMLogicalVolumeSnapshot(ctx, lvName)
+	if err != nil || llvs == nil || llvs.Status == nil {
+		return ""
+	}
+	if llvs.Status.ActualVGNameOnTheNode != vgName {
+		return ""
+	}
+	return llvs.Name
+}
+
+// reconcileBackingFinalizersToRelease maintains the write-ahead sets of
+// LVMLogicalVolume and LVMLogicalVolumeSnapshot names whose agent finalizer this
+// DRBDResource owes a release for, stored in
+// status.ActiveConfiguration.LLVFinalizersToRelease and .LLVSFinalizersToRelease.
+// It records the backing volume we are about to attach (and add a finalizer to in
+// Phase 5) BEFORE doing either, so a crash can never strand a finalizer: Phase 9
+// will not drop our DRBDResource finalizer while either list is non-empty.
+// Entries are removed only in Phase 7, after the finalizer is released.
+//
+// A resource is backed either by an LLV or by an LLVS (snapshot sync), never
+// both, so at most one list grows per call. If either set grew, both are
+// persisted in a single status patch and the reconcile requeues, so the
+// remaining phases proceed from durable state.
+func (r *Reconciler) reconcileBackingFinalizersToRelease(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	upAndNotInCleanup bool,
 	maintenanceMode bool,
-) (list []string, outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "llv-finalizers-to-release")
+) (llvList, llvsList []string, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "backing-finalizers-to-release")
 	defer rf.OnEnd(&outcome)
 
 	if drbdr.Status.ActiveConfiguration != nil {
-		list = slices.Clone(drbdr.Status.ActiveConfiguration.LLVFinalizersToRelease)
+		llvList = slices.Clone(drbdr.Status.ActiveConfiguration.LLVFinalizersToRelease)
+		llvsList = slices.Clone(drbdr.Status.ActiveConfiguration.LLVSFinalizersToRelease)
 	}
-	originalLen := len(list)
+	originalLen := len(llvList) + len(llvsList)
 
-	if !maintenanceMode && upAndNotInCleanup &&
-		drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful &&
-		drbdr.Spec.LVMLogicalVolumeName != "" &&
-		!slices.Contains(list, drbdr.Spec.LVMLogicalVolumeName) {
-		list = append(list, drbdr.Spec.LVMLogicalVolumeName)
+	if !maintenanceMode && drbdr.Spec.Type == v1alpha1.DRBDResourceTypeDiskful {
+		switch {
+		case upAndNotInCleanup:
+			// Normal write-ahead: record the backing volume we are about to
+			// attach a finalizer to in Phase 5.
+			if name := drbdr.Spec.LVMLogicalVolumeSnapshotName; name != "" {
+				if !slices.Contains(llvsList, name) {
+					llvsList = append(llvsList, name)
+				}
+			} else if name := drbdr.Spec.LVMLogicalVolumeName; name != "" {
+				if !slices.Contains(llvList, name) {
+					llvList = append(llvList, name)
+				}
+			}
+		case drbdr.DeletionTimestamp != nil:
+			// Recovery net for teardown: the write-ahead list is normally
+			// already populated from when the resource was Up, but it can be
+			// empty for a resource whose finalizer was added by an agent
+			// predating the list, or whose status was lost. Both spec names are
+			// enqueued (not just the active one) so that whichever finalizer we
+			// actually hold is released; releasing a finalizer we never added is
+			// a no-op. Without this, Phase 9 would see empty lists and drop the
+			// DRBDResource finalizer while an LLV/LLVS finalizer still leaks —
+			// for snapshot sync that would wedge the whole RVS deletion cascade.
+			//
+			// Deliberately not treated as write-ahead growth below: nothing is
+			// being added here, only released, so there is no ordering hazard to
+			// guard against and no reason to spend a status patch + requeue
+			// before Phase 7 does the release. A crash simply re-derives the
+			// same list from spec on the next reconcile.
+			if name := drbdr.Spec.LVMLogicalVolumeSnapshotName; name != "" && !slices.Contains(llvsList, name) {
+				llvsList = append(llvsList, name)
+			}
+			if name := drbdr.Spec.LVMLogicalVolumeName; name != "" && !slices.Contains(llvList, name) {
+				llvList = append(llvList, name)
+			}
+			return llvList, llvsList, rf.Continue()
+		}
 	}
 
-	if len(list) == originalLen {
-		return list, rf.Continue()
+	if len(llvList)+len(llvsList) == originalLen {
+		return llvList, llvsList, rf.Continue()
 	}
 
-	// Commit the grown list before any finalizer add / DRBD action, then
+	// Commit the grown lists before any finalizer add / DRBD action, then
 	// requeue so subsequent phases proceed from durable state.
 	base := drbdr.DeepCopy()
-	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = list
+	ac := ensureActiveConfiguration(drbdr)
+	ac.LLVFinalizersToRelease = llvList
+	ac.LLVSFinalizersToRelease = llvsList
 	if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
-		return list, rf.Fail(err)
+		return llvList, llvsList, rf.Fail(err)
 	}
-	return list, rf.DoneAndRequeue()
+	return llvList, llvsList, rf.DoneAndRequeue()
 }
 
 func ensureActiveConfiguration(drbdr *v1alpha1.DRBDResource) *v1alpha1.DRBDResourceActiveConfiguration {
