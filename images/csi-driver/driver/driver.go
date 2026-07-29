@@ -60,6 +60,9 @@ type Driver struct {
 	address           string
 	hostID            string
 	waitActionTimeout time.Duration
+	// snapshotsEnabled gates the snapshot and clone capabilities. Snapshots
+	// require LVMLogicalVolumeSnapshot from sds-node-configurator.
+	snapshotsEnabled bool
 
 	srv     *grpc.Server
 	httpSrv http.Server
@@ -79,7 +82,7 @@ type Driver struct {
 // NewDriver returns a CSI plugin that contains the necessary gRPC
 // interfaces to interact with Kubernetes over unix domain sockets for
 // managing  disks
-func NewDriver(csiAddress, driverName, address string, nodeName *string, log *logger.Logger, cl client.Client) (*Driver, error) {
+func NewDriver(csiAddress, driverName, address string, nodeName *string, snapshotsEnabled bool, log *logger.Logger, cl client.Client) (*Driver, error) {
 	if driverName == "" {
 		driverName = DefaultDriverName
 	}
@@ -93,6 +96,7 @@ func NewDriver(csiAddress, driverName, address string, nodeName *string, log *lo
 		address:           address,
 		log:               log,
 		waitActionTimeout: defaultWaitActionTimeout,
+		snapshotsEnabled:  snapshotsEnabled,
 		cl:                cl,
 		storeManager:      st,
 		inFlight:          internal.NewInFlight(),

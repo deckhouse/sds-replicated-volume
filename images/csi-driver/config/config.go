@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
@@ -30,6 +31,8 @@ const (
 	LogLevel                             = "LOG_LEVEL"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":8081"
+	// SnapshotsEnabled reflects the module's internal snapshotsEnabled value.
+	SnapshotsEnabled = "SNAPSHOTS_ENABLED"
 )
 
 type Options struct {
@@ -40,6 +43,7 @@ type Options struct {
 	CsiAddress             string
 	DriverName             string
 	Address                string
+	SnapshotsEnabled       bool
 }
 
 func NewConfig() (*Options, error) {
@@ -61,6 +65,10 @@ func NewConfig() (*Options, error) {
 	} else {
 		opts.Loglevel = logger.Verbosity(loglevel)
 	}
+
+	// Absent or unparseable means disabled: advertising a snapshot capability the
+	// cluster cannot honour is worse than not offering it.
+	opts.SnapshotsEnabled, _ = strconv.ParseBool(os.Getenv(SnapshotsEnabled))
 
 	opts.Version = "dev"
 

@@ -15,6 +15,7 @@ properties:
     - dataNodesChecksum
     - controlPlaneMigration
     - newControlPlane
+    - snapshotsEnabled
     properties:
       drbdVersion:
         type: string
@@ -33,6 +34,19 @@ properties:
         default: false
         description: |
           Internal value determining whether to use the new control plane.
+      snapshotsEnabled:
+        type: boolean
+        default: true
+        description: |
+          Internal value determining whether volume snapshots are available.
+          Enabled in every edition: this module places no edition restriction on
+          snapshots of its own. Snapshots do require LVMLogicalVolumeSnapshot
+          from sds-node-configurator, so leaving this on in an environment where
+          that resource is unavailable makes every snapshot fail on admission —
+          turn it off there. When off, the CSI driver advertises neither
+          CREATE_DELETE_SNAPSHOT nor CLONE_VOLUME, the csi-snapshotter sidecar
+          and the VolumeSnapshotClass are not deployed, and snapshot RPCs return
+          Unimplemented instead of failing late.
       masterPassphrase:
         type: string
       csiMigrationHook:

@@ -57,6 +57,11 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	var dataSource *srv.VolumeDataSource
 	if cs := request.VolumeContentSource; cs != nil {
+		// Restore and clone both go through the snapshot machinery, so they are
+		// unavailable for the same reason.
+		if !d.snapshotsEnabled {
+			return nil, errSnapshotsDisabled()
+		}
 		switch s := cs.Type.(type) {
 		case *csi.VolumeContentSource_Snapshot:
 			dataSource = &srv.VolumeDataSource{
@@ -451,8 +456,16 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+	}
+
+	// LIST_SNAPSHOTS is deliberately not advertised: external-snapshotter does
+	// not require it, and the module keeps no snapshot listing of its own beyond
+	// the ReplicatedVolumeSnapshot objects.
+	if d.snapshotsEnabled {
+		capabilities = append(capabilities,
+			csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+			csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+		)
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))
@@ -534,9 +547,22 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}, nil
 }
 
+// errSnapshotsDisabled is returned for every snapshot-related RPC while
+// snapshots are switched off. Unimplemented is the code CSI reserves for a
+// capability the plugin does not advertise, which is what external-snapshotter
+// and the provisioner expect to see here.
+func errSnapshotsDisabled() error {
+	return status.Error(codes.Unimplemented,
+		"volume snapshots are disabled: they require LVMLogicalVolumeSnapshot from sds-node-configurator")
+}
+
 func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
 	traceID := uuid.New().String()
 	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s] ========== CreateSnapshot ============", traceID))
+
+	if !d.snapshotsEnabled {
+		return nil, errSnapshotsDisabled()
+	}
 
 	if request.SourceVolumeId == "" {
 		return nil, status.Error(codes.InvalidArgument, "SourceVolumeId cannot be empty")
@@ -594,6 +620,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshot
 func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
 	traceID := uuid.New().String()
 	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s] ========== DeleteSnapshot ============", traceID))
+
+	if !d.snapshotsEnabled {
+		return nil, errSnapshotsDisabled()
+	}
 
 	if request.SnapshotId == "" {
 		return nil, status.Error(codes.InvalidArgument, "SnapshotId cannot be empty")

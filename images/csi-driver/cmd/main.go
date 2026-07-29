@@ -91,7 +91,7 @@ func main() {
 		}
 	}()
 
-	drv, err := driver.NewDriver(cfgParams.CsiAddress, cfgParams.DriverName, cfgParams.Address, &cfgParams.NodeName, log, cl)
+	drv, err := driver.NewDriver(cfgParams.CsiAddress, cfgParams.DriverName, cfgParams.Address, &cfgParams.NodeName, cfgParams.SnapshotsEnabled, log, cl)
 	if err != nil {
 		log.Error(err, "[main] create NewDriver")
 	}
