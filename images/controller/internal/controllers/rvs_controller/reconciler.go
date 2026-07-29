@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +32,7 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -432,8 +435,19 @@ func (r *Reconciler) reconcileStatus(
 		return rf.Continue()
 	}
 
+	// Decide before the patch, observe only after the state it describes has been
+	// committed, so a failed patch cannot inflate the histogram.
+	becameReady := phase == v1alpha1.ReplicatedVolumeSnapshotPhaseReady &&
+		base.Status.Phase != v1alpha1.ReplicatedVolumeSnapshotPhaseReady
+
 	if err := r.patchRVSStatus(rf.Ctx(), rvs, base); err != nil {
 		return rf.Fail(err)
+	}
+
+	if becameReady {
+		metrics.RVSReadyDuration.
+			WithLabelValues(strconv.Itoa(datamesh.TotalCount)).
+			Observe(time.Since(rvs.CreationTimestamp.Time).Seconds())
 	}
 
 	return rf.Continue()

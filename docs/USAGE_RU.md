@@ -174,7 +174,7 @@ spec:
 Проверьте, что снимок готов к использованию:
 
 ```shell
-d8 k get volumesnapshot my-data-snapshot
+kubectl get volumesnapshot my-data-snapshot
 ```
 
 Снимок готов, когда в поле `READYTOUSE` появится значение `true`. Внутри модуль создаёт снимок на каждой дисковой реплике тома и синхронизирует отстающие реплики, поэтому для тома с несколькими репликами это занимает больше времени, чем снимок одиночного диска.
@@ -182,7 +182,7 @@ d8 k get volumesnapshot my-data-snapshot
 Ход выполнения можно посмотреть по соответствующему ресурсу ReplicatedVolumeSnapshot:
 
 ```shell
-d8 k get replicatedvolumesnapshot
+kubectl get replicatedvolumesnapshot
 ```
 
 Его поле `status.phase` проходит значения `Pending` → `InProgress` (снимки создаются на репликах) → `Synchronizing` (отстающие реплики догоняют) → `Ready`.
@@ -241,7 +241,7 @@ spec:
 Удалите ресурс VolumeSnapshot:
 
 ```shell
-d8 k delete volumesnapshot my-data-snapshot
+kubectl delete volumesnapshot my-data-snapshot
 ```
 
 Модуль удалит снимки реплик на всех узлах. На тома, уже восстановленные из этого снимка, удаление не влияет.

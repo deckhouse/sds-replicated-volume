@@ -19,6 +19,7 @@ package metrics
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -352,6 +353,141 @@ func TestCollectRVMigratorLabelsEmitsOnlyLabeledRVs(t *testing.T) {
 	assertMetric(t, metrics[1], 1, map[string]string{
 		LabelName: "rv-blocked",
 	})
+}
+
+func TestCollectRVSMetricsEmitsPhaseMatrixAgeAndFailures(t *testing.T) {
+	now := metav1.Now()
+	deleteTime := metav1.NewTime(now.Add(-time.Minute))
+	created := func(ago time.Duration) metav1.Time {
+		return metav1.NewTime(now.Add(-ago))
+	}
+
+	ch := make(chan prometheus.Metric, 100)
+	countDesc := prometheus.NewDesc("test_rvs_count", "test", []string{LabelPhase}, nil)
+	ageDesc := prometheus.NewDesc("test_rvs_unfinished_age_seconds", "test", []string{LabelName, LabelPhase}, nil)
+	failedDesc := prometheus.NewDesc("test_rvs_failed", "test", []string{LabelName}, nil)
+
+	go func() {
+		defer close(ch)
+		collectRVSMetrics(ch, countDesc, ageDesc, failedDesc, now.Time, []v1alpha1.ReplicatedVolumeSnapshot{
+			// Ready snapshots are settled: counted, but neither aged nor failed.
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "snap-ready", CreationTimestamp: created(time.Hour)},
+				Status:     v1alpha1.ReplicatedVolumeSnapshotStatus{Phase: v1alpha1.ReplicatedVolumeSnapshotPhaseReady},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "snap-syncing", CreationTimestamp: created(10 * time.Minute)},
+				Status:     v1alpha1.ReplicatedVolumeSnapshotStatus{Phase: v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "snap-failed", CreationTimestamp: created(time.Hour)},
+				Status:     v1alpha1.ReplicatedVolumeSnapshotStatus{Phase: v1alpha1.ReplicatedVolumeSnapshotPhaseFailed},
+			},
+			// An empty phase means the controller has not written status yet: Pending.
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "snap-nostatus", CreationTimestamp: created(30 * time.Second)},
+			},
+			// A deleting snapshot reports Deleting whatever the last written phase was.
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "snap-deleting",
+					CreationTimestamp: created(5 * time.Minute),
+					DeletionTimestamp: &deleteTime,
+					Finalizers:        []string{"test"},
+				},
+				Status: v1alpha1.ReplicatedVolumeSnapshotStatus{Phase: v1alpha1.ReplicatedVolumeSnapshotPhaseReady},
+			},
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+
+	byPhase := map[string]float64{}
+	ages := map[string]testMetric{}
+	failed := map[string]float64{}
+	for _, m := range metrics {
+		switch {
+		case len(m.labels) == 1 && m.labels[LabelPhase] != "":
+			byPhase[m.labels[LabelPhase]] = m.value
+		case len(m.labels) == 2:
+			ages[m.labels[LabelName]] = m
+		default:
+			failed[m.labels[LabelName]] = m.value
+		}
+	}
+
+	// Every known phase is emitted, so an empty phase reads as 0 instead of vanishing.
+	wantCounts := map[string]float64{
+		string(v1alpha1.ReplicatedVolumeSnapshotPhasePending):       1, // snap-nostatus
+		string(v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress):    0,
+		string(v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing): 1,
+		string(v1alpha1.ReplicatedVolumeSnapshotPhaseReady):         1, // snap-ready only
+		string(v1alpha1.ReplicatedVolumeSnapshotPhaseFailed):        1,
+		string(v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting):      1, // snap-deleting
+	}
+	if len(byPhase) != len(wantCounts) {
+		t.Fatalf("expected %d phase series, got %d: %#v", len(wantCounts), len(byPhase), byPhase)
+	}
+	for phase, want := range wantCounts {
+		if byPhase[phase] != want {
+			t.Errorf("count for phase %q = %v, want %v", phase, byPhase[phase], want)
+		}
+	}
+
+	// Only unfinished snapshots are aged: ready and failed ones are excluded, so
+	// the alert built on this metric resolves as soon as a snapshot settles.
+	wantAges := map[string]float64{
+		"snap-syncing":  600,
+		"snap-nostatus": 30,
+		"snap-deleting": 300,
+	}
+	if len(ages) != len(wantAges) {
+		t.Fatalf("expected %d age series, got %d: %#v", len(wantAges), len(ages), ages)
+	}
+	for name, want := range wantAges {
+		if ages[name].value != want {
+			t.Errorf("age for %q = %v, want %v", name, ages[name].value, want)
+		}
+	}
+	if got := ages["snap-deleting"].labels[LabelPhase]; got != string(v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting) {
+		t.Errorf("deleting snapshot reported phase %q, want Deleting", got)
+	}
+
+	if len(failed) != 1 || failed["snap-failed"] != 1 {
+		t.Errorf("expected exactly one failed marker for snap-failed, got %#v", failed)
+	}
+}
+
+// An unknown phase from a newer API version must be counted, not dropped.
+func TestCollectRVSMetricsCountsUnknownPhase(t *testing.T) {
+	now := metav1.Now()
+	ch := make(chan prometheus.Metric, 50)
+	countDesc := prometheus.NewDesc("test_rvs_count", "test", []string{LabelPhase}, nil)
+	ageDesc := prometheus.NewDesc("test_rvs_unfinished_age_seconds", "test", []string{LabelName, LabelPhase}, nil)
+	failedDesc := prometheus.NewDesc("test_rvs_failed", "test", []string{LabelName}, nil)
+
+	go func() {
+		defer close(ch)
+		collectRVSMetrics(ch, countDesc, ageDesc, failedDesc, now.Time, []v1alpha1.ReplicatedVolumeSnapshot{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "snap-future", CreationTimestamp: now},
+				Status:     v1alpha1.ReplicatedVolumeSnapshotStatus{Phase: "SomeNewPhase"},
+			},
+		})
+	}()
+
+	var found bool
+	for _, m := range collectTestMetrics(t, ch) {
+		if m.labels[LabelPhase] == "SomeNewPhase" && len(m.labels) == 1 {
+			found = true
+			if m.value != 1 {
+				t.Errorf("count for the unknown phase = %v, want 1", m.value)
+			}
+		}
+	}
+	if !found {
+		t.Error("unknown phase produced no count series")
+	}
 }
 
 type testMetric struct {

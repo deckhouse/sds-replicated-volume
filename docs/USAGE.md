@@ -179,7 +179,7 @@ spec:
 Check that the snapshot is ready to use:
 
 ```shell
-d8 k get volumesnapshot my-data-snapshot
+kubectl get volumesnapshot my-data-snapshot
 ```
 
 The snapshot is complete once `READYTOUSE` is `true`. Under the hood the module snapshots every diskful replica of the volume and synchronizes the replicas that lag behind, so on a multi-replica volume this takes longer than a single-disk snapshot.
@@ -187,7 +187,7 @@ The snapshot is complete once `READYTOUSE` is `true`. Under the hood the module 
 To follow the internal progress, look at the corresponding ReplicatedVolumeSnapshot resource:
 
 ```shell
-d8 k get replicatedvolumesnapshot
+kubectl get replicatedvolumesnapshot
 ```
 
 Its `status.phase` goes `Pending` → `InProgress` (snapshots being created on the replicas) → `Synchronizing` (lagging replicas catching up) → `Ready`.
@@ -246,7 +246,7 @@ The source and the clone must use the same ReplicatedStorageClass. Cloning is im
 Delete the VolumeSnapshot resource:
 
 ```shell
-d8 k delete volumesnapshot my-data-snapshot
+kubectl delete volumesnapshot my-data-snapshot
 ```
 
 The module removes the per-replica snapshots on all nodes. Volumes already restored from this snapshot are not affected.
