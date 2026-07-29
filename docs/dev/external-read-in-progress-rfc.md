@@ -308,7 +308,7 @@ EnableMultiattach is blocked: ReplicatedVolume is being read by external consume
 
 Например, пользователь патчит `maxAttachments=2` одновременно с появлением RVS.
 
-Защита: внутри одного цикла `rv-controller` сначала прогоняет диспетчеры, и наш диспетчер создаёт `ExternalReadInProgress` _до_ того, как диспетчер `EnableMultiattach` успевает запросить admission. Защитная проверка `guardNoExternalReadInProgress` блокирует создание `EnableMultiattach`. Это главный устойчивый путь корректности.
+Защита: внутри одного цикла `rv-controller` сначала прогоняет диспетчеры, и наш диспетчер создаёт `ExternalReadInProgress` *до* того, как диспетчер `EnableMultiattach` успевает запросить admission. Защитная проверка `guardNoExternalReadInProgress` блокирует создание `EnableMultiattach`. Это главный устойчивый путь корректности.
 
 **Гонка 2.2: два параллельных реконсайла одного RV.**
 

@@ -1,0 +1,52 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            ReplicatedVolumeReplicaSnapshot описывает снимок (snapshot) отдельной реплики ReplicatedVolume.
+
+            Ресурс создаётся контроллером в рамках ReplicatedVolumeSnapshot — по одному на каждую дисковую реплику тома — и отображается на узле в ресурс LVMLogicalVolumeSnapshot, в котором физически хранятся данные снимка.
+          properties:
+            spec:
+              properties:
+                nodeName:
+                  description: |
+                    Имя узла, на котором размещается снимок реплики.
+
+                    > Важно: это поле является неизменяемым после первоначальной установки.
+                replicatedVolumeReplicaName:
+                  description: |
+                    Имя ReplicatedVolumeReplica, снимок которой создаётся.
+
+                    > Важно: это поле является неизменяемым после первоначальной установки.
+                replicatedVolumeSnapshotName:
+                  description: |
+                    Имя ReplicatedVolumeSnapshot, которому принадлежит данный снимок реплики.
+
+                    > Важно: это поле является неизменяемым после первоначальной установки.
+            status:
+              properties:
+                conditions:
+                  description: |
+                    Условия, отражающие текущее состояние снимка реплики.
+                creationTime:
+                  description: |
+                    Время создания снимка на узле.
+                message:
+                  description: |
+                    Сообщение о ходе выполнения или об ошибке.
+                phase:
+                  description: |
+                    Текущая фаза снимка реплики. Может быть:
+                    - Pending (снимок принят, работа ещё не началась)
+                    - InProgress (снимок создаётся на узле)
+                    - Ready (снимок создан и готов к использованию)
+                    - Failed (создание снимка завершилось ошибкой)
+                    - Deleting (снимок удаляется).
+                readyToUse:
+                  description: |
+                    Признак того, что снимок реплики создан и может использоваться.
+                snapshotHandle:
+                  description: |
+                    Идентификатор снимка на узле — имя ресурса LVMLogicalVolumeSnapshot, в котором хранятся данные.
