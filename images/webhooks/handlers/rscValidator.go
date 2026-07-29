@@ -142,10 +142,11 @@ func decodeReplicatedStorageClass(raw []byte) (*srv.ReplicatedStorageClass, erro
 // enforced by the webhook rather than by CEL transition rules on the CRD.
 //
 // The conservative r3->r2 migration matrix permits changing only replication,
-// failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
-// eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
-// creation. CEL transition rules on the CRD guard the scalar/enum and bounded-list fields
-// (reclaimPolicy, topology, volumeAccess, zones, systemNetworkNames, eligibleNodesPolicy).
+// failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy,
+// eligibleNodesConflictResolutionStrategy and reclaimPolicy (rsc_controller recreates the
+// StorageClass with the new policy); every other spec field is immutable after creation.
+// CEL transition rules on the CRD guard the scalar/enum and bounded-list fields
+// (topology, volumeAccess, zones, systemNetworkNames, eligibleNodesPolicy).
 // The unbounded structured fields below are guarded here because a CEL equality comparison
 // over their unbounded list/map would risk the per-expression CEL cost budget and cause the
 // apiserver to reject the whole CRD at install time.

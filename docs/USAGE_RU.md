@@ -126,13 +126,13 @@ spec:
 
 Результатом обработки ресурса ReplicatedStorageClass станет создание необходимого StorageClass в Kubernetes.
 
-> Обратите внимание, что большинство полей `spec` ресурса ReplicatedStorageClass являются **неизменяемыми** после создания. Изменить у существующего ресурса можно только параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), а также `configurationRolloutStrategy` и `eligibleNodesConflictResolutionStrategy`; изменение любого другого поля (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector` и т. д.) при обновлении будет отклонено.
+> Обратите внимание, что большинство полей `spec` ресурса ReplicatedStorageClass являются **неизменяемыми** после создания. Изменить у существующего ресурса можно только параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, а также `reclaimPolicy` (StorageClass при этом пересоздаётся с новой политикой); изменение любого другого поля (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector` и т. д.) при обновлении будет отклонено.
 
 Поле `status` будет обновляться `sds-replicated-volume-controller'ом` для отображения информации о результатах проводимых операций.
 
 #### Обновление ресурса ReplicatedStorageClass
 
-Большинство полей `spec` неизменяемы после создания, и попытка их изменить отклоняется с ошибкой, называющей поле; для изменения такого поля (например `storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`) ресурс нужно пересоздать. Параметры репликации изменяемы — именно это и позволяет выполнить миграцию r3→r2, описанную ниже.
+Большинство полей `spec` неизменяемы после создания, и попытка их изменить отклоняется с ошибкой, называющей поле; для изменения такого поля (например `storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`) ресурс нужно пересоздать. Параметры репликации и `reclaimPolicy` изменяемы: правка `replication` позволяет выполнить миграцию r3→r2, описанную ниже, а правка `reclaimPolicy` заставляет модуль пересоздать StorageClass с новой политикой.
 
 ##### Миграция томов с трёх реплик (r3) на две реплики + tie-breaker (r2)
 

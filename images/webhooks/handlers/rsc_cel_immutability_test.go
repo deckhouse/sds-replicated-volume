@@ -142,7 +142,7 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			new:  base(),
 		},
 		{
-			name: "reclaimPolicy change is rejected",
+			name: "reclaimPolicy change is accepted (mutable: the StorageClass is recreated with the new policy)",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.ReclaimPolicy = srv.RSCReclaimPolicyDelete
@@ -153,7 +153,6 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 				s.ReclaimPolicy = srv.RSCReclaimPolicyRetain
 				return s
 			}(),
-			wantErrSubstring: "spec.reclaimPolicy is immutable",
 		},
 		{
 			name:             "topology change is rejected",

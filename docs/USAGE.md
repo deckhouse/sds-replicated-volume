@@ -131,13 +131,13 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that most fields of the `spec` section of the ReplicatedStorageClass resource are **immutable** after creation. Only the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy` and `eligibleNodesConflictResolutionStrategy` can be changed on an existing resource; changing any other field (`storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`, etc.) is rejected on update.
+> Please note that most fields of the `spec` section of the ReplicatedStorageClass resource are **immutable** after creation. Only the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy` and `reclaimPolicy` (the StorageClass is recreated with the new policy) can be changed on an existing resource; changing any other field (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, etc.) is rejected on update.
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
 #### Updating the ReplicatedStorageClass resource
 
-Most `spec` fields are immutable after creation, and any attempt to change one is rejected with an error naming the field; changing such a field (for example `storage`, `topology`, `zones`, `volumeAccess`, `reclaimPolicy`, `nodeLabelSelector`) requires recreating the resource. The replication settings are mutable, which enables the r3→r2 migration below.
+Most `spec` fields are immutable after creation, and any attempt to change one is rejected with an error naming the field; changing such a field (for example `storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`) requires recreating the resource. The replication settings and `reclaimPolicy` are mutable: editing `replication` enables the r3→r2 migration below, and editing `reclaimPolicy` makes the module recreate the StorageClass with the new policy.
 
 ##### Migrating volumes from three replicas (r3) to two replicas + tie-breaker (r2)
 

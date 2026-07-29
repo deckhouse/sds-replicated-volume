@@ -103,11 +103,13 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // comparison over their unbounded list/map would risk the per-expression CEL cost budget
 // and cause the apiserver to reject the whole CRD at install time.
 //
-// reclaimPolicy, topology, volumeAccess and zones are strictly immutable (never touched by
-// the controller). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
+// topology, volumeAccess and zones are strictly immutable (never touched by the
+// controller). reclaimPolicy is deliberately MUTABLE: changing it is a supported operation —
+// rsc_controller reacts by recreating the Kubernetes StorageClass with the new policy (a
+// StorageClass itself is immutable, so recreate is the mechanism; covered by the SC
+// lifecycle e2e). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
 // controller fills them from nil to their default (rsc_controller applySpecDefaults), so the
 // rules must permit that initial nil->value transition while still rejecting later changes.
-// +kubebuilder:validation:XValidation:rule="self.reclaimPolicy == oldSelf.reclaimPolicy",message="spec.reclaimPolicy is immutable"
 // +kubebuilder:validation:XValidation:rule="self.topology == oldSelf.topology",message="spec.topology is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess) || self.volumeAccess == oldSelf.volumeAccess)",message="spec.volumeAccess is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones)",message="spec.zones is immutable"
@@ -118,7 +120,8 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 //
 // > Most fields are immutable after creation. Only the replication settings
 // > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
-// > configurationRolloutStrategy and eligibleNodesConflictResolutionStrategy can be
+// > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
+// > reclaimPolicy (the StorageClass is recreated with the new policy) can be
 // > changed on an existing resource; all other fields are rejected on update.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
