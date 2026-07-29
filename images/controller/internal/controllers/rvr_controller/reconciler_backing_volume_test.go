@@ -1725,3 +1725,76 @@ var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Other helper functions tests
 //
+
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcileBackingVolume tests
+//
+
+var _ = Describe("reconcileBackingVolume when the LLV create is rejected as invalid", func() {
+	var (
+		ctx  context.Context
+		rec  *Reconciler
+		rvr  *v1alpha1.ReplicatedVolumeReplica
+		rv   *v1alpha1.ReplicatedVolume
+		llvs []snc.LVMLogicalVolume
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+
+		scheme := runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv = &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Size: resource.MustParse("10Gi"),
+					Members: []v1alpha1.DatameshMember{{
+						Name:               "rvr-1",
+						Type:               v1alpha1.DatameshMemberTypeDiskful,
+						NodeName:           "node-1",
+						LVMVolumeGroupName: "lvg-1",
+					}},
+				},
+			},
+		}
+		llvs = nil
+
+		// sds-node-configurator rejects the LLV as invalid (e.g. a schema mismatch).
+		// The controller treats it as recoverable and keeps requeueing.
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
+					return &apierrors.StatusError{ErrStatus: metav1.Status{
+						Reason: metav1.StatusReasonInvalid,
+					}}
+				},
+			}).
+			Build()
+		rec = NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+	})
+
+	It("reports no change on the retry that leaves the condition untouched", func() {
+		// The stuck state persists across the 5-minute requeues, so an unconditional
+		// "changed" here turns every retry into a content-free RVR status patch.
+		_, _, outcome1 := rec.reconcileBackingVolume(ctx, rvr, &llvs, rv, nil, nil)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		_, _, outcome2 := rec.reconcileBackingVolume(ctx, rvr, &llvs, rv, nil, nil)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
