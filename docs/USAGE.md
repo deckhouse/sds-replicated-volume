@@ -146,6 +146,111 @@ The`sds-replicated-volume-controller` will detect that the resource has been del
 
 > The `sds-replicated-volume-controller` will only delete the StorageClass associated with the resource if the `status.phase` field of the ReplicatedStorageClass resource is set to `Created`. Otherwise, the controller will only delete the ReplicatedStorageClass resource while its associated StorageClass will not be affected.
 
+## Working with snapshots
+
+A snapshot captures the state of a volume at a point in time. You can then create a new volume from it, which is how you roll data back or take a copy for testing.
+
+{{< alert level="info" >}}
+The [snapshot-controller](/modules/snapshot-controller/) module must be enabled. The module creates a VolumeSnapshotClass named `sds-replicated-volume` automatically.
+{{< /alert >}}
+
+{{< alert level="warning" >}}
+Snapshots are only supported for volumes backed by a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) of type `LVMThin`. A snapshot of a volume in an `LVM` (thick) pool is rejected: the ReplicatedVolumeSnapshot goes to the `Failed` phase reporting that the volume is not thin-provisioned.
+
+A snapshot is taken while the application keeps writing, so it is crash-consistent: its contents are equivalent to the state after a sudden power loss. If the application requires a consistent snapshot, quiesce it (or freeze the file system) before creating one.
+{{< /alert >}}
+
+### Creating a snapshot
+
+Create a VolumeSnapshot referencing the PersistentVolumeClaim you want to snapshot:
+
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: my-data-snapshot
+  namespace: default
+spec:
+  volumeSnapshotClassName: sds-replicated-volume
+  source:
+    persistentVolumeClaimName: my-data
+```
+
+Check that the snapshot is ready to use:
+
+```shell
+kubectl get volumesnapshot my-data-snapshot
+```
+
+The snapshot is complete once `READYTOUSE` is `true`. Under the hood the module snapshots every diskful replica of the volume and synchronizes the replicas that lag behind, so on a multi-replica volume this takes longer than a single-disk snapshot.
+
+To follow the internal progress, look at the corresponding ReplicatedVolumeSnapshot resource:
+
+```shell
+kubectl get replicatedvolumesnapshot
+```
+
+Its `status.phase` goes `Pending` → `InProgress` (snapshots being created on the replicas) → `Synchronizing` (lagging replicas catching up) → `Ready`.
+
+### Restoring a volume from a snapshot
+
+Create a PersistentVolumeClaim with the snapshot as its data source. The restored volume must be at least as large as the source volume, and it must use a StorageClass created by a ReplicatedStorageClass:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-data-restored
+  namespace: default
+spec:
+  storageClassName: my-replicated-storage-class
+  dataSource:
+    apiGroup: snapshot.storage.k8s.io
+    kind: VolumeSnapshot
+    name: my-data-snapshot
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+The restored volume goes through normal formation and is independent of the snapshot: deleting the snapshot afterwards does not affect it.
+
+### Cloning a volume
+
+You can also create a volume directly from another PersistentVolumeClaim, without creating a snapshot first:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-data-clone
+  namespace: default
+spec:
+  storageClassName: my-replicated-storage-class
+  dataSource:
+    kind: PersistentVolumeClaim
+    name: my-data
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+The source and the clone must use the same ReplicatedStorageClass. Cloning is implemented as an internal snapshot followed by a restore, so the same thin-provisioning requirement and consistency caveat apply.
+
+### Deleting a snapshot
+
+Delete the VolumeSnapshot resource:
+
+```shell
+kubectl delete volumesnapshot my-data-snapshot
+```
+
+The module removes the per-replica snapshots on all nodes. Volumes already restored from this snapshot are not affected.
+
 ## Additional features for applications
 
 ### Hosting an application "closer" to the data (data locality)

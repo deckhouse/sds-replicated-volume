@@ -72,6 +72,9 @@ type currentMetricsCollector struct {
 	datameshActiveDesc             *prometheus.Desc
 	rvNoPersistentVolumeDesc       *prometheus.Desc
 	rvAutoConfigurationBlockedDesc *prometheus.Desc
+	rvsCountDesc                   *prometheus.Desc
+	rvsUnfinishedAgeDesc           *prometheus.Desc
+	rvsFailedDesc                  *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -120,6 +123,24 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelName},
 			nil,
 		),
+		rvsCountDesc: prometheus.NewDesc(
+			"sds_rvs_count",
+			"Current number of ReplicatedVolumeSnapshot objects by phase. All known phases are emitted, so a phase with no snapshots reads as 0 rather than being absent. Built from controller cache at scrape time.",
+			[]string{LabelPhase},
+			nil,
+		),
+		rvsUnfinishedAgeDesc: prometheus.NewDesc(
+			"sds_rvs_unfinished_age_seconds",
+			"Age of each ReplicatedVolumeSnapshot that has not reached a terminal phase, in seconds since creation. Only unfinished snapshots produce series, so the metric disappears (and any alert resolves) once a snapshot becomes ready, fails, or is deleted. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelPhase},
+			nil,
+		),
+		rvsFailedDesc: prometheus.NewDesc(
+			"sds_rvs_failed",
+			"ReplicatedVolumeSnapshot objects in the Failed phase. Emitted once per affected snapshot with value 1. Built from controller cache at scrape time.",
+			[]string{LabelName},
+			nil,
+		),
 	}
 }
 
@@ -131,6 +152,9 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.datameshActiveDesc
 	ch <- c.rvNoPersistentVolumeDesc
 	ch <- c.rvAutoConfigurationBlockedDesc
+	ch <- c.rvsCountDesc
+	ch <- c.rvsUnfinishedAgeDesc
+	ch <- c.rvsFailedDesc
 }
 
 func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -172,6 +196,18 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	var rvsList v1alpha1.ReplicatedVolumeSnapshotList
+	if err := c.reader.List(ctx, &rvsList, client.UnsafeDisableDeepCopy); err != nil {
+		c.collectError(err, "listing ReplicatedVolumeSnapshots for current metrics")
+		return
+	}
+
+	var rvrsList v1alpha1.ReplicatedVolumeReplicaSnapshotList
+	if err := c.reader.List(ctx, &rvrsList, client.UnsafeDisableDeepCopy); err != nil {
+		c.collectError(err, "listing ReplicatedVolumeReplicaSnapshots for current metrics")
+		return
+	}
+
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
@@ -180,12 +216,15 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	collectRVACounts(ch, c.rvaCountDesc, rvList.Items, rvaList.Items)
 	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvrList.Items)
 	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, rvList.Items, rvrList.Items)
+	collectRVSMetrics(ch, c.rvsCountDesc, c.rvsUnfinishedAgeDesc, c.rvsFailedDesc, time.Now(), rvsList.Items)
 
 	CurrentMetricsObjects.WithLabelValues("node").Set(float64(len(nodeList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rsc").Set(float64(len(rscList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rv").Set(float64(len(rvList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rvr").Set(float64(len(rvrList.Items)))
 	CurrentMetricsObjects.WithLabelValues("rva").Set(float64(len(rvaList.Items)))
+	CurrentMetricsObjects.WithLabelValues("rvs").Set(float64(len(rvsList.Items)))
+	CurrentMetricsObjects.WithLabelValues("rvrs").Set(float64(len(rvrsList.Items)))
 }
 
 func (c *currentMetricsCollector) collectError(err error, msg string) {
@@ -286,6 +325,105 @@ func collectRVMigratorLabels(
 
 	emit(noPersistentVolumeDesc, noPersistentVolume)
 	emit(autoConfigurationBlockedDesc, autoConfigurationBlocked)
+}
+
+// rvsPhases lists every ReplicatedVolumeSnapshot phase, so sds_rvs_count always
+// carries a series per phase and a drop to zero is visible instead of the series
+// vanishing.
+var rvsPhases = []v1alpha1.ReplicatedVolumeSnapshotPhase{
+	v1alpha1.ReplicatedVolumeSnapshotPhasePending,
+	v1alpha1.ReplicatedVolumeSnapshotPhaseInProgress,
+	v1alpha1.ReplicatedVolumeSnapshotPhaseSynchronizing,
+	v1alpha1.ReplicatedVolumeSnapshotPhaseReady,
+	v1alpha1.ReplicatedVolumeSnapshotPhaseFailed,
+	v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting,
+}
+
+// collectRVSMetrics emits the snapshot gauges: a count per phase, the age of
+// every snapshot that has not settled yet, and a marker per failed snapshot.
+//
+// The age gauge is what makes a stuck snapshot alertable: a snapshot has no
+// deadline of its own, and prepare + sync across several replicas legitimately
+// takes minutes, so the only usable signal is "unfinished for longer than X".
+// An empty phase counts as Pending: the controller has not written status yet.
+func collectRVSMetrics(
+	ch chan<- prometheus.Metric,
+	countDesc *prometheus.Desc,
+	unfinishedAgeDesc *prometheus.Desc,
+	failedDesc *prometheus.Desc,
+	now time.Time,
+	snapshots []v1alpha1.ReplicatedVolumeSnapshot,
+) {
+	counts := make(map[v1alpha1.ReplicatedVolumeSnapshotPhase]float64, len(rvsPhases))
+	for _, phase := range rvsPhases {
+		counts[phase] = 0
+	}
+
+	type unfinished struct {
+		name  string
+		phase string
+		age   float64
+	}
+	var unfinishedSnapshots []unfinished
+	failed := make(map[string]float64)
+
+	for i := range snapshots {
+		rvs := &snapshots[i]
+
+		phase := rvs.Status.Phase
+		if phase == "" {
+			phase = v1alpha1.ReplicatedVolumeSnapshotPhasePending
+		}
+		// A deleting snapshot is reported as Deleting regardless of the phase the
+		// controller last wrote, matching how sds_rv_count treats deletion.
+		if rvs.DeletionTimestamp != nil {
+			phase = v1alpha1.ReplicatedVolumeSnapshotPhaseDeleting
+		}
+		if _, known := counts[phase]; !known {
+			// Unknown phase from a newer API version: count it rather than drop it.
+			counts[phase] = 0
+		}
+		counts[phase]++
+
+		switch phase {
+		case v1alpha1.ReplicatedVolumeSnapshotPhaseReady:
+			// Settled successfully, nothing to watch.
+		case v1alpha1.ReplicatedVolumeSnapshotPhaseFailed:
+			failed[rvs.Name] = 1
+		default:
+			unfinishedSnapshots = append(unfinishedSnapshots, unfinished{
+				name:  rvs.Name,
+				phase: string(phase),
+				age:   now.Sub(rvs.CreationTimestamp.Time).Seconds(),
+			})
+		}
+	}
+
+	phases := make([]string, 0, len(counts))
+	for phase := range counts {
+		phases = append(phases, string(phase))
+	}
+	sort.Strings(phases)
+	for _, phase := range phases {
+		ch <- prometheus.MustNewConstMetric(countDesc, prometheus.GaugeValue,
+			counts[v1alpha1.ReplicatedVolumeSnapshotPhase(phase)], phase)
+	}
+
+	sort.Slice(unfinishedSnapshots, func(i, j int) bool {
+		return unfinishedSnapshots[i].name < unfinishedSnapshots[j].name
+	})
+	for _, u := range unfinishedSnapshots {
+		ch <- prometheus.MustNewConstMetric(unfinishedAgeDesc, prometheus.GaugeValue, u.age, u.name, u.phase)
+	}
+
+	names := make([]string, 0, len(failed))
+	for name := range failed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		ch <- prometheus.MustNewConstMetric(failedDesc, prometheus.GaugeValue, failed[name], name)
+	}
 }
 
 func collectRVRCounts(

@@ -38,6 +38,7 @@ const (
 	LabelPhase        = "phase"
 	LabelType         = "type"
 	LabelStep         = "step"
+	LabelMembers      = "members"
 )
 
 // Histogram bucket configurations.
@@ -51,6 +52,9 @@ var (
 	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 40, 120, 300, 600, 1200, 1800}
 	bucketsBackingVolume      = []float64{0.5, 1, 2, 5, 10, 20, 30}
 	bucketsCollect            = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
+	// A snapshot runs prepare across every diskful replica and then syncs the
+	// laggards, so the upper buckets are deliberately generous.
+	bucketsRVSReady = []float64{5, 10, 20, 40, 60, 120, 300, 600, 1200, 1800}
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -100,6 +104,12 @@ var (
 		Help:    "Time from RVA detach start (deletionTimestamp) to completion.",
 		Buckets: bucketsDeletion,
 	}, []string{LabelNode})
+
+	RVSReadyDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "sds_rvs_ready_duration_seconds",
+		Help:    "Time from ReplicatedVolumeSnapshot creation to the Ready phase, by number of diskful replicas the snapshot spans.",
+		Buckets: bucketsRVSReady,
+	}, []string{LabelMembers})
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -157,6 +167,7 @@ func init() {
 		RVDeletionDuration,
 		RVRDeletionDuration,
 		RVADetachDuration,
+		RVSReadyDuration,
 
 		// Datamesh
 		DatameshTransitionDuration,

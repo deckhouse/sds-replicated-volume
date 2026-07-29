@@ -41,6 +41,32 @@ func TestExecuteDisconnectKnownError(t *testing.T) {
 	}
 }
 
+func TestExecuteTrackBitmapStartFlag(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.TrackBitmapArgs("res", 7, 0, true),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteTrackBitmap(t.Context(), "res", 7, 0, true); err != nil {
+		t.Fatalf("ExecuteTrackBitmap() unexpected error: %v", err)
+	}
+}
+
+func TestExecuteFlushBitmap(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.FlushBitmapArgs(3),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteFlushBitmap(t.Context(), 3); err != nil {
+		t.Fatalf("ExecuteFlushBitmap() unexpected error: %v", err)
+	}
+}
+
 func TestExecuteStatusNotFoundHandling(t *testing.T) {
 	t.Run("no such resource", func(t *testing.T) {
 		fakeExec := &fakedrbdutils.Exec{}
@@ -161,6 +187,222 @@ func TestExecuteRenameKnownErrors(t *testing.T) {
 			err := drbdutils.ExecuteRename(t.Context(), "old", "new")
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("ExecuteRename() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusAdminLockUnmarshal(t *testing.T) {
+	const jsonOutput = `[{
+		"name": "res",
+		"node-id": 1,
+		"role": "Primary",
+		"suspended": false,
+		"suspended-user": false,
+		"suspended-no-data": false,
+		"suspended-fencing": false,
+		"suspended-quorum": false,
+		"force-io-failures": false,
+		"write-ordering": "flush",
+		"admin-lock": {"held": true, "holder-node-id": 2, "generation": 4711},
+		"devices": [],
+		"connections": []
+	}]`
+
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.StatusArgs("res"),
+		ResultOutput: []byte(jsonOutput),
+	})
+	fakeExec.Setup(t)
+
+	res, err := drbdutils.ExecuteStatus(t.Context(), "res")
+	if err != nil {
+		t.Fatalf("ExecuteStatus() unexpected error: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("ExecuteStatus() len = %d, want 1", len(res))
+	}
+	got := res[0].AdminLock
+	want := drbdutils.AdminLockStatus{Held: true, HolderNodeID: 2, Generation: 4711}
+	if got != want {
+		t.Fatalf("AdminLock = %+v, want %+v", got, want)
+	}
+}
+
+func TestStatusAdminLockMissingFromOldKernel(t *testing.T) {
+	// Old kernel without DRBD_FF_ADMIN_LOCK does not emit "admin-lock" at all.
+	// The field must default to zero values without breaking JSON unmarshal.
+	const jsonOutput = `[{
+		"name": "res",
+		"node-id": 1,
+		"role": "Primary",
+		"suspended": false,
+		"suspended-user": false,
+		"suspended-no-data": false,
+		"suspended-fencing": false,
+		"suspended-quorum": false,
+		"force-io-failures": false,
+		"write-ordering": "flush",
+		"devices": [],
+		"connections": []
+	}]`
+
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name:         drbdutils.DRBDSetupCommand,
+		Args:         drbdutils.StatusArgs("res"),
+		ResultOutput: []byte(jsonOutput),
+	})
+	fakeExec.Setup(t)
+
+	res, err := drbdutils.ExecuteStatus(t.Context(), "res")
+	if err != nil {
+		t.Fatalf("ExecuteStatus() unexpected error: %v", err)
+	}
+	got := res[0].AdminLock
+	want := drbdutils.AdminLockStatus{}
+	if got != want {
+		t.Fatalf("AdminLock = %+v, want zero %+v", got, want)
+	}
+}
+
+func TestExecuteLockArgs(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.LockArgs("res"),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteLock(t.Context(), "res"); err != nil {
+		t.Fatalf("ExecuteLock() unexpected error: %v", err)
+	}
+}
+
+func TestExecuteUnlockArgs(t *testing.T) {
+	t.Run("no expectations", func(t *testing.T) {
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+			Name: drbdutils.DRBDSetupCommand,
+			Args: drbdutils.UnlockArgs("res", nil, nil),
+		})
+		fakeExec.Setup(t)
+
+		if err := drbdutils.ExecuteUnlock(t.Context(), "res", nil, nil); err != nil {
+			t.Fatalf("ExecuteUnlock() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("with expected holder and generation", func(t *testing.T) {
+		holder := int8(2)
+		gen := uint32(4711)
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+			Name: drbdutils.DRBDSetupCommand,
+			Args: drbdutils.UnlockArgs("res", &holder, &gen),
+		})
+		fakeExec.Setup(t)
+
+		if err := drbdutils.ExecuteUnlock(t.Context(), "res", &holder, &gen); err != nil {
+			t.Fatalf("ExecuteUnlock() unexpected error: %v", err)
+		}
+	})
+}
+
+func TestExecuteForceUnlockArgs(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: drbdutils.ForceUnlockArgs("res"),
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteForceUnlock(t.Context(), "res"); err != nil {
+		t.Fatalf("ExecuteForceUnlock() unexpected error: %v", err)
+	}
+}
+
+func TestExecuteLockKnownErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   error
+	}{
+		{
+			name:   "unknown resource",
+			output: "Failure: (158) Unknown resource\n",
+			want:   drbdutils.ErrLockResourceNotFound,
+		},
+		{
+			name:   "lock held",
+			output: "Failure: (176) command rejected because admin_lock is held\n",
+			want:   drbdutils.ErrLockHeld,
+		},
+		{
+			name:   "lock busy",
+			output: "Failure: (178) lock acquisition timed out waiting for resync drain\n",
+			want:   drbdutils.ErrLockBusy,
+		},
+		{
+			name:   "not supported by peer",
+			output: "Failure: (180) a peer does not advertise DRBD_FF_ADMIN_LOCK\n",
+			want:   drbdutils.ErrLockNotSupported,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeExec := &fakedrbdutils.Exec{}
+			fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+				Name:         drbdutils.DRBDSetupCommand,
+				Args:         drbdutils.LockArgs("res"),
+				ResultOutput: []byte(tt.output),
+				ResultErr:    fakedrbdutils.ExitErr{Code: 10},
+			})
+			fakeExec.Setup(t)
+
+			err := drbdutils.ExecuteLock(t.Context(), "res")
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("ExecuteLock() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecuteUnlockKnownErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   error
+	}{
+		{
+			name:   "not lock holder",
+			output: "Failure: (177) unlock rejected: holder/generation mismatch\n",
+			want:   drbdutils.ErrNotLockHolder,
+		},
+		{
+			name:   "lock not held",
+			output: "Failure: (179) unlock requested but lock is not held\n",
+			want:   drbdutils.ErrLockNotHeld,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeExec := &fakedrbdutils.Exec{}
+			fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+				Name:         drbdutils.DRBDSetupCommand,
+				Args:         drbdutils.UnlockArgs("res", nil, nil),
+				ResultOutput: []byte(tt.output),
+				ResultErr:    fakedrbdutils.ExitErr{Code: 10},
+			})
+			fakeExec.Setup(t)
+
+			err := drbdutils.ExecuteUnlock(t.Context(), "res", nil, nil)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("ExecuteUnlock() error = %v, want %v", err, tt.want)
 			}
 		})
 	}

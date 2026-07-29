@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,8 +55,32 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume Capability cannot de empty")
 	}
 
-	if request.VolumeContentSource != nil {
-		return nil, status.Error(codes.InvalidArgument, "Creating volumes from snapshots or clones is not supported")
+	var dataSource *srv.VolumeDataSource
+	if cs := request.VolumeContentSource; cs != nil {
+		// Restore and clone both go through the snapshot machinery, so both are
+		// unavailable when snapshots are off. The CSI spec's CreateVolume error
+		// table has no UNIMPLEMENTED entry — the content source is an argument of
+		// this call, so an unsupported one is INVALID_ARGUMENT.
+		if !d.snapshotsEnabled {
+			return nil, status.Error(codes.InvalidArgument,
+				"volume content source is not supported: snapshots are disabled, they require LVMLogicalVolumeSnapshot from sds-node-configurator")
+		}
+		switch s := cs.Type.(type) {
+		case *csi.VolumeContentSource_Snapshot:
+			dataSource = &srv.VolumeDataSource{
+				Kind: srv.VolumeDataSourceKindReplicatedVolumeSnapshot,
+				Name: s.Snapshot.SnapshotId,
+			}
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from snapshot: %s", traceID, volumeID, s.Snapshot.SnapshotId))
+		case *csi.VolumeContentSource_Volume:
+			dataSource = &srv.VolumeDataSource{
+				Kind: srv.VolumeDataSourceKindReplicatedVolume,
+				Name: s.Volume.VolumeId,
+			}
+			d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Creating volume from source volume: %s", traceID, volumeID, s.Volume.VolumeId))
+		default:
+			return nil, status.Error(codes.InvalidArgument, "unsupported VolumeContentSource type")
+		}
 	}
 
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
@@ -95,11 +121,12 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		createdEarlyRVA = true
 	}
 
-	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
 		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
+
+	rvSpec.DataSource = dataSource
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))
 
@@ -178,7 +205,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, d.waitActionTimeout)
 	defer waitCancel()
-	rv, attemptCounter, waitErr := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
+	readyRV, attemptCounter, waitErr := utils.WaitForReplicatedVolumeReady(waitCtx, d.cl, d.log, traceID, volumeID)
 	if waitErr != nil {
 		d.log.Error(waitErr, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
 
@@ -218,7 +245,31 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume ready successfully, attempt counter: %d", traceID, volumeID, attemptCounter))
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ------------ WaitForReplicatedVolumeReady end ------------", traceID, volumeID))
 
-	return buildResponse(rv), nil
+	var contentSource *csi.VolumeContentSource
+	if dataSource != nil {
+		switch dataSource.Kind {
+		case srv.VolumeDataSourceKindReplicatedVolumeSnapshot:
+			contentSource = &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Snapshot{
+					Snapshot: &csi.VolumeContentSource_SnapshotSource{
+						SnapshotId: dataSource.Name,
+					},
+				},
+			}
+		case srv.VolumeDataSourceKindReplicatedVolume:
+			contentSource = &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Volume{
+					Volume: &csi.VolumeContentSource_VolumeSource{
+						VolumeId: dataSource.Name,
+					},
+				},
+			}
+		}
+	}
+
+	resp := buildResponse(readyRV)
+	resp.Volume.ContentSource = contentSource
+	return resp, nil
 }
 
 func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
@@ -408,9 +459,16 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 		csi.ControllerServiceCapability_RPC_GET_CAPACITY,
 		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
 		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-		// TODO: Add snapshot/clone support if needed
-		// csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-		// csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+	}
+
+	// LIST_SNAPSHOTS is deliberately not advertised: external-snapshotter does
+	// not require it, and the module keeps no snapshot listing of its own beyond
+	// the ReplicatedVolumeSnapshot objects.
+	if d.snapshotsEnabled {
+		capabilities = append(capabilities,
+			csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+			csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+		)
 	}
 
 	csiCaps := make([]*csi.ControllerServiceCapability, len(capabilities))
@@ -492,6 +550,118 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 	}, nil
 }
 
+// errSnapshotsDisabled is returned for every snapshot-related RPC while
+// snapshots are switched off. Unimplemented is the code CSI reserves for a
+// capability the plugin does not advertise, which is what external-snapshotter
+// and the provisioner expect to see here.
+func errSnapshotsDisabled() error {
+	return status.Error(codes.Unimplemented,
+		"volume snapshots are disabled: they require LVMLogicalVolumeSnapshot from sds-node-configurator")
+}
+
+func (d *Driver) CreateSnapshot(ctx context.Context, request *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+	traceID := uuid.New().String()
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s] ========== CreateSnapshot ============", traceID))
+
+	if !d.snapshotsEnabled {
+		return nil, errSnapshotsDisabled()
+	}
+
+	if request.SourceVolumeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "SourceVolumeId cannot be empty")
+	}
+	if request.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "Name cannot be empty")
+	}
+
+	snapshotID := request.Name
+	sourceVolumeID := request.SourceVolumeId
+
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] source volume: %s", traceID, snapshotID, sourceVolumeID))
+
+	rv, err := utils.GetReplicatedVolume(ctx, d.cl, sourceVolumeID)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, status.Errorf(codes.NotFound, "source volume %s not found", sourceVolumeID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to get source volume: %v", err)
+	}
+
+	_, err = utils.CreateReplicatedVolumeSnapshot(ctx, d.cl, d.log, traceID, snapshotID, sourceVolumeID)
+	if err != nil {
+		if kerrors.IsAlreadyExists(err) {
+			d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] RVS already exists", traceID, snapshotID))
+		} else {
+			return nil, status.Errorf(codes.Internal, "failed to create snapshot: %v", err)
+		}
+	}
+
+	rvs, err := utils.WaitForReplicatedVolumeSnapshotReady(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] failed waiting for snapshot ready", traceID, snapshotID))
+		return nil, status.Errorf(codes.Internal, "failed waiting for snapshot to become ready: %v", err)
+	}
+
+	creationTime := rvs.CreationTimestamp.UnixNano()
+	if rvs.Status.CreationTime != nil {
+		creationTime = rvs.Status.CreationTime.UnixNano()
+	}
+
+	d.log.Info(fmt.Sprintf("[CreateSnapshot][traceID:%s][snapshotID:%s] Snapshot created successfully", traceID, snapshotID))
+
+	return &csi.CreateSnapshotResponse{
+		Snapshot: &csi.Snapshot{
+			SnapshotId:     snapshotID,
+			SourceVolumeId: sourceVolumeID,
+			CreationTime:   timestamppbFromNanos(creationTime),
+			SizeBytes:      rv.Spec.Size.Value(),
+			ReadyToUse:     rvs.Status.ReadyToUse,
+		},
+	}, nil
+}
+
+func (d *Driver) DeleteSnapshot(ctx context.Context, request *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+	traceID := uuid.New().String()
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s] ========== DeleteSnapshot ============", traceID))
+
+	if !d.snapshotsEnabled {
+		return nil, errSnapshotsDisabled()
+	}
+
+	if request.SnapshotId == "" {
+		return nil, status.Error(codes.InvalidArgument, "SnapshotId cannot be empty")
+	}
+
+	snapshotID := request.SnapshotId
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] Deleting snapshot", traceID, snapshotID))
+
+	// A snapshot a volume is still being restored from cannot be removed yet. Say
+	// so instead of blocking until the sidecar's timeout expires: the controller
+	// holds the object until the restore finishes, so waiting here would burn the
+	// whole RPC deadline and then report a generic Internal error.
+	if inUse, err := utils.IsReplicatedVolumeSnapshotRestoreSource(ctx, d.cl, snapshotID); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to check whether snapshot is in use: %v", err)
+	} else if inUse {
+		d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] snapshot is in use as a restore source", traceID, snapshotID))
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"snapshot %s is in use as a restore source for a volume that is still being created", snapshotID)
+	}
+
+	err := utils.DeleteReplicatedVolumeSnapshot(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete snapshot: %v", err)
+	}
+
+	err = utils.WaitForReplicatedVolumeSnapshotDeleted(ctx, d.cl, d.log, traceID, snapshotID)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] failed waiting for snapshot deletion", traceID, snapshotID))
+		return nil, status.Errorf(codes.Internal, "failed waiting for snapshot deletion: %v", err)
+	}
+
+	d.log.Info(fmt.Sprintf("[DeleteSnapshot][traceID:%s][snapshotID:%s] Snapshot deleted successfully", traceID, snapshotID))
+	return &csi.DeleteSnapshotResponse{}, nil
+}
+
 func (d *Driver) ControllerGetVolume(_ context.Context, _ *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	d.log.Info(" call method ControllerGetVolume")
 	return &csi.ControllerGetVolumeResponse{}, nil
@@ -500,4 +670,8 @@ func (d *Driver) ControllerGetVolume(_ context.Context, _ *csi.ControllerGetVolu
 func (d *Driver) ControllerModifyVolume(_ context.Context, _ *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	d.log.Info(" call method ControllerModifyVolume")
 	return &csi.ControllerModifyVolumeResponse{}, nil
+}
+
+func timestamppbFromNanos(nanos int64) *timestamppb.Timestamp {
+	return timestamppb.New(time.Unix(0, nanos))
 }

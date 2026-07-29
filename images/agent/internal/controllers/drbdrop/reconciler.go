@@ -23,6 +23,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -34,6 +35,8 @@ type OperationReconciler struct {
 	cl       client.Client
 	nodeName string
 }
+
+type operationExecutor func(context.Context, *v1alpha1.DRBDResourceOperation, *v1alpha1.DRBDResource) error
 
 // NewOperationReconciler creates a new OperationReconciler.
 func NewOperationReconciler(cl client.Client, nodeName string) *OperationReconciler {
@@ -62,6 +65,13 @@ func (r *OperationReconciler) Reconcile(
 
 	switch op.Status.Phase {
 	case v1alpha1.DRBDOperationPhaseSucceeded, v1alpha1.DRBDOperationPhaseFailed:
+		// LockAdmin keeps a finalizer; even in a terminal phase we must
+		// run the deletion path to release the lock and clear the finalizer.
+		if op.Spec.Type == v1alpha1.DRBDResourceOperationLockAdmin &&
+			op.DeletionTimestamp != nil &&
+			hasAdminLockFinalizer(op) {
+			break
+		}
 		rf.Log().V(1).Info("Operation in terminal state, skipping", "phase", op.Status.Phase)
 		return rf.Done().ToCtrl()
 	}
@@ -69,6 +79,20 @@ func (r *OperationReconciler) Reconcile(
 	switch op.Spec.Type {
 	case v1alpha1.DRBDResourceOperationCreateNewUUID:
 		return r.reconcileCreateNewUUID(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationTrackBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "TrackBitmap", r.executeBitmapTracking).ToCtrl()
+	case v1alpha1.DRBDResourceOperationUntrackBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "UntrackBitmap", r.executeBitmapTracking).ToCtrl()
+	case v1alpha1.DRBDResourceOperationFlushBitmap:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "FlushBitmap", r.executeFlushBitmap).ToCtrl()
+	case v1alpha1.DRBDResourceOperationSuspendIO:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "SuspendIO", r.executeSuspendIO).ToCtrl()
+	case v1alpha1.DRBDResourceOperationResumeIO:
+		return r.reconcileOperationWithResource(rf.Ctx(), op, "ResumeIO", r.executeResumeIO).ToCtrl()
+	case v1alpha1.DRBDResourceOperationLockAdmin:
+		return r.reconcileLockAdmin(rf.Ctx(), op).ToCtrl()
+	case v1alpha1.DRBDResourceOperationForceUnlockAdmin:
+		return r.reconcileForceUnlockAdmin(rf.Ctx(), op).ToCtrl()
 	default:
 		return r.reconcileUnsupported(rf.Ctx(), op, op.Spec.Type).ToCtrl()
 	}
@@ -88,6 +112,18 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		}
 		return rf.Done()
 	}
+
+	return r.reconcileOperationWithResource(ctx, op, "CreateNewUUID", r.executeCreateNewUUID)
+}
+
+func (r *OperationReconciler) reconcileOperationWithResource(
+	ctx context.Context,
+	op *v1alpha1.DRBDResourceOperation,
+	name string,
+	execute operationExecutor,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, name)
+	defer rf.OnEnd(&outcome)
 
 	drbdr, err := r.getDRBDResourceForOperation(ctx, op)
 	if err != nil {
@@ -118,7 +154,7 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		}
 	}
 
-	opErr := r.executeCreateNewUUID(ctx, op, drbdr)
+	opErr := execute(ctx, op, drbdr)
 	if opErr != nil {
 		if err := r.failOperationAndPatch(ctx, op, opErr.Error()); err != nil {
 			return rf.Fail(err)
@@ -164,11 +200,13 @@ func (r *OperationReconciler) getDRBDResourceForOperation(
 	ctx context.Context,
 	op *v1alpha1.DRBDResourceOperation,
 ) (*v1alpha1.DRBDResource, error) {
+	l := log.FromContext(ctx)
 	drbdr, err := r.getDRBDR(ctx, op.Spec.DRBDResourceName)
 	if err != nil {
 		return nil, err
 	}
 	if drbdr == nil {
+		l.V(1).Info("DRBDResource not found in local cache, skipping", "drbdResourceName", op.Spec.DRBDResourceName)
 		return nil, nil
 	}
 	if drbdr.Spec.NodeName != r.nodeName {
@@ -212,20 +250,30 @@ func ensureOperationStatusSucceeded(ctx context.Context, op *v1alpha1.DRBDResour
 }
 
 // ensureOperationStatusFailed sets Phase=Failed, CompletedAt, Message. Caller passes completedAt.
-func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
+func ensureOperationStatusFailed(ctx context.Context, op *v1alpha1.DRBDResourceOperation, reason, message string, completedAt metav1.Time) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "OperationStatusFailed")
 	defer ef.OnEnd(&outcome)
-	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed || op.Status.Message != message
+	changed := op.Status.Phase != v1alpha1.DRBDOperationPhaseFailed ||
+		op.Status.Message != message ||
+		op.Status.Reason != reason
 	op.Status.Phase = v1alpha1.DRBDOperationPhaseFailed
 	op.Status.CompletedAt = &completedAt
 	op.Status.Message = message
+	op.Status.Reason = reason
 	return ef.Ok().ReportChangedIf(changed)
 }
 
 // failOperationAndPatch sets operation status to Failed with message and patches. Returns ensure error or patch error.
 func (r *OperationReconciler) failOperationAndPatch(ctx context.Context, op *v1alpha1.DRBDResourceOperation, message string) error {
+	return r.failOperationWithReasonAndPatch(ctx, op, "", message)
+}
+
+// failOperationWithReasonAndPatch is failOperationAndPatch with a
+// machine-readable reason, so an orchestrator can tell a permanent failure
+// apart from a transient one without parsing the message.
+func (r *OperationReconciler) failOperationWithReasonAndPatch(ctx context.Context, op *v1alpha1.DRBDResourceOperation, reason, message string) error {
 	base := op.DeepCopy()
-	outcome := ensureOperationStatusFailed(ctx, op, message, metav1.NewTime(time.Now()))
+	outcome := ensureOperationStatusFailed(ctx, op, reason, message, metav1.NewTime(time.Now()))
 	if outcome.Error() != nil {
 		return outcome.Error()
 	}

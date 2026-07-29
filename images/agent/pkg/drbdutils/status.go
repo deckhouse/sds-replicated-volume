@@ -28,18 +28,32 @@ type StatusResult []Resource
 var errStatusNoSuchResource = errors.New("no such resource")
 
 type Resource struct {
-	Name             string       `json:"name"`
-	NodeID           int          `json:"node-id"`
-	Role             string       `json:"role"`
-	Suspended        bool         `json:"suspended"`
-	SuspendedUser    bool         `json:"suspended-user"`
-	SuspendedNoData  bool         `json:"suspended-no-data"`
-	SuspendedFencing bool         `json:"suspended-fencing"`
-	SuspendedQuorum  bool         `json:"suspended-quorum"`
-	ForceIOFailures  bool         `json:"force-io-failures"`
-	WriteOrdering    string       `json:"write-ordering"`
-	Devices          []Device     `json:"devices"`
-	Connections      []Connection `json:"connections"`
+	Name             string `json:"name"`
+	NodeID           int    `json:"node-id"`
+	Role             string `json:"role"`
+	Suspended        bool   `json:"suspended"`
+	SuspendedUser    bool   `json:"suspended-user"`
+	SuspendedNoData  bool   `json:"suspended-no-data"`
+	SuspendedFencing bool   `json:"suspended-fencing"`
+	SuspendedQuorum  bool   `json:"suspended-quorum"`
+	ForceIOFailures  bool   `json:"force-io-failures"`
+	WriteOrdering    string `json:"write-ordering"`
+	// AdminLock reflects the cluster-wide DRBD administrative lock state on
+	// this node. Populated by drbdsetup status only when the kernel module
+	// negotiated DRBD_FF_ADMIN_LOCK with all peers; otherwise the fields are
+	// zero-valued (Held=false, HolderNodeID=-1 - the kernel default-encodes
+	// "no holder"). See drbd_protocol.h for protocol details.
+	AdminLock   AdminLockStatus `json:"admin-lock"`
+	Devices     []Device        `json:"devices"`
+	Connections []Connection    `json:"connections"`
+}
+
+// AdminLockStatus is the JSON sub-object emitted by `drbdsetup status --json`
+// under the "admin-lock" key. HolderNodeID is signed: -1 means "no holder".
+type AdminLockStatus struct {
+	Held         bool   `json:"held"`
+	HolderNodeID int8   `json:"holder-node-id"`
+	Generation   uint32 `json:"generation"`
 }
 
 type Device struct {

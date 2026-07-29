@@ -81,6 +81,22 @@ func (r *Reconciler) getLVMLogicalVolume(ctx context.Context, name string) (*snc
 	return llv, nil
 }
 
+// getLVMLogicalVolumeSnapshot gets the LVMLogicalVolumeSnapshot by name.
+// Returns (nil, nil) if not found.
+func (r *Reconciler) getLVMLogicalVolumeSnapshot(ctx context.Context, name string) (*snc.LVMLogicalVolumeSnapshot, error) {
+	if name == "" {
+		return nil, nil
+	}
+	llvs := &snc.LVMLogicalVolumeSnapshot{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, llvs); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, flow.Wrapf(err, "getting LVMLogicalVolumeSnapshot %q", name)
+	}
+	return llvs, nil
+}
+
 // getRequiredLLV gets the LVMLogicalVolume by name, returning an error when it
 // does not exist. Use when the LLV is required (e.g., the backing volume of a
 // Diskful resource); use getLVMLogicalVolume when absence is acceptable.

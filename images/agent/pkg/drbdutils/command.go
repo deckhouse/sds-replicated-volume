@@ -97,7 +97,11 @@ func executeCommand(
 		exitCode := errToExitCode(err)
 		outStr := string(out)
 
-		for _, ke := range knownErrors {
+		// The admin-lock gate in drbd_adm_prepare() rejects *any* administrative
+		// command on a locked resource with ERR_LOCK_HELD, so it is classified
+		// here rather than repeated in every command's known-error list. A
+		// per-command entry still wins, since it is more specific.
+		for _, ke := range append(append([]KnownError(nil), knownErrors...), adminLockGateKnownError) {
 			if ke.ExitCode == exitCode && strings.Contains(outStr, ke.OutputSubstring) {
 				err = errors.Join(ke.JoinErr, err)
 				break

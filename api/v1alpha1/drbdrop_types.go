@@ -62,9 +62,20 @@ type DRBDResourceOperationSpec struct {
 	DRBDResourceName string `json:"drbdResourceName"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=CreateNewUUID;ForcePrimary;Invalidate;Outdate;Verify;CreateSnapshot
+	// +kubebuilder:validation:Enum=CreateNewUUID;TrackBitmap;UntrackBitmap;FlushBitmap;SuspendIO;ResumeIO;ForcePrimary;Invalidate;Outdate;Verify;LockAdmin;ForceUnlockAdmin
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type DRBDResourceOperationType `json:"type"`
+
+	// PeerNodeID selects a target peer for per-peer operations (TrackBitmap, UntrackBitmap).
+	// When nil for TrackBitmap/UntrackBitmap, the operation is applied to all peers listed
+	// in the target DRBDResource's spec.peers.
+	// Ignored by operation types that are not per-peer (FlushBitmap, SuspendIO, ResumeIO,
+	// ForcePrimary, Invalidate, Outdate, Verify, CreateNewUUID, LockAdmin, ForceUnlockAdmin).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=31
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peerNodeID is immutable"
+	// +optional
+	PeerNodeID *uint8 `json:"peerNodeID,omitempty"`
 
 	// Parameters for CreateNewUUID operation. Immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="createNewUUID is immutable"
@@ -93,6 +104,17 @@ type DRBDResourceOperationStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Result string `json:"result,omitempty"`
+
+	// Reason is a machine-readable, CamelCase cause for the current phase.
+	// It lets an orchestrator distinguish a permanent failure (which must not
+	// be retried) from a transient one, without parsing Message.
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
@@ -114,6 +136,16 @@ const (
 	DRBDOperationPhaseFailed DRBDOperationPhase = "Failed"
 )
 
+// Reasons for DRBDResourceOperationStatus.Reason.
+const (
+	// DRBDResourceOperationReasonAdminLockNotSupported means the running DRBD
+	// kernel module (locally or on a peer) does not advertise
+	// DRBD_FF_ADMIN_LOCK, so the cluster-wide admin lock cannot be taken. This
+	// is a permanent failure until the module is upgraded — retrying cannot
+	// help.
+	DRBDResourceOperationReasonAdminLockNotSupported = "AdminLockNotSupported"
+)
+
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
@@ -129,6 +161,11 @@ type DRBDResourceOperationType string
 const (
 	// DRBDResourceOperationCreateNewUUID creates a new UUID for the resource.
 	DRBDResourceOperationCreateNewUUID DRBDResourceOperationType = "CreateNewUUID"
+	DRBDResourceOperationTrackBitmap   DRBDResourceOperationType = "TrackBitmap"
+	DRBDResourceOperationUntrackBitmap DRBDResourceOperationType = "UntrackBitmap"
+	DRBDResourceOperationFlushBitmap   DRBDResourceOperationType = "FlushBitmap"
+	DRBDResourceOperationSuspendIO     DRBDResourceOperationType = "SuspendIO"
+	DRBDResourceOperationResumeIO      DRBDResourceOperationType = "ResumeIO"
 	// DRBDResourceOperationForcePrimary forces the resource to become primary.
 	DRBDResourceOperationForcePrimary DRBDResourceOperationType = "ForcePrimary"
 	// DRBDResourceOperationInvalidate invalidates the resource data.
@@ -137,6 +174,25 @@ const (
 	DRBDResourceOperationOutdate DRBDResourceOperationType = "Outdate"
 	// DRBDResourceOperationVerify verifies data consistency with peers.
 	DRBDResourceOperationVerify DRBDResourceOperationType = "Verify"
-	// DRBDResourceOperationCreateSnapshot creates a snapshot of the resource.
-	DRBDResourceOperationCreateSnapshot DRBDResourceOperationType = "CreateSnapshot"
+	// DRBDResourceOperationLockAdmin acquires the cluster-wide DRBD admin lock
+	// on the resource and HOLDS IT for the lifetime of the DRBDResourceOperation
+	// object. The agent reconciler enters .status.phase=Running once the kernel
+	// has confirmed lock acquisition (TWOPC_ADMIN_LOCK committed across peers)
+	// and STAYS in Running indefinitely. The lock is released only when the
+	// DRBDResourceOperation is deleted - the on-delete finalizer issues
+	// `drbdsetup unlock`. This makes ownerReferences (e.g. from
+	// ReplicatedVolumeSnapshot) the natural lifetime owner of the lock, and
+	// guarantees no leaked locks when the orchestrator object is removed.
+	//
+	// Recovery semantics: if the agent pod restarts while the lock is held,
+	// re-issuing `drbdsetup lock` is a no-op for the same holder/generation
+	// (kernel returns NO_ERROR), so reconcile is idempotent.
+	DRBDResourceOperationLockAdmin DRBDResourceOperationType = "LockAdmin"
+	// DRBDResourceOperationForceUnlockAdmin is the operator/recovery escape
+	// hatch: it locally clears admin_lock state and best-effort broadcasts the
+	// release to connected peers WITHOUT going through TWOPC. One-shot:
+	// reconciler runs `drbdsetup force-unlock` once, then transitions to
+	// Succeeded. USE ONLY when the previous holder is known to be permanently
+	// gone and the normal LockAdmin/unlock path is unavailable.
+	DRBDResourceOperationForceUnlockAdmin DRBDResourceOperationType = "ForceUnlockAdmin"
 )

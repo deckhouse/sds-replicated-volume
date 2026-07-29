@@ -24,6 +24,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -81,6 +82,13 @@ func applyConfiguredCondition(drbdr *v1alpha1.DRBDResource, err error, maintenan
 }
 
 func getConfiguredReason(err error) string {
+	// Checked before the per-command reason: the command did not fail on its own
+	// merits, it was gated by someone else's admin lock. Reporting AttachFailed or
+	// ResizeFailed here would send an operator chasing a problem that does not
+	// exist — the snapshot holding the lock just has not finished yet.
+	if errors.Is(err, drbdutils.ErrLockHeld) {
+		return v1alpha1.DRBDResourceCondConfiguredReasonAdminLocked
+	}
 	var cfr ConfiguredReasonSource
 	if errors.As(err, &cfr) {
 		return cfr.ConfiguredReason()

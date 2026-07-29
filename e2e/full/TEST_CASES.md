@@ -140,3 +140,212 @@ Assert after deletion:
 When the parent RV does not exist, the RV controller must still remove its
 finalizer from deleting RVRs via the orphaned-RVR handler. Without this,
 the RVR would hang in deletion forever.
+
+---
+
+## 7. RVS creation: Prepare → Sync → Ready across layouts
+
+**Full RVS lifecycle on top of formed ReplicatedVolume layouts.**
+
+Setup: RV formed via `SetupLayout` for each of: 1D, 2D, 3D, 2D+1TB, 2D multiattach.
+
+Action: Create `ReplicatedVolumeSnapshot` pointing at the RV.
+
+Assert during transitions:
+- RVS goes through `Pending → Preparing → Synchronizing → Ready` without
+  being kicked back to earlier phases.
+- `prepare-mesh` completes (`match.RVS.PrepareComplete`).
+- `sync-mesh` completes (`match.RVS.SyncComplete`).
+
+Assert after completion:
+- RVS is `ReadyToUse=true`, `NoActiveTransitions`, member count matches the
+  number of diskful members of the source RV (`Type.HasBackingVolume()`).
+- Every owned `ReplicatedVolumeReplicaSnapshot` is `ReadyToUse=true` and has
+  a non-empty `status.snapshotHandle`.
+- No orphan temporary `DRBDResource` / `DRBDResourceOperation` objects named
+  after the RVS remain (`expectNoOrphanSyncResources`).
+
+The snapshot flow is the primary DMTE-driven user-facing feature. All three
+phases plus cleanup of temporary sync resources must succeed deterministically
+across the supported RV layouts.
+
+---
+
+## 8. RVS deletion cascade at every lifecycle phase
+
+⚡ **RVS and all children are garbage-collected regardless of deletion timing.**
+
+Setup: 2D RV via `SetupLayout`.
+
+Variants (each deletes RVS at a different phase):
+1. During `Preparing` — delete immediately after `Create`, before prepare completes.
+2. During `Synchronizing` — delete after `PrepareComplete` but before `SyncComplete`.
+3. After `Ready` — delete once RVS is `ReadyToUse=true`.
+
+Assert in all variants:
+- The RVS object itself disappears from the API (`tkmatch.Deleted`).
+- Every child `ReplicatedVolumeReplicaSnapshot` is removed.
+- Every temporary `DRBDResource` created for `sync-mesh` with a matching name
+  prefix is removed.
+- Every temporary `DRBDResourceOperation` with a matching name prefix is removed.
+- Parent RV/RVR objects are untouched (RVS deletion must never cascade upward).
+
+Premature deletion used to leave orphan `DRBDResource`/`DRBDResourceOperation`
+objects stuck with finalizers, blocking the next sync attempt. The cascade
+invariant must hold for every phase, including the middle of DMTE transitions.
+
+---
+
+## 9. RVS sync resilience: recover from disappearing temporary DRBDResources
+
+⚡ **`syncNeedsReset` watchdog recovers the snapshot after sync-mesh loses
+  its DRBDResource objects.**
+
+Setup: 3D RV via `SetupLayout` (to make `sync-mesh` long enough to race with).
+
+Action:
+1. Create RVS and wait for `Synchronizing` phase.
+2. Wait until temporary `DRBDResource` objects exist for the sync step.
+3. Force-delete them: strip finalizers, then `Delete` — simulating the
+   agent-side regression where sync DRBDResources vanish mid-flight.
+
+Assert:
+- The RVS does NOT get stuck in `Synchronizing` forever.
+- The controller's `syncNeedsReset` watchdog (2-minute threshold) fires,
+  the sync step is retried and RVS eventually reaches `ReadyToUse=true`
+  with `NoActiveTransitions`.
+
+Regression guard for the observed incident where DRBDResources disappeared
+mid-sync and the snapshot hung for > 10 minutes. The watchdog must detect the
+discrepancy between expected and actual sync resources and reset the step
+instead of waiting indefinitely.
+
+---
+
+## 10. RVS restore: new RV built from a ReplicatedVolumeSnapshot
+
+**`spec.dataSource { kind: ReplicatedVolumeSnapshot }` forms a ready RV.**
+
+Setup: For each of 1D / 2D / 3D — formed source RV via `SetupLayout`, then
+`SetupRVS` on it so there is a `ReadyToUse` RVS to restore from.
+
+Action: Create a new RV with `spec.dataSource.kind=ReplicatedVolumeSnapshot`
+and `name=<rvs>` (`TestRV.DataSourceRVS`).
+
+Assert:
+- Restored RV reaches `FormationComplete` and `NoActiveTransitions`.
+- All RVRs of the restored RV are `Healthy`.
+- `status.datamesh.size` of the restored RV is ≥ source RV size.
+- Member count matches the target layout.
+
+Snapshot-restore is the main "bring data back" flow. The new RV must go
+through normal Formation on the same RSC, pulling data from RVS, and land in
+a fully healthy state — not a partial or "needs manual intervention" state.
+
+---
+
+## 11. RVS clone: new RV built from an existing ReplicatedVolume
+
+**`spec.dataSource { kind: ReplicatedVolume }` forms a ready cloned RV.**
+
+Setup: For each of 1D / 2D / 3D — formed source RV via `SetupLayout`.
+
+Action: Create a new RV with `spec.dataSource.kind=ReplicatedVolume` and
+`name=<rv>` (`TestRV.DataSourceRV`).
+
+Assert:
+- Cloned RV reaches `FormationComplete` and `NoActiveTransitions`.
+- All RVRs of the cloned RV are `Healthy`.
+- `status.datamesh.size` of the cloned RV is ≥ source RV size.
+- Member count matches the target layout.
+
+Volume cloning is implemented as an internal snapshot + restore pipeline
+inside the controller. The resulting RV must behave identically to a
+snapshot-restored RV from the user's perspective.
+
+---
+
+## 12. RVS deletion deferred while a volume is restored from it
+
+⚡ **Deleting a snapshot mid-restore does not pull data out from under the target.**
+
+Setup: 2D RV via `SetupLayout`, `SetupRVS` on it, then a new RV with
+`spec.dataSource.kind=ReplicatedVolumeSnapshot`.
+
+Action: delete the RVS while the target is still forming.
+
+Assert:
+
+- The RVS gains `RVSRestoreSourceFinalizer` as soon as the target starts forming.
+- After `Delete`, the RVS reports `Deleting` but does not disappear, and its
+  `ReplicatedVolumeReplicaSnapshot` children still exist.
+- The restore completes: `FormationComplete`, `NoActiveTransitions`, all RVRs
+  `Healthy`.
+- Only then does the RVS disappear, together with every child.
+
+A finalizer alone would keep the object but not the children — rvs-controller has
+to defer its own cascade too, otherwise the per-replica snapshots the restore
+reads from are deleted while it runs.
+
+---
+
+## 13. RVS not pinned before it is Ready
+
+⚡ **Regression guard for a deadlock plus a leaked cluster-wide admin lock.**
+
+Setup: 2D RV, create an RVS and wait for `InProgress` (not Ready), then create an
+RV restoring from that unfinished snapshot.
+
+Action: delete the RVS.
+
+Assert:
+
+- The RVS is deleted promptly — nothing is pinned, because the restore-source
+  finalizer is only held on a Ready snapshot.
+- No orphan `DRBDResource` / `DRBDResourceOperation` named after the RVS remains,
+  i.e. the admin-lock operation went with it.
+
+Pinning an unsettled snapshot used to deadlock both sides: once the RVS has a
+deletionTimestamp its controller stops advancing prepare/sync, so it could never
+become Ready, so the restore could never finish, so the finalizer was never
+dropped — and the DRBD admin lock stayed held on every node, blocking
+administrative operations on the source volume until the target was deleted by
+hand.
+
+---
+
+## 14. RVS outlives its source ReplicatedVolume
+
+**A finished snapshot stays restorable after the source volume is deleted.**
+
+Setup: 2D RV via `SetupLayout`, `SetupRVS` on it.
+
+Action: delete the source RV and wait until it is gone.
+
+Assert:
+
+- The RVS stays `Ready` / `ReadyToUse=true` — losing the source does not
+  invalidate it.
+- A new RV restoring from it still reaches `FormationComplete` with
+  `status.datamesh.size` ≥ the original size.
+
+The data lives in the per-replica snapshots, which the RVS owns rather than the
+volume. Being able to restore after the source claim is gone is the whole point of
+a snapshot, and the VolumeSnapshot API guarantees that independence — a snapshot
+that dies with its PVC is useless as a backup.
+
+---
+
+## 15. Unfinished RVS fails when its source disappears
+
+**An in-flight snapshot cannot survive losing the replicas it is being taken from.**
+
+Setup: 2D RV, create an RVS and wait for `InProgress`.
+
+Action: delete the source RV.
+
+Assert: the RVS reaches `Failed` with `readyToUse=false`.
+
+The mirror image of case 14: prepare and sync both read from the source replicas,
+so an unfinished snapshot has nothing left to finish with. Only a snapshot that
+already reached Ready is self-sufficient.

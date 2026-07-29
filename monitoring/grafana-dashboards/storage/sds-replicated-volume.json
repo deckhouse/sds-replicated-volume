@@ -5255,6 +5255,254 @@
         }
       ],
       "description": ""
+    },
+    {
+      "id": 2017,
+      "type": "row",
+      "title": "Snapshots",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 152
+      },
+      "description": ""
+    },
+    {
+      "id": 2018,
+      "type": "timeseries",
+      "title": "Snapshots by Phase",
+      "description": "Current ReplicatedVolumeSnapshot count per phase. Every known phase is emitted, so a phase dropping to zero is visible instead of the series disappearing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 153
+      },
+      "targets": [
+        {
+          "expr": "sum by (phase) (sds_rvs_count)",
+          "legendFormat": "{{phase}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(sds_rvs_count) or on() vector(0)",
+          "legendFormat": "Total",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2019,
+      "type": "timeseries",
+      "title": "Unfinished Snapshot Age",
+      "description": "Age of each snapshot that has not reached Ready or Failed. The red line marks the 30-minute threshold used by D8ReplicatedVolumeSnapshotStuck. Ready and failed snapshots produce no series, so a line ending means the snapshot settled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 153
+      },
+      "targets": [
+        {
+          "expr": "sds_rvs_unfinished_age_seconds",
+          "legendFormat": "{{name}} ({{phase}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2020,
+      "type": "timeseries",
+      "title": "Failed Snapshots",
+      "description": "Snapshots in the Failed phase, one series per snapshot. A failed snapshot never retries on its own; read status.message for the cause.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 153
+      },
+      "targets": [
+        {
+          "expr": "sum(sds_rvs_failed) or on() vector(0)",
+          "legendFormat": "Total",
+          "refId": "A"
+        },
+        {
+          "expr": "sds_rvs_failed",
+          "legendFormat": "{{name}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 2021,
+      "type": "timeseries",
+      "title": "Snapshot Time to Ready P90",
+      "description": "P90 of the time from snapshot creation to Ready over the dashboard range, split by how many replicas the snapshot spans. Prepare plus sync across several replicas legitimately takes minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ds_prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 161
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rvs_ready_duration_seconds_bucket[$__range])) by (le, members))",
+          "legendFormat": "{{members}} replicas",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(increase(sds_rvs_ready_duration_seconds_bucket[$__range])) by (le))",
+          "legendFormat": "all",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
     }
   ],
   "refresh": "30s",

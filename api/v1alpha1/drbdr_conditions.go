@@ -23,6 +23,10 @@ const (
 	// Status=False means configuration failed; see Reason for the failing step.
 	DRBDResourceCondConfiguredType = "Configured"
 
+	// AdminLocked is not a failure: the resource is held by a cluster-wide admin
+	// lock (a snapshot in progress), so the kernel rejects administrative commands
+	// on it until the lock is released. The agent keeps retrying.
+	DRBDResourceCondConfiguredReasonAdminLocked              = "AdminLocked"
 	DRBDResourceCondConfiguredReasonApplyALFailed            = "ApplyALFailed"
 	DRBDResourceCondConfiguredReasonAttachFailed             = "AttachFailed"
 	DRBDResourceCondConfiguredReasonBackingVolumeDeleting    = "BackingVolumeDeleting"

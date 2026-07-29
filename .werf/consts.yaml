@@ -4,6 +4,11 @@
 {{- $_ := set $ "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
 
 # custom constants
+# Commit in deckhouse/3p-drbd that the DRBD kernel module is built from. Pinned
+# by commit because the admin-lock feature the snapshot flow needs is not tagged
+# yet; the commit must carry REL_VERSION equal to the DRBD version in oss.yaml.
+# Replace with a drbd-<version> tag once one is cut.
+{{- $_ := set $ "DRBD_COMMIT" "0004bb584adb91b5243af8d4c1629e0d27d8056c" }}
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
 {{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
 {{- $_ := set $ "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}
