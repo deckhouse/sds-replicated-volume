@@ -2122,6 +2122,30 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
+
+	It("is idempotent when a foreign peer is skipped", func() {
+		// A skipped peer makes the working slice longer than the written prefix, so
+		// the final trim runs on every call. It must not be mistaken for a change:
+		// the persisted content is identical and the report drives a status PATCH.
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "my-rv-0", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "unknown", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────

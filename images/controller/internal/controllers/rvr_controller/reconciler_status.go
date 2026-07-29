@@ -171,6 +171,11 @@ func ensureStatusPeers(
 	rvNamePrefix := rvr.Spec.ReplicatedVolumeName + "-"
 	n := len(drbdrPeers)
 
+	// Length of the persisted list, captured before the working slice is resized:
+	// the resizing below is scratch space for the write loop, so only the final
+	// written count compared against this value tells whether the list changed.
+	persistedLen := len(rvr.Status.Peers)
+
 	// Ensure rvr.Status.Peers has enough capacity (may shrink after skipping foreign peers).
 	if cap(rvr.Status.Peers) < n {
 		// Need to grow capacity.
@@ -286,9 +291,14 @@ func ensureStatusPeers(
 		writeIdx++
 	}
 
-	// Trim to actual written count (foreign peers were skipped).
+	// Trim to actual written count (foreign peers were skipped). Only a difference
+	// against the persisted length is a change: skipping a foreign peer leaves the
+	// working slice longer than the written prefix on every call, and reporting that
+	// trim as a change would issue a content-free status patch each reconcile.
 	if len(rvr.Status.Peers) != writeIdx {
 		rvr.Status.Peers = rvr.Status.Peers[:writeIdx]
+	}
+	if persistedLen != writeIdx {
 		changed = true
 	}
 

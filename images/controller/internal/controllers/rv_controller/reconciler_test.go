@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -5163,5 +5164,138 @@ var _ = Describe("reconcileDeletion layout condition", func() {
 		Expect(rec.reconcileDeletion(ctx, rv, nil, &rvrs).Error()).NotTo(HaveOccurred())
 		after := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(after.LastTransitionTime).To(Equal(before.LastTransitionTime))
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: status patch churn
+//
+
+var _ = Describe("Root Reconcile status patch churn", func() {
+	var (
+		scheme *runtime.Scheme
+		cl     client.Client
+		rec    *Reconciler
+		rv     *v1alpha1.ReplicatedVolume
+
+		// rvStatusPatches counts status-subresource patches issued for the RV,
+		// including content-free ones a content check cannot see.
+		rvStatusPatches int
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+
+		cfg := v1alpha1.ReplicatedVolumeConfiguration{
+			Topology:                        v1alpha1.TopologyIgnored,
+			FailuresToTolerate:              1,
+			GuaranteedMinimumDataRedundancy: 0,
+			VolumeAccess:                    v1alpha1.VolumeAccessPreferablyLocal,
+			ReplicatedStoragePoolName:       "test-pool",
+		}
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 1},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				ConfigurationGeneration: 1,
+				Configuration:           cfg.DeepCopy(),
+			},
+		}
+		rsp := newTestRSP("test-pool")
+
+		// Converged 2D+1TB at the r2 config above: layout convergence takes no action.
+		fixture, rvrs := convergenceFixture(0, 2, 1)
+
+		// Populate the replica observations the status pipeline mirrors, so the
+		// pointer-carrying artifacts (effective layout FTT/GMDR, status.size) are
+		// actually computed instead of staying nil.
+		members := fixture.Status.Datamesh.Members
+		for i, r := range rvrs {
+			addrs := []v1alpha1.DRBDResourceAddressStatus{{
+				SystemNetworkName: "Internal",
+				Address:           v1alpha1.DRBDAddress{IPv4: fmt.Sprintf("10.0.0.%d", i+1), Port: 7000},
+			}}
+			members[i].Addresses = addrs
+			r.Status.DatameshRevision = 1
+			r.Status.Addresses = addrs
+			r.Status.Quorum = ptr.To(true)
+			if r.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+				r.Status.Size = ptr.To(resource.MustParse("10Gi"))
+				r.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					State: v1alpha1.DiskStateUpToDate,
+				}
+			}
+		}
+		rv = &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-1",
+				Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				Labels:     map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1"},
+			},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-1",
+			},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision:                1, // post-formation → normal operation
+				ConfigurationGeneration:         1,
+				ConfigurationObservedGeneration: 1,
+				Configuration:                   cfg.DeepCopy(),
+				Datamesh:                        fixture.Status.Datamesh,
+			},
+		}
+
+		objs := []client.Object{rv, rsc, rsp}
+		for _, r := range rvrs {
+			objs = append(objs, r)
+		}
+
+		rvStatusPatches = 0
+		cl = newClientBuilder(scheme).
+			WithObjects(objs...).
+			WithStatusSubresource(rv, rsc).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok && subResourceName == "status" {
+						rvStatusPatches++
+					}
+					return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			}).
+			Build()
+		rec = NewReconciler(cl, scheme)
+	})
+
+	// settle reconciles until the stored RV status stops changing. Content-free
+	// patch churn does not change the content, so this loop terminates even when
+	// the churn is present — the patch counter is what exposes it.
+	settle := func(ctx context.Context) *v1alpha1.ReplicatedVolume {
+		var prev *v1alpha1.ReplicatedVolume
+		for range 10 {
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			cur := &v1alpha1.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), cur)).To(Succeed())
+			if prev != nil && equality.Semantic.DeepEqual(prev.Status, cur.Status) {
+				return cur
+			}
+			prev = cur
+		}
+		Fail("RV status did not settle")
+		return nil
+	}
+
+	It("does not patch the status of a settled volume at all", func(ctx SpecContext) {
+		// The settle loop only proves the content stops changing; this guards the
+		// write level too — an ensure that mis-reports "changed" on identical data
+		// (e.g. a by-pointer comparison) produces a content-free patch every
+		// reconcile, invisible to content checks but a constant apiserver load.
+		settle(ctx)
+
+		before := rvStatusPatches
+		_, err := rec.Reconcile(ctx, RequestFor(rv))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rvStatusPatches).To(Equal(before))
 	})
 })
