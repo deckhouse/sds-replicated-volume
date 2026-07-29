@@ -54,3 +54,25 @@ func WithRVByStoragePoolNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		return []string{rv.Status.Configuration.ReplicatedStoragePoolName}
 	})
 }
+
+// WithRVByDataSourceVolumeNameIndex registers the IndexFieldRVByDataSourceVolumeName
+// index on a fake.ClientBuilder. This is useful for tests that need to look up
+// clone-target RVs by the source RV name (spec.dataSource, kind=ReplicatedVolume).
+func WithRVByDataSourceVolumeNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolume{}, indexes.IndexFieldRVByDataSourceVolumeName, func(obj client.Object) []string {
+		rv, ok := obj.(*v1alpha1.ReplicatedVolume)
+		if !ok {
+			return nil
+		}
+		if rv.Spec.DataSource == nil {
+			return nil
+		}
+		if rv.Spec.DataSource.Kind != v1alpha1.VolumeDataSourceKindReplicatedVolume {
+			return nil
+		}
+		if rv.Spec.DataSource.Name == "" {
+			return nil
+		}
+		return []string{rv.Spec.DataSource.Name}
+	})
+}

@@ -165,6 +165,44 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
+// cloneSourceRVRPredicates returns predicates for the secondary watch on
+// ReplicatedVolumeReplica used to trigger reconcile of clone-target RVRs when
+// a potential source replica becomes usable. Reacts to:
+//   - Create/Delete (new candidate or candidate disappeared)
+//   - Spec.NodeName changes (scheduling changed where the source lives)
+//   - Status.BackingVolume.State changes (source becoming UpToDate or not)
+func cloneSourceRVRPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc:  func(event.TypedCreateEvent[client.Object]) bool { return true },
+			DeleteFunc:  func(event.TypedDeleteEvent[client.Object]) bool { return true },
+			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRVR, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
+				newRVR, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
+				if !okOld || !okNew || oldRVR == nil || newRVR == nil {
+					return true
+				}
+				if oldRVR.Spec.NodeName != newRVR.Spec.NodeName {
+					return true
+				}
+				oldState := backingVolumeState(oldRVR)
+				newState := backingVolumeState(newRVR)
+				return oldState != newState
+			},
+		},
+	}
+}
+
+// backingVolumeState returns the Status.BackingVolume.State of an RVR or an
+// empty string when BackingVolume is not populated.
+func backingVolumeState(rvr *v1alpha1.ReplicatedVolumeReplica) v1alpha1.DiskState {
+	if rvr == nil || rvr.Status.BackingVolume == nil {
+		return ""
+	}
+	return rvr.Status.BackingVolume.State
+}
+
 // rspPredicates returns predicates for ReplicatedStoragePool events.
 // Filters to react only to eligibleNodes changes (using EligibleNodesRevision).
 // The actual per-node change detection is done in the EventHandler.

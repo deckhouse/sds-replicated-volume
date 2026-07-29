@@ -119,6 +119,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		result := flow.MergeReconciles(
 			r.reconcileDeletion(rf.Ctx(), rv, rvas, &rvrs),
 			r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
+			r.reconcileCloneSourceFinalizer(rf.Ctx(), rv),
 			r.reconcileMetadata(rf.Ctx(), rv, rvrs),
 		)
 		if result.Error() == nil && !obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
@@ -188,6 +189,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		outcome,
 		r.reconcileRVAMetadata(rf.Ctx(), rv, rvas),
 		r.reconcileRVRFinalizers(rf.Ctx(), rv, rvrs),
+		r.reconcileCloneSourceFinalizer(rf.Ctx(), rv),
 	)
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
