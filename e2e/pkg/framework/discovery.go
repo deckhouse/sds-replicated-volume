@@ -109,6 +109,22 @@ func (d *Discovery) ThickRSPName() string { return d.thickPool.trsp.Name() }
 // Called via From(pt) they use the requested pool.
 //
 
+// PoolName returns the name of the scoped RSP, so a message about the pool can
+// name the object it was read from.
+func (ps *PoolScope) PoolName() string { return ps.trsp.Name() }
+
+// PoolType returns spec.type of the scoped RSP: LVM for a thick pool, LVMThin
+// for a thin one.
+//
+// It is what decides WHICH free-space field of an LVMVolumeGroup describes the
+// pool — the volume group's own status.vgFree for LVM, the placement's thin pool
+// status.thinPools[].availableSpace for LVMThin — so a caller reasoning about
+// free space reads the type from the pool itself instead of being told it
+// separately and risking a contradiction.
+func (ps *PoolScope) PoolType() v1alpha1.ReplicatedStoragePoolType {
+	return ps.trsp.Object().Spec.Type
+}
+
 // LVMVolumeGroups returns spec.lvmVolumeGroups from the scoped RSP.
 func (ps *PoolScope) LVMVolumeGroups() []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups {
 	return ps.trsp.Object().Spec.LVMVolumeGroups

@@ -66,6 +66,43 @@ var _ = Describe("optInEnabled", func() {
 	)
 })
 
+// DisruptiveEnabled is what a suite made entirely of Disruptive specs asks
+// before RunSpecs, so the only thing worth proving is the WIRING: that it reads
+// the Disruptive variable and the umbrella one, and no other. The decision rule
+// itself is the table above.
+var _ = Describe("DisruptiveEnabled", func() {
+	It("is false when neither variable is set", func() {
+		GinkgoT().Setenv(EnvAllowDisruptive, "")
+		GinkgoT().Setenv(EnvRunAll, "")
+		Expect(DisruptiveEnabled()).To(BeFalse())
+	})
+
+	It("is true when the class variable enables it", func() {
+		GinkgoT().Setenv(EnvAllowDisruptive, "true")
+		GinkgoT().Setenv(EnvRunAll, "")
+		Expect(DisruptiveEnabled()).To(BeTrue())
+	})
+
+	It("is true when only the umbrella variable enables it", func() {
+		GinkgoT().Setenv(EnvAllowDisruptive, "")
+		GinkgoT().Setenv(EnvRunAll, "true")
+		Expect(DisruptiveEnabled()).To(BeTrue())
+	})
+
+	It("is false for a value ParseBool cannot read", func() {
+		GinkgoT().Setenv(EnvAllowDisruptive, "yes")
+		GinkgoT().Setenv(EnvRunAll, "")
+		Expect(DisruptiveEnabled()).To(BeFalse())
+	})
+
+	It("ignores the LongHaul variable", func() {
+		GinkgoT().Setenv(EnvAllowDisruptive, "")
+		GinkgoT().Setenv(EnvAllowLongHaul, "true")
+		GinkgoT().Setenv(EnvRunAll, "")
+		Expect(DisruptiveEnabled()).To(BeFalse())
+	})
+})
+
 var _ = Describe("hasLabelInArgs", func() {
 	It("finds the label in a Labels arg", func() {
 		Expect(hasLabelInArgs([]any{Labels{"Smoke", LabelLongHaul}}, LabelLongHaul)).To(BeTrue())

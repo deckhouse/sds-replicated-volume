@@ -124,8 +124,8 @@ var _ = Describe("classifyDisruptiveCallSite", func() {
 		Expect(message).To(ContainSubstring(disruptiveOp))
 		Expect(message).To(ContainSubstring("Label(fw.LabelDisruptive)"))
 		Expect(message).To(ContainSubstring(LabelSmoke), "the labels in scope help the author see what was read")
-		Expect(message).To(ContainSubstring(envAllowDisruptive))
-		Expect(message).To(ContainSubstring(envRunAll))
+		Expect(message).To(ContainSubstring(EnvAllowDisruptive))
+		Expect(message).To(ContainSubstring(EnvRunAll))
 	})
 })
 

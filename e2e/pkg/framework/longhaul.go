@@ -108,13 +108,13 @@ func enforceLongHaul() {
 	if !slices.Contains(CurrentSpecReport().Labels(), LabelLongHaul) {
 		return
 	}
-	if optInEnabledFromEnv(envAllowLongHaul) {
+	if optInEnabledFromEnv(EnvAllowLongHaul) {
 		return
 	}
 	suiteConfig, _ := GinkgoConfiguration()
 	if focusRequested(suiteConfig.FocusStrings, suiteConfig.FocusFiles) {
 		return
 	}
-	Skip("LongHaul spec: export " + envAllowLongHaul + "=true (or " + envRunAll +
+	Skip("LongHaul spec: export " + EnvAllowLongHaul + "=true (or " + EnvRunAll +
 		"=true) before the run — this spec waits tens of minutes for the cluster")
 }

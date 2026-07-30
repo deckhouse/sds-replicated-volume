@@ -43,7 +43,34 @@ const (
 	testImageNew  = "registry.example.com/sds-replicated-volume@" + testDigestNew
 	testTagOld    = "main"
 	testTagNew    = "pr758"
+
+	// testVersionRelease is properties.version of a module a release channel
+	// installed: a semantic version, not a tag. It is what the version gate has to
+	// refuse while Deckhouse has not restored the module from our override.
+	testVersionRelease = "v0.9.1"
+
+	// The readiness transitions of the two test bundles. They look like the
+	// timestamps Deckhouse writes, but the helper compares them and never parses
+	// them, so only their inequality carries meaning.
+	testTransitionOld = "2026-07-31T02:20:00Z"
+	testTransitionNew = "2026-07-31T02:32:10Z"
+
+	// testPhaseReconciling is the phase Deckhouse publishes while it re-runs a
+	// module.
+	testPhaseReconciling = "Reconciling"
 )
+
+// transitionFor is the readiness transition of a module that last ran to apply
+// bundle digest. Deckhouse takes a module out of ready and back on every run, so
+// the two test bundles cannot share one transition — which is why the fixtures
+// derive it, and why a test about a module whose bundle changed but which has NOT
+// run yet has to set the field by hand.
+func transitionFor(digest string) string {
+	if digest == testDigestNew {
+		return testTransitionNew
+	}
+	return testTransitionOld
+}
 
 // moduleScheme is the scheme the fake client serves the two Deckhouse kinds
 // with. Neither has a Go type in this module's dependency set, so both are
@@ -222,33 +249,82 @@ func readyWorkloadState(w moduleWorkload, image string) moduleWorkloadState {
 }
 
 // releaseObservation builds an observation of a stand that runs the module with
-// NO ModulePullOverride at all — installed from a release channel — with every
-// expected workload healthy on image. It is the state in which creating an
-// override must not be mistaken for a finished rollout.
+// NO ModulePullOverride at all — installed from a release channel, so Deckhouse
+// reports its release version — with every expected workload healthy on image. It
+// is the state in which creating an override must not be mistaken for a finished
+// rollout.
 func releaseObservation(image string) moduleObservation {
-	var obs moduleObservation
+	obs := moduleObservation{
+		ModuleFound:           true,
+		ModulePhase:           moduleReadyPhase,
+		ModuleVersion:         testVersionRelease,
+		ModuleReadyTransition: testTransitionOld,
+	}
 	for _, w := range moduleWorkloads() {
 		obs.Workloads = append(obs.Workloads, readyWorkloadState(w, image))
 	}
 	return obs
 }
 
-// readyObservation builds an observation in which the override reports digest and
-// every expected workload finished rolling out on image.
+// readyObservation builds an observation in which the override reports digest,
+// Deckhouse reports the module ready at tag, and every expected workload finished
+// rolling out on image.
 func readyObservation(tag, digest, image string) moduleObservation {
 	obs := releaseObservation(image)
 	obs.MPOFound, obs.MPOTag, obs.MPODigest = true, tag, digest
+	obs.ModuleVersion, obs.ModuleReadyTransition = tag, transitionFor(digest)
 	return obs
 }
 
 // pendingObservation builds an observation of a stand where the override exists
 // but not a single workload does — a first installation that has not started.
 func pendingObservation(tag, digest string) moduleObservation {
-	obs := moduleObservation{MPOFound: true, MPOTag: tag, MPODigest: digest}
+	obs := moduleObservation{
+		MPOFound:              true,
+		MPOTag:                tag,
+		MPODigest:             digest,
+		ModuleFound:           true,
+		ModulePhase:           moduleReadyPhase,
+		ModuleVersion:         tag,
+		ModuleReadyTransition: transitionFor(digest),
+	}
 	for _, w := range moduleWorkloads() {
 		obs.Workloads = append(obs.Workloads, moduleWorkloadState{Workload: w})
 	}
 	return obs
+}
+
+// retaggedReadiness is what a poll waits for after a live override was retagged
+// from testTagOld to testTagNew: a new bundle digest, the new tag in the Module,
+// and a readiness transition other than the one the old bundle left behind.
+func retaggedReadiness() moduleReadiness {
+	return moduleReadiness{
+		DigestBefore:          testDigestOld,
+		Digest:                digestChanged,
+		ImageTag:              testTagNew,
+		ReadyTransitionBefore: transitionFor(testDigestOld),
+	}
+}
+
+// staleReadyObservation builds the observation the old criterion was fooled by:
+// Deckhouse has published the new bundle digest and restarted itself, but the
+// Module still carries the version, the readiness transition and the phase it had
+// BEFORE the restart, and every workload still runs the old build, calmly and
+// healthily.
+func staleReadyObservation() moduleObservation {
+	obs := readyObservation(testTagNew, testDigestNew, testImageOld)
+	obs.ModuleVersion = testTagOld
+	obs.ModuleReadyTransition = transitionFor(testDigestOld)
+	return obs
+}
+
+// testWaitPolicy budgets a unit-test wait: a real budget, so a bug fails the test
+// instead of hanging it, and polls that do not wait in real time. The observation
+// window is per test, because how many polls it takes is what several of them
+// assert; with a 1ms poll, 0 means one accepting poll, 1ms means two and 2ms
+// means three (moduleStableSamples).
+func testWaitPolicy(timeout, window time.Duration) moduleWaitPolicy {
+	return moduleWaitPolicy{Timeout: timeout, Poll: time.Millisecond, ObservationWindow: window}
 }
 
 // moduleAnswer is one scripted reply to an observation: a snapshot, or a failure.
@@ -271,6 +347,49 @@ func (s *stubModuleObserver) observeModule(_ context.Context, _ string) (moduleO
 	answer := s.script[min(s.reads, len(s.script))-1]
 	return answer.obs, answer.err
 }
+
+// The tag rule is what a suite's gate refuses a mistyped E2E_UPGRADE_*_TAG with,
+// before a single object is written, so both directions matter: everything a dev
+// build is actually tagged with has to pass, and everything a shell can smuggle
+// in has to be refused.
+var _ = Describe("ValidateModuleImageTag", func() {
+	DescribeTable("accepts the tags this project builds",
+		func(tag string) {
+			Expect(ValidateModuleImageTag(tag)).To(Succeed())
+		},
+		Entry("a release channel branch", "main"),
+		Entry("a CI build of a pull request", "pr758"),
+		Entry("a branch name with a slash", "feat/r3-r2-auto-migration"),
+		Entry("a semantic version", "v1.2.3-alpha.1"),
+		Entry("a digest-looking tag", "sha256-1111"),
+	)
+
+	DescribeTable("refuses what an operator can mistype",
+		func(tag, wantMessage string) {
+			Expect(ValidateModuleImageTag(tag)).To(MatchError(ContainSubstring(wantMessage)))
+		},
+		Entry("empty", "", "must not be empty"),
+		Entry("a quoted value that kept its spaces", "pr758 ", "printable ASCII"),
+		Entry("a value with a space inside", "two tags", "printable ASCII"),
+		Entry("a tab", "pr758\t", "printable ASCII"),
+		Entry("a trailing newline from a command substitution", "pr758\n", "printable ASCII"),
+		Entry("a non-ASCII character", "prесемьсотпятьдесятвосемь", "printable ASCII"),
+	)
+
+	It("is the rule ensureModuleVersion applies, so a gate and the helper agree", func() {
+		c := newModuleClient()
+		observer := &stubModuleObserver{script: []moduleAnswer{
+			{obs: readyObservation(testTagOld, testDigestOld, testImageOld)},
+		}}
+
+		err := ensureModuleVersion(context.Background(), c, observer, ModuleName, "pr758 ",
+			testWaitPolicy(time.Second, 0))
+
+		Expect(err).To(MatchError(ContainSubstring("printable ASCII")))
+		Expect(c.creates).To(BeZero())
+		Expect(c.updates).To(BeZero())
+	})
+})
 
 var _ = Describe("buildModuleConfig", func() {
 	It("enables the module and touches nothing else", func() {
@@ -487,8 +606,12 @@ var _ = Describe("moduleDigestRequirementFor", func() {
 })
 
 var _ = Describe("checkModuleReady", func() {
-	retagged := moduleReadiness{DigestBefore: testDigestOld, Digest: digestChanged}
-	created := moduleReadiness{Digest: digestPublished}
+	retagged := retaggedReadiness()
+	created := moduleReadiness{
+		Digest:                digestPublished,
+		ImageTag:              testTagNew,
+		ReadyTransitionBefore: testTransitionOld,
+	}
 
 	It("accepts a rolled-out module when no digest change is expected", func() {
 		Expect(checkModuleReady(moduleReadiness{},
@@ -510,15 +633,55 @@ var _ = Describe("checkModuleReady", func() {
 	It("accepts a retag whose pod templates did NOT change", func() {
 		before := readyObservation(testTagOld, testDigestOld, testImageOld)
 		after := readyObservation(testTagNew, testDigestNew, testImageOld)
-		want := moduleReadiness{
-			DigestBefore: testDigestOld,
-			Digest:       digestChanged,
-			ImagesBefore: observationImages(before),
-		}
+		want := retagged
+		want.ImagesBefore = observationImages(before)
 
 		Expect(checkModuleReady(want, after)).To(Succeed(),
 			"werf builds are content-addressed: components untouched between two tags keep their digest")
 		Expect(moduleImagesChanged(want.ImagesBefore, after)).To(BeEmpty())
+	})
+
+	It("keeps waiting while the Module resource does not exist", func() {
+		obs := readyObservation(testTagNew, testDigestNew, testImageNew)
+		obs.ModuleFound, obs.ModulePhase, obs.ModuleVersion, obs.ModuleReadyTransition = false, "", "", ""
+
+		Expect(checkModuleReady(retagged, obs)).
+			To(MatchError(ContainSubstring("Module resource does not exist yet")))
+	})
+
+	It("keeps waiting while Deckhouse still reports the version it ran before the restart", func() {
+		err := checkModuleReady(retagged, staleReadyObservation())
+
+		Expect(err).To(MatchError(ContainSubstring("properties.version")),
+			"the digest is published before Deckhouse restarts, and only the restarted one"+
+				" writes the tag into the Module")
+		Expect(err).To(MatchError(ContainSubstring(testTagOld)))
+		Expect(err).To(MatchError(ContainSubstring(testTagNew)))
+	})
+
+	It("keeps waiting while the module has not run again since the write", func() {
+		obs := readyObservation(testTagNew, testDigestNew, testImageOld)
+		obs.ModuleReadyTransition = transitionFor(testDigestOld)
+
+		Expect(checkModuleReady(retagged, obs)).
+			To(MatchError(ContainSubstring("has not run again yet")))
+	})
+
+	It("does not demand a readiness transition when the tag was already pinned", func() {
+		obs := readyObservation(testTagNew, testDigestOld, testImageOld)
+		obs.ModuleReadyTransition = transitionFor(testDigestOld)
+		want := moduleReadiness{ImageTag: testTagNew, ReadyTransitionBefore: obs.ModuleReadyTransition}
+
+		Expect(checkModuleReady(want, obs)).To(Succeed(),
+			"nothing is re-applied on that path, so demanding a re-run would wait forever")
+	})
+
+	It("keeps waiting while the module is still reconciling", func() {
+		obs := readyObservation(testTagNew, testDigestNew, testImageNew)
+		obs.ModulePhase = testPhaseReconciling
+
+		Expect(checkModuleReady(retagged, obs)).
+			To(MatchError(ContainSubstring(`phase "Reconciling", not "Ready"`)))
 	})
 
 	It("keeps waiting while the override has published no digest", func() {
@@ -534,7 +697,12 @@ var _ = Describe("checkModuleReady", func() {
 	})
 
 	It("rejects an observation with no workload at all", func() {
-		err := checkModuleReady(moduleReadiness{}, moduleObservation{MPOFound: true, MPODigest: testDigestNew})
+		err := checkModuleReady(moduleReadiness{}, moduleObservation{
+			MPOFound:    true,
+			MPODigest:   testDigestNew,
+			ModuleFound: true,
+			ModulePhase: moduleReadyPhase,
+		})
 
 		Expect(err).To(MatchError(ContainSubstring("no workload of the module was observed")))
 	})
@@ -591,63 +759,138 @@ var _ = Describe("moduleImagesChanged", func() {
 	})
 })
 
+var _ = Describe("moduleStableSamples", func() {
+	DescribeTable("counts the consecutive polls that span the observation window",
+		func(window, poll time.Duration, want int) {
+			Expect(moduleStableSamples(window, poll)).To(Equal(want))
+		},
+		Entry("no window at all is one sample", time.Duration(0), 10*time.Second, 1),
+		Entry("a poll of zero cannot span anything", time.Second, time.Duration(0), 1),
+		Entry("a window shorter than one poll still costs the next poll", time.Second, 10*time.Second, 2),
+		Entry("the shipped pair", moduleObservationWindow, moduleReadyPollInterval, 2),
+		Entry("three polls span a window of three", 30*time.Second, 10*time.Second, 4),
+		Entry("a window that does not divide evenly rounds up", 25*time.Second, 10*time.Second, 4),
+	)
+})
+
+// The fingerprint is what makes the observation window a claim about the cluster
+// standing still rather than about time passing, so every field the criterion
+// reads has to move it.
+var _ = Describe("moduleStateFingerprint", func() {
+	It("is equal for two identical observations", func() {
+		Expect(moduleStateFingerprint(readyObservation(testTagNew, testDigestNew, testImageNew))).
+			To(Equal(moduleStateFingerprint(readyObservation(testTagNew, testDigestNew, testImageNew))))
+	})
+
+	DescribeTable("changes when anything the window watches moves",
+		func(mutate func(*moduleObservation)) {
+			base := readyObservation(testTagNew, testDigestNew, testImageNew)
+			moved := readyObservation(testTagNew, testDigestNew, testImageNew)
+			mutate(&moved)
+
+			Expect(moduleStateFingerprint(moved)).NotTo(Equal(moduleStateFingerprint(base)))
+		},
+		Entry("the pinned tag", func(obs *moduleObservation) { obs.MPOTag = testTagOld }),
+		Entry("the bundle digest", func(obs *moduleObservation) { obs.MPODigest = testDigestOld }),
+		Entry("the module version", func(obs *moduleObservation) { obs.ModuleVersion = testTagOld }),
+		Entry("the module phase", func(obs *moduleObservation) { obs.ModulePhase = testPhaseReconciling }),
+		Entry("the readiness transition",
+			func(obs *moduleObservation) { obs.ModuleReadyTransition = testTransitionOld }),
+		Entry("a generation bump", func(obs *moduleObservation) { obs.Workloads[4].Generation = 4 }),
+		Entry("a rollout counter", func(obs *moduleObservation) { obs.Workloads[2].Updated = 1 }),
+		Entry("a pod-template image",
+			func(obs *moduleObservation) { obs.Workloads[0].Images = []string{testImageOld} }),
+	)
+})
+
 var _ = Describe("awaitModuleReady", func() {
-	It("returns as soon as the criterion is satisfied", func(ctx SpecContext) {
+	It("returns on the first accepting poll when no window is configured", func(ctx SpecContext) {
 		observer := &stubModuleObserver{script: []moduleAnswer{
 			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 		}}
 
 		Expect(awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{},
-			5*time.Second, time.Millisecond)).To(Succeed())
-		Expect(observer.reads).To(Equal(1), "no retag, so no confirmation poll is needed")
+			testWaitPolicy(5*time.Second, 0))).To(Succeed())
+		Expect(observer.reads).To(Equal(1))
 	})
 
-	It("waits for the new bundle digest and confirms the state once more", func(ctx SpecContext) {
+	It("waits for the new bundle digest and then for the observation window", func(ctx SpecContext) {
 		observer := &stubModuleObserver{script: []moduleAnswer{
 			{obs: readyObservation(testTagNew, testDigestOld, testImageOld)},
 			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
-			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 		}}
-		want := moduleReadiness{DigestBefore: testDigestOld, Digest: digestChanged}
 
-		Expect(awaitModuleReady(ctx, observer, ModuleName, want, 5*time.Second, time.Millisecond)).To(Succeed())
-		Expect(observer.reads).To(Equal(3), "one rejected poll, then the accepting one and its confirmation")
+		Expect(awaitModuleReady(ctx, observer, ModuleName, retaggedReadiness(),
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
+		Expect(observer.reads).To(Equal(3),
+			"one rejected poll, then the accepting one and the one that spans the window")
 	})
 
-	It("does not mistake the window between the new digest and the re-apply for a finished rollout",
-		func(ctx SpecContext) {
-			rolling := readyObservation(testTagNew, testDigestNew, testImageOld)
-			rolling.Workloads[4].Generation = 4 // the re-apply landed, the DaemonSet is restarting
-			observer := &stubModuleObserver{script: []moduleAnswer{
-				{obs: readyObservation(testTagNew, testDigestNew, testImageOld)}, // digest new, old pods intact
-				{obs: rolling},
-				{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
-			}}
-			want := moduleReadiness{DigestBefore: testDigestOld, Digest: digestChanged}
+	// This is the measured defect, poll by poll. The old criterion accepted the
+	// second sample — a published digest next to workloads that were still
+	// healthily running the OLD build — and the caller went on to assert against
+	// pods that were replaced 45 seconds later.
+	It("does not accept the stale Ready Deckhouse leaves behind while it restarts", func(ctx SpecContext) {
+		reconciling := readyObservation(testTagNew, testDigestNew, testImageOld)
+		reconciling.ModulePhase = testPhaseReconciling
+		rolling := readyObservation(testTagNew, testDigestNew, testImageOld)
+		rolling.Workloads[4].Generation = 4
 
-			Expect(awaitModuleReady(ctx, observer, ModuleName, want, 5*time.Second, time.Millisecond)).To(Succeed())
-			Expect(observer.reads).To(Equal(4),
-				"the premature sample is dropped by the confirmation poll, which sees the rollout start")
-		})
+		observer := &stubModuleObserver{script: []moduleAnswer{
+			// The override controller published the digest and restarted Deckhouse:
+			// the version, the readiness transition and the phase are the ones
+			// written BEFORE the restart, and no workload has moved.
+			{obs: staleReadyObservation()},
+			{obs: staleReadyObservation()},
+			// The restarted Deckhouse restored the module at our tag and took it out
+			// of ready in order to run it.
+			{obs: reconciling},
+			// The run applied the manifests: the DaemonSet is rolling.
+			{obs: rolling},
+			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
+		}}
 
-	It("reports that an accepted state was never confirmed", func(ctx SpecContext) {
+		Expect(awaitModuleReady(ctx, observer, ModuleName, retaggedReadiness(),
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
+		Expect(observer.reads).To(Equal(6),
+			"accepting either of the two stale samples is the defect this criterion exists to refuse")
+	})
+
+	It("starts the observation window over when a rollout begins inside it", func(ctx SpecContext) {
+		rolling := readyObservation(testTagNew, testDigestNew, testImageOld)
+		rolling.Workloads[4].Generation = 4
+		observer := &stubModuleObserver{script: []moduleAnswer{
+			{obs: readyObservation(testTagNew, testDigestNew, testImageOld)},
+			{obs: readyObservation(testTagNew, testDigestNew, testImageOld)},
+			{obs: rolling},
+			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
+		}}
+
+		Expect(awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{},
+			testWaitPolicy(5*time.Second, 2*time.Millisecond))).To(Succeed())
+		Expect(observer.reads).To(Equal(6),
+			"two samples of the window had passed when the rollout started, and all three are retaken")
+	})
+
+	It("reports that an accepted state never held for the whole window", func(ctx SpecContext) {
 		observer := &stubModuleObserver{script: []moduleAnswer{
 			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 		}}
-		want := moduleReadiness{DigestBefore: testDigestOld, Digest: digestChanged}
 
-		err := awaitModuleReady(ctx, observer, ModuleName, want, 0, time.Millisecond)
+		err := awaitModuleReady(ctx, observer, ModuleName, retaggedReadiness(),
+			testWaitPolicy(0, time.Millisecond))
 
 		Expect(err).To(MatchError(ContainSubstring("held for 1 of the 2 polls")))
+		Expect(err).To(MatchError(ContainSubstring("1ms observation window")))
 	})
 
 	It("reports the last reason when the budget runs out", func(ctx SpecContext) {
 		observer := &stubModuleObserver{script: []moduleAnswer{
 			{obs: readyObservation(testTagNew, testDigestOld, testImageOld)},
 		}}
-		want := moduleReadiness{DigestBefore: testDigestOld, Digest: digestChanged}
 
-		err := awaitModuleReady(ctx, observer, ModuleName, want, 10*time.Millisecond, time.Millisecond)
+		err := awaitModuleReady(ctx, observer, ModuleName, retaggedReadiness(),
+			testWaitPolicy(10*time.Millisecond, time.Millisecond))
 
 		Expect(err).To(MatchError(ContainSubstring("did not become ready within 10ms")))
 		Expect(err).To(MatchError(ContainSubstring("before the retag")))
@@ -661,7 +904,7 @@ var _ = Describe("awaitModuleReady", func() {
 		}}
 
 		Expect(awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{},
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, 0))).To(Succeed())
 		Expect(observer.reads).To(Equal(3))
 	})
 
@@ -669,7 +912,7 @@ var _ = Describe("awaitModuleReady", func() {
 		observer := &stubModuleObserver{script: []moduleAnswer{{err: errors.New("connection refused")}}}
 
 		err := awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{},
-			10*time.Millisecond, time.Millisecond)
+			testWaitPolicy(10*time.Millisecond, 0))
 
 		Expect(err).To(MatchError(ContainSubstring("connection refused")))
 	})
@@ -679,7 +922,10 @@ var _ = Describe("awaitModuleReady", func() {
 		cancel()
 		observer := &stubModuleObserver{script: []moduleAnswer{{obs: pendingObservation(testTagNew, testDigestNew)}}}
 
-		err := awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{}, time.Minute, time.Second)
+		// A poll far longer than the cancellation, so the select cannot pick the
+		// timer instead of the cancelled context.
+		err := awaitModuleReady(ctx, observer, ModuleName, moduleReadiness{},
+			moduleWaitPolicy{Timeout: time.Minute, Poll: time.Second})
 
 		Expect(err).To(MatchError(context.Canceled))
 		Expect(err).To(MatchError(ContainSubstring("does not exist yet")))
@@ -699,10 +945,10 @@ var _ = Describe("ensureModuleVersion", func() {
 		}}
 
 		Expect(ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew,
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
 
 		Expect(observer.reads).To(Equal(4),
-			"the pre-write snapshot, a poll on the old digest, the accepting poll and its confirmation")
+			"the pre-write snapshot, a poll on the old digest, the accepting poll and the window")
 		Expect(c.updates).To(Equal(1))
 		mpo := readModuleObject(c, gvkModulePullOverride)
 		Expect(specString(mpo, "spec", "imageTag")).To(Equal(testTagNew))
@@ -718,11 +964,13 @@ var _ = Describe("ensureModuleVersion", func() {
 		}}
 
 		Expect(ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew,
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
 
 		Expect(c.creates).To(BeZero())
 		Expect(c.updates).To(BeZero())
-		Expect(observer.reads).To(Equal(2), "the pre-write snapshot plus one accepting poll")
+		Expect(observer.reads).To(Equal(3),
+			"the pre-write snapshot, the accepting poll and the one that spans the window —"+
+				" the window is not skipped here either, because a sibling may have retagged a moment ago")
 	})
 
 	It("installs the module from scratch and waits for the workloads to appear", func(ctx SpecContext) {
@@ -735,11 +983,11 @@ var _ = Describe("ensureModuleVersion", func() {
 		}}
 
 		Expect(ensureModuleVersion(ctx, c, observer, ModuleName, testTagOld,
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
 
 		Expect(c.creates).To(Equal(2), "the ModuleConfig and the ModulePullOverride")
 		Expect(observer.reads).To(Equal(4),
-			"the pre-write snapshot, the poll without a digest, the accepting poll and its confirmation")
+			"the pre-write snapshot, the poll without a digest, the accepting poll and the window")
 		Expect(specBool(readModuleObject(c, gvkModuleConfig), "spec", "enabled")).To(BeTrue())
 		Expect(specString(readModuleObject(c, gvkModulePullOverride), "spec", "imageTag")).
 			To(Equal(testTagOld))
@@ -754,15 +1002,15 @@ var _ = Describe("ensureModuleVersion", func() {
 			// on the build a release channel installed.
 			{obs: releaseObservation(testImageOld)},
 			// Our override exists; Deckhouse has not resolved the tag yet, so the
-			// healthy workloads are still the release build's.
+			// healthy workloads are still the release build's and the Module still
+			// reports the release version.
 			{obs: pinnedNotResolved},
 			{obs: pinnedNotResolved},
-			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 		}}
 
 		Expect(ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew,
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
 
 		Expect(observer.reads).To(Equal(5),
 			"a populated namespace with no digest published is not readiness, however healthy it looks")
@@ -774,11 +1022,10 @@ var _ = Describe("ensureModuleVersion", func() {
 		observer := &stubModuleObserver{script: []moduleAnswer{
 			{obs: releaseObservation(testImageOld)}, // before the write: no override
 			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
-			{obs: readyObservation(testTagNew, testDigestNew, testImageNew)},
 		}}
 
 		Expect(ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew,
-			5*time.Second, time.Millisecond)).To(Succeed())
+			testWaitPolicy(5*time.Second, time.Millisecond))).To(Succeed())
 
 		Expect(observer.reads).To(Equal(3),
 			"the write reports 'unchanged', but the snapshot had no override, so a digest is still awaited")
@@ -794,7 +1041,7 @@ var _ = Describe("ensureModuleVersion", func() {
 			}}
 
 			err := ensureModuleVersion(context.Background(), c, observer, moduleName, imageTag,
-				time.Second, time.Millisecond)
+				testWaitPolicy(time.Second, 0))
 
 			Expect(err).To(MatchError(ContainSubstring(wantMessage)))
 			Expect(c.creates).To(BeZero())
@@ -809,7 +1056,8 @@ var _ = Describe("ensureModuleVersion", func() {
 		c := newModuleClient()
 		observer := &stubModuleObserver{script: []moduleAnswer{{err: errors.New("connection refused")}}}
 
-		err := ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew, time.Second, time.Millisecond)
+		err := ensureModuleVersion(ctx, c, observer, ModuleName, testTagNew,
+			testWaitPolicy(time.Second, 0))
 
 		Expect(err).To(MatchError(ContainSubstring("before the write")))
 		Expect(c.creates).To(BeZero())

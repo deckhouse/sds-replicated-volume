@@ -28,14 +28,18 @@ import (
 // repository ever sets them: no workflow under .github/workflows runs the e2e
 // suites and hack/run-e2e-new.sh only picks a Ginkgo label filter. They are
 // exported by the person who starts the run, in their own shell.
+//
+// The names are exported so that a suite whose specs ALL belong to an opt-in
+// class can refuse to start at all instead of running its setup and then
+// skipping every spec — see DisruptiveEnabled.
 const (
-	// envAllowDisruptive enables the Disruptive class on its own.
-	envAllowDisruptive = "E2E_ALLOW_DISRUPTIVE"
-	// envAllowLongHaul enables the LongHaul class on its own.
-	envAllowLongHaul = "E2E_ALLOW_LONG_HAUL"
-	// envRunAll is the umbrella variable: it enables every opt-in class at once
+	// EnvAllowDisruptive enables the Disruptive class on its own.
+	EnvAllowDisruptive = "E2E_ALLOW_DISRUPTIVE"
+	// EnvAllowLongHaul enables the LongHaul class on its own.
+	EnvAllowLongHaul = "E2E_ALLOW_LONG_HAUL"
+	// EnvRunAll is the umbrella variable: it enables every opt-in class at once
 	// (Disruptive and LongHaul).
-	envRunAll = "E2E_RUN_ALL"
+	EnvRunAll = "E2E_RUN_ALL"
 )
 
 // truthy reports whether s spells "true" the way strconv.ParseBool reads it:
@@ -69,7 +73,24 @@ func optInEnabled(classVar, runAllVar string) bool {
 // optInEnabledFromEnv applies optInEnabled to the current process environment.
 // It is the only place a class gate reads os.Getenv.
 func optInEnabledFromEnv(classEnv string) bool {
-	return optInEnabled(os.Getenv(classEnv), os.Getenv(envRunAll))
+	return optInEnabled(os.Getenv(classEnv), os.Getenv(EnvRunAll))
+}
+
+// DisruptiveEnabled reports whether the Disruptive class is enabled for this
+// process, by exactly the rule enforceDisruptive uses (optInEnabled over
+// EnvAllowDisruptive and EnvRunAll). Exported so that the decision is asked for,
+// never re-implemented: a caller spelling out its own strconv.ParseBool would be
+// a second copy of the formula, free to drift from the gate that actually skips
+// the specs.
+//
+// Its intended caller is the entry point of a suite whose scenario is Disruptive
+// as a whole (func TestX, before RunSpecs). Such a suite must refuse to run with
+// the class off rather than let the gate skip its specs: the class gate lives in
+// JustBeforeEach, which Ginkgo reaches only AFTER BeforeAll — a suite that sets
+// its whole stand up in a BeforeAll would install, create and attach everything
+// and only then report every spec as skipped.
+func DisruptiveEnabled() bool {
+	return optInEnabledFromEnv(EnvAllowDisruptive)
 }
 
 // hasLabelInArgs reports whether args contain a Labels value carrying label.

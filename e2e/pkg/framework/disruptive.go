@@ -64,8 +64,8 @@ func enforceDisruptive() {
 	if !slices.Contains(CurrentSpecReport().Labels(), LabelDisruptive) {
 		return
 	}
-	if !optInEnabledFromEnv(envAllowDisruptive) {
-		Skip("Disruptive spec: export " + envAllowDisruptive + "=true (or " + envRunAll +
+	if !optInEnabledFromEnv(EnvAllowDisruptive) {
+		Skip("Disruptive spec: export " + EnvAllowDisruptive + "=true (or " + EnvRunAll +
 			"=true) before the run to allow destructive actions on this cluster")
 	}
 }
@@ -169,14 +169,14 @@ func classifyDisruptiveCallSite(
 				" runs for it, so the requirement cannot be satisfied where this call stands:"+
 				" move it into a spec labelled Label(fw.LabelDisruptive), whose run also needs"+
 				" %s=true (or %s=true).",
-			what, leafNodeType, envAllowDisruptive, envRunAll)
+			what, leafNodeType, EnvAllowDisruptive, EnvRunAll)
 	case !slices.Contains(labels, LabelDisruptive):
 		return disruptiveCallSiteUnlabeledSpec, fmt.Sprintf(
 			"%s is a destructive operation and needs Label(fw.LabelDisruptive) on the spec or on"+
 				" an enclosing container; the labels in scope here are %v. Add the label — it"+
 				" also injects Serial and the lowest spec priority — and start the run with"+
 				" %s=true (or %s=true).",
-			what, labels, envAllowDisruptive, envRunAll)
+			what, labels, EnvAllowDisruptive, EnvRunAll)
 	default:
 		return disruptiveCallSiteAllowed, ""
 	}
