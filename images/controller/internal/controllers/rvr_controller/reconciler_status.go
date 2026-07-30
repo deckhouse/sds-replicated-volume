@@ -140,18 +140,20 @@ func ensureStatusSize(
 
 // ensureStatusPeers ensures the RVR status.peers field reflects the current DRBDR state.
 //
-// This function updates rvr.Status.Peers in-place based solely on drbdr.Status.Peers:
+// This function updates rvr.Status.Peers in-place from drbdr.Status.Peers. The datamesh is
+// used only to disambiguate diskless peer roles; it never overrides what DRBD reports:
 //   - Each drbdr peer becomes a peer entry (connection state, disk state, etc.)
-//   - Type is computed from drbdr peer:
-//   - Diskful → Diskful
-//   - Diskless + AllowRemoteRead=false → Access
-//   - Diskless + AllowRemoteRead=true → TieBreaker
+//   - A Diskful drbdr peer is reported as Diskful.
+//   - A Diskless drbdr peer is reported as TieBreaker when the datamesh member of the same
+//     name is a TieBreaker, and as Access otherwise (any other member type, a member missing
+//     from the datamesh, or no datamesh at all).
 //
 // The order of rvr.Status.Peers mirrors drbdr.Status.Peers.
 func ensureStatusPeers(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
+	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "status-peers")
 	defer ef.OnEnd(&outcome)
@@ -218,17 +220,23 @@ func ensureStatusPeers(
 
 		dst := &rvr.Status.Peers[writeIdx]
 
-		// Compute target Type from drbdr peer.
+		// Compute target Type from the drbdr peer, disambiguating diskless peers by
+		// datamesh member type: DRBD reports TieBreaker and Access peers identically
+		// (both are plain diskless), so the intended role is only known to the datamesh.
+		// Everything but an explicit TieBreaker member — an Access member, a member the
+		// datamesh does not carry, or no datamesh at all — stays Access.
 		// TODO: ShadowDiskful
 		var targetType v1alpha1.ReplicaType
 		switch src.Type {
 		case v1alpha1.DRBDResourceTypeDiskful:
 			targetType = v1alpha1.ReplicaTypeDiskful
 		case v1alpha1.DRBDResourceTypeDiskless:
-			if src.AllowRemoteRead {
-				targetType = v1alpha1.ReplicaTypeTieBreaker
-			} else {
-				targetType = v1alpha1.ReplicaTypeAccess
+			targetType = v1alpha1.ReplicaTypeAccess
+			if datamesh != nil {
+				if member := datamesh.FindMemberByName(peerName); member != nil &&
+					member.Type == v1alpha1.DatameshMemberTypeTieBreaker {
+					targetType = v1alpha1.ReplicaTypeTieBreaker
+				}
 			}
 		}
 

@@ -1200,7 +1200,7 @@ flowchart TD
     MirrorPeers --> ForeignGuard{"Foreign peer guard:<br/>name starts with<br/>ReplicatedVolumeName + dash?"}
     ForeignGuard -->|No| ErrorForeign[Return error: foreign peer detected]
     ErrorForeign --> End3([Done])
-    ForeignGuard -->|Yes| ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + AllowRemoteRead=false → Access<br/>Diskless + AllowRemoteRead=true → TieBreaker"]
+    ForeignGuard -->|Yes| ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + datamesh member is TieBreaker → TieBreaker<br/>Diskless otherwise (other member type,<br/>member not found, no datamesh) → Access"]
     ComputeType --> ComputeAttached[Compute Attached from Role=Primary]
     ComputeAttached --> CopyFields["Copy ConnectionState, DiskState,<br/>ReplicationState, Paths"]
     CopyFields --> End2([Done])
@@ -1212,6 +1212,7 @@ flowchart TD
 |-------|-------------|
 | `drbdr.Status.Peers` | Peer status from DRBD |
 | `rvr.Spec.ReplicatedVolumeName` | Used for foreign peer guard (name prefix check) |
+| `rv.Status.Datamesh` | Disambiguates diskless peer roles (TieBreaker vs Access); never overrides the Diskful/diskless boundary reported by DRBD |
 
 | Output | Description |
 |--------|-------------|

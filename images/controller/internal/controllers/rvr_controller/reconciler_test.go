@@ -3829,6 +3829,7 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 		rvrName = "rv-1-0"
 		nodeA   = "node-1"
 		nodeB   = "node-2"
+		nodeC   = "node-3"
 	)
 
 	var (
@@ -3900,8 +3901,9 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 		Expect(corev1.AddToScheme(scheme)).To(Succeed())
 		ctx = context.Background()
 
-		// A two-member datamesh: our Access replica plus one Diskful peer, so the quorum
-		// message is the realistic "quorum via connected peers" one.
+		// A three-member datamesh: our Access replica, one Diskful peer and one TieBreaker
+		// peer, so the quorum message is the realistic "quorum via connected peers" one and
+		// the peer list carries both diskful and diskless (tie-breaker) peers.
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{Name: rvName},
 			Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "rsc-1"},
@@ -3924,6 +3926,12 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 							Name:      "rv-1-1",
 							Type:      v1alpha1.DatameshMemberTypeDiskful,
 							NodeName:  nodeB,
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+						{
+							Name:      "rv-1-2",
+							Type:      v1alpha1.DatameshMemberTypeTieBreaker,
+							NodeName:  nodeC,
 							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
 						},
 					},
@@ -3980,6 +3988,23 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 							{
 								SystemNetworkName: "Internal",
 								Address:           v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7000},
+								Established:       true,
+							},
+						},
+					},
+					{
+						// The tie-breaker peer: DRBD reports it as plain diskless, so it can
+						// only be told apart from an Access peer via its datamesh member type.
+						Name:             "rv-1-2",
+						Type:             v1alpha1.DRBDResourceTypeDiskless,
+						NodeID:           2,
+						ConnectionState:  v1alpha1.ConnectionStateConnected,
+						DiskState:        v1alpha1.DiskStateDiskless,
+						ReplicationState: v1alpha1.ReplicationStateEstablished,
+						Paths: []v1alpha1.DRBDResourcePathStatus{
+							{
+								SystemNetworkName: "Internal",
+								Address:           v1alpha1.DRBDAddress{IPv4: "10.0.0.3", Port: 7000},
 								Established:       true,
 							},
 						},
@@ -4050,6 +4075,20 @@ var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt
 		before := rvrStatusPatches
 		reconcileOnce()
 		Expect(rvrStatusPatches).To(Equal(before))
+	})
+
+	It("types a tie-breaker peer from the datamesh and counts it in the quorum summary", func() {
+		// DRBD reports both diskless peer roles identically, so the tie-breaker can only be
+		// recognised by its datamesh member type. Getting this wrong types every diskless
+		// peer as Access and pins quorumSummary.connectedTieBreakerPeers to 0.
+		settled := settle()
+
+		peer := findPeerByName(settled.Status.Peers, "rv-1-2")
+		Expect(peer).NotTo(BeNil())
+		Expect(peer.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+
+		Expect(settled.Status.QuorumSummary).NotTo(BeNil())
+		Expect(settled.Status.QuorumSummary.ConnectedTieBreakerPeers).To(Equal(1))
 	})
 
 	It("records the latch for an old healthy member without other status churn", func() {
