@@ -18,7 +18,6 @@ package framework
 
 import (
 	"math"
-	"os"
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -47,23 +46,25 @@ func registerDisruptiveTransformer() {
 // hasDisruptiveLabel reports whether args contain a Labels value with
 // the Disruptive entry.
 func hasDisruptiveLabel(args []any) bool {
-	for _, arg := range args {
-		if labels, ok := arg.(Labels); ok {
-			if slices.Contains(labels, LabelDisruptive) {
-				return true
-			}
-		}
-	}
-	return false
+	return hasLabelInArgs(args, LabelDisruptive)
 }
 
-// enforceDisruptive skips the current spec if it carries the Disruptive
-// label and the E2E_ALLOW_DISRUPTIVE environment variable is not set.
+// enforceDisruptive skips the current spec when it carries the Disruptive label
+// and the class is not enabled: Disruptive runs only when
+// E2E_ALLOW_DISRUPTIVE=true or E2E_RUN_ALL=true. Both values are parsed as
+// booleans (strconv.ParseBool), so false, an unrecognized value and an unset
+// variable all keep the class skipped.
+//
+// The gate is a runtime Skip carrying the instruction to switch it on, never a
+// silent return: a skipped spec has to show up in the Ginkgo summary as
+// Skipped, because a class that is off on most runs is exactly where a
+// vacuous pass would go unnoticed.
 func enforceDisruptive() {
 	if !slices.Contains(CurrentSpecReport().Labels(), LabelDisruptive) {
 		return
 	}
-	if os.Getenv("E2E_ALLOW_DISRUPTIVE") == "" {
-		Skip("disruptive tests require E2E_ALLOW_DISRUPTIVE=true")
+	if !optInEnabledFromEnv(envAllowDisruptive) {
+		Skip("Disruptive spec: export " + envAllowDisruptive + "=true (or " + envRunAll +
+			"=true) before the run to allow destructive actions on this cluster")
 	}
 }

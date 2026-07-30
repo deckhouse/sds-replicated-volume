@@ -8,6 +8,13 @@ at formation and strict create-first tie-breaker replacement, the RSC aggregate
 conservative RSC-update validation matrix. The migration is also exercised under
 the `Local` volume access and the `TransZonal` topology.
 
+The same area covers what happens when the layout diverges and stays diverged:
+the manual recovery of a lost diskful replica in both directions (cases BE2E-1
+and BE2E-2), the manual shrink of an excess replica (BE2E-3), and the alerting
+pipeline that tells an operator to perform them —
+`sds_rv_membership_layout_converged` → scrape → the
+`D8ReplicatedVolumeLayoutDegraded` rule → a firing `ClusterAlert` (BE2E-4).
+
 The migration trigger is always an **in-place edit of `rsc.spec.replication`** on an
 existing ReplicatedStorageClass. `rv.spec.replicatedStorageClassName` is never
 changed (that path is out of scope until verdict D-3). Replication modes map to
@@ -16,8 +23,9 @@ FTT/GMDR as: `ConsistencyAndAvailability` = FTT1/GMDR1 → **3D**;
 
 Each case is titled with the text of its Ginkgo `It` verbatim; the line right
 below the title carries the case identifier, its position in this document, the
-`Disruptive` mark where it applies, and the `Describe` container the spec lives
-in (a container usually holds more than one case).
+opt-in class mark where it applies (`Disruptive`, `LongHaul`), and the
+`Describe` container the spec lives in (a container usually holds more than one
+case).
 
 Run against a real cluster (`e2e/full`, Ginkgo). These specs are written and
 compiled here; the actual run happens on the stand. Non-obvious cases are
@@ -34,7 +42,8 @@ E2E-1 · case 1 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration by edit
 Covers: decomposition T-2.0.3 (direction r3→r2); verifies blocks 1+2.
 
 Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Serial`
-+ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
++ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true` or
+`E2E_RUN_ALL=true`.
 
 Given: a dedicated RSC with `replication: ConsistencyAndAvailability`, a 3D volume
 (`MembershipLayoutConverged=True/Converged`, `status.membershipLayout=3D`), attached with I/O-safety
@@ -120,7 +129,8 @@ E2E-4 · case 4 · ⚡ Disruptive · Describe: `Layout: unsupported divergence i
 Covers: decomposition T-2.2.1 (e2e part); negative case for future US-2.4; verifies block 1.
 
 Labelled `Disruptive` (it writes to the raw DRBD device) — auto-injects `Serial`
-+ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true`.
++ lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true` or
+`E2E_RUN_ALL=true`.
 
 Given: an r2 storage class (`replication: Availability`), a 2D+1TB volume,
 `MembershipLayoutConverged=True/Converged`, attached on one of its diskful nodes with a
@@ -178,7 +188,7 @@ E2E-6 · case 6 · ⚡ Disruptive · Describe: `Layout: r2 volume survives a dis
 Covers: decomposition T-1.1.3 ("disruptive" part) and the Epic 1 criterion; verifies block 3.
 
 Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unless
-`E2E_ALLOW_DISRUPTIVE=true`. Node reboot is performed via
+`E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`. Node reboot is performed via
 `Framework.RebootNode` (`systemctl reboot` through the sds-node-configurator pod's
 `nsenter`).
 
@@ -439,3 +449,185 @@ Then:
   `ConfigurationReady=True/Ready`, and the RSC reports
   `ConfigurationRolledOut=True/RolledOutToAllVolumes` with
   `status.volumes.aligned == 2`.
+
+---
+
+## restores an r2 volume to 2D+1TB by creating a diskful replica by hand
+
+BE2E-1 · case 13 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+
+⚡ **After an r2 volume loses a diskful replica, creating a `ReplicatedVolumeReplica`
+by hand brings it back to 2D+1TB — the join goes through `diskful-q-up/v1`, the
+exact edge bug B-1 used to break.**
+
+Covers: the e2e part of the B-1 fix (the agent restores `--bitmap=yes` when a
+peer leaves the diskless stage) and the r2 half of the r2/r3 parity claim.
+
+Labelled `Disruptive` because of the raw-device writer — auto-injects `Serial` +
+lowest priority; skipped unless `E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`.
+The replica loss itself is **not** disruptive: no finalizer is stripped and
+nothing outside the volume's own `spec` is touched (see below).
+
+Given: a converged 2D+1TB volume, attached on one of its two diskful nodes with a
+raw-device writer running there. The victim is the OTHER diskful node — the
+datamesh refuses to demote an attached voter.
+
+When: the victim replica is lost through the legal simulation — the volume
+configuration is temporarily switched to Manual `FTT=0/GMDR=0` (`topology:
+Ignored`, the API rejects that pair under any other topology) so
+`guardFTTPreserved` stops blocking a voter's departure, the RVR is deleted
+through the ordinary API path, and the original Auto configuration is restored.
+Then a diskful RVR is created by hand, with a free replica id and no placement.
+
+Then:
+- ⚡ The volume really shrinks first: `Deleted()` on the victim RVR (the
+  controller released its own finalizer) and
+  `MembershipLayoutConverged=False/TransitionUnsupported` with the exact
+  arithmetic `have 1D+1TB, want 2D+1TB`. The arithmetic is what makes the
+  assertion non-vacuous — inside the downgrade window the volume reports the very
+  same reason for the *excess*.
+- ⚡ Nothing is removed by convergence itself: an `Always` invariant pins the
+  member composition for the whole downgrade window, so a future change that
+  starts trimming volumes automatically cannot be mistaken for this spec's own
+  delete.
+- The kernel agrees: on the surviving diskful node the departed peer is gone from
+  the DRBD configuration, only the tie-breaker peer is left, quorum is still held
+  and the enforced threshold matches the published one (now 1).
+- The layout metric reads `0` with `reason=TransitionUnsupported` on every
+  controller pod — the series `D8ReplicatedVolumeLayoutDegraded` selects.
+- ⚡ Verified device writes keep advancing while the volume runs on its single
+  remaining copy.
+- ⚡ The join runs `diskful-q-up/v1` (or its `-qmr-up` variant): odd→even voters,
+  the `✦ → A → D∅+q↑ → D` path with the Access vestibule. Asserted on the
+  transition's `planID`, which is set at dispatch and lives for the whole join —
+  unlike a single step name. **Under B-1 the spec fails here**: the peer never
+  regains its bitmap, the kernel refuses the connection and the replica never
+  reaches `Healthy`.
+- The new replica reaches `Healthy` with `backingVolume.state=UpToDate`; the
+  volume is 2D+1TB again, `MembershipLayoutConverged=True/Converged`, quorum
+  raised back to 2 and enforced at the DRBD level, with the new peer visible on
+  the surviving node.
+- The metric returns to `1`/`Converged`, so the alert can no longer fire.
+- Verified device writes advance again after the recovery.
+
+---
+
+## restores an r3 volume to 3D by creating a diskful replica by hand
+
+BE2E-2 · case 14 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+
+**The r3 half of the parity claim: losing one of three diskful replicas is
+repaired by hand through `diskful/v1`, which has no Access stage at all.**
+
+Covers: the r3 recovery path, and guards it against collateral damage from the
+B-1 fix (the fix changes agent behaviour for every volume, so the path that
+always worked has to be pinned too).
+
+Labelled `Disruptive` because of the raw-device writer; skipped unless
+`E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`.
+
+Given: a converged 3D volume (no tie-breaker), attached on one diskful node with
+a raw-device writer; the victim is a third, unattached diskful node.
+
+When: the same legal loss simulation as BE2E-1, then a diskful RVR is created by
+hand.
+
+Then:
+- The volume shrinks to 2D with `have 2D, want 3D`; the quorum threshold stays 2
+  — with two voters left the volume now survives no further failure at all, which
+  is exactly the situation the alert exists for.
+- The metric reads `0`/`TransitionUnsupported`; device writes keep advancing.
+- ⚡ The join runs `diskful/v1` (or `diskful-qmr-up/v1`): even→odd voters,
+  `✦ → D∅ → D`, **no** Access vestibule and no quorum raise.
+- The replica reaches `Healthy`/`UpToDate`, the volume is 3D and
+  `True/Converged`, DRBD sees the recovered peer, the metric is back to `1`.
+
+---
+
+## reports an excess diskful without removing it and converges after a manual delete
+
+BE2E-3 · case 15 · ⚡ Disruptive · Describe: `Layout: an excess replica is reported and removed by hand`
+
+⚡ **A volume with more replicas than its configuration asks for is reported
+honestly and is never trimmed automatically; deleting the excess RVR by hand is
+the whole shrink procedure.**
+
+Covers: the negative half of the convergence contract ("convergence never
+removes a replica") and the operator's shrink recipe; pins the layout metric on
+live data.
+
+Labelled `Disruptive` because of the raw-device writer; skipped unless
+`E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`.
+
+Given: a converged 2D+1TB volume, attached, with a raw-device writer running; the
+layout metric reads `1`/`Converged`.
+
+When: a third diskful RVR is created by hand (composition → 3D+1TB), and later
+deleted by hand.
+
+Then (phase 1 — the honest report):
+- `MembershipLayoutConverged=False/TransitionUnsupported` with the exact
+  arithmetic `have 3D+1TB, want 2D+1TB`.
+- ⚡ Convergence takes no action: two `Always` invariants — the member
+  composition is unchanged, and no `RemoveReplica` transition ever appears — hold
+  across a long stretch of sustained verified I/O, so "nothing happened" is an
+  observation over real elapsed time rather than a single sample.
+- The layout metric drops to `0` with `reason=TransitionUnsupported` on every
+  controller pod: exactly the series and label pair the alert rule selects.
+
+Then (phase 2 — the manual shrink):
+- The excess RVR is deleted with a plain delete. ⚡ **No configuration downgrade
+  is needed here**, unlike BE2E-1/2: with 3 voters against `dMin=2` the FTT/GMDR
+  guards allow the departure, which is why the recipe is "just delete it".
+- The volume returns to 2D+1TB, `True/Converged`, quorum 2 cross-checked at the
+  DRBD level; the metric returns to `1`/`Converged` and the writer never stalled.
+
+---
+
+## raises a firing D8ReplicatedVolumeLayoutDegraded for every volume that lost a diskful replica
+
+BE2E-4 · case 16 · ⚡ LongHaul · Describe: `Layout: a degraded layout raises a ClusterAlert`
+
+⚡ **The alerting pipeline end to end: collector → ServiceMonitor scrape → the
+`D8ReplicatedVolumeLayoutDegraded` rule → Alertmanager → a firing `ClusterAlert`
+naming the volume.**
+
+Covers: `monitoring/prometheus-rules/replicated-volume-layout.yaml` on a live
+cluster — the only part of the pipeline no unit test can reach.
+
+**Two independent gates, both explicit `Skip`s with an instruction:**
+1. `LongHaul` — the spec is skipped unless `E2E_ALLOW_LONG_HAUL=true` or
+   `E2E_RUN_ALL=true` (a focused run bypasses it). The label raises the default
+   `SpecTimeout` to 30min and gives the spec the highest priority.
+2. `clusteralerts.deckhouse.io` absent — a stand without Deckhouse observability
+   (Prometheus + alerts-receiver) never materializes an alert as an object, so
+   the spec skips with that stated.
+
+⚡ The spec is deliberately **not** `Disruptive`: that label would inject `Serial`
++ lowest priority and push the 15-minute wait to the end of the run, where it
+overlaps nothing. It earns that by stripping no finalizer, touching no node label
+and writing to no raw device — the loss simulation only edits the volume's own
+`spec` (see BE2E-1).
+
+Given: a converged 3D volume and a converged 2D+1TB volume; no attachments.
+
+When: each loses one diskful replica through the same legal simulation. ⚡ Both
+losses happen **before** either alert is awaited, so the two `for: 15m` windows
+run at the same time and the spec costs one wait, not two.
+
+Then:
+- Both volumes report `False/TransitionUnsupported` with the exact arithmetic
+  (`have 2D, want 3D` and `have 1D+1TB, want 2D+1TB`).
+- ⚡ Precondition before the long wait: the metric reads `0` with
+  `reason=TransitionUnsupported` for both volumes. It is what makes a failure
+  diagnosable — if the series is present and no alert arrives, the defect is in
+  the scrape, the rule or the receiver, never in the controller.
+- For each volume a `ClusterAlert` eventually exists with
+  `alert.name=D8ReplicatedVolumeLayoutDegraded`, `alert.labels.name=<volume>`,
+  `alert.labels.reason=TransitionUnsupported`, `alert.severityLevel="6"` and
+  `status.alertStatus=firing`. ⚡ The label match is what makes the assertion
+  specific: "some layout alert is firing" would also pass on an alert about a
+  volume this spec never touched.
+- Resolution after the repair is **not** asserted: the retention and the
+  resolve behaviour of the alerts-receiver are unverified. Check it by eye on the
+  first real run and record the result here.

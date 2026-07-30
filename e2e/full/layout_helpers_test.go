@@ -17,8 +17,11 @@ limitations under the License.
 package full
 
 import (
+	"fmt"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,6 +33,16 @@ import (
 	fw "github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework"
 	"github.com/deckhouse/sds-replicated-volume/e2e/pkg/framework/match"
 	tkmatch "github.com/deckhouse/sds-replicated-volume/lib/go/testkit/match"
+)
+
+// The observables of the layout alerting pipeline, named once so a spec and the
+// shipped artefacts cannot drift apart:
+//   - the metric is emitted by images/controller/internal/metrics/current_metrics_collector.go,
+//   - the alert is defined in monitoring/prometheus-rules/replicated-volume-layout.yaml
+//     and selects exactly that metric.
+const (
+	layoutConvergedMetricName = "sds_rv_membership_layout_converged"
+	layoutDegradedAlertName   = "D8ReplicatedVolumeLayoutDegraded"
 )
 
 // newMigrationRSC creates a dedicated (non-shared, per-spec) ReplicatedStorageClass
@@ -319,6 +332,189 @@ func expectDRBDQuorum(ctx SpecContext, trv *fw.TestRV) {
 		Expect(f.DRBDConfig(ctx, node, res).Quorum).To(Equal(want),
 			"node %s enforces a quorum threshold other than the published %s", node, want)
 	}
+}
+
+// memberNames returns the sorted names of the RV's current datamesh members.
+func memberNames(trv *fw.TestRV) []string {
+	var names []string
+	for _, m := range trv.Object().Status.Datamesh.Members {
+		names = append(names, m.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// membersAre matches an RV whose datamesh membership is exactly this set of
+// member names. Registered as a continuous invariant it fails the moment
+// convergence adds or drops a member on its own — which is the whole point in
+// windows where the spec claims that nothing but its own edit moves the
+// composition.
+func membersAre(want []string) types.GomegaMatcher {
+	sorted := slices.Clone(want)
+	sort.Strings(sorted)
+	return match.RV.Custom("datamesh members are ["+strings.Join(sorted, " ")+"]",
+		func(rv *v1alpha1.ReplicatedVolume) bool {
+			var got []string
+			for i := range rv.Status.Datamesh.Members {
+				got = append(got, rv.Status.Datamesh.Members[i].Name)
+			}
+			sort.Strings(got)
+			return slices.Equal(got, sorted)
+		})
+}
+
+// noActiveRemoveReplica matches when the RV has NO active RemoveReplica
+// transition. Registered as a continuous invariant it proves that convergence
+// never starts removing a replica by itself.
+func noActiveRemoveReplica() types.GomegaMatcher {
+	return Not(match.RV.HasActiveTransition(
+		string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica)))
+}
+
+// layoutDegraded matches an RV reporting MembershipLayoutConverged=False/TransitionUnsupported
+// with exactly this arithmetic ("have 1D+1TB, want 2D+1TB").
+//
+// The arithmetic is not decoration: simulateDiskfulLoss passes through a window
+// where the very same status/reason pair is reported for an EXCESS (the volume
+// is temporarily configured for fewer replicas than it has), so a matcher
+// looking only at the reason would be satisfied before anything was removed.
+// Everything is read off ONE snapshot, so the reason and the arithmetic can
+// never come from two different observations.
+func layoutDegraded(have, want string) types.GomegaMatcher {
+	arithmetic := fmt.Sprintf("have %s, want %s", have, want)
+	return match.RV.Custom("MembershipLayoutConverged=False/TransitionUnsupported with "+arithmetic,
+		func(rv *v1alpha1.ReplicatedVolume) bool {
+			cond := meta.FindStatusCondition(rv.Status.Conditions,
+				v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
+			return cond != nil &&
+				cond.Status == metav1.ConditionFalse &&
+				cond.Reason == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported &&
+				strings.Contains(cond.Message, arithmetic)
+		})
+}
+
+// resolvedFTTGMDR matches an RV whose RESOLVED configuration (status, not spec)
+// carries these FTT/GMDR values. The datamesh guards read the resolved
+// configuration, so this is what says "the downgrade has taken effect and a
+// voter may now leave".
+func resolvedFTTGMDR(ftt, gmdr byte) types.GomegaMatcher {
+	return match.RV.Custom(fmt.Sprintf("resolved configuration is FTT=%d/GMDR=%d", ftt, gmdr),
+		func(rv *v1alpha1.ReplicatedVolume) bool {
+			return rv.Status.Configuration.FailuresToTolerate == ftt &&
+				rv.Status.Configuration.GuaranteedMinimumDataRedundancy == gmdr
+		})
+}
+
+// addReplicaPlanIDIn matches an RV running an AddReplica transition whose plan
+// is one of planIDs.
+//
+// The plan id is what distinguishes the two join paths the recovery specs care
+// about: `diskful-q-up/v1` (odd→even voters) routes the joining replica through
+// the Access vestibule and raises the quorum, `diskful/v1` (even→odd) does
+// neither. It is set when the transition is created and survives all of its
+// steps, so it is observable for the whole join rather than for one step.
+func addReplicaPlanIDIn(planIDs ...string) types.GomegaMatcher {
+	return match.RV.Custom("AddReplica runs one of the plans "+strings.Join(planIDs, ", "),
+		func(rv *v1alpha1.ReplicatedVolume) bool {
+			for i := range rv.Status.DatameshTransitions {
+				t := &rv.Status.DatameshTransitions[i]
+				if t.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica {
+					continue
+				}
+				if slices.Contains(planIDs, t.PlanID) {
+					return true
+				}
+			}
+			return false
+		})
+}
+
+// simulateDiskfulLoss removes one diskful replica of trv the way an operator
+// could, and NEVER by stripping a finalizer.
+//
+// A volume standing exactly at its redundancy boundary (r2 = 2D+1TB with 2
+// voters, r3 = 3D with 3) refuses to let a voter go: guardFTTPreserved requires
+// more voters than dMin = FTT+GMDR+1. So the volume is temporarily switched to a
+// Manual configuration with FTT=0/GMDR=0 (topology Ignored — the API rejects
+// FTT=0+GMDR=0 under any other topology), the victim replica is deleted through
+// the ordinary API path, and the original Auto configuration is restored. The
+// member leaves through the graceful RemoveReplica plan and the controller
+// releases its own finalizer; awaiting Deleted() is what proves it did.
+//
+// The same trick is already used by rv_resize_test.go ("resize completes after
+// replica deletion") for the same reason.
+//
+// Contract:
+//   - trv MUST be in Auto mode with a storage class — that configuration is what
+//     gets restored.
+//   - victimNode MUST NOT hold an attachment: the datamesh refuses to demote an
+//     attached voter.
+//   - On return the volume carries its ORIGINAL configuration and one diskful
+//     member less. The caller asserts the resulting mismatch by its arithmetic
+//     (layoutDegraded), never by the reason alone — inside the downgrade window
+//     the very same reason is reported for the excess.
+//
+// While the configuration is downgraded, an Always invariant pins the member
+// composition: the convergence whitelist holds only the P1 retype and the P2
+// tie-breaker heal, so nothing is supposed to be removed automatically. If that
+// ever changes, the spec has to notice instead of crediting its own Delete with
+// someone else's removal.
+func simulateDiskfulLoss(ctx SpecContext, trv *fw.TestRV, victimNode string) {
+	GinkgoHelper()
+
+	rv := trv.Object()
+	Expect(rv.Spec.ConfigurationMode).To(Equal(v1alpha1.ReplicatedVolumeConfigurationModeAuto),
+		"simulateDiskfulLoss restores an Auto configuration and must not be used on a Manual volume")
+	rscName := rv.Spec.ReplicatedStorageClassName
+	Expect(rscName).NotTo(BeEmpty(), "volume %s has no storage class to restore", trv.Name())
+	poolName := rv.Status.Configuration.ReplicatedStoragePoolName
+	Expect(poolName).NotTo(BeEmpty(), "volume %s has no resolved storage pool yet", trv.Name())
+	volumeAccess := rv.Status.Configuration.VolumeAccess
+
+	victim := rvrOnNode(trv, victimNode)
+	Expect(trv.RVANodes()).NotTo(HaveKey(victimNode),
+		"the victim replica on %s is attached; the datamesh refuses to demote an attached voter", victimNode)
+
+	By("pinning the member composition for the downgrade window")
+	frozen := tkmatch.NewSwitch(membersAre(memberNames(trv)))
+	trv.Always(frozen)
+
+	By("downgrading the configuration to Manual FTT=0/GMDR=0 so the guards let a voter leave")
+	trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
+		rv.Spec.ConfigurationMode = v1alpha1.ReplicatedVolumeConfigurationModeManual
+		rv.Spec.ReplicatedStorageClassName = ""
+		rv.Spec.ManualConfiguration = &v1alpha1.ReplicatedVolumeConfiguration{
+			ReplicatedStoragePoolName: poolName,
+			Topology:                  v1alpha1.TopologyIgnored,
+			VolumeAccess:              volumeAccess,
+		}
+	})
+	// Wait for the RESOLVED configuration, not just for the accepted spec: the
+	// guards read the resolved one, and this is also what gives the invariant
+	// above a window with real reconcile passes in it.
+	trv.Await(ctx, resolvedFTTGMDR(0, 0))
+
+	By("deleting the diskful replica on " + victimNode + " through the ordinary API path")
+	victim.Delete(ctx)
+	// From here on the composition is meant to change — by our own request.
+	frozen.Disable()
+	victim.Await(ctx, tkmatch.Deleted())
+
+	By("restoring the original Auto configuration")
+	trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
+		rv.Spec.ConfigurationMode = v1alpha1.ReplicatedVolumeConfigurationModeAuto
+		rv.Spec.ManualConfiguration = nil
+		rv.Spec.ReplicatedStorageClassName = rscName
+	})
+}
+
+// awaitLayoutMetric waits until every controller pod exports the layout metric
+// of this volume with the given reason and value — the very series the
+// D8ReplicatedVolumeLayoutDegraded rule selects.
+func awaitLayoutMetric(ctx SpecContext, trv *fw.TestRV, reason string, value float64) {
+	GinkgoHelper()
+	f.AwaitControllerMetric(ctx, layoutConvergedMetricName,
+		map[string]string{"name": trv.Name(), "reason": reason}, value)
 }
 
 // rvrOnNode returns the tracked RVR scheduled on the given node, failing the test

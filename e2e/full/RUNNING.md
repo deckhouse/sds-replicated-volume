@@ -37,6 +37,15 @@ cluster shape than `e2e/agent`.
     **Do not copy this into other specs**: the framework exports the escape
     hatch as `TestRVR.RemoveFinalizers`, but anywhere else a finalizer that
     does not go away on its own is a bug to report, not to patch out.
+  - **Simulating the loss of a diskful replica does NOT need that escape.**
+    The recovery/alert specs (`diskful_recovery_test.go`,
+    `layout_alert_test.go`) reach "this volume lost a replica" by temporarily
+    switching the volume to a Manual `FTT=0/GMDR=0` configuration — which is
+    what stops `guardFTTPreserved` from blocking the departure of a voter —
+    deleting the RVR through the ordinary API path, and restoring the original
+    configuration. The controller releases its own finalizer, so the shortcut
+    is never needed and those specs are not `Disruptive` on that account.
+    See `simulateDiskfulLoss` in `layout_helpers_test.go`.
 - **Some specs mutate node labels** (`topology.kubernetes.io/zone`,
   `e2e.deckhouse.io/node-scope`) to build synthetic zones or to carve out
   an exact eligible set. They are `Disruptive` + `Serial` and restore the
@@ -88,9 +97,22 @@ controlled by environment variables:
 | `E2E_RSP_THIN`            | RSP name to use as the thin pool                                    | `e2e-thin`   |
 | `E2E_RSP_THICK`           | RSP name to use as the thick pool                                   | `e2e-thick`  |
 | `E2E_TIMEOUT_MULTIPLIER`  | Multiply all `SpecTimeout` and `Eventually` budgets (e.g. `2.0`)    | `1.0`        |
-| `E2E_ALLOW_DISRUPTIVE`    | Set to `true` to run `Disruptive` specs; otherwise auto-skipped     | unset        |
+| `E2E_ALLOW_DISRUPTIVE`    | Runs the `Disruptive` specs (boolean, see below); otherwise they are auto-skipped | unset |
+| `E2E_ALLOW_LONG_HAUL`     | Runs the `LongHaul` specs (boolean, see below); otherwise they are auto-skipped | unset |
+| `E2E_RUN_ALL`             | Umbrella switch: runs **every** opt-in class — `Disruptive` and `LongHaul` (boolean, see below) | unset |
 | `E2E_FLAKE_ATTEMPTS`      | `--flake-attempts=N` for `hack/run-e2e-new.sh`                      | `1`          |
 | `E2E_SUITE`               | Selects sub-suite for `hack/run-e2e-new.sh` (`full`, `agent`, …)    | `control-plane` |
+
+The three opt-in switches are parsed as **booleans**, by the same rule
+(`strconv.ParseBool`): `true`/`TRUE`/`True`/`1`/`t` enable the class, while an
+unset variable, `false`/`0`/`f` and anything `ParseBool` cannot read (`yes`,
+`on`, a typo) leave it skipped. `E2E_RUN_ALL=true` enables a class regardless of
+its own variable — there is no negative veto. A class that is off is reported by
+Ginkgo as *Skipped* with the instruction to switch it on, never as a pass.
+
+Nothing sets these variables for you: no CI workflow runs the e2e suites, and
+`hack/run-e2e-new.sh` only picks a label filter. Export them in your own shell
+for the run you are about to start.
 
 ## Run it
 
@@ -204,7 +226,8 @@ The suite uses Ginkgo labels heavily. Key ones:
 | `Smoke`                                | Minimal sanity set (~1 spec).                                            |
 | `Slow`                                 | Long-running specs.                                                      |
 | `Upgrade`                              | Migration from v0 (linstor) control plane to v1 (datamesh).              |
-| `Disruptive`                           | Destructive actions; auto-skipped unless `E2E_ALLOW_DISRUPTIVE=true`.    |
+| `Disruptive`                           | Destructive actions (node reboot, system node labels, a hand-removed finalizer, raw-device writes); auto-injects `Serial` + lowest priority; auto-skipped unless `E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`. |
+| `LongHaul`                             | Very long opt-in specs — tens of minutes of *waiting* (an alert with `for: 15m`). Default `SpecTimeout` is raised to 30min, the HIGHEST spec priority is auto-injected and `Serial` is deliberately **not** (a serial spec runs after every worker exits, so its wait could overlap nothing). Auto-skipped unless `E2E_ALLOW_LONG_HAUL=true` or `E2E_RUN_ALL=true`; a focused run (`--focus`/`--focus-file`) bypasses the gate. |
 | `Bug:<short-tag>`                      | Known bug; excluded by suite default `LabelFilter = "!/^Bug:/"`.         |
 | `Req:MinNodes:<diskful>:<extra>:<pool>`| Runtime requirement; auto-skipped if cluster doesn't satisfy it.         |
 | `Req:ControlPlane:New`                 | Only on new (controller-based) control plane.                            |
@@ -215,6 +238,20 @@ The suite uses Ginkgo labels heavily. Key ones:
 - `fast` — `Smoke || Full` (currently equivalent to `smoke`; no spec carries `Full`)
 - `safe` — `!Disruptive`
 - `all` — empty filter; the suite default `!/^Bug:/` applies
+
+**A preset only widens the label filter — it never enables an opt-in class.**
+`all` included: the script sets no environment variable at all, so `Disruptive`
+and `LongHaul` specs are still skipped at runtime unless you export their
+switch. A full run is therefore:
+
+```bash
+E2E_RUN_ALL=true E2E_SUITE=full bash hack/run-e2e-new.sh all
+```
+
+`all` is deliberately not taught to export `E2E_RUN_ALL` for you: that would
+silently turn "run everything" into "reboot nodes, rewrite system labels and
+strip a finalizer", which is exactly the decision the opt-in gates exist to keep
+in your hands.
 
 ## Parallelism
 

@@ -33,7 +33,8 @@ import (
 // E2E-6 — disruptive: a 2D+1TB volume must keep serving I/O when one diskful
 // node is lost, because the tie-breaker keeps quorum at 2/3 (block 3, Epic 1).
 // The Disruptive label auto-injects Serial + lowest priority and is skipped
-// unless E2E_ALLOW_DISRUPTIVE=true.
+// unless E2E_ALLOW_DISRUPTIVE=true or E2E_RUN_ALL=true (values are parsed as
+// booleans; false or an unrecognized value keeps the class skipped).
 var _ = Describe("Layout: r2 volume survives a diskful node outage",
 	Label(fw.LabelDisruptive), Label(fw.LabelSlow), Label(fw.LabelFeatureQuorum), func() {
 

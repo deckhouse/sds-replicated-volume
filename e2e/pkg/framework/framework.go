@@ -88,6 +88,11 @@ type Framework struct {
 	// nodeRun overrides how node commands are executed. It stays nil against a
 	// real cluster (pod exec) and is set by helper unit tests to a stub runner.
 	nodeRun nodeRunner
+
+	// metricsScrape overrides how the controller's /metrics endpoint is read. It
+	// stays nil against a real cluster (pod proxy through the API server) and is
+	// set by helper unit tests to a stub scraper.
+	metricsScrape metricsScraper
 }
 
 // Setup creates an empty Framework and registers Ginkgo lifecycle hooks.
@@ -105,6 +110,7 @@ func Setup() *Framework {
 	registerTimeoutPolicy(mult)
 	registerRequirementsTransformer()
 	registerDisruptiveTransformer()
+	registerLongHaulTransformer()
 
 	SynchronizedBeforeSuite(func(_ SpecContext) []byte {
 		return []byte(generateRunID())
@@ -139,6 +145,7 @@ func Setup() *Framework {
 	JustBeforeEach(func() {
 		enforceRequirements(f)
 		enforceDisruptive()
+		enforceLongHaul()
 	})
 
 	return f
