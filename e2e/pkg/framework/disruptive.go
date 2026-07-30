@@ -75,8 +75,9 @@ func enforceDisruptive() {
 // is executing right now carries LabelDisruptive, on itself or on an enclosing
 // container. A guarded helper calls it as its FIRST statement, so the requirement
 // its doc comment states is checked where the damage would be done. Guarded
-// today: Framework.RebootNode, Framework.StartIOWorkload, Framework.SetNodeLabel
-// and TestRVR.RemoveFinalizers — every framework helper that damages state shared
+// today: Framework.RebootNode, Framework.StartIOWorkload,
+// Framework.StartPodIOWorkload, Framework.SetNodeLabel and
+// TestRVR.RemoveFinalizers — every framework helper that damages state shared
 // with the rest of the suite. A wrapper around a guarded helper adds no guard of
 // its own: two checks of one requirement can only drift apart in wording.
 //

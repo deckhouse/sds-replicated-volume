@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 var _ = Describe("hasDisruptiveLabel", func() {
@@ -161,6 +162,29 @@ var _ = Describe("RequireDisruptiveSpec", Label(LabelDisruptive), func() {
 		Expect(w.RunID()).To(Equal(testRunID))
 		Expect(node.writerStarts).To(Equal(1), "the writer must have been spawned, not merely admitted")
 	})
+
+	// The same for the pod writer: with the label in scope the call must reach the
+	// claim and the pod instead of being refused. The fake cluster already holds
+	// both, bound and running, so guard, validation, cleanup registration and the
+	// wait for the first beat all run without a cluster.
+	It("lets a labelled spec through Framework.StartPodIOWorkload", func(ctx SpecContext) {
+		pod := newFakeIOPod()
+		f := &Framework{
+			nodeRun: &stubRunner{respond: pod.respond},
+			Client: fake.NewClientBuilder().WithScheme(podIOScheme()).
+				WithObjects(boundPVC(), runningWriterPod()).Build(),
+		}
+
+		w := f.StartPodIOWorkload(ctx, PodIOWorkloadOptions{
+			Namespace:        testPodIONS,
+			StorageClassName: testPodIOSC,
+			Name:             testPodIOName,
+		})
+
+		Expect(w.PodName()).To(Equal(testPodIOPodName))
+		Expect(w.VolumeName()).To(Equal(testPodIOVolume),
+			"the writer must have been started, not merely admitted")
+	})
 })
 
 // TestDisruptiveGuardOutsideOfASpec covers the one branch that is unreachable
@@ -219,6 +243,21 @@ func TestDisruptiveGuardOutsideOfASpec(t *testing.T) {
 					NodeName:         testNode,
 					DevicePath:       testDevicePath,
 					DRBDResourceName: testDRBDName,
+				})
+			},
+		},
+		{
+			// No name either: the default one comes from naming state that only a
+			// real Setup() populates, so a helper that skipped the guard would
+			// panic on that nil state instead of on the guard's message.
+			caller: "Framework.StartPodIOWorkload",
+			operation: fmt.Sprintf(
+				"running a continuous I/O writer pod on a new volume of storage class %q in namespace %q",
+				testPodIOSC, testPodIONS),
+			call: func() {
+				(&Framework{}).StartPodIOWorkload(context.Background(), PodIOWorkloadOptions{
+					Namespace:        testPodIONS,
+					StorageClassName: testPodIOSC,
 				})
 			},
 		},

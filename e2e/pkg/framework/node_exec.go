@@ -101,6 +101,24 @@ type nodeRunner interface {
 
 	// DrbdsetupRun executes `drbdsetup <args>` in the agent pod on nodeName.
 	DrbdsetupRun(ctx context.Context, nodeName string, args ...string) (ExecResult, error)
+
+	// PodRun executes cmd in container of the pod namespace/pod — any pod, in
+	// any namespace, addressed by name instead of by node. A transport error is
+	// retried once, so cmd MUST be safe to execute twice; that makes this the
+	// path for reads (probing a journal, re-hashing a file) and PodRunNoRetry
+	// the path for everything that changes the pod's state.
+	//
+	// Unlike the node methods there is no pod discovery and no pod-name cache:
+	// the caller owns the pod it created and names it, so a stale cache entry —
+	// the reason the node path retries at all — cannot exist here.
+	PodRun(ctx context.Context, namespace, pod, container string, cmd []string, displayCmd string) (ExecResult, error)
+
+	// PodRunNoRetry executes cmd in container of the pod namespace/pod exactly
+	// once. Same semantics as HostRunNoRetry: a non-nil error is always a
+	// transport error (a non-zero exit code is reported in the ExecResult), and
+	// the ExecResult still carries whatever output arrived before the connection
+	// broke.
+	PodRunNoRetry(ctx context.Context, namespace, pod, container string, cmd []string, displayCmd string) (ExecResult, error)
 }
 
 // runner returns the node runner in use: the stub injected by a unit test, or
@@ -135,6 +153,24 @@ func (r podRunner) HostRunNoRetry(ctx context.Context, nodeName string, cmd []st
 
 func (r podRunner) DrbdsetupRun(ctx context.Context, nodeName string, args ...string) (ExecResult, error) {
 	return r.f.Drbdsetup(ctx, nodeName, args...)
+}
+
+func (r podRunner) PodRun(
+	ctx context.Context,
+	namespace, pod, container string,
+	cmd []string,
+	displayCmd string,
+) (ExecResult, error) {
+	return r.f.execInPod(ctx, namespace, pod, container, cmd, displayCmd, true)
+}
+
+func (r podRunner) PodRunNoRetry(
+	ctx context.Context,
+	namespace, pod, container string,
+	cmd []string,
+	displayCmd string,
+) (ExecResult, error) {
+	return r.f.execInPod(ctx, namespace, pod, container, cmd, displayCmd, false)
 }
 
 // Drbdsetup executes `drbdsetup <args>` inside the agent pod running on
@@ -208,7 +244,7 @@ func (f *Framework) execOnNode(ctx context.Context, target podTarget, nodeName s
 		return ExecResult{}, err
 	}
 
-	result, transportErr := f.doExec(ctx, target, podName, nodeName, cmd, displayCmd)
+	result, transportErr := f.doExec(ctx, target, podName, "node="+nodeName, cmd, displayCmd)
 	if transportErr != nil && cached {
 		fmt.Fprintf(GinkgoWriter, "[%s] [exec] node=%s $ %s -> transport error with cached pod %q, retrying with fresh lookup\n",
 			time.Now().Format("15:04:05.000"), nodeName, displayCmd, podName)
@@ -217,7 +253,7 @@ func (f *Framework) execOnNode(ctx context.Context, target podTarget, nodeName s
 		if err != nil {
 			return ExecResult{}, err
 		}
-		result, transportErr = f.doExec(ctx, target, podName, nodeName, cmd, displayCmd)
+		result, transportErr = f.doExec(ctx, target, podName, "node="+nodeName, cmd, displayCmd)
 	}
 	if transportErr != nil {
 		return result, fmt.Errorf("exec in pod %q on node %q (cmd: %s): %w\nstdout: %s\nstderr: %s",
@@ -240,7 +276,7 @@ func (f *Framework) execOnNodeNoRetry(ctx context.Context, target podTarget, nod
 		return ExecResult{}, err
 	}
 
-	result, transportErr := f.doExec(ctx, target, podName, nodeName, cmd, displayCmd)
+	result, transportErr := f.doExec(ctx, target, podName, "node="+nodeName, cmd, displayCmd)
 	if transportErr != nil {
 		return result, fmt.Errorf("exec in pod %q on node %q (cmd: %s): %w\nstdout: %s\nstderr: %s",
 			podName, nodeName, strings.Join(cmd, " "), transportErr, result.Stdout, result.Stderr)
@@ -249,10 +285,41 @@ func (f *Framework) execOnNodeNoRetry(ctx context.Context, target podTarget, nod
 	return result, nil
 }
 
-// doExec performs a single exec attempt against podName. It returns the
+// execInPod executes cmd in container of the pod namespace/podName, the seam
+// behind nodeRunner.PodRun and nodeRunner.PodRunNoRetry. The pod is addressed by
+// name, so no discovery and no cache are involved; retry re-runs the command once
+// on a transport error and MUST be false for anything that changes state in the
+// pod.
+func (f *Framework) execInPod(
+	ctx context.Context,
+	namespace, podName, container string,
+	cmd []string,
+	displayCmd string,
+	retry bool,
+) (ExecResult, error) {
+	target := podTarget{namespace: namespace, container: container}
+	where := "pod=" + namespace + "/" + podName
+
+	result, transportErr := f.doExec(ctx, target, podName, where, cmd, displayCmd)
+	if transportErr != nil && retry {
+		fmt.Fprintf(GinkgoWriter, "[%s] [exec] %s $ %s -> transport error, retrying once\n",
+			time.Now().Format("15:04:05.000"), where, displayCmd)
+		result, transportErr = f.doExec(ctx, target, podName, where, cmd, displayCmd)
+	}
+	if transportErr != nil {
+		return result, fmt.Errorf("exec in container %q of pod %s/%s (cmd: %s): %w\nstdout: %s\nstderr: %s",
+			container, namespace, podName, strings.Join(cmd, " "), transportErr, result.Stdout, result.Stderr)
+	}
+
+	return result, nil
+}
+
+// doExec performs a single exec attempt against podName. where is the
+// human-readable target the log lines and errors name it by ("node=worker-1"
+// for the node channel, "pod=ns/name" for a direct pod exec). It returns the
 // ExecResult and a non-nil transportErr when the failure is not an in-pod
 // exit code (i.e. the pod may no longer exist).
-func (f *Framework) doExec(ctx context.Context, target podTarget, podName, nodeName string, cmd []string, displayCmd string) (ExecResult, error) {
+func (f *Framework) doExec(ctx context.Context, target podTarget, podName, where string, cmd []string, displayCmd string) (ExecResult, error) {
 	req := f.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -268,11 +335,11 @@ func (f *Framework) doExec(ctx context.Context, target podTarget, podName, nodeN
 
 	executor, err := remotecommand.NewSPDYExecutor(f.restConfig, "POST", req.URL())
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("creating SPDY executor for pod %q on node %q: %w", podName, nodeName, err)
+		return ExecResult{}, fmt.Errorf("creating SPDY executor for pod %q (%s): %w", podName, where, err)
 	}
 
-	fmt.Fprintf(GinkgoWriter, "[%s] [exec] node=%s $ %s\n",
-		time.Now().Format("15:04:05.000"), nodeName, displayCmd)
+	fmt.Fprintf(GinkgoWriter, "[%s] [exec] %s $ %s\n",
+		time.Now().Format("15:04:05.000"), where, displayCmd)
 
 	var stdout, stderr, combined bytes.Buffer
 	stderrColored := &colorWriter{
@@ -299,8 +366,8 @@ func (f *Framework) doExec(ctx context.Context, target podTarget, podName, nodeN
 		}
 	}
 
-	fmt.Fprintf(GinkgoWriter, "[%s] [exec] node=%s $ %s -> exit=%d\n",
-		time.Now().Format("15:04:05.000"), nodeName, displayCmd, result.ExitCode)
+	fmt.Fprintf(GinkgoWriter, "[%s] [exec] %s $ %s -> exit=%d\n",
+		time.Now().Format("15:04:05.000"), where, displayCmd, result.ExitCode)
 	if combined.Len() > 0 {
 		fmt.Fprint(GinkgoWriter, combined.String())
 		if !strings.HasSuffix(combined.String(), "\n") {

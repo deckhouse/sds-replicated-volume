@@ -27,14 +27,22 @@ const (
 	execKindHost        = "host"
 	execKindHostNoRetry = "host-no-retry"
 	execKindDrbdsetup   = "drbdsetup"
+	execKindPod         = "pod"
+	execKindPodNoRetry  = "pod-no-retry"
 )
 
-// execCall is one command the code under test asked a node to run.
+// execCall is one command the code under test asked a node or a pod to run.
 type execCall struct {
 	Kind    string
 	Node    string
 	Cmd     []string
 	Display string
+
+	// Namespace, Pod and Container are set by the pod kinds only, so a test can
+	// assert which pod a helper addressed.
+	Namespace string
+	Pod       string
+	Container string
 }
 
 // stubRunner is the nodeRunner used by helper unit tests: it records every
@@ -57,13 +65,51 @@ func (s *stubRunner) DrbdsetupRun(_ context.Context, node string, args ...string
 	return s.record(execKindDrbdsetup, node, append([]string{"drbdsetup"}, args...), "drbdsetup "+strings.Join(args, " "))
 }
 
+func (s *stubRunner) PodRun(
+	_ context.Context,
+	namespace, pod, container string,
+	cmd []string,
+	display string,
+) (ExecResult, error) {
+	return s.recordCall(execCall{
+		Kind: execKindPod, Namespace: namespace, Pod: pod, Container: container,
+		Cmd: cmd, Display: display,
+	})
+}
+
+func (s *stubRunner) PodRunNoRetry(
+	_ context.Context,
+	namespace, pod, container string,
+	cmd []string,
+	display string,
+) (ExecResult, error) {
+	return s.recordCall(execCall{
+		Kind: execKindPodNoRetry, Namespace: namespace, Pod: pod, Container: container,
+		Cmd: cmd, Display: display,
+	})
+}
+
 func (s *stubRunner) record(kind, node string, cmd []string, display string) (ExecResult, error) {
-	call := execCall{Kind: kind, Node: node, Cmd: cmd, Display: display}
+	return s.recordCall(execCall{Kind: kind, Node: node, Cmd: cmd, Display: display})
+}
+
+func (s *stubRunner) recordCall(call execCall) (ExecResult, error) {
 	s.calls = append(s.calls, call)
 	if s.respond == nil {
 		return ExecResult{}, nil
 	}
 	return s.respond(call)
+}
+
+// countKind counts recorded calls of one exec kind.
+func (s *stubRunner) countKind(kind string) int {
+	n := 0
+	for i := range s.calls {
+		if s.calls[i].Kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 // displays returns the display strings of all recorded calls, in order.
