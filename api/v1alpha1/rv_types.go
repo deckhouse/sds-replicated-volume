@@ -161,8 +161,8 @@ type ReplicatedVolumeConfiguration struct {
 //	tiebreakers = TieBreakersForDiskful(diskful, FailuresToTolerate)
 //
 // This is the source of truth for the layout comparison (the MembershipLayoutConverged condition and the
-// tie-breaker guard reuse it). Note that some formation-time code still duplicates the diskful
-// count formula (e.g. computeIntendedDiskfulReplicaCount); those are not yet unified.
+// tie-breaker guard reuse it). Note that rvr_scheduling_controller still recomputes the diskful count with
+// the same formula (its requiredDiskful in reconciler.go); that copy is not yet unified with this method.
 func (c ReplicatedVolumeConfiguration) IntendedLayout() (diskful, tiebreakers int) {
 	diskful = int(c.FailuresToTolerate) + int(c.GuaranteedMinimumDataRedundancy) + 1
 	tiebreakers = TieBreakersForDiskful(diskful, int(c.FailuresToTolerate))

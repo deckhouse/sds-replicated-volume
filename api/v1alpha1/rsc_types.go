@@ -401,18 +401,6 @@ type ReplicatedStorageClassConfigurationRolloutStrategy struct {
 	RollingUpdate *ReplicatedStorageClassConfigurationRollingUpdateStrategy `json:"rollingUpdate,omitempty"`
 }
 
-// ReplicatedStorageClassConfigurationRolloutStrategyType enumerates possible values for configuration rollout strategy type.
-type ReplicatedStorageClassConfigurationRolloutStrategyType string
-
-const (
-	// ConfigurationRolloutRollingUpdate means configuration changes are rolled out to existing volumes.
-	ConfigurationRolloutRollingUpdate ReplicatedStorageClassConfigurationRolloutStrategyType = "RollingUpdate"
-	// ConfigurationRolloutNewVolumesOnly means configuration changes only apply to newly created volumes.
-	ConfigurationRolloutNewVolumesOnly ReplicatedStorageClassConfigurationRolloutStrategyType = "NewVolumesOnly"
-)
-
-func (t ReplicatedStorageClassConfigurationRolloutStrategyType) String() string { return string(t) }
-
 // GetType returns the effective configuration rollout strategy type.
 //
 // The field is optional: the controller fills the default on the first reconcile, so a nil
@@ -425,6 +413,18 @@ func (s *ReplicatedStorageClassConfigurationRolloutStrategy) GetType() Replicate
 	}
 	return s.Type
 }
+
+// ReplicatedStorageClassConfigurationRolloutStrategyType enumerates possible values for configuration rollout strategy type.
+type ReplicatedStorageClassConfigurationRolloutStrategyType string
+
+const (
+	// ConfigurationRolloutRollingUpdate means configuration changes are rolled out to existing volumes.
+	ConfigurationRolloutRollingUpdate ReplicatedStorageClassConfigurationRolloutStrategyType = "RollingUpdate"
+	// ConfigurationRolloutNewVolumesOnly means configuration changes only apply to newly created volumes.
+	ConfigurationRolloutNewVolumesOnly ReplicatedStorageClassConfigurationRolloutStrategyType = "NewVolumesOnly"
+)
+
+func (t ReplicatedStorageClassConfigurationRolloutStrategyType) String() string { return string(t) }
 
 // ReplicatedStorageClassConfigurationRollingUpdateStrategy configures parameters for rolling update configuration rollout strategy.
 // +kubebuilder:object:generate=true
@@ -450,6 +450,19 @@ type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
 	RollingRepair *ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair `json:"rollingRepair,omitempty"`
 }
 
+// GetType returns the effective eligible nodes conflict resolution strategy type.
+//
+// The field is optional: the controller fills the default on the first reconcile, so a nil
+// strategy only means "not defaulted yet". Consumers MUST treat that state as RollingRepair,
+// which is the default this controller writes; assuming Manual instead would report conflict
+// resolution as disabled during the window before defaults are persisted.
+func (s *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy) GetType() ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType {
+	if s == nil {
+		return EligibleNodesConflictResolutionRollingRepair
+	}
+	return s.Type
+}
+
 // ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType enumerates possible values for eligible nodes conflict resolution strategy type.
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType string
 
@@ -462,19 +475,6 @@ const (
 
 func (t ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType) String() string {
 	return string(t)
-}
-
-// GetType returns the effective eligible nodes conflict resolution strategy type.
-//
-// The field is optional: the controller fills the default on the first reconcile, so a nil
-// strategy only means "not defaulted yet". Consumers MUST treat that state as RollingRepair,
-// which is the default this controller writes; assuming Manual instead would report conflict
-// resolution as disabled during the window before defaults are persisted.
-func (s *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy) GetType() ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType {
-	if s == nil {
-		return EligibleNodesConflictResolutionRollingRepair
-	}
-	return s.Type
 }
 
 // ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair configures parameters for rolling repair conflict resolution strategy.
