@@ -228,4 +228,71 @@ func TestComputePeerDeviceOptionsAction(t *testing.T) {
 			t.Errorf("expected bitmap=false, got %v", pdo.Bitmap)
 		}
 	})
+
+	// Main regression case for the diskless -> diskful transition (B-1): a peer that
+	// was typed Diskless during an Access stage keeps bitmap=no on the kernel, and
+	// once it becomes Diskful the bitmap must be turned back on, otherwise the
+	// kernel refuses its disk attach.
+	t.Run("diskful bitmap=false — action re-enables bitmap", func(t *testing.T) {
+		actions := computePeerDeviceOptionsAction("res", &stubIntendedPeer{
+			nodeID: 7, peerType: v1alpha1.DRBDResourceTypeDiskful,
+		}, stubActualPeerWithDefaults(7, boolPtr(false)))
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+		}
+		pdo := actions[0].(PeerDeviceOptionsAction)
+		if pdo.Bitmap == nil || *pdo.Bitmap != true {
+			t.Errorf("expected bitmap=true, got %v", pdo.Bitmap)
+		}
+		if pdo.CPlanAhead != nil {
+			t.Errorf("expected CPlanAhead nil (already correct), got %v", *pdo.CPlanAhead)
+		}
+	})
+
+	t.Run("diskful bitmap=nil — action re-enables bitmap", func(t *testing.T) {
+		actions := computePeerDeviceOptionsAction("res", &stubIntendedPeer{
+			nodeID: 8, peerType: v1alpha1.DRBDResourceTypeDiskful,
+		}, stubActualPeerWithDefaults(8, nil))
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+		}
+		pdo := actions[0].(PeerDeviceOptionsAction)
+		if pdo.Bitmap == nil || *pdo.Bitmap != true {
+			t.Errorf("expected bitmap=true, got %v", pdo.Bitmap)
+		}
+	})
+
+	t.Run("diskful bitmap re-enabled — next pass is a no-op", func(t *testing.T) {
+		iPeer := &stubIntendedPeer{nodeID: 9, peerType: v1alpha1.DRBDResourceTypeDiskful}
+		aPeer := stubActualPeerWithDefaults(9, boolPtr(false))
+
+		actions := computePeerDeviceOptionsAction("res", iPeer, aPeer)
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+		}
+		// Apply the computed action to the actual state and recompute.
+		aPeer.bitmap = actions[0].(PeerDeviceOptionsAction).Bitmap
+
+		if actions := computePeerDeviceOptionsAction("res", iPeer, aPeer); len(actions) != 0 {
+			t.Fatalf("expected 0 actions after applying bitmap, got %d: %v", len(actions), actions)
+		}
+	})
+
+	t.Run("diskless with non-default c-max-rate — action keeps bitmap off untouched", func(t *testing.T) {
+		aPeer := stubActualPeerWithDefaults(10, boolPtr(false))
+		aPeer.cMaxRate = "102400k"
+		actions := computePeerDeviceOptionsAction("res", &stubIntendedPeer{
+			nodeID: 10, peerType: v1alpha1.DRBDResourceTypeDiskless,
+		}, aPeer)
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+		}
+		pdo := actions[0].(PeerDeviceOptionsAction)
+		if pdo.CMaxRate == nil || *pdo.CMaxRate != DefaultCMaxRate {
+			t.Errorf("expected CMaxRate=%q, got %v", DefaultCMaxRate, pdo.CMaxRate)
+		}
+		if pdo.Bitmap != nil {
+			t.Errorf("expected Bitmap nil (already off for diskless), got %v", *pdo.Bitmap)
+		}
+	})
 }
