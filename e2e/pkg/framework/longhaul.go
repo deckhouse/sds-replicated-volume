@@ -40,21 +40,50 @@ import (
 //     it damages shared state, LongHaul is pulled to the front because it is slow.
 //
 // A spec carrying BOTH labels keeps the Disruptive placement (Serial + lowest
-// priority): Disruptive is a safety class, and two SpecPriority decorators on
-// one node would otherwise contradict each other.
+// priority), no matter whether Disruptive sits on the spec itself or on one of
+// its parent containers: Disruptive is a safety class, and two SpecPriority
+// decorators would otherwise contradict each other.
 func registerLongHaulTransformer() {
 	AddTreeConstructionNodeArgsTransformer(
 		func(nodeType types.NodeType, _ Offset, text string, args []any) (string, []any, []error) {
 			if !nodeType.Is(types.NodeTypesForContainerAndIt) {
 				return text, args, nil
 			}
-			if !hasLongHaulLabel(args) || hasDisruptiveLabel(args) {
+			if !longHaulPriorityApplies(args) {
 				return text, args, nil
 			}
 			args = append(args, SpecPriority(math.MaxInt))
 			return text, args, nil
 		},
 	)
+}
+
+// longHaulPriorityApplies reports whether the highest spec priority has to be
+// injected into the container/It node described by args. It MUST be called
+// during tree construction only — it reads the container chain of the node
+// currently being built (a top-level node simply has none).
+//
+// The two labels are read from deliberately different scopes:
+//
+//   - LongHaul from the node's OWN args. The priority belongs on the node that
+//     declares the class; Ginkgo already propagates it to every spec underneath
+//     (Nodes.GetSpecPriority walks outwards from the spec), and re-injecting it
+//     on descendants would stack a second SpecPriority decorator on top of one
+//     the author wrote by hand.
+//   - Disruptive from the labels IN SCOPE for the node — its own plus the ones
+//     inherited from parent containers. Disruptive on a Describe holding a
+//     LongHaul It is the realistic shape (that is how it is written across this
+//     suite), and Ginkgo resolves a spec's priority from the INNERMOST node that
+//     sets one: a MaxInt landing on the It would silently beat the container's
+//     MinInt and move a destructive spec to the FRONT of the serial phase,
+//     ahead of the specs it is meant to run after.
+func longHaulPriorityApplies(args []any) bool {
+	// Fast path: collectNodeLabels walks the whole container chain, so it is
+	// only worth paying for on a node that declares LongHaul at all.
+	if !hasLongHaulLabel(args) {
+		return false
+	}
+	return !hasLabel(collectNodeLabels(args), LabelDisruptive)
 }
 
 // hasLongHaulLabel reports whether args contain a Labels value with the
