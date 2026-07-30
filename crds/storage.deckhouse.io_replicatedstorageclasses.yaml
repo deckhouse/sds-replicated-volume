@@ -61,6 +61,7 @@ spec:
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
+
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
@@ -68,6 +69,7 @@ spec:
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
+
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
@@ -76,31 +78,18 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              Legacy replication validations (only fire when replication is set):
-
-              FTT/GMDR mutual exclusivity with replication:
-
-              FTT and GMDR must be specified together:
-
-              Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
-
-              FTT=0, GMDR=0 requires topology Ignored:
-
-              TransZonal zone count validations for FTT/GMDR:
-
-              Defines a Kubernetes Storage class configuration.
-
-              > Note that this field is in read-only mode.
+            description: Defines a Kubernetes Storage class configuration.
             properties:
               configurationRolloutStrategy:
                 description: |-
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
+
                   When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
                 properties:
                   rollingUpdate:
                     description: |-
                       RollingUpdate configures parameters for RollingUpdate strategy.
+
                       Required when type is RollingUpdate.
                     properties:
                       maxParallel:
@@ -131,11 +120,13 @@ spec:
               eligibleNodesConflictResolutionStrategy:
                 description: |-
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
+
                   When not specified, the controller fills the default (RollingRepair, maxParallel=5).
                 properties:
                   rollingRepair:
                     description: |-
                       RollingRepair configures parameters for RollingRepair conflict resolution strategy.
+
                       Required when type is RollingRepair.
                     properties:
                       maxParallel:
@@ -166,6 +157,7 @@ spec:
               eligibleNodesPolicy:
                 description: |-
                   EligibleNodesPolicy defines policies for managing eligible nodes.
+
                   When not specified, the controller fills the default (notReadyGracePeriod=10m).
                 properties:
                   notReadyGracePeriod:
@@ -181,32 +173,38 @@ spec:
                 description: |-
                   FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
                   can tolerate while remaining available for IO.
+
                   Mutually exclusive with Replication.
                   Must be specified together with GuaranteedMinimumDataRedundancy.
-                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+                  Valid combinations: |FTT - GMDR| <= 1.
                 maximum: 2
                 minimum: 0
                 type: integer
               guaranteedMinimumDataRedundancy:
                 description: |-
                   GuaranteedMinimumDataRedundancy (GMDR) specifies the minimum number of additional
-                  data copies maintained while the volume is serving IO. GMDR=0 means the system may
+                  data copies maintained while the volume is serving IO.
+
+                  GMDR=0 means the system may
                   operate with a single data copy in degraded mode (like a RAID-1 mirror after one
                   disk failure). GMDR=1 means at least 2 copies are always maintained during IO.
                   Mutually exclusive with Replication.
                   Must be specified together with FailuresToTolerate.
-                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+                  Valid combinations: |FTT - GMDR| <= 1.
                 maximum: 2
                 minimum: 0
                 type: integer
               nodeLabelSelector:
                 description: |-
                   NodeLabelSelector filters nodes eligible for DRBD participation.
+
                   Only nodes matching this selector can store data, provide access, or host tiebreaker.
                   If not specified, all nodes are candidates.
                 properties:
                   matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
+                    description: |-
+                      matchExpressions is a list of label selector requirements.
+
                       The requirements are ANDed.
                     items:
                       description: |-
@@ -220,11 +218,14 @@ spec:
                         operator:
                           description: |-
                             operator represents a key's relationship to a set of values.
+
                             Valid operators are In, NotIn, Exists and DoesNotExist.
                           type: string
                         values:
                           description: |-
-                            values is an array of string values. If the operator is In or NotIn,
+                            values is an array of string values.
+
+                            If the operator is In or NotIn,
                             the values array must be non-empty. If the operator is Exists or DoesNotExist,
                             the values array must be empty. This array is replaced during a strategic
                             merge patch.
@@ -242,7 +243,9 @@ spec:
                     additionalProperties:
                       type: string
                     description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      matchLabels is a map of {key,value} pairs.
+
+                      A single {key,value} in the matchLabels
                       map is equivalent to an element of matchExpressions, whose key field is "key", the
                       operator is "In", and the values array contains only "value". The requirements are ANDed.
                     type: object
@@ -250,7 +253,9 @@ spec:
                 x-kubernetes-map-type: atomic
               reclaimPolicy:
                 description: |-
-                  The storage class's reclaim policy. Might be:
+                  The storage class's reclaim policy.
+
+                  Might be:
                   - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
                   - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
                 enum:
@@ -260,6 +265,7 @@ spec:
               replication:
                 description: |-
                   Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
+
                   Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
 
                   The Storage class's replication mode. Might be:
@@ -282,6 +288,7 @@ spec:
               storage:
                 description: |-
                   Storage defines the storage backend configuration for this storage class.
+
                   Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
                   will be used to allocate space for volumes.
                 properties:
@@ -290,10 +297,8 @@ spec:
                       LVMVolumeGroups is an array of LVMVolumeGroup resource names whose Volume Groups/Thin-pools
                       will be used to allocate the required space.
 
-                      > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
+                      > **Caution.** Every LVMVolumeGroup resource must have the same type (Thin/Thick)
                       as specified in the Type field.
-                      is replaced with selectors, revisit the key. Currently using name only because
-                      thinPoolName is optional and cannot be a listMapKey without a default value.
                     items:
                       properties:
                         name:
@@ -317,7 +322,9 @@ spec:
                     x-kubernetes-list-type: map
                   type:
                     description: |-
-                      Type defines the volumes type. Might be:
+                      Type defines the volumes type.
+
+                      Might be:
                       - LVM (for Thick)
                       - LVMThin (for Thin)
                     enum:
@@ -339,6 +346,7 @@ spec:
               storagePool:
                 description: |-
                   StoragePool is the name of a ReplicatedStoragePool resource.
+
                   This field cannot be added or changed, only removed.
 
                   Deprecated: Use Storage instead.
@@ -349,10 +357,8 @@ spec:
               systemNetworkNames:
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
-                  At least one network name must be specified. Each name is limited to 64 characters.
 
-                  Custom network support requires NetworkNode watch implementation in the controller.
-                  When multi-network support is implemented, raise MaxItems to 10.
+                  At least one network name must be specified. Each name is limited to 64 characters.
                 items:
                   type: string
                 maxItems: 1
@@ -364,7 +370,9 @@ spec:
                   rule: self.all(n, n == 'Internal')
               topology:
                 description: |-
-                  The topology settings for the volumes in the created Storage class. Might be:
+                  The topology settings for the volumes in the created Storage class.
+
+                  Might be:
                   - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
                     To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
                   - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
@@ -372,7 +380,7 @@ spec:
                     The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
                     Required when replication is 'None'.
 
-                  > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+                  > **Caution.** The 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
 
                   > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
                 enum:
@@ -383,15 +391,15 @@ spec:
               volumeAccess:
                 default: PreferablyLocal
                 description: |-
-                  The Storage class's volume access mode. Defines how pods access the volume. Might be:
+                  The Storage class's volume access mode.
+
+                  Defines how pods access the volume. Might be:
                   - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
                   - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
                     after some time. Pod scheduling waits for consumer.
                   - PreferablyLocal — volume prefers local access but allows remote access if no local replica is available.
                     Scheduler tries to place pods on nodes with replicas. Pod scheduling waits for consumer.
                   - Any — volume can be accessed from any node. Most flexible mode with immediate volume binding.
-
-                  > Note that the default Volume Access mode is 'PreferablyLocal'.
                 enum:
                 - Local
                 - EventuallyLocal
@@ -400,7 +408,9 @@ spec:
                 type: string
               zones:
                 description: |-
-                  Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
+                  Array of zones the Storage class's volumes should be replicated in.
+
+                  The controller will put a label with
                   the Storage class's name on the nodes which be actual used by the Storage class.
 
                   For TransZonal topology, the number of zones depends on replication mode:
@@ -496,18 +506,21 @@ spec:
                     lastTransitionTime:
                       description: |-
                         lastTransitionTime is the last time the condition transitioned from one status to another.
+
                         This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
                       description: |-
                         message is a human readable message indicating details about the transition.
+
                         This may be an empty string.
                       maxLength: 32768
                       type: string
                     observedGeneration:
                       description: |-
                         observedGeneration represents the .metadata.generation that the condition was set based upon.
+
                         For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
                         with respect to the current state of the instance.
                       format: int64
@@ -516,6 +529,7 @@ spec:
                     reason:
                       description: |-
                         reason contains a programmatic identifier indicating the reason for the condition's last transition.
+
                         Producers of specific condition types may define expected values and meanings for this field,
                         and whether the values are considered a guaranteed API.
                         The value should be a CamelCase string.
@@ -525,7 +539,7 @@ spec:
                       pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
-                      description: status of the condition, one of True, False, Unknown.
+                      description: Status of the condition.
                       enum:
                       - "True"
                       - "False"
@@ -633,6 +647,7 @@ spec:
               storagePoolName:
                 description: |-
                   StoragePoolName is the computed name of the ReplicatedStoragePool for this RSC.
+
                   Format: auto-rsp-<fnv128-hex>. Multiple RSCs with identical storage parameters
                   will share the same StoragePoolName.
                 type: string
@@ -640,6 +655,7 @@ spec:
                 default: {}
                 description: |-
                   Volumes provides aggregated volume statistics.
+
                   Always present (may have total=0).
                 properties:
                   aligned:
