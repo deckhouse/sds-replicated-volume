@@ -49,8 +49,12 @@ type NodeReboot struct {
 }
 
 // RebootNode reboots the host of nodeName and returns a handle for awaiting
-// the node's return. It is used only by Disruptive specs to simulate a node
-// outage.
+// the node's return.
+//
+// The calling spec MUST carry LabelDisruptive, on itself or on an enclosing
+// container: this takes a node of a shared cluster down. The requirement is
+// enforced, not merely stated — RequireDisruptiveSpec fails the spec before
+// anything is executed on the host.
 //
 // Protocol:
 //   - The node's boot ID is recorded before anything is executed.
@@ -67,6 +71,7 @@ type NodeReboot struct {
 // the point where the spec expects recovery. Goroutine-safe.
 func (f *Framework) RebootNode(ctx context.Context, nodeName string) *NodeReboot {
 	GinkgoHelper()
+	RequireDisruptiveSpec("rebooting node " + nodeName)
 
 	clock := realClock{}
 	bootIDBefore, err := issueReboot(ctx, f, f.runner(), nodeName)

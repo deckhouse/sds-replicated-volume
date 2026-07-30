@@ -77,9 +77,15 @@ func (s nodeLabelSnapshot) String() string {
 // way through the labelling.
 //
 // Editing a system label such as ZoneLabelKey is globally visible: the calling
-// spec MUST carry LabelDisruptive (which also makes it Serial).
+// spec MUST carry LabelDisruptive (which also makes it Serial). The requirement
+// is enforced, not merely stated — RequireDisruptiveSpec fails the spec before
+// the first node is even read.
 func (f *Framework) SetNodeLabel(ctx context.Context, key string, valueByNode map[string]string) {
 	GinkgoHelper()
+	// Sorted, because a map renders in a random order and a message that reads
+	// differently on every run cannot be matched against, in a test or by eye.
+	RequireDisruptiveSpec(fmt.Sprintf(
+		"setting the node label %q on nodes %v", key, slices.Sorted(maps.Keys(valueByNode))))
 
 	plan, err := planNodeLabel(ctx, f, key, valueByNode)
 	if err != nil {

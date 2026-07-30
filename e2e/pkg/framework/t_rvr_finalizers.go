@@ -38,9 +38,10 @@ var rvrFinalizerRemovalPatch = []byte(`{"metadata":{"finalizers":null}}`)
 // hides cleanup-path bugs, so a spec may only use it when the deadlock it
 // escapes is by design and the manual escape is the very thing under test (the
 // operator recipe from debug_and_problem_solving.md). Such a spec MUST carry
-// LabelDisruptive and MUST be listed among the deliberate exceptions in
-// e2e/full/RUNNING.md. Anywhere else a finalizer that does not go away on its
-// own is a bug to report, not to patch out.
+// LabelDisruptive — the requirement is enforced, not merely stated, by
+// RequireDisruptiveSpec below — and MUST be listed among the deliberate
+// exceptions in e2e/full/RUNNING.md. Anywhere else a finalizer that does not go
+// away on its own is a bug to report, not to patch out.
 //
 // The tracked Update helper cannot do this: dropping the last finalizer of an
 // object that already has a deletion timestamp makes it vanish, and Update
@@ -48,6 +49,8 @@ var rvrFinalizerRemovalPatch = []byte(`{"metadata":{"finalizers":null}}`)
 // that is already gone is the intended outcome, so NotFound is success.
 func (t *TestRVR) RemoveFinalizers(ctx context.Context) {
 	GinkgoHelper()
+	RequireDisruptiveSpec("removing the finalizers of " + t.Name())
+
 	if err := removeRVRFinalizers(ctx, t.Client, t.Name()); err != nil {
 		Fail(err.Error())
 	}

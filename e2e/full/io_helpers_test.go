@@ -47,7 +47,12 @@ func devicePathPublished() types.GomegaMatcher {
 // The device comes from RVA.status.devicePath and the expected identity from
 // the DRBD resource of the replica living on that same node, so the writer
 // refuses to touch anything but this volume's device. The caller MUST hold
-// fw.LabelDisruptive: the writer writes to a raw block device on the host.
+// fw.LabelDisruptive, on the spec or on an enclosing container: the writer
+// writes to a raw block device on the host. The requirement is enforced by
+// fw.StartIOWorkload itself, which fails the spec before the writer is started.
+// This wrapper adds no check of its own: everything it does before that call is
+// a read, so a second guard here would only be a second wording of the same
+// refusal, free to drift from the first.
 //
 // tune adjusts the options before the writer starts — a spec that disrupts the
 // cluster raises MaxHeartbeatGap so a brief blip is not read as a stall.

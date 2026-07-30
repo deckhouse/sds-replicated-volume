@@ -191,6 +191,11 @@ type IOWorkload struct {
 // StartIOWorkload starts a raw-device writer on opts.NodeName and returns once
 // it has completed its first verified write.
 //
+// The calling spec MUST carry LabelDisruptive, on itself or on an enclosing
+// container: this spawns a process writing to a raw block device on the host of
+// a shared cluster. The requirement is enforced, not merely stated —
+// RequireDisruptiveSpec fails the spec before the options are even validated.
+//
 // Guarantees:
 //   - Nothing is written before the device is proven to be this volume: the
 //     path is resolved and must be the canonical /dev/drbd<N>, its minor must
@@ -219,6 +224,12 @@ type IOWorkload struct {
 // explicit message rather than silently skipping the I/O coverage.
 func (f *Framework) StartIOWorkload(ctx context.Context, opts IOWorkloadOptions) *IOWorkload {
 	GinkgoHelper()
+	// The guard runs before the options are validated or defaulted, so the
+	// operation is named from opts exactly as the caller passed them. The values
+	// are quoted rather than interpolated bare: a field the caller left empty has
+	// to be visible as "" instead of as a gap in the middle of the sentence.
+	RequireDisruptiveSpec(fmt.Sprintf(
+		"writing to the raw block device %q on node %q", opts.DevicePath, opts.NodeName))
 
 	w, err := f.newIOWorkload(opts)
 	if err != nil {
