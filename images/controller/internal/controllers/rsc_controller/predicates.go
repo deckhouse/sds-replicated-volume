@@ -34,19 +34,19 @@ func rspPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// Be conservative if objects are nil.
-				if e.ObjectOld == nil || e.ObjectNew == nil {
+				// Type-assert first, then read. This single guard is conservative for every
+				// unclassifiable event: an untyped-nil interface and a wrong-typed object both give
+				// ok == false, and a typed nil pointer gives ok == true with a nil value (caught by
+				// the nil check). It MUST run before GetGeneration, which promotes a method on the
+				// embedded ObjectMeta value and would panic on a typed nil.
+				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
 					return true
 				}
 
 				// Generation change (spec updates).
-				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
-					return true
-				}
-
-				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
-				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
-				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+				if newRSP.GetGeneration() != oldRSP.GetGeneration() {
 					return true
 				}
 
@@ -80,21 +80,21 @@ func rvPredicates() []predicate.Predicate {
 		predicate.TypedFuncs[client.Object]{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// Be conservative if objects are nil.
-				if e.ObjectOld == nil || e.ObjectNew == nil {
+				// Type-assert first, then read. This single guard is conservative for every
+				// unclassifiable event: an untyped-nil interface and a wrong-typed object both give
+				// ok == false, and a typed nil pointer gives ok == true with a nil value (caught by
+				// the nil check). It MUST run before GetGeneration, which promotes a method on the
+				// embedded ObjectMeta value and would panic on a typed nil.
+				oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
+				newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
+				if !okOld || !okNew || oldRV == nil || newRV == nil {
 					return true
 				}
 
 				// Generation change (spec updates): reconciliation is condition-driven and
 				// reads condition ObservedGeneration, so a bumped generation alone already
 				// changes how every condition of this volume is classified.
-				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
-					return true
-				}
-
-				oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
-				newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
-				if !okOld || !okNew || oldRV == nil || newRV == nil {
+				if newRV.GetGeneration() != oldRV.GetGeneration() {
 					return true
 				}
 
