@@ -47,7 +47,7 @@ func computeCorrectQuorum(gctx *globalContext) (q, qmr byte) {
 	voters := voterCount(gctx)
 	q = voters/2 + 1
 
-	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	targetQMR := gctx.configuration.QuorumMinimumRedundancy()
 	currentQMR := gctx.datamesh.quorumMinimumRedundancy
 
 	if targetQMR <= currentQMR {

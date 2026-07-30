@@ -213,25 +213,27 @@ TB (tie-breakers)   = 1  if D is even and FailuresToTolerate == D/2, else 0
 ```
 
 This is provided by `ReplicatedVolumeConfiguration.IntendedLayout()` in `api/v1alpha1/rv_types.go`,
-with the tie-breaker sub-formula exposed as `v1alpha1.TieBreakersForDiskful(diskful, ftt)`. It is
+which factors the diskful count into `v1alpha1.IntendedDiskfulCount(ftt, gmdr)` and the tie-breaker
+sub-formula into `v1alpha1.TieBreakersForDiskful(diskful, ftt)`. It is
 the source of truth for the **layout comparison** (the `MembershipLayoutConverged` condition and the
 tie-breaker guard reuse it). Placement decision: `IntendedLayout` is a pure, deterministic,
 context-free get-helper (no I/O, no cluster-state interpretation), so per `api-file-structure.mdc`
 it lives in `rv_types.go` (not `rv_custom_logic_that_should_not_be_here.go`).
 
-The datamesh package reuses the same formula: `guardTBSufficient` computes its required tie-breaker
-count via `v1alpha1.TieBreakersForDiskful`. Note that the guard passes the **actual** current voter
-count (not the intended diskful count), so it stays correct during transitions where the two differ.
+The datamesh guards reuse these helpers rather than re-deriving the formulas. Note that a guard
+passes the **actual** current voter count (not the intended diskful count) to
+`v1alpha1.TieBreakersForDiskful`, so it stays correct during transitions where the two differ.
 
-The controller now derives both the diskful and tie-breaker counts from `IntendedLayout()`:
-formation (`reconcileFormationStepPreconfigure`), `computeTargetQuorum` (`minD`), and
-`rsc_controller`'s `validateEligibleNodes` all call it (the latter through a config built from
-FTT/GMDR), so the D/TB formula lives in exactly one place for controller code. The e2e helper
+All controller code derives the diskful and tie-breaker counts through these helpers — via
+`IntendedLayout()` where both are needed together, or directly through `v1alpha1.IntendedDiskfulCount`
+/ `v1alpha1.TieBreakersForDiskful` — instead of re-deriving the formula, so the D/TB formula lives in
+exactly one place for controller code. The e2e helper
 `pkg/framework/t_layout.go` also calls `IntendedLayout()` now (via a config built from its
-`TestLayout` FTT/GMDR), so no production/framework copy of the formula remains. The one deliberate
-re-derivation left is the independent cross-check in the e2e selftest
-(`pkg/framework/selftest/layout_test.go`), which recomputes the expected layout by hand to validate
-the real cluster state against `ExpectedReplicas()` rather than to reuse the formula.
+`TestLayout` FTT/GMDR), so no production/framework copy of the formula remains. The deliberate
+re-derivations left are the independent cross-checks in the e2e selftests
+(`pkg/framework/selftest/layout_test.go` and `pkg/framework/selftest/emulate_preexisting_test.go`),
+which recompute the expected layout by hand to validate the real cluster state against
+`ExpectedReplicas()` rather than to reuse the formula.
 
 ## Conditions
 

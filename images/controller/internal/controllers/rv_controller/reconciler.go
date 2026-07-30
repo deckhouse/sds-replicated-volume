@@ -1337,7 +1337,7 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	quorum := byte(voters.Len()/2 + 1)
 	q = max(quorum, minQ)
 
-	qmr = cfg.GuaranteedMinimumDataRedundancy + 1
+	qmr = cfg.QuorumMinimumRedundancy()
 
 	return q, qmr
 }

@@ -161,12 +161,29 @@ type ReplicatedVolumeConfiguration struct {
 //	tiebreakers = TieBreakersForDiskful(diskful, FailuresToTolerate)
 //
 // This is the source of truth for the layout comparison (the MembershipLayoutConverged condition and the
-// tie-breaker guard reuse it). Note that rvr_scheduling_controller still recomputes the diskful count with
-// the same formula (its requiredDiskful in reconciler.go); that copy is not yet unified with this method.
+// tie-breaker guard reuse it).
 func (c ReplicatedVolumeConfiguration) IntendedLayout() (diskful, tiebreakers int) {
-	diskful = int(c.FailuresToTolerate) + int(c.GuaranteedMinimumDataRedundancy) + 1
+	diskful = IntendedDiskfulCount(c.FailuresToTolerate, c.GuaranteedMinimumDataRedundancy)
 	tiebreakers = TieBreakersForDiskful(diskful, int(c.FailuresToTolerate))
 	return diskful, tiebreakers
+}
+
+// QuorumMinimumRedundancy returns qmr, the minimum number of up-to-date replicas the datamesh must
+// keep available for IO (qmr = GuaranteedMinimumDataRedundancy + 1).
+//
+// Unlike IntendedLayout, which returns int for the layout comparison, this returns byte to mirror
+// the GMDR/FTT spec fields and the byte q/qmr call sites, avoiding casts on the DMTE hot path. All
+// controller code derives qmr through this helper instead of re-deriving GMDR+1.
+func (c ReplicatedVolumeConfiguration) QuorumMinimumRedundancy() byte {
+	return c.GuaranteedMinimumDataRedundancy + 1
+}
+
+// IntendedDiskfulCount returns the number of diskful voters a datamesh needs for the given FTT/GMDR
+// (D = FailuresToTolerate + GuaranteedMinimumDataRedundancy + 1). It is the single source of truth
+// for the diskful formula: all controller code derives D through this helper (directly or via
+// IntendedLayout) instead of re-deriving FTT+GMDR+1.
+func IntendedDiskfulCount(ftt, gmdr byte) int {
+	return int(ftt) + int(gmdr) + 1
 }
 
 // TieBreakersForDiskful returns the number of tie-breaker members required for a
@@ -174,7 +191,8 @@ func (c ReplicatedVolumeConfiguration) IntendedLayout() (diskful, tiebreakers in
 //
 // A tie-breaker is required only when the diskful voter count is even and FTT equals
 // half of it: then losing FTT voters would leave a non-majority, and a single diskless
-// tie-breaker restores quorum.
+// tie-breaker restores quorum. It is the single source of truth for the TB rule: all controller
+// code derives the TB count through this helper instead of re-deriving the even/half condition.
 func TieBreakersForDiskful(diskful, ftt int) int {
 	if diskful > 0 && diskful%2 == 0 && ftt == diskful/2 {
 		return 1

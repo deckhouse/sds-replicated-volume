@@ -493,7 +493,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// replicas. For TransZonal this is unnecessary — replicas are already
 	// spread across zones by the zone filtering predicate above.
 	//
-	// The required Diskful count: D = FTT + GMDR + 1.
+	// The required Diskful count (D = FTT + GMDR + 1) comes from v1alpha1.IntendedDiskfulCount.
 	//
 	// We subtract already-scheduled Diskful to get the remaining demand.
 	// By this point the "node occupied" predicate has already filtered
@@ -504,7 +504,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// the 0–10 range, so -800 pushes these zones to the bottom and
 	// they will only be chosen as a last resort).
 	if isDiskful && sctx.Topology == v1alpha1.TopologyZonal {
-		requiredDiskful := int(sctx.FailuresToTolerate + sctx.GuaranteedMinimumDataRedundancy + 1)
+		requiredDiskful := v1alpha1.IntendedDiskfulCount(sctx.FailuresToTolerate, sctx.GuaranteedMinimumDataRedundancy)
 		scheduledDiskful := sctx.Scheduled.Intersect(sctx.Diskful).Len()
 		remainingDemand := requiredDiskful - scheduledDiskful
 		if remainingDemand < 0 {

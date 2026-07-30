@@ -54,6 +54,69 @@ func TestIntendedLayout(t *testing.T) {
 	}
 }
 
+func TestQuorumMinimumRedundancy(t *testing.T) {
+	// qmr = GMDR + 1 (datamesh README section 4). Independent of FTT; the cases below span the
+	// valid FTT/GMDR grid (both in {0,1,2}, |GMDR-FTT| <= 1) so the qmr column mirrors that table.
+	cases := []struct {
+		name      string
+		ftt, gmdr byte
+		want      byte
+	}{
+		{"FTT=0,GMDR=0", 0, 0, 1},
+		{"FTT=1,GMDR=0", 1, 0, 1},
+		{"FTT=0,GMDR=1", 0, 1, 2},
+		{"FTT=1,GMDR=1", 1, 1, 2},
+		{"FTT=1,GMDR=2", 1, 2, 3},
+		{"FTT=2,GMDR=1", 2, 1, 2},
+		{"FTT=2,GMDR=2", 2, 2, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := v1alpha1.ReplicatedVolumeConfiguration{
+				FailuresToTolerate:              tc.ftt,
+				GuaranteedMinimumDataRedundancy: tc.gmdr,
+			}
+			if got := cfg.QuorumMinimumRedundancy(); got != tc.want {
+				t.Errorf("QuorumMinimumRedundancy() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIntendedDiskfulCount(t *testing.T) {
+	// D = FTT + GMDR + 1 (datamesh README section 4) across the valid FTT/GMDR grid. This is the
+	// diskful column of that table and matches the diskful part of IntendedLayout, which now
+	// delegates to this function.
+	cases := []struct {
+		name      string
+		ftt, gmdr byte
+		want      int
+	}{
+		{"FTT=0,GMDR=0", 0, 0, 1},
+		{"FTT=1,GMDR=0", 1, 0, 2},
+		{"FTT=0,GMDR=1", 0, 1, 2},
+		{"FTT=1,GMDR=1", 1, 1, 3},
+		{"FTT=1,GMDR=2", 1, 2, 4},
+		{"FTT=2,GMDR=1", 2, 1, 4},
+		{"FTT=2,GMDR=2", 2, 2, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := v1alpha1.IntendedDiskfulCount(tc.ftt, tc.gmdr); got != tc.want {
+				t.Errorf("IntendedDiskfulCount(%d, %d) = %d, want %d", tc.ftt, tc.gmdr, got, tc.want)
+			}
+			// IntendedLayout must report the same diskful count (it delegates to this function).
+			cfg := v1alpha1.ReplicatedVolumeConfiguration{
+				FailuresToTolerate:              tc.ftt,
+				GuaranteedMinimumDataRedundancy: tc.gmdr,
+			}
+			if gotD, _ := cfg.IntendedLayout(); gotD != tc.want {
+				t.Errorf("IntendedLayout() diskful = %d, want %d (must match IntendedDiskfulCount)", gotD, tc.want)
+			}
+		})
+	}
+}
+
 func TestTieBreakersForDiskful(t *testing.T) {
 	cases := []struct {
 		name         string

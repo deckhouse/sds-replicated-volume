@@ -2075,6 +2075,53 @@ var _ = Describe("Reconciler", func() {
 			Expect(n1).To(HavePrefix("node-a"))
 		})
 
+		It("penalty threshold tracks D = FTT+GMDR+1 (D=3, a 2-node zone is penalized)", func() {
+			// requiredDiskful comes from v1alpha1.IntendedDiskfulCount(FTT, GMDR). With FTT=1, GMDR=1
+			// it must be 3, so a zone with only 2 free nodes is under capacity and penalized. zone-b
+			// is scored higher by the extender, so it would win WITHOUT the penalty; a placement in
+			// zone-a therefore proves the threshold is 3 (not the constant 2 the other cases use).
+			cfg := zonalConfig()
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D = 3
+			rv := newRV(cfg)
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a1", "zone-a", makeLVG("vg-a1", true)),
+					makeNode("node-a2", "zone-a", makeLVG("vg-a2", true)),
+					makeNode("node-a3", "zone-a", makeLVG("vg-a3", true)),
+					makeNode("node-b1", "zone-b", makeLVG("vg-b1", true)),
+					makeNode("node-b2", "zone-b", makeLVG("vg-b2", true)),
+				})
+
+			rvr0 := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+
+			mock := &reconcilerMockExtender{
+				filterAndScoreFn: func(lvgs []schext.LVMVolumeGroup) ([]schext.ScoredLVMVolumeGroup, error) {
+					var result []schext.ScoredLVMVolumeGroup
+					for _, l := range lvgs {
+						score := 5
+						if l.LVGName == "vg-b1" || l.LVGName == "vg-b2" {
+							score = 50 // zone-b more attractive absent the capacity penalty
+						}
+						result = append(result, schext.ScoredLVMVolumeGroup{LVMVolumeGroup: l, Score: score})
+					}
+					return result, nil
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, rvr0).
+				WithStatusSubresource(rvr0).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			// zone-a (3 free nodes ≥ 3) is not penalized; zone-b (2 < 3) is. Placement lands in zone-a.
+			Expect(getUpdatedRVR(ctx, cl, rvr0).Spec.NodeName).To(HavePrefix("node-a"))
+		})
+
 		It("no zone has enough nodes — all penalized, best score wins", func() {
 			cfg := zonalConfig()
 			cfg.FailuresToTolerate = 1

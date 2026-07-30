@@ -305,9 +305,9 @@ func guardGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardRes
 func guardFTTPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	targetFTT := gctx.configuration.FailuresToTolerate
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	dMin := targetFTT + targetGMDR + 1
+	dMin := v1alpha1.IntendedDiskfulCount(targetFTT, targetGMDR)
 	voters := voterCount(gctx)
-	if voters <= dMin {
+	if int(voters) <= dMin {
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: fmt.Sprintf("would violate FTT (Diskful=%d, need > %d)", voters, dMin),
@@ -696,8 +696,9 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 	voters := voterCount(gctx)
 	targetFTT := gctx.configuration.FailuresToTolerate
 
-	// TB is only required when D is even and FTT == D/2.
-	if voters%2 != 0 || voters == 0 || targetFTT != voters/2 {
+	// TB is only required when D is even and FTT == D/2; TieBreakersForDiskful encodes that rule
+	// (returns 1 exactly in that case), so an early exit when it returns 0 means "no TB needed".
+	if v1alpha1.TieBreakersForDiskful(int(voters), int(targetFTT)) == 0 {
 		return dmte.GuardResult{}
 	}
 
@@ -803,7 +804,7 @@ func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 // guardQMRRaiseNeeded blocks if qmr is already at or above the target (config.GMDR + 1).
 // Defense: plans with qmr↑ expect qmr < config.GMDR + 1.
 func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	targetQMR := gctx.configuration.QuorumMinimumRedundancy()
 	if gctx.datamesh.quorumMinimumRedundancy >= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
@@ -817,7 +818,7 @@ func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResul
 // guardQMRLowerNeeded blocks if qmr is already at or below the target (config.GMDR + 1).
 // Defense: plans with qmr↓ expect qmr > config.GMDR + 1.
 func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	targetQMR := gctx.configuration.QuorumMinimumRedundancy()
 	if gctx.datamesh.quorumMinimumRedundancy <= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,

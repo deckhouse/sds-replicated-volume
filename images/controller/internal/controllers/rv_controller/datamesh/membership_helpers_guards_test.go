@@ -570,6 +570,34 @@ var _ = Describe("guardFTTPreserved", func() {
 		r := guardFTTPreserved(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeTrue())
 	})
+
+	// Pins the block threshold to D_min = FTT+GMDR+1 (via v1alpha1.IntendedDiskfulCount) across the
+	// valid FTT/GMDR grid, checking both sides of the boundary: exactly D_min voters must block
+	// (removing one would drop below the FTT guarantee), one more voter must pass.
+	DescribeTable("threshold D_min = FTT+GMDR+1 across the valid grid (boundary both sides)",
+		func(ftt, gmdr byte, dMin int) {
+			diskful := func(n int) []zoneMember {
+				ms := make([]zoneMember, n)
+				for i := range ms {
+					ms[i] = zoneMember{uint8(i), v1alpha1.DatameshMemberTypeDiskful, "", true}
+				}
+				return ms
+			}
+			atMin := mkGctx(ftt, gmdr, diskful(dMin)...)
+			Expect(guardFTTPreserved(atMin, rctxByID(atMin, 0)).Blocked).
+				To(BeTrue(), "voters == D_min must block")
+			aboveMin := mkGctx(ftt, gmdr, diskful(dMin+1)...)
+			Expect(guardFTTPreserved(aboveMin, rctxByID(aboveMin, 0)).Blocked).
+				To(BeFalse(), "voters == D_min+1 must pass")
+		},
+		Entry("FTT=0,GMDR=0 → D_min=1", byte(0), byte(0), 1),
+		Entry("FTT=1,GMDR=0 → D_min=2", byte(1), byte(0), 2),
+		Entry("FTT=0,GMDR=1 → D_min=2", byte(0), byte(1), 2),
+		Entry("FTT=1,GMDR=1 → D_min=3", byte(1), byte(1), 3),
+		Entry("FTT=1,GMDR=2 → D_min=4", byte(1), byte(2), 4),
+		Entry("FTT=2,GMDR=1 → D_min=4", byte(2), byte(1), 4),
+		Entry("FTT=2,GMDR=2 → D_min=5", byte(2), byte(2), 5),
+	)
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1243,6 +1271,16 @@ var _ = Describe("guardZoneTBSufficient", func() {
 		gctx.configuration.Topology = v1alpha1.TopologyIgnored
 
 		r := guardZoneTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("skip: no diskful voters (voters==0) — TB not required", func() {
+		// Boundary of the swapped predicate: TieBreakersForDiskful(0, ftt) is 0 (the diskful>0 term
+		// fails), so the guard early-exits — the branch the pre-refactor `voters == 0` term handled.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeTieBreaker, "a", false},
+		)
+		r := guardZoneTBSufficient(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeFalse())
 	})
 
@@ -1936,6 +1974,32 @@ var _ = Describe("guardQMRLowerNeeded", func() {
 		Expect(r.Blocked).To(BeTrue())
 	})
 })
+
+// guardQMRRaiseNeeded/guardQMRLowerNeeded derive their target from the shared
+// ReplicatedVolumeConfiguration.QuorumMinimumRedundancy() (qmr = GMDR + 1). This table pins that
+// wiring across the valid GMDR range: the raise guard passes iff qmr < target, the lower guard
+// passes iff qmr > target, and both block at qmr == target.
+var _ = DescribeTable("guardQMR{Raise,Lower}Needed target = GMDR+1 across the grid",
+	func(gmdr, qmr byte, wantRaisePasses, wantLowerPasses bool) {
+		gctx := &globalContext{
+			datamesh:      datameshContext{quorumMinimumRedundancy: qmr},
+			configuration: v1alpha1.ReplicatedVolumeConfiguration{GuaranteedMinimumDataRedundancy: gmdr},
+		}
+		Expect(guardQMRRaiseNeeded(gctx, nil).Blocked).To(Equal(!wantRaisePasses), "raise guard")
+		Expect(guardQMRLowerNeeded(gctx, nil).Blocked).To(Equal(!wantLowerPasses), "lower guard")
+	},
+	// GMDR=0 → target qmr=1
+	Entry("GMDR=0, qmr=1 (=target)", byte(0), byte(1), false, false),
+	Entry("GMDR=0, qmr=2 (>target)", byte(0), byte(2), false, true),
+	// GMDR=1 → target qmr=2
+	Entry("GMDR=1, qmr=1 (<target)", byte(1), byte(1), true, false),
+	Entry("GMDR=1, qmr=2 (=target)", byte(1), byte(2), false, false),
+	Entry("GMDR=1, qmr=3 (>target)", byte(1), byte(3), false, true),
+	// GMDR=2 → target qmr=3
+	Entry("GMDR=2, qmr=2 (<target)", byte(2), byte(2), true, false),
+	Entry("GMDR=2, qmr=3 (=target)", byte(2), byte(3), false, false),
+	Entry("GMDR=2, qmr=4 (>target)", byte(2), byte(4), false, true),
+)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // guardShadowDiskfulSupported
