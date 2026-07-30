@@ -166,6 +166,13 @@ func validateImmutableSpecFields(oldRSC, newRSC *srv.ReplicatedStorageClass) *kw
 }
 
 // validateLegacySpecFields rejects spec fields that are only for new control plane.
+//
+// Because this rejects an RSC whenever these fields are SET, they MUST NOT get
+// +kubebuilder:default markers on the CRD: the apiserver applies schema defaults before
+// validating admission, so a default makes the field always-set and this webhook (reached when
+// NEW_CONTROL_PLANE is unset) would then reject every RSC create/update on legacy installations.
+// Keep defaulting these fields in the controller (rsc_controller applySpecDefaults) until the
+// legacy control plane is removed.
 func validateLegacySpecFields(rsc *srv.ReplicatedStorageClass) *kwhvalidating.ValidatorResult {
 	spec := &rsc.Spec
 

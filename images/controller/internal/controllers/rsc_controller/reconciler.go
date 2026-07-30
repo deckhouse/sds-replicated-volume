@@ -403,6 +403,12 @@ func (r *Reconciler) reconcileDefaults(
 }
 
 // applySpecDefaults fills nil optional spec fields with default values.
+//
+// These defaults deliberately live here and NOT as +kubebuilder:default on the CRD. The legacy
+// control-plane webhook (validateLegacySpecFields, reached when NEW_CONTROL_PLANE is unset)
+// rejects an RSC that has any of these fields set, and schema defaults are applied before that
+// webhook runs — so moving them to the schema would break RSC on every legacy installation.
+// Revisit once the legacy control plane is gone.
 func applySpecDefaults(rsc *v1alpha1.ReplicatedStorageClass) {
 	if rsc.Spec.SystemNetworkNames == nil {
 		rsc.Spec.SystemNetworkNames = []string{"Internal"}
