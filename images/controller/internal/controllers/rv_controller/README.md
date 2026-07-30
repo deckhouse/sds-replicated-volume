@@ -532,6 +532,51 @@ Quick operational state summary. Derived from DeletionTimestamp and Attached con
 
 Message is passthrough from the Attached condition, except when Phase=Attached and ReplicaReady != True — the ReplicaReady message is shown to surface degradation.
 
+## Metrics
+
+### sds_rv_membership_layout_converged
+
+Per-volume export of the [MembershipLayoutConverged](#membershiplayoutconverged) condition. It exists
+so that a degraded layout — a volume that lost a replica, keeps serving I/O on a lowered quorum and
+will not heal by itself — is noticed without watching conditions by hand.
+
+**Source.** `collectRVLayoutConverged` in the current-metrics collector
+(`images/controller/internal/metrics/current_metrics_collector.go`), which builds every series from
+the controller cache at scrape time. The reconciler does **not** write this gauge:
+`reconcileLayoutStatus` remains the single writer of the condition, and the metric is a pure read of
+the status it publishes.
+
+**Semantics.** Exactly one series per ReplicatedVolume, labels `name` and `reason`:
+
+| Condition in `rv.status` | Value | `reason` label |
+|--------------------------|-------|----------------|
+| `True` / `Converged` | 1 | `Converged` |
+| `False` / `Converging`, `CannotConverge`, `TransitionUnsupported` | 0 | the reason, verbatim |
+| `Unknown` / `VolumeDeleting` | 0 | `VolumeDeleting` |
+| condition absent (the volume is still forming) | 0 | `Unknown` (synthetic) |
+
+The value is 1 **if and only if** the condition is `True` with reason `Converged`; the `reason` label
+otherwise always carries the reason recorded in the status, and the synthetic `Unknown` is used in
+exactly one case — the condition is missing from the status altogether.
+
+**Removal.** There is nothing to remove: the collector rebuilds all series on every scrape, so a
+reason change replaces the volume's series and a deleted volume simply stops being emitted (no
+`DeleteLabelValues`, no finalizer bookkeeping). Cardinality equals the number of volumes, so queries
+over this metric should stay cheap — select an exact `reason` set rather than run heavy regexps.
+
+**Alerting.** `D8ReplicatedVolumeLayoutDegraded`
+(`monitoring/prometheus-rules/replicated-volume-layout.yaml`) fires on
+`max by (name, reason) (sds_rv_membership_layout_converged{reason=~"TransitionUnsupported|CannotConverge"} == 0)`
+held for 15m. Only those two reasons are verdicts that need a human: `Converging` is transient (this
+deliberately leaves flip-flop branch B — a permanent honest `Converging` — outside the alert's scope,
+see [Configuration flip-flop](#configuration-flip-flop-known-limitation)), while `VolumeDeleting` and
+the synthetic `Unknown` are not degradations at all. `max by` collapses duplicate series coming from
+several controller replicas (the ServiceMonitor drops `pod`, but `instance` survives). Because the
+comparison is against the layout intended by the configuration, a volume configured to run on a
+single replica reports `Converged` and never alerts. The rule ships as a static `.yaml` with no
+`newControlPlane` gate: the series is exported only by this controller, whose ServiceMonitor is
+already gated, so on the old control plane the expression matches nothing.
+
 ## Formation Steps
 
 Datamesh formation uses one of two plans depending on whether pre-existing replicas need to be adopted. Each plan is a 3-step process tracked in `rv.Status.DatameshTransitions[].Steps`.
