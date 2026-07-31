@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -95,14 +94,7 @@ func ParseVolumesOverride(raw string) (int, error) {
 	if raw == "" {
 		return 0, nil
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("%s=%q must be a decimal integer >= 1: %w", EnvUpgradeVolumes, raw, err)
-	}
-	if n < 1 {
-		return 0, fmt.Errorf("%s=%q must be a decimal integer >= 1", EnvUpgradeVolumes, raw)
-	}
-	return n, nil
+	return parseVolumeCountEnv(EnvUpgradeVolumes, raw)
 }
 
 // ---------------------------------------------------------------------------

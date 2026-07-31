@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -43,6 +44,15 @@ import (
 const (
 	layoutConvergedMetricName = "sds_rv_membership_layout_converged"
 	layoutDegradedAlertName   = "D8ReplicatedVolumeLayoutDegraded"
+)
+
+// The r2 target of the migration scenarios, in the two shapes a volume reports
+// it: the resolved configuration (what rsc.spec.replication=Availability maps
+// to, see replicationToFTTGMDR) and the actual layout string it converges on.
+const (
+	r2FTT    = 1
+	r2GMDR   = 0
+	layoutR2 = "2D+1TB"
 )
 
 // newMigrationRSC creates a dedicated (non-shared, per-spec) ReplicatedStorageClass
@@ -202,8 +212,8 @@ func rvrNames(trv *fw.TestRV) []string {
 // tie-breaker member. Evaluated atomically on a single snapshot so it never
 // matches a stale pre-migration snapshot (3D/Converged) nor a mid-migration one.
 func migratedToR2() types.GomegaMatcher {
-	return match.RV.Custom("migrated to 2D+1TB", func(rv *v1alpha1.ReplicatedVolume) bool {
-		if rv.Status.MembershipLayout == nil || *rv.Status.MembershipLayout != "2D+1TB" {
+	return match.RV.Custom("migrated to "+layoutR2, func(rv *v1alpha1.ReplicatedVolume) bool {
+		if rv.Status.MembershipLayout == nil || *rv.Status.MembershipLayout != layoutR2 {
 			return false
 		}
 		tb := 0
@@ -300,6 +310,240 @@ func tieBreakerRVR(trv *fw.TestRV) *fw.TestRVR {
 	}
 	Expect(count).To(Equal(1), "expected exactly one present tie-breaker RVR")
 	return found
+}
+
+// snapshotBackingLLVs records, for every present diskful replica of trv, the
+// identity (name + UID) of the LVMLogicalVolume that backs it right now, keyed
+// by replica name.
+//
+// The UID is the whole point. After an r3->r2 retype the module may well create
+// another LVMLogicalVolume with the same name — the name is derived from the
+// replica, and the replica survives the retype — so a snapshot that only kept
+// names could not tell a released LV from a recreated one.
+//
+// The LVs come from the framework's own tracking (the LLV informer the volume
+// registers when it is created) and are cross-checked against the name the
+// replica's DRBDResource says it uses, so a snapshot can never record an LV the
+// data path is not actually on. Both are settled long before this is called:
+// callers snapshot a converged volume, and a converged volume has had its disk
+// attached for a while.
+func snapshotBackingLLVs(trv *fw.TestRV) map[string]fw.LLVIdentity {
+	GinkgoHelper()
+	backing := map[string]fw.LLVIdentity{}
+	for _, trvr := range trv.TestRVRs() {
+		if !trvr.IsPresent() || trvr.Object().Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+
+		var present []*fw.TestLLV
+		for _, tllv := range trvr.LLVs() {
+			if tllv.IsPresent() {
+				present = append(present, tllv)
+			}
+		}
+		Expect(present).To(HaveLen(1),
+			"diskful replica %s must be backed by exactly one LVMLogicalVolume", trvr.Name())
+
+		drbdr := trvr.DRBDR()
+		Expect(drbdr.IsPresent()).To(BeTrue(), "replica %s has no observed DRBDResource", trvr.Name())
+		llv := present[0].Object()
+		Expect(llv.Name).To(Equal(drbdr.Object().Spec.LVMLogicalVolumeName),
+			"replica %s is backed by an LVMLogicalVolume its DRBDResource does not name", trvr.Name())
+
+		backing[trvr.Name()] = fw.LLVIdentity{Name: llv.Name, UID: llv.UID}
+	}
+	return backing
+}
+
+// assertBackingLLVIdentityAfterRetype proves what the r3->r2 retype did to the
+// backing storage of a volume that has already converged to 2D+1TB: the replica
+// that became the tie-breaker released its LV, and the two surviving diskful
+// replicas kept theirs — the very same objects, not equally named replacements.
+//
+// A recreated survivor LV would mean the data was rebuilt rather than kept,
+// which is exactly the full-resync migration this whole scenario denies, and it
+// would pass every name-based check.
+//
+// before is the snapshot taken by snapshotBackingLLVs before the storage class
+// edit.
+func assertBackingLLVIdentityAfterRetype(ctx SpecContext, trv *fw.TestRV, before map[string]fw.LLVIdentity) {
+	GinkgoHelper()
+	Expect(before).To(HaveLen(3),
+		"a 3D volume must have been snapshotted with three backing LVs before the migration")
+
+	retyped := tieBreakerRVR(trv).Name()
+	released, ok := before[retyped]
+	Expect(ok).To(BeTrue(), "replica %s was not diskful before the migration", retyped)
+
+	By("the LV of the retyped replica " + retyped + " is released, by UID")
+	f.AwaitLLVGone(ctx, released)
+
+	By("the surviving diskful replicas keep the very same LVs")
+	for rvrName, survivor := range before {
+		if rvrName == retyped {
+			continue
+		}
+		f.AwaitLLVSameUID(ctx, survivor)
+	}
+}
+
+// rolloutVolumeSuffix names the i-th volume of a rollout scenario running on
+// total volumes, zero-padded to the width of the largest index.
+//
+// The padding is not cosmetic. The controller hands out the rollout budget in
+// name order and sorts the names as strings (slices.Sort in
+// computeActualRolloutCohort), so at twenty volumes an unpadded "rollout-2"
+// would sort after "rollout-19" and the volumes admitted first would no longer
+// be the ones the spec created first — and therefore no longer the ones it put
+// on hold. Padded, the string order and the creation order are the same order.
+func rolloutVolumeSuffix(i, total int) string {
+	return fmt.Sprintf("rollout-%0*d", len(strconv.Itoa(total-1)), i)
+}
+
+// rolloutSpecBudget is the SpecTimeout of a rollout scenario running on volumes
+// volumes: a fixed part plus a share per volume, because everything the spec
+// does after the storage class is created is done once per volume.
+//
+// The per-volume share is deliberately several times the work itself. That work
+// is a formation of three replicas, a retype admitted no earlier than the next
+// budget re-check of the class (configurationRolloutRequeueInterval, 5s, is the
+// only thing that wakes a queued volume), the observation window each released
+// LV is then watched for, and the reads around them. On the stands this runs on
+// that is tens of seconds, but the stand is shared and three worker nodes
+// serialise the DRBD work of every volume on them, so the budget is sized for a
+// bad day rather than a good one. It is still a budget and not a promise to
+// wait: a rollout that stops making progress hits it instead of running until
+// the suite's own --timeout.
+func rolloutSpecBudget(volumes int) time.Duration {
+	return rolloutSpecBaseBudget + time.Duration(volumes)*rolloutSpecPerVolumeBudget
+}
+
+const (
+	// rolloutSpecBaseBudget covers what a rollout scenario does once: the storage
+	// class, discovery, the maintenance hold and its lifting, and the attachment.
+	rolloutSpecBaseBudget = 15 * time.Minute
+	// rolloutSpecPerVolumeBudget covers what it does per volume; see
+	// rolloutSpecBudget for what that is.
+	rolloutSpecPerVolumeBudget = 75 * time.Second
+)
+
+// pauseDRBDReconciliation puts every DRBD resource of trv into
+// NoResourceReconciliation and returns the call that lifts the hold again.
+//
+// While the hold is on, the agent reports the resources as
+// Configured=False/InMaintenance and stops converging them, so a retype
+// dispatched for this volume cannot complete and the volume keeps its rollout
+// slot. That is what turns "at most N volumes migrate at a time" from a race
+// against the agent into something a spec can stand still and look at.
+//
+// The previous value of spec.maintenance is read off every resource BEFORE the
+// first write, and the cleanup that restores it is registered at that same
+// point — a spec that fails half-way through the hold still leaves the agent
+// reconciling again. The returned call restores the same values and, unlike the
+// cleanup, waits for every resource to report Configured=True/Configured; both
+// are idempotent, so lifting the hold explicitly and then unwinding the cleanup
+// is not a conflict.
+func pauseDRBDReconciliation(ctx SpecContext, trv *fw.TestRV) func(SpecContext) {
+	GinkgoHelper()
+
+	type held struct {
+		drbdr *fw.TestDRBDR
+		prev  v1alpha1.MaintenanceMode
+	}
+	var paused []held
+	for _, trvr := range trv.TestRVRs() {
+		if !trvr.IsPresent() {
+			continue
+		}
+		drbdr := trvr.DRBDR()
+		Expect(drbdr.IsPresent()).To(BeTrue(), "replica %s has no observed DRBDResource", trvr.Name())
+		paused = append(paused, held{drbdr: drbdr, prev: drbdr.Object().Spec.Maintenance})
+	}
+	Expect(paused).NotTo(BeEmpty(), "volume %s has no DRBD resources to pause", trv.Name())
+
+	restore := func(ctx SpecContext) {
+		for _, h := range paused {
+			// A resource that is already gone needs no restoring, and reading it
+			// would fail the cleanup instead of finishing it.
+			if !h.drbdr.IsPresent() {
+				continue
+			}
+			h.drbdr.Update(ctx, func(drbdr *v1alpha1.DRBDResource) {
+				drbdr.Spec.Maintenance = h.prev
+			})
+		}
+	}
+	DeferCleanup(restore)
+
+	for _, h := range paused {
+		h.drbdr.Update(ctx, func(drbdr *v1alpha1.DRBDResource) {
+			drbdr.Spec.Maintenance = v1alpha1.MaintenanceModeNoResourceReconciliation
+		})
+	}
+	for _, h := range paused {
+		h.drbdr.Await(ctx, tkmatch.ConditionReason(
+			v1alpha1.DRBDResourceCondConfiguredType,
+			v1alpha1.DRBDResourceCondConfiguredReasonInMaintenance))
+	}
+
+	return func(ctx SpecContext) {
+		restore(ctx)
+		for _, h := range paused {
+			if !h.drbdr.IsPresent() {
+				continue
+			}
+			h.drbdr.Await(ctx, tkmatch.ConditionReason(
+				v1alpha1.DRBDResourceCondConfiguredType,
+				v1alpha1.DRBDResourceCondConfiguredReasonConfigured))
+		}
+	}
+}
+
+// rolloutActive reports whether a volume is spending a rollout slot of its
+// storage class: it already stores the r2 configuration the edited class asks
+// for, and has not published a fresh verdict that its datamesh reached the
+// layout that configuration means (2D+1TB).
+//
+// It mirrors what the controller counts (computeActualRolloutRole /
+// computeActualRolloutConvergence in reconciler_rollout.go): the slot is freed
+// by a MembershipLayoutConverged=True/Converged verdict observed for the current
+// generation, not by the member counts looking right. The layout string is
+// required on top of the verdict, so the volume is only counted as done once
+// both the report and the arithmetic agree.
+//
+// The controller also demands that the stored configuration come from the
+// current configuration epoch of the class, which tells an A->B->A rollback
+// apart from the epoch it looks identical to. That distinction needs the class
+// object, which this predicate deliberately does not read — the observer runs on
+// the volume stream alone — and it is not needed here: the scenario edits the
+// class exactly once, so "stores the r2 configuration" and "belongs to the
+// current epoch" are the same statement.
+func rolloutActive(rv *v1alpha1.ReplicatedVolume) bool {
+	if rv.Status.Configuration == nil ||
+		rv.Status.Configuration.FailuresToTolerate != r2FTT ||
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy != r2GMDR {
+		return false
+	}
+	if rv.Status.MembershipLayout == nil || *rv.Status.MembershipLayout != layoutR2 {
+		return true
+	}
+	cond := meta.FindStatusCondition(rv.Status.Conditions,
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
+	return cond == nil ||
+		cond.Status != metav1.ConditionTrue ||
+		cond.Reason != v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged ||
+		cond.ObservedGeneration != rv.Generation
+}
+
+// rolloutWaiting reports whether a volume is queued behind the rollout budget of
+// its storage class, which is exactly what the volume itself says when the
+// controller refuses to hand it the new configuration.
+func rolloutWaiting(rv *v1alpha1.ReplicatedVolume) bool {
+	cond := meta.FindStatusCondition(rv.Status.Conditions,
+		v1alpha1.ReplicatedVolumeCondConfigurationReadyType)
+	return cond != nil &&
+		cond.Status == metav1.ConditionFalse &&
+		cond.Reason == v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress
 }
 
 // drbdResourceOn returns the kernel-side DRBD resource name of trv's replica

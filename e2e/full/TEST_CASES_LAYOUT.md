@@ -58,7 +58,14 @@ Then:
   (`status.membershipLayout=2D+1TB`, 2 Diskful + 1 TieBreaker members, still 3 members).
 - ⚡ No `AddReplica` transition ever fires — the migration is a retype, not a
   resync.
-- The retyped replica releases its backing LV (`status.backingVolume == nil`).
+- The retyped replica releases its backing LV (`status.backingVolume == nil`) and
+  the `LVMLogicalVolume` it was on disappears **by UID** and stays gone for an
+  observation window — an object recreated under the same name is a
+  reincarnation, not a release, and fails the check whether it is already there
+  when the wait starts or comes back after a moment of absence.
+- ⚡ The two surviving diskful replicas keep the very same `LVMLogicalVolume`
+  objects (same UID, still present): the retype moves one member, it does not
+  rebuild the storage under the other two.
 - On the RSC, `ConfigurationRolledOut=True/RolledOutToAllVolumes` and
   `status.volumes.aligned == 1`.
 - ⚡ I/O continuity is proven on the data path, not only through conditions:
@@ -159,21 +166,62 @@ Then:
 
 ---
 
-## migrates all volumes of a class with a single rsc.spec.replication edit
+## limits an r3->r2 rollout to two concurrent volumes and migrates them all
 
 E2E-5 · case 5 · Describe: `Layout: r3->r2 migration by editing rsc.spec.replication`
 
-**One `rsc.spec.replication` edit migrates every volume of the class.**
+**One `rsc.spec.replication` edit migrates every volume of the class, no more
+than `maxParallel` of them at a time.**
 
-Covers: decomposition T-2.0.3 ("mass migration" part); verifies blocks 1+2.
+Covers: decomposition T-2.0.3 ("mass migration" part) and the RollingUpdate
+budget; verifies blocks 1+2.
 
-Given: an r3 storage class with N volumes (N=3), one volume attached.
+Given: a dedicated r3 storage class with an explicit
+`configurationRolloutStrategy: RollingUpdate` / `maxParallel: 2` and N volumes,
+where N is `E2E_ROLLOUT_VOLUMES` and defaults to 20 — ten waves of two, because a
+single wave shows only that a limit exists, while a queue served over and over
+shows it keeps holding. The volume names are deterministic, zero-padded and
+sorted (the controller hands out the budget in name order, so the names decide
+which volumes go first, and the padding is what keeps the name order and the
+creation order the same at any N). The last volume is attached, so the
+attachment is exercised by a volume that had to sit through the whole queue.
+Before the edit, the identity (name + UID) of every diskful replica's backing
+`LVMLogicalVolume` is recorded.
 
-When: `rsc.spec.replication` is edited to `Availability` once.
+The spec's `SpecTimeout` is sized from N (a fixed part plus a share per volume),
+so raising the count raises the budget with it.
+
+⚡ The two volumes that go first are held back on purpose: every DRBD resource
+of theirs is put into `spec.maintenance=NoResourceReconciliation`
+(`Configured=False/InMaintenance`) before the edit, so their retype cannot
+complete and they keep their rollout slots. Without that hold, "two at a time"
+would be a race against the agent rather than an observable state. The previous
+`spec.maintenance` of each resource is captured before the first write and
+restored by a cleanup registered at the same point.
+
+When: `rsc.spec.replication` is edited to `Availability` once, with a class-wide
+rollout observer running. The observer is a single `ReplicatedVolume` event
+handler started before the edit; it waits for its initial replay before
+returning, so it accounts every volume that already exists, and it folds events
+in the order they arrive rather than sampling the cache.
 
 Then:
-- Every volume converges to 2D+1TB (`MembershipLayoutConverged=True/Converged`, 1 tie-breaker
-  each); no `AddReplica`/resync on any volume.
+- ⚡ Exactly 2 volumes are mid-rollout while the hold is on — the first two by
+  name — and the other N-2 report `ConfigurationReady=False/ConfigurationRolloutInProgress`,
+  i.e. they say they are queued rather than silently lagging. A volume counts as
+  mid-rollout once it stores the r2 configuration and until it publishes a fresh
+  `MembershipLayoutConverged=True/Converged` for the 2D+1TB layout, which is what
+  frees its slot in the controller.
+- ⚡ The observed parallelism never exceeds 2 at any point of the whole rollout,
+  every wave of it: the peak is asserted after the rollout has drained, and any
+  over-limit reading fails the spec at the observation that caused it.
+- After the hold is lifted, every volume converges to 2D+1TB
+  (`MembershipLayoutConverged=True/Converged`, 1 tie-breaker each); no
+  `AddReplica`/resync on any volume, and each volume's RVR set is unchanged.
+- For every volume, the retyped replica's backing `LVMLogicalVolume` disappears
+  **by UID** and stays gone for an observation window (a name that comes back
+  under a different UID is a recreation, not a release), and both surviving
+  diskful replicas keep the very same LVs (same UID, still present).
 - The RSC aggregate reaches `status.volumes.aligned == N` and
   `staleConfiguration == 0` without stalling; `ConfigurationRolledOut=True`.
 

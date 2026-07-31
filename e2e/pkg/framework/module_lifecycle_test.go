@@ -373,7 +373,12 @@ var _ = Describe("ValidateModuleImageTag", func() {
 		Entry("a value with a space inside", "two tags", "printable ASCII"),
 		Entry("a tab", "pr758\t", "printable ASCII"),
 		Entry("a trailing newline from a command substitution", "pr758\n", "printable ASCII"),
-		Entry("a non-ASCII character", "prесемьсотпятьдесятвосемь", "printable ASCII"),
+		// Both are written as escapes rather than as the characters themselves, so
+		// this file stays ASCII: the module linter refuses non-ASCII letters in the
+		// sources, and a rune that is invisible in an editor is a poor thing to
+		// keep in a literal anyway.
+		Entry("a non-ASCII character", "pr\u03bf758", "printable ASCII"),
+		Entry("a non-breaking space that a copy-paste smuggled in", "pr758\u00a0", "printable ASCII"),
 	)
 
 	It("is the rule ensureModuleVersion applies, so a gate and the helper agree", func() {

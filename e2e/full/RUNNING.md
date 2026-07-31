@@ -102,6 +102,21 @@ controlled by environment variables:
 | `E2E_RUN_ALL`             | Umbrella switch: runs **every** opt-in class — `Disruptive` and `LongHaul` (boolean, see below) | unset |
 | `E2E_FLAKE_ATTEMPTS`      | `--flake-attempts=N` for `hack/run-e2e-new.sh`                      | `1`          |
 | `E2E_SUITE`               | Selects sub-suite for `hack/run-e2e-new.sh` (`full`, `agent`, …)    | `control-plane` |
+| `E2E_ROLLOUT_VOLUMES`     | How many volumes the r3->r2 rollout spec migrates in one class edit (see below) | `20` |
+
+`E2E_ROLLOUT_VOLUMES` is read as a **decimal integer >= 1**, once, before the
+specs are built; anything else (` 20`, `2.5`, `twenty`) stops the run with a
+message naming the variable and the value, rather than being silently defaulted.
+It sets N for *limits an r3->r2 rollout to two concurrent volumes and migrates
+them all*: the class's rollout budget stays at 2, so N decides how many waves of
+two the rollout is served in — the default of 20 makes it ten. The value must
+exceed 2, otherwise no volume would ever wait for a slot and the spec would
+prove nothing; the suite refuses to start on a smaller one. The spec's
+`SpecTimeout` is sized from N, so a larger count also gets a larger budget —
+`E2E_TIMEOUT_MULTIPLIER` stretches it further on a slow stand. The volumes are
+created at the default size of `TestRV` (1Mi), so the count costs a pool almost
+nothing: N x 3 diskful LVs of one LVM extent each, a few hundred MiB at the
+default N against the tens of GiB a thin pool of a stand has free.
 
 The three opt-in switches are parsed as **booleans**, by the same rule
 (`strconv.ParseBool`): `true`/`TRUE`/`True`/`1`/`t` enable the class, while an
