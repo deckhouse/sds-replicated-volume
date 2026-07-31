@@ -147,6 +147,10 @@ var _ = Describe("Layout: tie-breaker replacement",
 						rvrOnNode(trv, otherThan(diskfulNodes, node)).Name(), newTB.Name()))
 				}
 				expectDRBDQuorum(ctx, trv)
+				// The replacement is a freshly created tie-breaker, so its minor
+				// comes from `new-minor --diskless`: it has to be an intentional
+				// diskless client, not merely a device without a disk.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("I/O never stopped")
 				// The final progress check plus the workload cleanup's whole-journal
@@ -307,6 +311,9 @@ var _ = Describe("Layout: tie-breaker replacement",
 						rvrOnNode(trv, otherThan(diskfulNodes, node)).Name(), replacement.Name()))
 				}
 				expectDRBDQuorum(ctx, trv)
+				// The replacement finally got a node of its own, so its device now
+				// exists and must be an intentional diskless client.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("I/O never stopped")
 				ioProgressed(ctx, io, ioBefore)

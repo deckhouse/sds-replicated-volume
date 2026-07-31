@@ -94,6 +94,11 @@ var _ = Describe("Layout: NewVolumesOnly holds existing volumes",
 				newRV.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
+				// Formed as 2D+1TB, so its tie-breaker comes from `new-minor
+				// --diskless` — the other volume below reaches the same layout by a
+				// retype, and this spec is the one place where both paths are
+				// checked side by side.
+				newRV.AwaitIntentionalDiskless(ctx, 1)
 
 				By("the old volume is still held at 3D")
 				Expect(membershipLayoutOf(oldRV)).To(Equal(ptr.To("3D")))
@@ -113,6 +118,9 @@ var _ = Describe("Layout: NewVolumesOnly holds existing volumes",
 				By("the held volume migrates to 2D+1TB")
 				oldRV.Await(ctx, migratedToR2())
 				Expect(memberTypeCount(oldRV, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
+				// Reached the same layout by a retype: the released replica must be
+				// diskless on purpose, exactly like the one formed that way above.
+				oldRV.AwaitIntentionalDiskless(ctx, 1)
 				oldRV.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))

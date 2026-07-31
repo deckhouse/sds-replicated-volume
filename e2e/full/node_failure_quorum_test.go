@@ -74,6 +74,15 @@ var _ = Describe("Layout: r2 volume survives a diskful node outage",
 				survivorRVR := rvrOnNode(trv, survivor)
 				tbRVR := tieBreakerRVR(trv)
 
+				By("verifying the tie-breaker holds its vote as an intentional diskless client")
+				// The whole spec rests on the tie-breaker's vote, and the kernel
+				// counts a diskless voter differently depending on whether it is
+				// diskless on purpose: an unintentionally diskless device counts
+				// itself as `unknown` rather than `diskless`. Establishing the flag
+				// before the outage is what makes the quorum arithmetic below the
+				// one the layout was designed for.
+				trv.AwaitIntentionalDiskless(ctx, 1)
+
 				By("pinning the victim replica to Healthy before the reboot (Given: healthy volume)")
 				// Establish a fresh Healthy baseline so the PhaseNot(Healthy) below can only
 				// pass on a real reboot-induced dip, not a pre-existing transient non-Healthy state.

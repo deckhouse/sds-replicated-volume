@@ -70,6 +70,12 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 				trva.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+
+				By("verifying the tie-breaker is diskless on purpose on its node")
+				// A tie-breaker created at formation gets its minor with
+				// `new-minor --diskless`, so it must report client:yes. This is the
+				// creation path of the same property the retype path has to preserve.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 			})
 
 		// E2E-3 — a deleted tie-breaker is healed by the P2 convergence pattern (block 2).
@@ -119,6 +125,9 @@ var _ = Describe("Layout: tie-breaker at formation and healing",
 
 				By("verifying the healed tie-breaker is a NEW RVR, not the deleted one")
 				Expect(tieBreakerRVR(trv).Name()).NotTo(Equal(deletedName))
+
+				By("verifying the healed tie-breaker is diskless on purpose on its node")
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("I/O kept flowing through the healing")
 				ioProgressed(ctx, io, ioBefore)

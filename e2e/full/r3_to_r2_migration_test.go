@@ -114,6 +114,14 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 				tieBreakerRVR(trv).Await(ctx, noBackingVolume())
 				assertBackingLLVIdentityAfterRetype(ctx, trv, llvsBefore)
 
+				By("verifying the retyped replica is diskless on purpose on its node")
+				// Ground truth for the retype: releasing the backing LV is the
+				// control plane's half, and `detach --diskless` is the kernel's. A
+				// plain detach produces the exact same API state while the node
+				// reports an unintentionally diskless device — and monitoring raises
+				// D8DrbdDeviceIsUnintentionalDiskless for every migrated volume.
+				trv.AwaitIntentionalDiskless(ctx, 1)
+
 				By("verifying the RSC aggregate reports the rollout complete")
 				trsc.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType,
@@ -265,6 +273,14 @@ var _ = Describe("Layout: r3->r2 migration by editing rsc.spec.replication",
 				for i, trv := range volumes {
 					tieBreakerRVR(trv).Await(ctx, noBackingVolume())
 					assertBackingLLVIdentityAfterRetype(ctx, trv, llvsBefore[i])
+				}
+
+				By("verifying every retyped replica is diskless on purpose on its node")
+				// Checked per volume, not once: the rollout retypes each volume on
+				// its own, so a detach that forgets --diskless could well affect
+				// only the wave that took a different code path.
+				for _, trv := range volumes {
+					trv.AwaitIntentionalDiskless(ctx, 1)
 				}
 
 				By("observing the RSC aggregate reach aligned=N without stalling")

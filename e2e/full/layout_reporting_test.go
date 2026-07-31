@@ -91,6 +91,10 @@ var _ = Describe("Layout: unsupported divergence is reported, not acted upon",
 				Expect(trv.RVRCount()).To(Equal(rvrCountBefore))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeTieBreaker)).To(Equal(1))
+				// "Untouched" is a claim about the node too: the rejected upsize must
+				// not have gone as far as touching the tie-breaker's device, which
+				// still has to be an intentional diskless client.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("verifying the volume stays healthy and serving I/O despite the mismatch")
 				// Readiness is reported per attachment and per replica, not on the RV.

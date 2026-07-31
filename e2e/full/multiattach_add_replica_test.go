@@ -37,6 +37,14 @@ var _ = Describe("Multiattach: add replica to live datamesh", Label(fw.LabelSlow
 
 			initialMembers := len(trv.Object().Status.Datamesh.Members)
 
+			// The layout arrives with its own diskless replicas already proven
+			// intentional (SetupLayout); an added Access or TieBreaker makes one
+			// more, and that one is what this entry is about.
+			wantDiskless := layout.DisklessReplicas()
+			if add == v1alpha1.ReplicaTypeAccess || add == v1alpha1.ReplicaTypeTieBreaker {
+				wantDiskless++
+			}
+
 			switch add {
 			case v1alpha1.ReplicaTypeAccess:
 				trv.Update(ctx, func(rv *v1alpha1.ReplicatedVolume) {
@@ -65,6 +73,11 @@ var _ = Describe("Multiattach: add replica to live datamesh", Label(fw.LabelSlow
 			trv.Await(ctx, match.RV.Members(initialMembers+1))
 
 			Expect(trv.Object().Status.Datamesh.Members).NotTo(BeEmpty())
+
+			// A replica added to a live datamesh takes the same creation path as
+			// one created at formation, so a diskless one must come up as an
+			// intentional diskless client here too.
+			trv.AwaitIntentionalDiskless(ctx, wantDiskless)
 		},
 
 		// ── 1D (FTT=0, GMDR=0), 2 att (1D+1A) — two Primaries baseline ──

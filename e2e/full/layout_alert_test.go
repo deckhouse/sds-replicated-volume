@@ -86,6 +86,12 @@ var _ = Describe("Layout: a degraded layout raises a ClusterAlert",
 				trv3.Await(ctx, layoutDegraded("2D", "3D"))
 				trv2.Await(ctx, layoutDegraded("1D+1TB", "2D+1TB"))
 
+				By("the surviving tie-breaker is still an intentional diskless client")
+				// The degradation this spec alerts on must not drag a second alert
+				// behind it: a tie-breaker whose device stopped being intentionally
+				// diskless would fire D8DrbdDeviceIsUnintentionalDiskless as well.
+				trv2.AwaitIntentionalDiskless(ctx, 1)
+
 				By("the metric is exported for both — so a missing alert cannot be blamed on the collector")
 				// This is the precondition that keeps a failure diagnosable: if the
 				// series is here and the ClusterAlert never arrives, the defect is in

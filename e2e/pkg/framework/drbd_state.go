@@ -25,6 +25,9 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // drbdResourceNamePrefix mirrors the agent's drbdNamePrefix: every DRBD
@@ -37,9 +40,16 @@ const drbdResourceNamePrefix = "sdsrv-"
 // peer is actually participating in the resource.
 const drbdConnectionStateConnected = "Connected"
 
+// drbdDiskStateDiskless is the disk state `drbdsetup status` reports for a
+// device that carries no backing disk.
+const drbdDiskStateDiskless = "Diskless"
+
 const (
 	drbdPeerSettleTimeout = 5 * time.Minute
 	drbdPeerSettlePoll    = 5 * time.Second
+
+	drbdDisklessSettleTimeout = 5 * time.Minute
+	drbdDisklessSettlePoll    = 5 * time.Second
 )
 
 // DRBDResourceName returns the resource name the kernel of a node knows for the
@@ -88,12 +98,38 @@ func (c DRBDConnection) Connected() bool {
 
 // DRBDStatus is the runtime state of one resource on one node, parsed from
 // `drbdsetup status --json`.
+//
+// Suspended and SuspendedQuorum come from the RESOURCE level of the dump, the
+// rest of the fields from its single device: `drbdsetup` prints the I/O freeze
+// per resource (`suspended`, `suspended-user`, `suspended-no-data`,
+// `suspended-fencing`, `suspended-quorum`) and the disk per device.
 type DRBDStatus struct {
-	Name        string
-	Role        string
-	Minor       int
-	Quorum      bool // the device has quorum
-	Connections []DRBDConnection
+	Name  string
+	Role  string
+	Minor int
+	// DiskState is `devices[].disk-state`: "UpToDate", "Diskless",
+	// "Inconsistent", …
+	DiskState string
+	// IntentionalDiskless is `devices[].client`, which drbdsetup prints from
+	// the kernel's device_conf.intentional_diskless. It tells a replica that is
+	// diskless BY DESIGN (a tie-breaker, an access replica, a diskless client)
+	// apart from one that merely lost its disk — the distinction the
+	// D8DrbdDeviceIsUnintentionalDiskless alert is built on.
+	IntentionalDiskless bool
+	Quorum              bool // the device has quorum
+	// Suspended is the resource-level `suspended`: I/O is frozen for any
+	// reason (user, no-data, fencing, quorum).
+	Suspended bool
+	// SuspendedQuorum narrows Suspended down to the quorum cause, which is
+	// what `on-no-quorum: suspend-io` produces.
+	SuspendedQuorum bool
+	Connections     []DRBDConnection
+}
+
+// Diskless reports whether the device currently carries no backing disk. It
+// says nothing about whether that is intentional — see IntentionalDiskless.
+func (s DRBDStatus) Diskless() bool {
+	return s.DiskState == drbdDiskStateDiskless
 }
 
 // PeerNames returns the sorted names of all configured connections.
@@ -132,7 +168,10 @@ func (s DRBDStatus) Connection(peerName string) (DRBDConnection, bool) {
 // String renders the status for failure messages.
 func (s DRBDStatus) String() string {
 	parts := make([]string, 0, len(s.Connections)+1)
-	parts = append(parts, fmt.Sprintf("%s role=%s minor=%d quorum=%t", s.Name, s.Role, s.Minor, s.Quorum))
+	parts = append(parts, fmt.Sprintf(
+		"%s role=%s minor=%d disk=%s client=%t quorum=%t suspended=%t suspended-quorum=%t",
+		s.Name, s.Role, s.Minor, s.DiskState, s.IntentionalDiskless, s.Quorum,
+		s.Suspended, s.SuspendedQuorum))
 	for i := range s.Connections {
 		parts = append(parts, fmt.Sprintf("%s=%s", s.Connections[i].Name, s.Connections[i].ConnectionState))
 	}
@@ -220,6 +259,81 @@ func (f *Framework) AwaitDRBDPeers(ctx context.Context, nodeName, resourceName s
 	}
 }
 
+// AwaitIntentionalDiskless blocks until the device of resourceName on nodeName
+// is diskless BY DESIGN — `drbdsetup status` reporting both disk-state
+// "Diskless" and client:yes — and fails the spec when it does not get there.
+//
+// The two halves are separate facts and both have to be asserted. "Diskless"
+// is the state of the disk; client:yes is the kernel's record of WHY it is
+// diskless (device_conf.intentional_diskless), written once when the minor is
+// created (`new-minor --diskless`) or when the disk is dropped on purpose
+// (`detach --diskless`). A replica converted to a tie-breaker with a plain
+// `detach` ends up diskless with client:no — indistinguishable, to the kernel
+// and to monitoring, from a replica whose disk failed.
+//
+// Waiting is for the first half only: the flag is written together with the
+// state transition, so once the device reports Diskless the flag is final and
+// this helper fails right away instead of polling out its whole budget.
+func (f *Framework) AwaitIntentionalDiskless(ctx context.Context, nodeName, resourceName string) {
+	GinkgoHelper()
+	err := f.awaitIntentionalDiskless(ctx, nodeName, resourceName,
+		drbdDisklessSettleTimeout, drbdDisklessSettlePoll)
+	if err != nil {
+		Fail(err.Error())
+	}
+}
+
+// AwaitIntentionalDiskless asserts that this volume has exactly wantDiskless
+// replicas of a diskless type (TieBreaker, Access) and that every one of them
+// came up on its node as an intentional diskless client (see
+// Framework.AwaitIntentionalDiskless).
+//
+// wantDiskless is not a convenience — it is what keeps the assertion from
+// passing on a volume that has nothing to check. "Every diskless replica is
+// fine" is satisfied for free by a volume whose tie-breaker never appeared, so
+// the count the spec has already proved on the API side is restated here and
+// the node-side claim is made about a known number of replicas.
+//
+// The replica type is read from rvr.spec.type rather than from the datamesh
+// member type on purpose: the spec type is the intent (and flips in place on a
+// retype), while the datamesh publishes transitional types such as
+// LiminalDiskful for a replica that is only passing through the diskless stage
+// on its way to becoming diskful.
+func (t *TestRV) AwaitIntentionalDiskless(ctx context.Context, wantDiskless int) {
+	GinkgoHelper()
+
+	type disklessReplica struct{ name, node, resource string }
+	var replicas []disklessReplica
+	var described []string
+
+	for _, r := range t.TestRVRs() {
+		if !r.IsPresent() {
+			continue
+		}
+		switch r.Object().Spec.Type {
+		case v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeAccess:
+			rep := disklessReplica{
+				name:     r.Name(),
+				node:     r.Object().Spec.NodeName,
+				resource: r.DRBDResourceName(),
+			}
+			replicas = append(replicas, rep)
+			described = append(described,
+				fmt.Sprintf("%s (%s) on node %q", rep.name, r.Object().Spec.Type, rep.node))
+		}
+	}
+
+	Expect(replicas).To(HaveLen(wantDiskless),
+		"volume %s has %d diskless replicas (TieBreaker/Access), expected %d: [%s]",
+		t.Name(), len(replicas), wantDiskless, strings.Join(described, ", "))
+
+	for _, r := range replicas {
+		Expect(r.node).NotTo(BeEmpty(),
+			"diskless replica %s is not scheduled on any node, so it has no device to check", r.name)
+		t.f.AwaitIntentionalDiskless(ctx, r.node, r.resource)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Core: error-returning, unit-testable with a stub runner
 // ---------------------------------------------------------------------------
@@ -285,16 +399,80 @@ func (f *Framework) awaitDRBDPeers(
 	}
 }
 
+// awaitIntentionalDiskless polls the node until its device for resourceName is
+// diskless and flagged as an intentional diskless client.
+//
+// Unlike awaitDRBDPeers it does not give up on the first unreadable answer: a
+// replica is a datamesh member in the API before the agent has created its
+// minor, so "no such resource on this node" is a state that passes rather than
+// a verdict. The last problem seen is carried into the timeout message so the
+// failure still says what the node was answering.
+func (f *Framework) awaitIntentionalDiskless(
+	ctx context.Context,
+	nodeName, resourceName string,
+	timeout, poll time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	var lastProblem error
+
+	for {
+		st, err := f.drbdStatus(ctx, nodeName, resourceName)
+		switch {
+		case err != nil:
+			lastProblem = err
+		case st.Diskless() && st.IntentionalDiskless:
+			return nil
+		case st.Diskless():
+			// Terminal, so there is nothing to wait for: the kernel writes
+			// intentional_diskless when the minor is created or detached and
+			// never revises it for a live device.
+			return fmt.Errorf("drbd resource %q on node %q is diskless but NOT intentionally diskless:"+
+				" `drbdsetup status` reports client:no, which is the kernel saying this replica lost its"+
+				" disk rather than gave it up on purpose. It is exactly the state the"+
+				" D8DrbdDeviceIsUnintentionalDiskless alert fires on, and it is what a plain"+
+				" `drbdsetup detach` leaves behind where `detach --diskless` was meant. Node state: %s",
+				resourceName, nodeName, st)
+		default:
+			lastProblem = fmt.Errorf("device is not diskless yet: %s", st)
+		}
+
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("timed out after %s waiting for drbd resource %q on node %q to come up as an"+
+				" intentional diskless client (disk-state %q and client:yes); last problem: %v",
+				timeout, resourceName, nodeName, drbdDiskStateDiskless, lastProblem)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for drbd resource %q on node %q to become an intentional diskless"+
+				" client: %w; last problem: %v", resourceName, nodeName, ctx.Err(), lastProblem)
+		case <-time.After(poll):
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Parsers
 // ---------------------------------------------------------------------------
 
 // drbdStatusJSON is the subset of `drbdsetup status --json` the suite depends on.
+//
+// The freeze flags sit next to name/role because that is where drbdsetup prints
+// them — they describe the resource, not the device (drbd-utils,
+// user/v9/drbdsetup.c, resource_status_json).
 type drbdStatusJSON struct {
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	Devices []struct {
-		Minor  int  `json:"minor"`
+	Name            string `json:"name"`
+	Role            string `json:"role"`
+	Suspended       bool   `json:"suspended"`
+	SuspendedQuorum bool   `json:"suspended-quorum"`
+	Devices         []struct {
+		Minor     int    `json:"minor"`
+		DiskState string `json:"disk-state"`
+		// Client is the kernel's intentional-diskless flag. drbdsetup prints
+		// the tri-state "unknown" as false, so an absent field and an
+		// unintentionally diskless device look the same here — which is the
+		// safe direction: it can only make an assertion stricter.
+		Client bool `json:"client"`
 		Quorum bool `json:"quorum"`
 	} `json:"devices"`
 	Connections []struct {
@@ -323,10 +501,14 @@ func parseDRBDStatus(out, resourceName string) (DRBDStatus, error) {
 				resourceName, len(r.Devices))
 		}
 		st := DRBDStatus{
-			Name:   r.Name,
-			Role:   r.Role,
-			Minor:  r.Devices[0].Minor,
-			Quorum: r.Devices[0].Quorum,
+			Name:                r.Name,
+			Role:                r.Role,
+			Minor:               r.Devices[0].Minor,
+			DiskState:           r.Devices[0].DiskState,
+			IntentionalDiskless: r.Devices[0].Client,
+			Quorum:              r.Devices[0].Quorum,
+			Suspended:           r.Suspended,
+			SuspendedQuorum:     r.SuspendedQuorum,
 		}
 		for j := range r.Connections {
 			c := &r.Connections[j]

@@ -123,6 +123,9 @@ var _ = Describe("Layout: an excess replica is reported and removed by hand",
 				Expect(memberTypeCount(trv, v1alpha1.DatameshMemberTypeDiskful)).To(Equal(2))
 				trv.Await(ctx, match.RV.Quorum(2))
 				expectDRBDQuorum(ctx, trv)
+				// The shrink went through the excess diskful, so the tie-breaker must
+				// still be the intentional diskless client it was created as.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("the metric returns to 1/Converged and the data path is intact")
 				awaitLayoutMetric(ctx, trv,

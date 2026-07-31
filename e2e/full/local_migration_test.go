@@ -106,6 +106,9 @@ var _ = Describe("Layout: r3->r2 migration with volumeAccess=Local",
 				Expect(rvrNames(trv)).To(Equal(rvrsBefore))
 				tb.Await(ctx, noBackingVolume())
 
+				By("verifying the retyped replica is diskless on purpose on its node")
+				trv.AwaitIntentionalDiskless(ctx, 1)
+
 				By("verifying the attachment survived the migration")
 				trva.Await(ctx, tkmatch.ConditionReason(
 					v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
