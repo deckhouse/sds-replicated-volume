@@ -519,7 +519,10 @@ var _ = Describe("IOWorkload observation", func() {
 		node.beat()
 		_, err := w.awaitProgress(ctx, 1)
 
-		Expect(err).To(MatchError(ContainSubstring("stalled for")))
+		Expect(err).To(MatchError(ContainSubstring("the writer stalled")))
+		// The verdict names the policy it was measured against, so a reader
+		// does not have to know the defaults to judge the number.
+		Expect(err).To(MatchError(ContainSubstring("no gap longer than " + ioWorkloadDefaultMaxGap.String())))
 	})
 
 	It("does not call a terminated writer stalled", func() {
@@ -720,7 +723,7 @@ var _ = Describe("IOWorkload cleanup", func() {
 
 		err := w.cleanup(ctx)
 
-		Expect(err).To(MatchError(ContainSubstring("stalled for")))
+		Expect(err).To(MatchError(ContainSubstring("the writer stalled during the run")))
 		Expect(node.purged).To(BeTrue(), "the verdict must not leave the writer's files behind")
 	})
 
@@ -735,6 +738,163 @@ var _ = Describe("IOWorkload cleanup", func() {
 
 		Expect(node.signals).To(BeEmpty())
 		Expect(node.purged).To(BeTrue())
+	})
+})
+
+var _ = Describe("IOWorkload declared freeze", func() {
+	ctx := context.Background()
+
+	// declaredBound is comfortably above the default heartbeat gap, so a freeze
+	// can be built both inside and outside it.
+	const declaredBound = 10 * time.Minute
+
+	startedWorkload := func(node *fakeIONode) *IOWorkload {
+		node.onSpawn = (*fakeIONode).startWriter
+		w, _ := newTestIOWorkload(node)
+		Expect(w.start(ctx)).To(Succeed())
+		return w
+	}
+
+	// freezeFor stops the writer for d and then lets it write again, which is
+	// what leaves a historical gap of d in the journal.
+	freezeFor := func(node *fakeIONode, d time.Duration) {
+		node.nowMS += d.Milliseconds()
+		node.beat()
+		node.beat()
+	}
+
+	Describe("declaring it", func() {
+		It("records the bound", func() {
+			w := startedWorkload(newFakeIONode())
+
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+
+			Expect(w.freeze).To(Equal(ioFreezeAllowance{declared: true, max: declaredBound}))
+		})
+
+		DescribeTable("refuses a declaration that would amount to switching the checks off",
+			func(first, second time.Duration, wantMsg string) {
+				w := startedWorkload(newFakeIONode())
+				if first > 0 {
+					Expect(w.declareFreeze(first)).To(Succeed())
+				}
+
+				err := w.declareFreeze(second)
+
+				Expect(err).To(MatchError(ContainSubstring(wantMsg)))
+			},
+			Entry("no bound at all", time.Duration(0), time.Duration(0), "finite positive upper bound"),
+			Entry("a negative bound", time.Duration(0), -time.Minute, "finite positive upper bound"),
+			Entry("a bound below the heartbeat gap", time.Duration(0), ioWorkloadDefaultMaxGap/2, "does not exceed MaxHeartbeatGap"),
+			Entry("a bound equal to the heartbeat gap", time.Duration(0), ioWorkloadDefaultMaxGap, "does not exceed MaxHeartbeatGap"),
+			Entry("a second declaration", declaredBound, declaredBound, "already declared"),
+		)
+	})
+
+	Describe("a freeze within the declared bound", func() {
+		It("does not fail a progress wait", func() {
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Minute)
+			node.beatOnPeek = true // the writer is going again after the freeze
+			st, err := w.awaitProgress(ctx, 1)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(st.GapExceeded).To(BeFalse())
+			// The stall is still MEASURED and reported — the declaration only
+			// changes the verdict, never the evidence.
+			Expect(st.Stalls).To(HaveLen(1))
+			Expect(st.MaxObservedGap).To(BeNumerically(">", ioWorkloadDefaultMaxGap))
+		})
+
+		It("does not fail the final verification", func() {
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Minute)
+
+			// Cleanup is where an undeclared freeze fails a spec that had long
+			// since passed, so it is the half that matters most.
+			Expect(w.cleanup(ctx)).To(Succeed())
+		})
+	})
+
+	Describe("a freeze beyond the declared bound", func() {
+		It("fails a progress wait", func() {
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+
+			freezeFor(node, declaredBound+time.Minute)
+			_, err := w.awaitProgress(ctx, 1)
+
+			Expect(err).To(MatchError(ContainSubstring("the writer stalled")))
+			Expect(err).To(MatchError(ContainSubstring("ONE declared freeze of up to " + declaredBound.String())))
+		})
+
+		It("fails the final verification", func() {
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+			freezeFor(node, declaredBound+time.Minute)
+
+			Expect(w.cleanup(ctx)).NotTo(Succeed())
+		})
+
+		It("fails on a SECOND freeze even when both are inside the bound", func() {
+			// One freeze was declared, not a series: a volume that keeps
+			// freezing is a different story from the one the spec is telling.
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			Expect(w.declareFreeze(declaredBound)).To(Succeed())
+
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Minute)
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Minute)
+			st := mustObserve(ctx, w)
+
+			Expect(st.Stalls).To(HaveLen(2))
+			Expect(st.GapExceeded).To(BeTrue())
+		})
+	})
+
+	Describe("without a declaration", func() {
+		It("fails a progress wait exactly as before", func() {
+			// The relaxation must not leak into the rest of the suite: a
+			// workload nobody declared anything for keeps the plain rule.
+			node := newFakeIONode()
+			w := startedWorkload(node)
+
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Second)
+			_, err := w.awaitProgress(ctx, 1)
+
+			Expect(err).To(MatchError(ContainSubstring("the writer stalled")))
+			Expect(err).To(MatchError(ContainSubstring("no gap longer than " + ioWorkloadDefaultMaxGap.String())))
+			Expect(err).NotTo(MatchError(ContainSubstring("declared freeze")))
+		})
+
+		It("fails the final verification exactly as before", func() {
+			node := newFakeIONode()
+			w := startedWorkload(node)
+			freezeFor(node, ioWorkloadDefaultMaxGap+time.Second)
+
+			Expect(w.cleanup(ctx)).NotTo(Succeed())
+		})
+	})
+
+	It("never widens the live stall observation", func() {
+		// Stalled is what a spec waits on to learn that the freeze has begun,
+		// so it stays a plain measurement against MaxHeartbeatGap.
+		node := newFakeIONode()
+		w := startedWorkload(node)
+		Expect(w.declareFreeze(declaredBound)).To(Succeed())
+
+		node.nowMS += (ioWorkloadDefaultMaxGap + time.Second).Milliseconds()
+		st := mustObserve(ctx, w)
+
+		Expect(st.Stalled).To(BeTrue())
+		Expect(st.GapExceeded).To(BeFalse())
 	})
 })
 

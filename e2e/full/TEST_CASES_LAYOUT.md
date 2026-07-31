@@ -15,6 +15,13 @@ pipeline that tells an operator to perform them —
 `sds_rv_membership_layout_converged` → scrape → the
 `D8ReplicatedVolumeLayoutDegraded` rule → a firing `ClusterAlert` (BE2E-4).
 
+It also covers both sides of quorum on a 2D+1TB volume. The positive side is
+E2E-6: the tie-breaker holds quorum at 2/3 while a diskful node reboots. The
+negative side is the pair E2E-Q1/E2E-Q2: a replica cut off from its peers by a
+silent packet drop MUST lose quorum, freeze its I/O and recover — a bug that
+makes quorum too permissive passes every positive case by construction, so the
+negative pair is the only thing standing between such a bug and the stand.
+
 The migration trigger is always an **in-place edit of `rsc.spec.replication`** on an
 existing ReplicatedStorageClass. `rv.spec.replicatedStorageClassName` is never
 changed (that path is out of scope until verdict D-3). Replication modes map to
@@ -295,9 +302,138 @@ Then:
 
 ---
 
+## freezes an isolated primary while the diskful+tie-breaker majority keeps serving, then recovers
+
+E2E-Q1 · case 7 · ⚡ Disruptive · Describe: `Layout: r2 volume loses quorum when a replica is cut off`
+
+⚡ **A 2D+1TB volume must FREEZE the replica that lost quorum while the majority
+keeps serving, and both sides must come back after the link returns.**
+
+Covers the negative side of quorum, which no other case in the suite asserts:
+every existing quorum case demands that quorum is KEPT (`NeverLoseQuorum`,
+never `IOSuspended`), and a bug that makes quorum too permissive satisfies those
+demands all the better the worse it is. E2E-Q1 and E2E-Q2 are the only cases
+that require quorum to be LOST where it must be.
+
+Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unless
+`E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`.
+
+⚡ **The outage is a SILENT PACKET DROP** (`iptables … -j DROP`) on the
+replication link of this one volume, applied through
+`Framework.BlockDRBDLinks`, never `drbdsetup disconnect` and never `-j REJECT`.
+Both alternatives tear the connection down in-band and at once, so DRBD's
+timeout code — the code that decides a peer is dead in a real outage — never
+runs, and the case degenerates into a test of the orderly path. The rules pin
+both endpoint addresses and the ports of this resource, so exactly one volume's
+replication breaks; they carry a tag unique to the run, are removed by a
+`DeferCleanup` registered before the first rule, and are additionally removed by
+a detached watchdog on the node whose TTL is derived from the spec's own
+(multiplier-scaled) deadline.
+
+Given: a healthy 2D+1TB volume, published on one of the two diskful nodes, with
+a raw-device writer running on that node. The tie-breaker is proven on its own
+node to be an intentional diskless client (`disk-state: Diskless`,
+`client: yes`) — the kernel counts a diskless voter differently depending on
+that flag, so this is what makes the arithmetic under test the intended one.
+Quorum-survival invariants (`NeverLoseQuorum`, `NeverCritical`,
+`NeverIOSuspended`) are armed on the majority side ONLY; the replica about to be
+isolated is deliberately unarmed, since losing quorum is what is demanded of it.
+The workload declares ONE expected freeze with a finite upper bound
+(`IOWorkload.DeclareFreeze`), which removes the framework's veto on a stall
+without making the stall optional.
+
+When: every replication packet between the attached diskful replica and BOTH of
+its peers is dropped silently, in both directions.
+
+Then:
+- ⚡ The kernel on the isolated node is observed to declare both peers dead
+  BEFORE anything about quorum is asserted (a dropped packet is invisible until
+  DRBD's timers expire, and quorum is only re-evaluated at that declaration).
+- ⚡ The isolated replica loses quorum and freezes: `drbdsetup` reports
+  `quorum:no` with `suspended:yes` **and** `suspended-quorum:yes` (the cause
+  matters — a plain `suspended` is also raised by a user freeze or by fencing),
+  the replica reports `quorum: false` (the value `false`, not merely "not
+  true"), `Ready=False/QuorumLost` and `Attached=False/IOSuspended`.
+- ⚡ The writer BLOCKS and does not die: the sequence stops advancing across two
+  reads while the process is still alive. A writer that kept going would mean
+  the volume served I/O without quorum; a writer that exited would mean it
+  answered with errors instead of freezing (the `io-error` behaviour), which is
+  a separate defect.
+- ⚡ In the very same window the surviving diskful replica and the tie-breaker
+  hold `quorum:yes` on their nodes, report `quorum: true`, are not frozen, and
+  the surviving diskful stays `Ready=True/Ready`. This asymmetry — one side
+  frozen, the other provably alive — is the point of the case.
+- After the rules are removed (and nothing is done to help DRBD reconnect): all
+  three replicas reconnect on their own with no connection left `StandAlone`,
+  every replica reports `FullyConnected=True/FullyConnected`, quorum returns
+  everywhere including the isolated replica, the thawed replica reports
+  `deviceIOSuspended: false` and `Attached=True/Attached`, and the attachment is
+  `Ready=True/Ready`.
+- ⚡ The data path moves again (`ioResumed`): every beat is a write, an
+  `fdatasync`, a read-back and a checksum comparison, so progress is itself the
+  integrity proof.
+- The resync converges: both diskful devices are `UpToDate`, replication between
+  them is `Established`, and the node-reported `out-of-sync` counter is zero (an
+  unreported counter is NOT accepted as zero).
+- The layout is intact (2D+1TB, `MembershipLayoutConverged=True/Converged`, the
+  same datamesh members as before), and all three replicas are `Healthy` again;
+  the closing `Await`s surface any invariant violation the armed replicas
+  recorded on a snapshot no assertion looked at.
+
+---
+
+## denies quorum to an isolated tie-breaker while both diskful replicas keep serving, then recovers
+
+E2E-Q2 · case 8 · ⚡ Disruptive · Describe: `Layout: r2 volume loses quorum when a replica is cut off`
+
+⚡ **An isolated tie-breaker must produce no quorum of its own, and must cost the
+two diskful voters nothing.**
+
+Covers the second half of the negative quorum pair (see E2E-Q1). A tie-breaker
+does not vote: the controller gives every non-voter an impossibly high quorum
+threshold precisely so that it can never satisfy the quorum condition alone, and
+its quorum comes from connected diskful peers. Cut off from both, it must have
+none — a build in which it reported quorum here is the "quorum is too
+permissive" class of bug this pair exists for.
+
+Labelled `Disruptive`; the outage is the same silent packet drop as in E2E-Q1.
+
+Given: a healthy 2D+1TB volume published on one diskful node, with a raw-device
+writer running there, and the tie-breaker proven to be an intentional diskless
+client. Quorum-survival invariants are armed on BOTH diskful replicas; the
+tie-breaker is unarmed. **No freeze is declared** — two voters out of two are a
+majority of themselves, so the plain continuity rule applies and any stall fails
+the case exactly as it does everywhere else in the suite.
+
+When: every replication packet between the tie-breaker and both diskful replicas
+is dropped silently, in both directions.
+
+Then:
+- The kernel on the tie-breaker's node is observed to declare both peers dead
+  first, and the replica reports `FullyConnected=False/NotConnected`.
+- ⚡ The isolated tie-breaker has `quorum:no` on its node, reports
+  `quorum: false` and `Ready=False/QuorumViaPeers`. The status and the reason
+  are matched in ONE snapshot: `QuorumViaPeers` is published with both `True`
+  and `False` (it names the mechanism, not the verdict), so two independent
+  waits could each match on a different snapshot.
+- ⚡ In the very same window both diskful replicas hold `quorum:yes`, report
+  `quorum: true`, are not frozen, and verified device writes keep advancing —
+  losing the tie-breaker may not cost a single beat.
+- After the rules are removed: all three replicas reconnect on their own with
+  none left `StandAlone`, quorum returns to the tie-breaker, which reports
+  `Ready=True/QuorumViaPeers` and is STILL an intentional diskless client (it
+  came back through a reconnect, not a re-create, so its `device_conf` flag must
+  be the one it was created with).
+- The writer's sequence advanced across the whole outage, the attachment is
+  `Ready=True/Ready`, the resync converges with a zero `out-of-sync` counter,
+  the layout is intact (2D+1TB, converged, same members) and all three replicas
+  are `Healthy`.
+
+---
+
 ## rejects storage/topology changes and accepts a replication edit
 
-E2E-7 · case 7 · Describe: `Layout: incompatible ReplicatedStorageClass updates are rejected`
+E2E-7 · case 9 · Describe: `Layout: incompatible ReplicatedStorageClass updates are rejected`
 
 **Storage/topology changes are rejected with a field-naming error; replication edits pass.**
 
@@ -326,7 +462,7 @@ When / Then:
 
 ## retypes a non-attached replica and keeps the attached node diskful
 
-E2E-LOCAL · case 8 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with volumeAccess=Local`
+E2E-LOCAL · case 10 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with volumeAccess=Local`
 
 ⚡ **With `volumeAccess: Local` the retype must never demote the node the workload runs on.**
 
@@ -354,7 +490,7 @@ Then:
 
 ## migrates 3D in three zones to 2D+1TB with the tie-breaker in the third zone
 
-E2E-TZ · case 9 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with TransZonal topology`
+E2E-TZ · case 11 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with TransZonal topology`
 
 ⚡ **A 3D volume spread over three zones migrates to 2D+1TB with the tie-breaker holding the third zone.**
 
@@ -391,7 +527,7 @@ Then:
 
 ## replaces a deleted tie-breaker create-first when a free node exists
 
-E2E-TB1 · case 10 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
+E2E-TB1 · case 12 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 **Deleting a tie-breaker starts a strict create-first replacement: the new one joins before the old one leaves.**
 
@@ -449,7 +585,7 @@ Then:
 
 ## keeps a terminating tie-breaker working when no node can host a replacement
 
-E2E-TB2 · case 11 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
+E2E-TB2 · case 13 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 ⚡ **With every eligible node occupied, the deleted tie-breaker keeps serving quorum and the volume says `CannotConverge`; the documented manual escape ends the deadlock.**
 
@@ -506,7 +642,7 @@ Then (phase 2 — the documented manual escape):
 
 ## holds the old volume at 3D, creates new ones as 2D+1TB, and releases the hold on RollingUpdate
 
-E2E-NVO · case 12 · Describe: `Layout: NewVolumesOnly holds existing volumes`
+E2E-NVO · case 14 · Describe: `Layout: NewVolumesOnly holds existing volumes`
 
 **`configurationRolloutStrategy: NewVolumesOnly` holds existing volumes at their layout and says so; switching to `RollingUpdate` releases them.**
 
@@ -541,7 +677,7 @@ Then:
 
 ## restores an r2 volume to 2D+1TB by creating a diskful replica by hand
 
-BE2E-1 · case 13 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+BE2E-1 · case 15 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
 
 ⚡ **After an r2 volume loses a diskful replica, creating a `ReplicatedVolumeReplica`
 by hand brings it back to 2D+1TB — the join goes through `diskful-q-up/v1`, the
@@ -604,7 +740,7 @@ Then:
 
 ## restores an r3 volume to 3D by creating a diskful replica by hand
 
-BE2E-2 · case 14 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+BE2E-2 · case 16 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
 
 **The r3 half of the parity claim: losing one of three diskful replicas is
 repaired by hand through `diskful/v1`, which has no Access stage at all.**
@@ -636,7 +772,7 @@ Then:
 
 ## reports an excess diskful without removing it and converges after a manual delete
 
-BE2E-3 · case 15 · ⚡ Disruptive · Describe: `Layout: an excess replica is reported and removed by hand`
+BE2E-3 · case 17 · ⚡ Disruptive · Describe: `Layout: an excess replica is reported and removed by hand`
 
 ⚡ **A volume with more replicas than its configuration asks for is reported
 honestly and is never trimmed automatically; deleting the excess RVR by hand is
@@ -679,7 +815,7 @@ Then (phase 2 — the manual shrink):
 
 ## raises a firing D8ReplicatedVolumeLayoutDegraded for every volume that lost a diskful replica
 
-BE2E-4 · case 16 · ⚡ LongHaul · Describe: `Layout: a degraded layout raises a ClusterAlert`
+BE2E-4 · case 18 · ⚡ LongHaul · Describe: `Layout: a degraded layout raises a ClusterAlert`
 
 ⚡ **The alerting pipeline end to end: collector → ServiceMonitor scrape → the
 `D8ReplicatedVolumeLayoutDegraded` rule → Alertmanager → a firing `ClusterAlert`

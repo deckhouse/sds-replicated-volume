@@ -85,15 +85,50 @@ func DRBDPeerName(replicaID uint8) string {
 
 // DRBDConnection is one peer connection of a resource, as `drbdsetup status`
 // reports it on the node.
+//
+// Name, PeerNodeID and ConnectionState describe the connection itself; the
+// replication fields come from its single peer device (`peer_devices[0]`),
+// which exists because a resource of this module carries exactly one device.
 type DRBDConnection struct {
 	Name            string // peer-<replica id>
 	PeerNodeID      int
 	ConnectionState string
+
+	// ReplicationState is `peer_devices[].replication-state`: "Established"
+	// once the two sides are in sync and replicating, "SyncSource"/"SyncTarget"
+	// while a resync runs, "Off" while the connection is down.
+	ReplicationState string
+
+	// OutOfSyncKiB is `peer_devices[].out-of-sync`: the amount of data known to
+	// differ between the two sides, in KiB. It is drbdOutOfSyncUnknown when the
+	// node reported no peer device for this connection at all — an absent
+	// counter must never be read as "nothing is out of sync", which is exactly
+	// what a plain zero would say.
+	OutOfSyncKiB int
 }
+
+// drbdOutOfSyncUnknown marks an out-of-sync counter the node did not report.
+const drbdOutOfSyncUnknown = -1
 
 // Connected reports whether the connection is established right now.
 func (c DRBDConnection) Connected() bool {
 	return c.ConnectionState == drbdConnectionStateConnected
+}
+
+// InSync reports that the peer device carries no out-of-sync data. It is false
+// when the counter was not reported at all, so a claim about convergence can
+// never pass on a missing measurement.
+func (c DRBDConnection) InSync() bool {
+	return c.OutOfSyncKiB == 0
+}
+
+// String renders one connection for failure messages.
+func (c DRBDConnection) String() string {
+	oos := "unknown"
+	if c.OutOfSyncKiB != drbdOutOfSyncUnknown {
+		oos = fmt.Sprintf("%dKiB", c.OutOfSyncKiB)
+	}
+	return fmt.Sprintf("%s=%s repl=%s out-of-sync=%s", c.Name, c.ConnectionState, c.ReplicationState, oos)
 }
 
 // DRBDStatus is the runtime state of one resource on one node, parsed from
@@ -173,7 +208,7 @@ func (s DRBDStatus) String() string {
 		s.Name, s.Role, s.Minor, s.DiskState, s.IntentionalDiskless, s.Quorum,
 		s.Suspended, s.SuspendedQuorum))
 	for i := range s.Connections {
-		parts = append(parts, fmt.Sprintf("%s=%s", s.Connections[i].Name, s.Connections[i].ConnectionState))
+		parts = append(parts, s.Connections[i].String())
 	}
 	return strings.Join(parts, " ")
 }
@@ -479,6 +514,14 @@ type drbdStatusJSON struct {
 		Name            string `json:"name"`
 		PeerNodeID      int    `json:"peer-node-id"`
 		ConnectionState string `json:"connection-state"`
+		// PeerDevices is the per-volume half of a connection. drbdsetup spells
+		// this key with an underscore while every field inside it is hyphenated
+		// (drbd-utils, user/v9/drbdsetup.c); the agent's own parser
+		// (images/agent/pkg/drbdutils/status.go) reads the very same shape.
+		PeerDevices []struct {
+			ReplicationState string `json:"replication-state"`
+			OutOfSync        *int   `json:"out-of-sync"`
+		} `json:"peer_devices"`
 	} `json:"connections"`
 }
 
@@ -512,11 +555,29 @@ func parseDRBDStatus(out, resourceName string) (DRBDStatus, error) {
 		}
 		for j := range r.Connections {
 			c := &r.Connections[j]
-			st.Connections = append(st.Connections, DRBDConnection{
+			conn := DRBDConnection{
 				Name:            c.Name,
 				PeerNodeID:      c.PeerNodeID,
 				ConnectionState: c.ConnectionState,
-			})
+				OutOfSyncKiB:    drbdOutOfSyncUnknown,
+			}
+			// The resource carries exactly one device (checked above), so a
+			// connection carries exactly one peer device — unless the node
+			// reports none, which happens while a connection is being set up
+			// and must stay distinguishable from "reported zero".
+			if len(c.PeerDevices) > 1 {
+				return DRBDStatus{}, fmt.Errorf(
+					"drbd resource %q reports %d peer devices on connection %q, expected at most 1",
+					resourceName, len(c.PeerDevices), c.Name)
+			}
+			if len(c.PeerDevices) == 1 {
+				pd := &c.PeerDevices[0]
+				conn.ReplicationState = pd.ReplicationState
+				if pd.OutOfSync != nil {
+					conn.OutOfSyncKiB = *pd.OutOfSync
+				}
+			}
+			st.Connections = append(st.Connections, conn)
 		}
 		return st, nil
 	}

@@ -58,6 +58,22 @@ func statusJSONDevice(diskState string, deviceFields string) string {
 		diskState, deviceFields)
 }
 
+// statusJSONPeerDevices is a dump whose connections carry their peer device:
+// one peer fully caught up, one still carrying out-of-sync data. drbdsetup
+// spells the array key with an underscore and its fields with hyphens, which is
+// what makes this fixture worth having verbatim.
+const statusJSONPeerDevices = `[
+  {"name":"sdsrv-rv-1-0","node-id":0,"role":"Primary",
+   "suspended":false,"suspended-quorum":false,
+   "devices":[{"volume":0,"minor":1012,"disk-state":"UpToDate","client":false,"quorum":true}],
+   "connections":[
+     {"peer-node-id":1,"name":"peer-1","connection-state":"Connected",
+      "peer_devices":[{"volume":0,"replication-state":"Established","peer-disk-state":"UpToDate","out-of-sync":0}]},
+     {"peer-node-id":2,"name":"peer-2","connection-state":"Connected",
+      "peer_devices":[{"volume":0,"replication-state":"SyncSource","peer-disk-state":"Inconsistent","out-of-sync":4096}]}
+   ]}
+]`
+
 // showJSONTwoPeers is the matching `drbdsetup show --json` dump: the peer
 // identity lives in connections[].net._name, the voter threshold in
 // options.quorum.
@@ -120,6 +136,49 @@ var _ = Describe("parseDRBDStatus", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(st.Diskless()).To(BeTrue())
 		Expect(st.IntentionalDiskless).To(BeFalse())
+	})
+
+	It("reads the replication state and the out-of-sync counter of every connection", func() {
+		st, err := parseDRBDStatus(statusJSONPeerDevices, "sdsrv-rv-1-0")
+		Expect(err).NotTo(HaveOccurred())
+
+		caughtUp, ok := st.Connection("peer-1")
+		Expect(ok).To(BeTrue())
+		Expect(caughtUp.ReplicationState).To(Equal("Established"))
+		Expect(caughtUp.OutOfSyncKiB).To(Equal(0))
+		Expect(caughtUp.InSync()).To(BeTrue())
+
+		resyncing, ok := st.Connection("peer-2")
+		Expect(ok).To(BeTrue())
+		Expect(resyncing.ReplicationState).To(Equal("SyncSource"))
+		Expect(resyncing.OutOfSyncKiB).To(Equal(4096))
+		Expect(resyncing.InSync()).To(BeFalse())
+	})
+
+	It("reads an unreported out-of-sync counter as unknown, never as zero", func() {
+		// A connection the node reported no peer device for says nothing about
+		// convergence. Defaulting the counter to 0 would turn silence into
+		// "nothing is out of sync" and make a resync assertion pass vacuously.
+		st, err := parseDRBDStatus(statusJSONTwoPeers, "sdsrv-rv-1-0")
+		Expect(err).NotTo(HaveOccurred())
+
+		conn, ok := st.Connection("peer-1")
+		Expect(ok).To(BeTrue())
+		Expect(conn.OutOfSyncKiB).To(Equal(drbdOutOfSyncUnknown))
+		Expect(conn.InSync()).To(BeFalse())
+		Expect(conn.String()).To(ContainSubstring("out-of-sync=unknown"))
+	})
+
+	It("refuses a connection reporting more than one peer device", func() {
+		// A resource of this module carries exactly one device, so a connection
+		// with several peer devices is a resource this parser is not describing.
+		dump := `[{"name":"sdsrv-rv-1-0","devices":[{"volume":0,"minor":1012}],
+		  "connections":[{"peer-node-id":1,"name":"peer-1","connection-state":"Connected",
+		   "peer_devices":[{"volume":0,"out-of-sync":0},{"volume":1,"out-of-sync":0}]}]}]`
+
+		_, err := parseDRBDStatus(dump, "sdsrv-rv-1-0")
+
+		Expect(err).To(MatchError(ContainSubstring("reports 2 peer devices")))
 	})
 
 	It("reads the I/O freeze from the resource level, not from the device", func() {

@@ -174,6 +174,55 @@ func (j ioJournal) maxInterBeatGap() (gap time.Duration, endedBy *ioBeat) {
 	return gap, endedBy
 }
 
+// ioGap is one interval in which the writer published no beat — a window in
+// which nothing reached the device.
+//
+// It lives next to the journal rather than next to one of the workloads
+// because both of them (the node writer and the pod writer) read the same
+// journal grammar and need the same measurement: how many times the data path
+// stopped for longer than tolerated, and for how long.
+type ioGap struct {
+	// Duration is the distance between the two beats that bound the gap.
+	Duration time.Duration
+	// From and To are those beats' timestamps, on the writer's own clock.
+	From time.Time
+	To   time.Time
+	// FromSequence and ToSequence are their sequence numbers, which is what
+	// makes a gap findable in the journal.
+	FromSequence int64
+	ToSequence   int64
+}
+
+// String renders the gap for failure messages.
+func (g ioGap) String() string {
+	return fmt.Sprintf("%s between beats %d and %d (%s .. %s)",
+		g.Duration.Truncate(time.Millisecond), g.FromSequence, g.ToSequence,
+		g.From.Format("15:04:05"), g.To.Format("15:04:05"))
+}
+
+// gapsOver lists every gap between two consecutive verified writes that is
+// longer than threshold, oldest first. The COUNT matters as much as the
+// durations: a policy that tolerates one expected freeze has to be able to tell
+// one long gap from several.
+func (j ioJournal) gapsOver(threshold time.Duration) []ioGap {
+	var out []ioGap
+	for i := 1; i < len(j.Beats); i++ {
+		prev, cur := j.Beats[i-1], j.Beats[i]
+		gap := cur.At.Sub(prev.At)
+		if gap <= threshold {
+			continue
+		}
+		out = append(out, ioGap{
+			Duration:     gap,
+			From:         prev.At,
+			To:           cur.At,
+			FromSequence: prev.Sequence,
+			ToSequence:   cur.Sequence,
+		})
+	}
+	return out
+}
+
 // malformedRecordError marks a record that could not be parsed at all. The
 // tail may have caught the writer mid-append, so this is tolerated on the last
 // line — unlike a semantic violation such as a non-monotonic sequence, which

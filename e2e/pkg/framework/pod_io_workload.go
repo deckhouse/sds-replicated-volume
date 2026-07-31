@@ -978,21 +978,21 @@ func (w *PodIOWorkload) analyzeFreezes(ctx context.Context) (time.Duration, []Po
 
 // freezesOver lists every gap between two consecutive verified writes that is
 // longer than threshold.
+//
+// The measurement itself lives on the journal (ioJournal.gapsOver), which the
+// node workload uses as well; this only re-types it into the exported shape the
+// pod workload's API promises.
 func freezesOver(j ioJournal, threshold time.Duration) []PodIOFreeze {
-	var out []PodIOFreeze
-	for i := 1; i < len(j.Beats); i++ {
-		prev, cur := j.Beats[i-1], j.Beats[i]
-		gap := cur.At.Sub(prev.At)
-		if gap <= threshold {
-			continue
-		}
-		out = append(out, PodIOFreeze{
-			Duration:     gap,
-			From:         prev.At,
-			To:           cur.At,
-			FromSequence: prev.Sequence,
-			ToSequence:   cur.Sequence,
-		})
+	gaps := j.gapsOver(threshold)
+	if len(gaps) == 0 {
+		return nil
+	}
+	out := make([]PodIOFreeze, 0, len(gaps))
+	for _, g := range gaps {
+		// A plain conversion: the two structs describe the same measurement,
+		// and a field that drifts apart breaks this line at compile time rather
+		// than silently dropping a value.
+		out = append(out, PodIOFreeze(g))
 	}
 	return out
 }
