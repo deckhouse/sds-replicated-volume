@@ -1,5 +1,5 @@
 ---
-description: RFC-style writing conventions for .mdc rule files: normative keywords (MUST/SHOULD/MAY per BCP 14), term emphasis, Cursor frontmatter requirements (description required; include when-to-apply incl. decision-making; globs discouraged), language and style guidelines (CMOS-based), literals, examples, and section drafting checklist. Apply when writing, editing, or reviewing .cursor/rules/*.mdc files, and when deciding how to phrase/structure rule requirements. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: RFC-style writing conventions for .mdc rule files: normative keywords (MUST/SHOULD/MAY per BCP 14), term emphasis (defined terms in bold), Cursor frontmatter requirements (description required; include when-to-apply incl. decision-making; globs discouraged), language and style guidelines (CMOS-based), literals, examples, and section drafting checklist. Apply when writing, editing, or reviewing .cursor/rules/*.mdc files, and when deciding how to phrase/structure rule requirements. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 alwaysApply: false
 ---
 
@@ -42,10 +42,12 @@ Use BCP 14 key words (RFC 2119 / RFC 8174) only when you intend normative meanin
 
 ## 2. Terms and emphasis
 
-- Terms (words/phrases with a defined meaning in a Terminology / Definitions / Glossary section) MUST be written in italics on every mention.
-- Terms MUST NOT be bolded.
+- Terms (words/phrases with a defined meaning in a Terminology / Definitions / Glossary section) MUST be written in bold on every mention.
+- Terms MUST NOT be italicized; italics stay available for ordinary emphasis, so that a term is always distinguishable from an emphasized word.
 - Terms MUST NOT be left unformatted when used with their defined meaning.
-- If a term contains a literal token, keep the literal in inline code and italicize the term as a whole (for example: *`controller.go`*).
+- If a term contains a literal token, keep the literal in inline code and bold the term as a whole (for example: **`controller.go`**).
+
+Rationale: bold is the established convention of this rule corpus (see the controller rule files and the "Canonical term list" section of `controller-terminology.mdc`); the requirements above record that convention instead of introducing a new one.
 
 ##  3. Cursor frontmatter
 

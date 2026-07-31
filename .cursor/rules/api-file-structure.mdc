@@ -4,6 +4,8 @@ globs: api/v*/**/*.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Object prefixes (MUST):
   - Use short prefixes: `rv`, `rvr`, `rva`, `rsc`, `rsp`.
 

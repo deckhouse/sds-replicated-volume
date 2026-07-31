@@ -1,5 +1,5 @@
 ---
-description: Rules for controller package file structure (controller.go/predicates.go/reconciler.go/tests) and what belongs in each file. Apply when creating or editing controller packages under images/controller/internal/controllers/, and when deciding where to place controller logic. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Rules for controller package file structure (controller.go/predicates.go/the reconciler*.go family/tests, plus allowed runnable and computation components) and what belongs in each file. Apply when creating or editing controller packages under images/controller/internal/controllers/, when splitting reconciliation logic into reconciler_<area>.go files, and when deciding where to place controller logic. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/*.go
 alwaysApply: false
 ---
@@ -12,16 +12,19 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - **`predicates.go`** (required only when the controller uses controller-runtime **predicate**/**filter**s)
     - **`reconciler.go`**
     - **`reconciler_test.go`**
+  - Each **controller package** MAY additionally have area files of the **`reconciler*.go`** family (`reconciler_<area>.go`, with matching `reconciler_<area>_test.go`); see **Controller terminology**.
 
 - **`controller.go`** (MUST): **Wiring-only** **Entrypoint** (**builder chain**/**options**/**predicates**/**runnables**), no **Reconciliation business logic**.
   - See: `controller-controller.mdc`.
 
-- **`reconciler.go`** (MUST): all **Reconciliation business logic** for this controller.
+- **`reconciler*.go`** family (MUST): all **Reconciliation business logic** for this controller.
+  - The family consists of **`reconciler.go`** (required; owns the reconciler type/constructor and the **root Reconcile**) and any number of area files `reconciler_<area>.go` (see **Controller terminology**).
+  - **Reconciliation business logic** MUST NOT be placed in files outside this family; only the components listed below (**runnables**/**sources**, extracted computation/caching components) MAY live in their own files.
   - This includes the Controller POV pipeline: compute **intended**, observe **actual**, decide/enforce **target**, and compute/publish **report** (including persisting **controller-owned state** and **report** into Kubernetes POV **observed state** (`.status`) via the appropriate **patch domain**).
-  - Detailed rules for **phase** usage, **I/O** boundaries, **patch domains** and patterns: `controller-reconciliation.mdc`.
-  - **`reconciler.go`** MUST contain these categories of code:
+  - Detailed rules for **phase** usage, **I/O** boundaries, **patch domains** and patterns, and for the layout inside each file of the family: `controller-reconciliation.mdc`.
+  - The **`reconciler*.go`** family MUST contain these categories of code:
     - 1. **Reconcile method** functions/methods.
-      - MUST comply with: `controller-reconcile.mdc`.
+      - MUST comply with: `controller-reconciliation.mdc`.
       - Definition (MUST):
         - the controller-runtime `Reconcile(...)` method, and
         - any other function/method whose name starts with `reconcile*` / `Reconcile*`.
@@ -42,13 +45,14 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
       - SHOULD be rare; if a helper matches the **ReconcileHelper** naming or contracts, prefer making it a **ReconcileHelper**.
 
 - **`reconciler_test.go`** (MUST): tests for reconciliation behavior and edge cases.
+  - Unit tests of an area file of the **`reconciler*.go`** family SHOULD live in the matching `reconciler_<area>_test.go`; feature-scoped test files that drive the **root Reconcile** (for example, `reconciler_rollout_test.go`) MAY exist alongside them.
 
 - Additional **Wiring-only** / infra components (MAY): **manager** **runnables**/**sources** (not reconcilers, not pure helpers).
   - Allowed example:
     - `manager.Runnable`/`manager.LeaderElectionRunnable` initializers/sources that prepare or maintain in-memory state and expose it via a small interface (blocking + non-blocking access).
   - Notes:
     - These components MAY perform **Kubernetes API I/O** as part of initialization/maintenance.
-    - Their registration/wiring belongs to **`controller.go`** (`mgr.Add(...)`, indexes, sources, etc.); **Reconciliation business logic** still belongs to **`reconciler.go`**.
+    - Their registration/wiring belongs to **`controller.go`** (`mgr.Add(...)`, indexes, sources, etc.); **Reconciliation business logic** still belongs to the **`reconciler*.go`** family.
 
 - **`controlleroptions`** sibling package (MUST):
   - Each application that has controllers (e.g., `images/controller`, `images/agent`) MUST have a shared `controlleroptions` package at `<app>/internal/controllers/controlleroptions/options.go`.
@@ -62,4 +66,4 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - caching components to avoid repeated expensive computation (explicitly owned by the reconciler and easy to invalidate).
   - Constraints (MUST):
     - computation components MUST be pure: no **Kubernetes API I/O**, no patches, no **DeepCopy**, no time/random/env **I/O**.
-    - caching components MUST NOT hide **Kubernetes API I/O** inside themselves; **I/O** stays in **`reconciler.go`** or other **runnables**/**sources**.
+    - caching components MUST NOT hide **Kubernetes API I/O** inside themselves; **I/O** stays in the **`reconciler*.go`** family or other **runnables**/**sources**.

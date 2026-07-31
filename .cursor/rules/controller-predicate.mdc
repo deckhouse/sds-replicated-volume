@@ -1,5 +1,5 @@
 ---
-description: Rules for controller-runtime predicates/filters in predicates*.go: mechanical change detection only, no I/O, no domain logic, no mutations. Apply when editing images/controller/internal/controllers/**/predicates*.go, and when deciding whether logic belongs in predicates vs reconciliation. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Rules for controller-runtime predicates/filters in predicates*.go: mechanical change detection only, no I/O, no domain logic, no mutations, plus predicate-set function naming and casing (short kind name, unexported by default). Apply when editing images/controller/internal/controllers/**/predicates*.go, when naming a predicate set, and when deciding whether logic belongs in predicates or in the reconciler*.go family. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/predicates*.go
 alwaysApply: false
 ---
@@ -16,7 +16,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - by calling `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
     - Predicate implementation still lives in **`predicates.go`**.
     - When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
-  - **`reconciler.go`** MUST NOT contain **predicates**/**filters**.
+  - The **`reconciler*.go`** family MUST NOT contain **predicates**/**filters**: this holds for **`reconciler.go`** and for every `reconciler_<area>.go` file alike.
 
 - Scope (MUST):
   - This document applies only to **`predicates.go`**.
@@ -25,10 +25,11 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
 - What is allowed in **`predicates.go`** (MUST):
   - Definitions of predicate sets as **functions** (no package-level `var` predicates).
     Predicate-set function naming (MUST) follows this convention:
-    - `func <Kind>Predicates() []predicate.Predicate { ... }`
-    - `<Kind>` MUST either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
-    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
-    - Each such function returns **all** predicates needed for that `<Kind>` at the watch site where it is used.
+    - `func <kind>Predicates() []predicate.Predicate { ... }`
+    - `<kind>` MUST either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
+    - When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+    - The casing of `<kind>` MUST follow **short kind name spelling in symbols** (see `controller-terminology.mdc`): the leading token is all-lowercase in the default unexported form (`rvPredicates`, `drbdrPredicates`) and all-capitals in an exported one (`RVPredicates`).
+    - Each such function returns **all** predicates needed for that `<kind>` at the watch site where it is used.
   - Pure, **mechanical** comparisons of object fields to decide whether to enqueue a **reconcile request**.
   - Typed events (preferred): `event.TypedUpdateEvent[client.Object]`, etc.
   - **`predicates.go`** MUST NOT define controller-runtime builder wiring helpers:
@@ -44,15 +45,16 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
 
 - Naming and shape (SHOULD):
   - Predicate symbols SHOULD be unexported unless another package must reuse them.
+    - The unexported form of a predicate set is the default in this repository, and it does not conflict with the **short kind name** requirement above: the leading token is simply spelled in all lowercase (`rvPredicates`), per **short kind name spelling in symbols**.
   - Use names that reflect the filtered object kind:
-    - `<Kind>Predicates` (returns `[]predicate.Predicate`)
-    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` SHOULD use the **short kind name**.
+    - `<kind>Predicates` (returns `[]predicate.Predicate`)
+    - When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` SHOULD use the **short kind name**.
   - Avoid generic prefixes like `primary*` in concrete controllers; prefer naming by the actual watched kind.
 
 - Multiple predicate sets for the same kind (MAY):
-  - If you need distinct predicate sets for the same `<Kind>` (for example, different watches), you MAY add a short suffix **before** `Predicates`:
-    - `<Kind><Scope>Predicates`
-  - `<Scope>` MUST be a short, stable identifier in `PascalCase` and MUST NOT repeat `<Kind>`.
+  - If you need distinct predicate sets for the same `<kind>` (for example, different watches), you MAY add a short suffix **before** `Predicates`:
+    - `<kind><Scope>Predicates`
+  - `<Scope>` MUST be a short, stable identifier in `PascalCase` and MUST NOT repeat `<kind>`.
   - Typical scopes (illustrative): `Status`, `Spec`, `Child`, `Owner`, `Cast`.
   - Prefer one canonical set per kind; introduce multiple sets only when it improves clarity at the watch site.
 

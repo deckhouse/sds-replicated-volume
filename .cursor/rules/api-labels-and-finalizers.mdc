@@ -4,6 +4,8 @@ globs: api/v*/**/finalizers.go,api/v*/**/labels.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 ## Label keys (`labels.go`)
 
 - **Constant naming (MUST)**:

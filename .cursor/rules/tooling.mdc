@@ -3,6 +3,8 @@ description: Project tooling commands and safety policy: what the agent may run 
 alwaysApply: true
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 ## Canonical development commands (prefer these)
 
 - **Lint**: `bash hack/run-linter.sh`

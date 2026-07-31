@@ -4,6 +4,8 @@ globs: api/v*/**/*.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Kubebuilder markers & API changes (MUST):
   - If I add a new API object/type or modify an existing one in `api/` (especially changes to `// +kubebuilder:*` markers, validation markers, printcolumns, subresources, etc.), I MUST run code generation and include the regenerated outputs in the same change.
   - In this repo, run generation from the repository root:

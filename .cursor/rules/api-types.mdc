@@ -4,6 +4,8 @@ globs: api/v*/**/*_types.go,api/v*/**/common_types.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 ## Code layout: type-centric blocks (MUST)
 
 - **Type-centric blocks** MUST be used to organize code:
@@ -74,7 +76,7 @@ alwaysApply: false
       - `// +optional`
       - JSON tag: ``json:"conditions,omitempty"``.
     - MUST NOT use `+patchMergeKey`/`+patchStrategy` or their struct tags -- SMP does not apply to CRDs (see `api-list-types.mdc`).
-    - Condition Type/Reason constants are defined in `<objprefix>_conditions.go` only when they become standardized/used (see `conditions_rules.mdc`).
+    - Condition Type/Reason constants are defined in `<objprefix>_conditions.go` only when they become standardized/used (see `api-conditions.mdc`).
   - Every API **root object** that exposes `.status.conditions` MUST provide adapter methods to satisfy `api/objutilv1.StatusConditionObject`:
     - `GetStatusConditions() []metav1.Condition` (returns `o.Status.Conditions`)
     - `SetStatusConditions([]metav1.Condition)` (sets `o.Status.Conditions`)

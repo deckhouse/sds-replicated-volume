@@ -1,5 +1,5 @@
 ---
-description: Rules for controller package entrypoint wiring in controller.go (builder chain, options, predicates wiring) and strict separation from reconciliation business logic. Apply when editing images/controller/internal/controllers/**/controller*.go, and when deciding what belongs in controller.go vs reconciler.go. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Rules for controller package entrypoint wiring in controller.go (builder chain, options, predicate wiring and predicate-set naming) and strict separation from reconciliation business logic. Apply when editing images/controller/internal/controllers/**/controller*.go, and when deciding what belongs in controller.go vs the reconciler*.go family. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/controller*.go
 alwaysApply: false
 ---
@@ -14,7 +14,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     - are **mechanical** change detection (no **I/O**, no **domain/business** decisions),
     - live in **`predicates.go`**,
     - MUST NOT be implemented in **`controller.go`**.
-  - All **Reconciliation business logic** = **`reconciler.go`**.
+  - All **Reconciliation business logic** = the **`reconciler*.go`** family.
   - **controller name** string values are `kebab-case` (see **Controller terminology**).
 
 - **`controller.go`** purpose (MUST):
@@ -22,8 +22,8 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
   - If the controller needs event filtering, **`controller.go`** wires predicates by calling
     `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
-    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
-  - It MUST NOT contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name**, written according to **short kind name spelling in symbols** — for the unexported predicate sets of the same package, the leading token is all-lowercase (`rvPredicates`) (see `controller-terminology.mdc`).
+  - It MUST NOT contain **Reconciliation business logic** (that belongs to the **`reconciler*.go`** family).
 
 - ALLOW (in **`controller.go`**):
   - controller-runtime builder wiring:
@@ -37,7 +37,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - registering **runnables**/**sources** on the **manager** (wiring-only), e.g. `mgr.Add(...)`, indexes, **sources**.
 
 - DENY (in **`controller.go`**):
-  - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
+  - any functions that **compute/ensure/apply/reconcile** domain logic (must live in the **`reconciler*.go`** family).
   - implementing controller-runtime **predicates**/**filters**:
     - **`controller.go`** MUST NOT define `predicate.Funcs{...}` (or any other predicate implementation) inline.
     - All predicate implementations MUST live in **`predicates.go`** (see: `controller-predicate.mdc`).
@@ -116,7 +116,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - **predicates**/**filters** MUST be implemented in **`predicates.go`**.
   - **`controller.go`** MUST NOT contain predicate implementation code.
   - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
-    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name**, written according to **short kind name spelling in symbols** (see `controller-terminology.mdc`): `rvPredicates` for an unexported set, `RVPredicates` for an exported one.
   - See: `controller-predicate.mdc`.
 
 - MaxConcurrentReconciles (MUST):

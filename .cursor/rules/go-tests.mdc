@@ -4,6 +4,8 @@ globs: **/*_test.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Test fixtures & I/O (MUST):
   - Prefer embedding static fixtures with `//go:embed` into a `[]byte`.
   - Do NOT read fixtures from disk at runtime unless embedding is impossible.

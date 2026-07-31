@@ -1,5 +1,5 @@
 ---
-description: Common rules for ReconcileHelper functions/methods in reconciler.go: naming-by-category, signatures, determinism, aliasing, and I/O boundaries. Apply when implementing or reviewing reconcile helper functions in reconciler*.go, and when deciding helper categories or allowed side effects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Common rules for ReconcileHelper functions/methods in the reconciler*.go family: naming-by-category, signatures, determinism, aliasing, and I/O boundaries. Apply when implementing or reviewing reconcile helper functions in reconciler*.go, and when deciding helper categories or allowed side effects. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/reconciler*.go
 alwaysApply: false
 ---
@@ -31,7 +31,7 @@ Summary only; if anything differs, follow normative sections below.
 ## Terminology
 
 - **Reconcile methods**: the controller-runtime `Reconcile(...)` method and any other function/method whose name matches `reconcile*` / `Reconcile*` (see `controller-file-structure.mdc`).
-- **ReconcileHelper functions/methods**: any helper function/method used by **Reconcile methods**, implemented in `reconciler.go`, whose name matches one of the **ReconcileHelper categories** below.
+- **ReconcileHelper functions/methods**: any helper function/method used by **Reconcile methods**, implemented in the **`reconciler*.go`** family, whose name matches one of the **ReconcileHelper categories** below.
   - When referring to *any* helper from these categories, use **ReconcileHelper**.
   - When referring to a *specific kind* of helper, use the corresponding category name below.
 

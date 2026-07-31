@@ -3,6 +3,8 @@ description: Repository-wide Cursor/agent rules for this repo (formatting, chang
 alwaysApply: true
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Formatting & style (MUST):
   - Match existing formatting and indentation exactly.
 
@@ -44,10 +46,10 @@ alwaysApply: true
 - Controller development / design / review (MUST):
   - When developing, designing, or reviewing controllers under `images/controller/internal/controllers/`, you MUST consult and follow the controller-specific `.mdc` rules in `.cursor/rules/`:
     - `controller-terminology.mdc` — shared terminology and definitions used across all controller rule files.
-    - `controller-file-structure.mdc` — controller package file structure (`controller.go`/`predicates.go`/`reconciler.go`/tests).
+    - `controller-file-structure.mdc` — controller package file structure (`controller.go`/`predicates.go`/the **`reconciler*.go`** family/tests).
     - `controller-controller.mdc` — rules for `controller.go` (wiring, builder chain, predicates wiring).
     - `controller-predicate.mdc` — rules for `predicates.go` (mechanical change detection, no I/O, no domain logic).
-    - `controller-reconciliation.mdc` — rules for `Reconcile` method orchestration in `reconciler.go`.
+    - `controller-reconciliation.mdc` — rules for `Reconcile` method orchestration in the **`reconciler*.go`** family.
     - `controller-reconciliation-flow.mdc` — rules for using `lib/go/common/reconciliation/flow` (phases, outcomes).
     - `controller-reconcile-helper.mdc` — common rules for ReconcileHelper functions/methods.
     - `controller-reconcile-helper-*.mdc` — category-specific contracts (compute, apply, ensure, get, create, delete, patch, is-in-sync, construction).

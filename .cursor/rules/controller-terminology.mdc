@@ -1,5 +1,5 @@
 ---
-description: Shared controller terminology and definitions used across controller rule files. Apply when editing controller code under images/controller/internal/controllers/, and when reasoning/planning/answering questions that use these terms (controller.go/predicates.go/reconciler.go, patch domains, intended/actual/target/report). Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Shared controller terminology and definitions used across controller rule files, including the controller package file layout (controller.go/predicates.go/the reconciler*.go family), short kind names and their spelling in Go symbols (exported vs unexported), patch domains, and the intended/actual/target/report model. Apply when editing controller code under images/controller/internal/controllers/, when naming controller symbols or files, and when reasoning/planning/answering questions that use these terms. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: images/controller/internal/controllers/**/*.go,.cursor/rules/controller*.mdc
 alwaysApply: false
 ---
@@ -20,7 +20,7 @@ A **controller package** is a Go package under `images/controller/internal/contr
 
 - **`controller.go`** (**Wiring-only** setup)
 - **`predicates.go`** (predicate/**filter** implementations; required only when the package uses controller-runtime **predicate**/**filter**s)
-- **`reconciler.go`** (**Reconciliation business logic**)
+- **`reconciler*.go`** (**Reconciliation business logic**): **`reconciler.go`** and, optionally, additional area files
 - **`reconciler_test.go`** (tests) and/or other `*_test.go` files
 
 ### **`controller.go`**
@@ -37,14 +37,29 @@ A **controller package** is a Go package under `images/controller/internal/contr
 - It is referenced from the **builder chain** in **`controller.go`** via `builder.WithPredicates(<kind>Predicates()...)`.
 - It is optional, but when the controller uses any controller-runtime **predicate**/**filter**, **`predicates.go`** is required.
 
-### **`reconciler.go`**
-**`reconciler.go`** is the file that owns all **Reconciliation business logic** for the **controller package**, including:
+### **`reconciler*.go`** (**reconciler file family**)
+The **`reconciler*.go`** family (a.k.a. the **reconciler file family**) is the set of non-test files of a **controller package** whose names match `reconciler*.go`.
+The family owns all **Reconciliation business logic** of the **controller package**, including:
 
 - the controller-runtime `Reconcile(...)` method, and
 - other internal **Reconcile methods** and **ReconcileHelpers**.
 
+Family composition (MUST):
+
+- The family MUST contain **`reconciler.go`**.
+- Every other file of the family MUST be named `reconciler_<area>.go`, where `<area>` is a short `snake_case` name of the reconciliation area the file owns (for example, `reconciler_formation.go`, `reconciler_status.go`, `reconciler_get.go`).
+- **Reconciliation business logic** MUST live in the **`reconciler*.go`** family; it MUST NOT be placed in files outside the family. The components that MAY live next to the family — **Wiring-only** infra (**runnables**/**sources**) and extracted pure computation/caching components — are listed in `controller-file-structure.mdc`.
+
+### **`reconciler.go`**
+**`reconciler.go`** is the required entry file of the **`reconciler*.go`** family. It owns:
+
+- the reconciler type and its constructor (see `controller-reconciliation.mdc`),
+- the controller-runtime `Reconcile(...)` method (**root Reconcile**), and
+- every **Reconcile method** and **ReconcileHelper** that is not moved to an area file of the family.
+
 ### **`reconciler_test.go`**
 **`reconciler_test.go`** contains tests for reconciliation behavior and edge cases.
+Unit tests of an area file of the **`reconciler*.go`** family live in the matching `reconciler_<area>_test.go`; feature-scoped test files that drive the **root Reconcile** are used as well.
 
 ---
 
@@ -74,7 +89,8 @@ In this codebase it is defined as a package-level `const <XControllerName> = "<n
 
 ### **short kind name**
 A **short kind name** is a stable, codebase-established abbreviation used in Go symbol names that refer to a Kubernetes **object** kind
-(for example, controller helper names like `get<Kind>`, `patch<Kind>Status`, and predicate-set functions like `<Kind>Predicates`).
+(for example, controller helper names like `get<Kind>`, `patch<Kind>Status`, and predicate-set functions like `<kind>Predicates`).
+The casing of the token inside a symbol is defined below in **short kind name spelling in symbols**.
 
 In this repository:
 
@@ -89,6 +105,20 @@ Canonical short kind names for this repository's API kinds:
 - `ReplicatedStorageClass` → `RSC`
 - `ReplicatedStoragePool` → `RSP`
 - `DRBDResource` → `DRBDR`
+
+### **short kind name spelling in symbols**
+
+A **short kind name** is declared above as an all-capitals token (for example, `RV`). The term **short kind name spelling in symbols** covers how that token is written when it appears inside a Go symbol name; the spelling depends on the position of the token and on whether the symbol is exported.
+
+Spelling rules (MUST):
+
+- A token that is **not** the first element of the symbol name MUST keep its canonical all-capitals spelling, regardless of export status.
+  - Examples: `getRV`, `createRVR`, `patchRVStatus`, `applyDRBDRMetadata`.
+- A token that **is** the first element of the symbol name MUST match the export status of the symbol:
+  - exported symbol: the token keeps its canonical all-capitals spelling (for example, `RVPredicates`, `RSPPredicates`);
+  - unexported symbol: the whole token is written in lowercase (for example, `rvPredicates`, `rvrPredicates`, `drbdrPredicates`), and it MUST NOT be spelled with mixed case (not `rVPredicates`).
+
+Rationale: Go export status is encoded in the first letter of the symbol, so an all-capitals leading token would force the symbol to be exported. Lowercasing the whole leading token keeps the token recognizable while letting the symbol stay unexported (see `controller-predicate.mdc` for the default export status of **predicate** symbols).
 
 ### **manager**
 The **manager** is the controller-runtime **`manager.Manager`** instance.
@@ -141,7 +171,7 @@ In this codebase, **predicates** are intended for **mechanical** change detectio
 
 ### **Wiring-only** vs **Reconciliation business logic**
 - **Wiring-only**: configuration/registration code (builder/**watches**/options/**runnables**/**predicates** construction). No Kubernetes API reads/writes beyond **manager** wiring.
-- **Reconciliation business logic** (a.k.a. **domain/business** logic): any logic that computes **intended**, observes **actual**, decides/applies **target**, computes **report** (and persists **controller-owned state** when needed), performs orchestration, decides patch sequencing, or writes to the API server. Lives in **`reconciler.go`**.
+- **Reconciliation business logic** (a.k.a. **domain/business** logic): any logic that computes **intended**, observes **actual**, decides/applies **target**, computes **report** (and persists **controller-owned state** when needed), performs orchestration, decides patch sequencing, or writes to the API server. Lives in the **`reconciler*.go`** family.
 
 ### **mechanical** vs **domain/business**
 A step is **mechanical** when it is a straightforward technical operation that does not encode **domain/business** policy (e.g., “compare **Generation**”, “copy desired labels into obj”, “execute one Patch call”).
@@ -637,16 +667,19 @@ This section applies to **.mdc** rules that describe how to write controllers in
 ### Canonical term list
 
 Below is the list of terms (without definitions) that are defined in **Controller terminology**. Use these spellings consistently across controller rules:
-Terms MUST be written in italics on every mention (see `rfc-like-mdc.mdc`).
+Terms MUST be written in bold on every mention (see `rfc-like-mdc.mdc`).
 
 - **controller package**
 - **`controller.go`**
 - **`predicates.go`**
+- **`reconciler*.go`**
+- **reconciler file family**
 - **`reconciler.go`**
 - **`reconciler_test.go`**
 - **Entrypoint**
 - **controller name**
 - **short kind name**
+- **short kind name spelling in symbols**
 - **manager**
 - **Manager-owned dependencies**
 - **builder chain**

@@ -1,5 +1,5 @@
 ---
-description: Kubebuilder marker hygiene rules for CEL expressions, gofmt smart quote avoidance, and typographic character detection. Apply when writing or editing kubebuilder markers (especially XValidation with CEL), when reviewing API types under api/v*/, and when debugging unexpected character transformations in comments. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
+description: Kubebuilder marker hygiene rules for CEL expressions, gofmt smart quote avoidance, typographic character detection, and the exact scope of the non-ASCII punctuation prohibition (codegen markers — kubebuilder and plain — plus CEL expressions only; Go doc comments and Markdown are out of scope). Apply when writing or editing kubebuilder markers (especially XValidation with CEL), when reviewing API types under api/v*/, when judging whether a Unicode character is a violation, and when debugging unexpected character transformations in comments. Apply when editing relevant files, and when reasoning/planning/answering questions where this rule could influence code decisions (even if matching files are not currently open).
 globs: api/v*/**/*.go
 alwaysApply: true
 ---
@@ -56,9 +56,28 @@ Adding a tab character before the `+` in the marker causes `gofmt` to treat the 
 
 Note: The tab character is between `//` and `+`. This approach is less preferred because it is subtle and easy to lose during edits.
 
+## Scope of the non-ASCII punctuation prohibition (MUST)
+
+Non-ASCII punctuation breaks parsing and semantics only where it is consumed as code, so this document prohibits it exactly there and nowhere else.
+
+In scope:
+
+- the content of every codegen marker, that is, any comment line whose text starts with `+` and is consumed by `controller-gen` or another code generator — both the `+kubebuilder:...` markers and the plain ones (`+listType`, `+listMapKey`, `+optional`, `+groupName`, and the like) — including marker arguments such as `rule=`, `message=`, `default=`, and `enum=`;
+- CEL expressions wherever they appear: marker `rule=`/`message=` values, the generated CRD manifests under `crds/`, and CEL test fixtures.
+
+In the locations above, non-ASCII punctuation MUST NOT be used — in particular the characters listed in "Detecting typographic characters" below (U+2018, U+2019, U+201C, U+201D, U+2013, U+2014). Use the ASCII equivalents from the same table.
+
+Out of scope:
+
+- Go doc comments and ordinary Go comments, outside the codegen marker lines they may surround;
+- Markdown documents, including `.mdc` rule files, skills, and package `README`s;
+- generated CRD `description` fields that copy such comments verbatim.
+
+Non-ASCII punctuation is allowed in the out-of-scope locations, and a reviewer MUST NOT report it there as a violation of this document. When a doc comment mixes prose and markers, only the marker lines are in scope.
+
 ## Detecting typographic characters (MUST)
 
-When reviewing or debugging kubebuilder markers, you MUST check for typographic/Unicode characters that should not be present in code:
+When reviewing or debugging codegen markers, you MUST check the in-scope locations (see above) for typographic/Unicode characters that must not appear there:
 
 | Bad character | Unicode | Hex bytes (UTF-8) | Should be |
 |---------------|---------|-------------------|-----------|
@@ -77,7 +96,7 @@ Use `xxd` or `hexdump` to inspect suspicious lines:
 sed -n '<line>p' <file> | xxd | grep -E "e2 80"
 ```
 
-If you see `e2 80 9c`, `e2 80 9d`, `e2 80 98`, or `e2 80 99` in the output, the file contains typographic quotes that will cause problems.
+If you see `e2 80 9c`, `e2 80 9d`, `e2 80 98`, or `e2 80 99` in the output, the inspected line contains typographic quotes; they will cause problems whenever that line is in scope (see "Scope of the non-ASCII punctuation prohibition").
 
 ### How to fix
 

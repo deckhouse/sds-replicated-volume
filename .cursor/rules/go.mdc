@@ -3,5 +3,7 @@ description: Go formatting requirement: run gofmt/go fmt on modified Go files. A
 alwaysApply: true
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Formatting (MUST):
   - After making changes to Go code, run `gofmt` (or `go fmt`) on the modified files before finalizing the change.

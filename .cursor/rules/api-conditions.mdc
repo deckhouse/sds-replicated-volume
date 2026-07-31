@@ -4,8 +4,10 @@ globs: api/v*/**/*_conditions.go
 alwaysApply: false
 ---
 
+Normative keywords used in this document are defined in `rfc-like-mdc.mdc`.
+
 - Condition constants naming:
-  - Every API object `Status` MUST expose `.status.conditions` (`[]metav1.Condition`) (see `types_rules.mdc`).
+  - Every API object `Status` MUST expose `.status.conditions` (`[]metav1.Condition`) (see `api-types.mdc`).
   - Any API object that has at least one standardized/used condition MUST have its own condition type/reason constants scoped by object name.
   - If the API type exposes `.status.conditions` but there are **no** standardized/used conditions yet:
     - The `Conditions` field MUST remain in the API (it is part of the contract).
