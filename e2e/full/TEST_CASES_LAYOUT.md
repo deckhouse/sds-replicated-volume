@@ -628,6 +628,34 @@ Then:
   `status.alertStatus=firing`. ⚡ The label match is what makes the assertion
   specific: "some layout alert is firing" would also pass on an alert about a
   volume this spec never touched.
-- Resolution after the repair is **not** asserted: the retention and the
-  resolve behaviour of the alerts-receiver are unverified. Check it by eye on the
-  first real run and record the result here.
+- Resolution after the repair is **not** asserted by the spec: the retention and
+  the resolve behaviour of the alerts-receiver are outside what a spec can
+  reasonably wait for. It was verified by hand instead — result below.
+
+  **Verified 2026-07-31 on `storage-load-test`** (two green runs of this spec,
+  read back from Prometheus as `ALERTS{alertname="D8ReplicatedVolumeLayoutDegraded"}`
+  over a 2 h range; times are the stand's local time):
+
+  | run | `pending` | `firing` | after |
+  | --- | --- | --- | --- |
+  | `a4ed8f` | 04:59:32 → 05:13:32 (15 samples) | 05:14:32 → 05:15:32 | series gone |
+  | `1bbbbf` | 04:03:32 → 04:17:32 (15 samples) | 04:18:32 → 04:20:32 | series gone |
+
+  So the whole lifecycle works: 14 min of `pending` (the rule's `for: 15m`),
+  then `firing`, then the series disappears and with it the `ClusterAlert` —
+  `kubectl get clusteralerts` carried no `D8ReplicatedVolumeLayoutDegraded`
+  20 minutes later.
+
+  Two things the same data shows, both worth keeping:
+
+  - **`for: 15m` really does filter noise.** Volumes degraded briefly by other
+    specs (`e2e-a4ed8f-50432737-a1-4`, `e2e-1bbbbf-8a742b5d-a1-1`,
+    `e2e-1bbbbf-f52b54e5-a1-1`) reached `pending` for 1–8 samples and vanished
+    without ever firing. A repair that lands inside the window produces no alert
+    at all — which is the intended operator experience.
+  - **What is still unobserved:** the resolve above followed this spec's cleanup
+    *deleting* the degraded volumes (the collector emits no series for a deleted
+    RV). A volume that fires and is then repaired **in place** — diskful restored,
+    layout converged, volume still present — was not caught in the act. The
+    mechanism is the same (the series returns to `1` and stops matching the rule),
+    but if that path ever matters for a runbook, watch it once explicitly.
