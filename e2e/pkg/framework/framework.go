@@ -84,6 +84,53 @@ type Framework struct {
 	podNameCache       map[podCacheKey]string
 	nsenterBinResolved string // protected by podCacheMu; resolved lazily by resolveNsenterBin
 	specCounters       map[any]int
+
+	// nodeRun overrides how node commands are executed. It stays nil against a
+	// real cluster (pod exec) and is set by helper unit tests to a stub runner.
+	nodeRun nodeRunner
+
+	// metricsScrape overrides how the controller's /metrics endpoint is read. It
+	// stays nil against a real cluster (pod proxy through the API server) and is
+	// set by helper unit tests to a stub scraper.
+	metricsScrape metricsScraper
+
+	// preDiscovery is the bootstrap hook registered with WithPreDiscovery. It
+	// stays nil for a suite that runs against an already-installed module.
+	preDiscovery func(ctx context.Context, f *Framework) error
+}
+
+// SetupOption customizes the Framework built by Setup. Every option has a
+// default that reproduces the plain Setup() behavior, so a suite passes only
+// what it deviates in.
+type SetupOption func(*Framework)
+
+// WithPreDiscovery registers a bootstrap hook that runs INSIDE
+// SynchronizedBeforeSuite, right after the Kubernetes clients are built and
+// BEFORE the framework detects the control plane and discovers the cluster.
+//
+// That position is the point of the option: discovery reads the module's own
+// objects (RSPs, eligible nodes) and the control-plane detection lists the
+// module's Deployments, so both are meaningless — or, worse, quietly resolve to
+// ControlPlaneOld and cascade into skips — until the module is installed. A hook
+// that installs it (f.EnsureModuleVersion) therefore has to run before them, not
+// in a BeforeAll.
+//
+// The hook receives the suite's SpecContext and the Framework with Client,
+// Cache, Scheme and clientset ready; Discovery is nil at that moment. An error
+// it returns fails the suite.
+//
+// It runs in the SECOND function of SynchronizedBeforeSuite, i.e. once per
+// Ginkgo worker, and every worker enters it at the same time. A suite using it is
+// expected to run with --procs=1 (exactly one call), and the hook MUST still be
+// idempotent so that an accidental parallel run only slows the suite down instead
+// of breaking it. Idempotent here has to include losing a write to a sibling
+// worker: two callers reading the same object and then writing it get
+// AlreadyExists or Conflict, and a hook that reports those as errors fails the
+// suite (EnsureModuleVersion re-reads and retakes the decision instead).
+//
+// Default (option not passed): no hook, and Setup behaves exactly as before.
+func WithPreDiscovery(hook func(ctx context.Context, f *Framework) error) SetupOption {
+	return func(f *Framework) { f.preDiscovery = hook }
 }
 
 // Setup creates an empty Framework and registers Ginkgo lifecycle hooks.
@@ -92,15 +139,21 @@ type Framework struct {
 // The returned pointer is populated during SynchronizedBeforeSuite when the
 // cluster is discovered. The run ID is generated on worker 1 and broadcast
 // to all parallel workers.
-func Setup() *Framework {
+//
+// Options customize the lifecycle; see WithPreDiscovery.
+func Setup(opts ...SetupOption) *Framework {
 	ctrl.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	f := &Framework{}
+	for _, opt := range opts {
+		opt(f)
+	}
 
 	mult := parseTimeoutMultiplier(os.Getenv("E2E_TIMEOUT_MULTIPLIER"))
 	registerTimeoutPolicy(mult)
 	registerRequirementsTransformer()
 	registerDisruptiveTransformer()
+	registerLongHaulTransformer()
 
 	SynchronizedBeforeSuite(func(_ SpecContext) []byte {
 		return []byte(generateRunID())
@@ -135,6 +188,7 @@ func Setup() *Framework {
 	JustBeforeEach(func() {
 		enforceRequirements(f)
 		enforceDisruptive()
+		enforceLongHaul()
 	})
 
 	return f
@@ -196,6 +250,16 @@ func (f *Framework) init(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	f.clientset = clientset
 
+	// Bootstrap hook, if any, BEFORE the control-plane detection below and before
+	// newDiscovery: both read state that only exists once the module is installed.
+	if f.preDiscovery != nil {
+		fmt.Fprintln(GinkgoWriter, "[Setup] pre-discovery hook starting...")
+		if err := f.preDiscovery(ctx, f); err != nil {
+			Fail(fmt.Sprintf("pre-discovery hook: %v", err))
+		}
+		fmt.Fprintln(GinkgoWriter, "[Setup] pre-discovery hook done")
+	}
+
 	var deploys appsv1.DeploymentList
 	Expect(c.List(ctx, &deploys, client.InNamespace("d8-sds-replicated-volume"))).To(Succeed())
 	for i := range deploys.Items {
@@ -256,11 +320,15 @@ func (f *Framework) autoName(sample client.Object, name ...string) string {
 // in specCounters, separate from any client.Object type.
 type uniqueNameKey struct{}
 
-// UniqueName returns a per-spec unique name suitable for arbitrary resources
-// (not tied to a Kubernetes object type). Each call within the same spec
-// increments an independent counter, producing names like
-// "e2e-{runID}-{specHash}-a{attempt}-{suffix}" or
-// "e2e-{runID}-{specHash}-a{attempt}-{N}" when no suffix is given.
+// UniqueName returns a name unique to the current spec, suitable for arbitrary
+// resources (not tied to a Kubernetes object type).
+//
+// Without a suffix, each call increments an independent counter and therefore
+// returns a name of its own ("e2e-{runID}-{specHash}-a{attempt}-{N}"). A suffix
+// replaces that counter with a readable label
+// ("e2e-{runID}-{specHash}-a{attempt}-{suffix}"), which makes the name stable
+// within the spec — the same suffix always yields the same name. Callers that
+// need one name per call MUST NOT expect a fixed suffix to provide it.
 func (f *Framework) UniqueName(suffix ...string) string {
 	report := CurrentSpecReport()
 	h := fnv.New32a()

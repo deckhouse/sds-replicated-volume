@@ -298,3 +298,127 @@ var _ = Describe("Settle TB transitions", func() {
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Left datamesh successfully"))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TieBreaker replacement window (strict create-first)
+//
+
+// makeOperational marks an RVR as fully configured for the given datamesh revision and
+// reporting a Connected connection to each named peer — what isTieBreakerOperational requires.
+func makeOperational(rvr *v1alpha1.ReplicatedVolumeReplica, revision int64, peerNames ...string) {
+	rvr.Generation = 1
+	rvr.Status.DatameshRevision = revision
+	rvr.Status.Conditions = []metav1.Condition{{
+		Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Configured",
+		ObservedGeneration: 1,
+	}}
+	rvr.Status.Peers = nil
+	for _, p := range peerNames {
+		rvr.Status.Peers = append(rvr.Status.Peers, mkPeerConnected(p))
+	}
+}
+
+// findRequest returns the replica request with the given name.
+func findRequest(rv *v1alpha1.ReplicatedVolume, name string) *v1alpha1.ReplicatedVolumeDatameshReplicaRequest {
+	for i := range rv.Status.DatameshReplicaRequests {
+		if rv.Status.DatameshReplicaRequests[i].Name == name {
+			return &rv.Status.DatameshReplicaRequests[i]
+		}
+	}
+	return nil
+}
+
+// hasTransition reports whether a transition of the given type exists.
+func hasTransition(rv *v1alpha1.ReplicatedVolume, tt v1alpha1.ReplicatedVolumeDatameshTransitionType) bool {
+	for i := range rv.Status.DatameshTransitions {
+		if rv.Status.DatameshTransitions[i].Type == tt {
+			return true
+		}
+	}
+	return false
+}
+
+var _ = Describe("TieBreaker replacement (strict create-first)", func() {
+	// Full replacement cycle of the only tie-breaker of an r2 volume (2D+1TB): the old
+	// tie-breaker is terminating (its RVR is being deleted, the finalizer holds it) and asked
+	// to leave, while rv_controller creates a replacement on a free node. The datamesh must
+	// keep the old tie-breaker until the replacement is OPERATIONAL, then release it.
+	It("keeps the old tie-breaker until its replacement is operational, then releases it", func() {
+		ctx := context.Background()
+		rsp := mkRSP("node-1", "node-2", "node-3", "node-4")
+
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rv.Status.Configuration = &v1alpha1.ReplicatedVolumeConfiguration{
+			ReplicatedStoragePoolName: "test-pool", Topology: v1alpha1.TopologyIgnored,
+			VolumeAccess:       v1alpha1.VolumeAccessPreferablyLocal,
+			FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+		}
+		d0 := mkRVR("rv-1-0", "node-1", 5)
+		d1 := mkRVR("rv-1-1", "node-2", 5)
+		oldTB := mkRVR("rv-1-2", "node-3", 5)
+		oldTB.DeletionTimestamp = ptr.To(metav1.Now())
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{d0, d1, oldTB}
+
+		// ── Phase 1: no replacement exists → the departure stays blocked ──────
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).NotTo(BeNil(),
+			"the terminating tie-breaker keeps protecting the volume")
+		Expect(findRequest(rv, "rv-1-2").Message).To(ContainSubstring("TieBreaker required"))
+
+		// ── Phase 2: the replacement RVR is created and asks to join ──────────
+		newTB := mkRVR("rv-1-3", "node-4", 0)
+		rvrs = append(rvrs, newTB)
+		rv.Status.DatameshReplicaRequests = append(rv.Status.DatameshReplicaRequests,
+			mkJoinRequestTB("rv-1-3"))
+
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(hasTransition(rv, v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica)).To(BeTrue())
+		Expect(hasTransition(rv, v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica)).To(BeFalse())
+
+		// The join is confirmed by every replica applying the new revision.
+		simulateRevisionBump(rv, rvrs)
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(4), "replacement window: 2D+2TB")
+		Expect(findRequest(rv, "rv-1-3").Message).To(Equal("Joined datamesh successfully"))
+
+		// ── Phase 3: member, but not operational yet → still blocked ──────────
+		// Joining only proves that the agents applied the revision, not that DRBD connections
+		// were established.
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(hasTransition(rv, v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica)).To(BeFalse())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).NotTo(BeNil())
+		Expect(findRequest(rv, "rv-1-2").Message).To(ContainSubstring("rv-1-3: DRBD is not configured"))
+
+		// ── Phase 4: the replacement becomes operational → release ────────────
+		revision := rv.Status.DatameshRevision
+		makeOperational(newTB, revision, "rv-1-0", "rv-1-1")
+
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(hasTransition(rv, v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica)).To(BeTrue())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2")).To(BeNil())
+
+		// The leaving replica confirms by resetting its revision to 0.
+		simulateRevisionBump(rv, rvrs)
+		oldTB.Status.DatameshRevision = 0
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, FeatureFlags{})
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(findRequest(rv, "rv-1-2").Message).To(Equal("Left datamesh successfully"))
+
+		// ── Final state: 2D+1TB on the replacement ────────────────────────────
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(3))
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-3").Type).To(
+			Equal(v1alpha1.DatameshMemberTypeTieBreaker))
+	})
+})

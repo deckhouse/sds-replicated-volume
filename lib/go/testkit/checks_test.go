@@ -113,6 +113,52 @@ var _ = Describe("After", func() {
 		to.mu.RUnlock()
 	})
 
+	It("arms from the snapshot the object is already in", func() {
+		to := NewTrackedObject(nil, nil, schema.GroupVersionKind{}, "chk-rvr", Lifecycle[*testObj]{})
+
+		to.InjectEvent(watch.Added, makeRVR("chk-rvr", "Healthy"))
+		to.After(match.Phase("Healthy"), match.PhaseNot("Critical"))
+
+		// The trigger fired before registration, so without arming from the
+		// current snapshot this regression would go unnoticed.
+		to.InjectEvent(watch.Modified, makeRVR("chk-rvr", "Critical"))
+
+		to.mu.RLock()
+		Expect(to.failedErr).NotTo(BeNil())
+		to.mu.RUnlock()
+	})
+
+	It("stays dormant when the object has not hit the trigger yet", func() {
+		to := NewTrackedObject(nil, nil, schema.GroupVersionKind{}, "chk-rvr", Lifecycle[*testObj]{})
+
+		to.InjectEvent(watch.Added, makeRVR("chk-rvr", "Pending"))
+		to.After(match.Phase("Healthy"), match.PhaseNot("Critical"))
+
+		to.InjectEvent(watch.Modified, makeRVR("chk-rvr", "Critical"))
+
+		to.mu.RLock()
+		Expect(to.failedErr).To(BeNil())
+		to.mu.RUnlock()
+	})
+
+	It("does not arm from the last snapshot of a deleted object", func() {
+		to := NewTrackedObject(nil, nil, schema.GroupVersionKind{}, "chk-rvr", Lifecycle[*testObj]{})
+
+		to.InjectEvent(watch.Added, makeRVR("chk-rvr", "Healthy"))
+		to.InjectEvent(watch.Deleted, makeRVR("chk-rvr", "Healthy"))
+
+		// The object is gone; its dying state must not arm the check. Arming here
+		// would survive resetLocked (which clears snapshots but not checks) and fire
+		// on the first snapshot of a reincarnation that legitimately starts unhealthy.
+		to.After(match.Phase("Healthy"), match.PhaseNot("Critical"))
+
+		to.InjectEvent(watch.Added, makeRVR("chk-rvr", "Critical"))
+
+		to.mu.RLock()
+		Expect(to.failedErr).To(BeNil())
+		to.mu.RUnlock()
+	})
+
 	It("check runs on the snapshot that triggers", func() {
 		to := NewTrackedObject(nil, nil, schema.GroupVersionKind{}, "chk-rvr", Lifecycle[*testObj]{})
 		to.After(match.Phase("Healthy"), match.Phase("Healthy"))

@@ -34,19 +34,19 @@ func rspPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// Be conservative if objects are nil.
-				if e.ObjectOld == nil || e.ObjectNew == nil {
+				// Type-assert first, then read. This single guard is conservative for every
+				// unclassifiable event: an untyped-nil interface and a wrong-typed object both give
+				// ok == false, and a typed nil pointer gives ok == true with a nil value (caught by
+				// the nil check). It MUST run before GetGeneration, which promotes a method on the
+				// embedded ObjectMeta value and would panic on a typed nil.
+				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
 					return true
 				}
 
 				// Generation change (spec updates).
-				if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
-					return true
-				}
-
-				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
-				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
-				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+				if newRSP.GetGeneration() != oldRSP.GetGeneration() {
 					return true
 				}
 
@@ -67,23 +67,44 @@ func rspPredicates() []predicate.Predicate {
 
 // rvPredicates returns predicates for ReplicatedVolume events.
 // Filters to only react to changes in:
+//   - metadata.generation (the volume aggregate classifies conditions by freshness, i.e. by
+//     condition ObservedGeneration against metadata.generation)
 //   - spec.replicatedStorageClassName (storage class reference)
-//   - status.configurationObservedGeneration (observed RSC state for acknowledgment tracking)
+//   - status.configurationGeneration (the configuration generation the volume applied)
+//   - status.configurationObservedGeneration (the newest configuration generation it has seen)
 //   - ConfigurationReady condition
 //   - SatisfyEligibleNodes condition
+//   - MembershipLayoutConverged condition (feeds the aligned/stale volume aggregate)
 func rvPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			GenericFunc: func(event.TypedGenericEvent[client.Object]) bool { return false },
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				// Type-assert first, then read. This single guard is conservative for every
+				// unclassifiable event: an untyped-nil interface and a wrong-typed object both give
+				// ok == false, and a typed nil pointer gives ok == true with a nil value (caught by
+				// the nil check). It MUST run before GetGeneration, which promotes a method on the
+				// embedded ObjectMeta value and would panic on a typed nil.
 				oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
 				newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
 				if !okOld || !okNew || oldRV == nil || newRV == nil {
 					return true
 				}
 
+				// Generation change (spec updates): reconciliation is condition-driven and
+				// reads condition ObservedGeneration, so a bumped generation alone already
+				// changes how every condition of this volume is classified.
+				if newRV.GetGeneration() != oldRV.GetGeneration() {
+					return true
+				}
+
 				// Storage class reference change.
 				if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+					return true
+				}
+
+				// Applied configuration generation change.
+				if oldRV.Status.ConfigurationGeneration != newRV.Status.ConfigurationGeneration {
 					return true
 				}
 
@@ -96,6 +117,7 @@ func rvPredicates() []predicate.Predicate {
 					oldRV, newRV,
 					v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 					v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+					v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
 				)
 			},
 		},

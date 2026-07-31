@@ -413,6 +413,14 @@ func rctxByID(gctx *globalContext, id uint8) *ReplicaContext {
 	return gctx.replicas[id]
 }
 
+// setDiskState gives the member's RVR a backing volume in the given state. It models the second
+// way a replica fails the UpToDate criterion (a backing volume that is not UpToDate); the first
+// one — no backing volume at all — is what mkZonalGctx produces for upToDate=false.
+func setDiskState(gctx *globalContext, id uint8, state v1alpha1.DiskState) {
+	rctxByID(gctx, id).rvr.Status.BackingVolume =
+		&v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{State: state}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // guardGMDRPreserved
 //
@@ -451,6 +459,72 @@ var _ = Describe("guardGMDRPreserved", func() {
 		)
 		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeTrue())
+	})
+
+	// ── №3: the subject is subtracted only when it is itself UpToDate ─────────
+	//
+	// Losing a replica that holds no UpToDate copy does not reduce redundancy, so modelling it
+	// as "one UpToDate copy fewer" blocks legitimate transitions (the degraded replica is the
+	// best retype candidate — there is nothing to lose on it).
+
+	It("pass: 3D, GMDR=1, subject has no backing volume → ADR=2 > 1", func() {
+		gctx := mkGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", false}, // subject: no backing volume
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3D, GMDR=1, subject's backing volume is not UpToDate → ADR=2 > 1", func() {
+		gctx := mkGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		setDiskState(gctx, 0, v1alpha1.DiskStateInconsistent) // subject is syncing
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: 2D, GMDR=1, subject not UpToDate → ADR=1 ≤ 1 (relaxation is exactly one copy)", func() {
+		gctx := mkGctx(0, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		)
+		r := guardGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+	})
+
+	It("does not block RemoveReplica(D) of a replica that holds no UpToDate copy", func() {
+		// The guard is shared by every lose-voter plan through loseVoterGuardsCommon
+		// (RemoveReplica(D), D→A, D→sD, D→TB), so the relaxation is not specific to the retype
+		// path: 3D at GMDR=1 with a degraded subject leaves two UpToDate copies either way.
+		rv := mkRV(5,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkLeaveRequest("rv-1-2")},
+			nil,
+		)
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
+		rv.Status.Datamesh.QuorumMinimumRedundancy = 2 // GMDR=1 → qmr=2, already settled
+		rv.Status.BaselineGuaranteedMinimumDataRedundancy = 1
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5),
+			mkRVRUpToDate("rv-1-1", "node-2", 5),
+			mkRVR("rv-1-2", "node-3", 5), // the leaving replica holds no UpToDate copy
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, nil, rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Type).
+			To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica))
 	})
 })
 
@@ -496,11 +570,97 @@ var _ = Describe("guardFTTPreserved", func() {
 		r := guardFTTPreserved(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeTrue())
 	})
+
+	// Pins the block threshold to D_min = FTT+GMDR+1 (via v1alpha1.IntendedDiskfulCount) across the
+	// valid FTT/GMDR grid, checking both sides of the boundary: exactly D_min voters must block
+	// (removing one would drop below the FTT guarantee), one more voter must pass.
+	DescribeTable("threshold D_min = FTT+GMDR+1 across the valid grid (boundary both sides)",
+		func(ftt, gmdr byte, dMin int) {
+			diskful := func(n int) []zoneMember {
+				ms := make([]zoneMember, n)
+				for i := range ms {
+					ms[i] = zoneMember{uint8(i), v1alpha1.DatameshMemberTypeDiskful, "", true}
+				}
+				return ms
+			}
+			atMin := mkGctx(ftt, gmdr, diskful(dMin)...)
+			Expect(guardFTTPreserved(atMin, rctxByID(atMin, 0)).Blocked).
+				To(BeTrue(), "voters == D_min must block")
+			aboveMin := mkGctx(ftt, gmdr, diskful(dMin+1)...)
+			Expect(guardFTTPreserved(aboveMin, rctxByID(aboveMin, 0)).Blocked).
+				To(BeFalse(), "voters == D_min+1 must pass")
+		},
+		Entry("FTT=0,GMDR=0 → D_min=1", byte(0), byte(0), 1),
+		Entry("FTT=1,GMDR=0 → D_min=2", byte(1), byte(0), 2),
+		Entry("FTT=0,GMDR=1 → D_min=2", byte(0), byte(1), 2),
+		Entry("FTT=1,GMDR=1 → D_min=3", byte(1), byte(1), 3),
+		Entry("FTT=1,GMDR=2 → D_min=4", byte(1), byte(2), 4),
+		Entry("FTT=2,GMDR=1 → D_min=4", byte(2), byte(1), 4),
+		Entry("FTT=2,GMDR=2 → D_min=5", byte(2), byte(2), 5),
+	)
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
 // guardTBSufficient
 //
+
+// guardRevision is the datamesh revision used by the operational-tie-breaker fixtures below.
+const guardRevision int64 = 7
+
+// mkOperationalGctx builds a topology-agnostic context (guardTBSufficient ignores topology) in
+// which EVERY member is fully operational: it applied the current datamesh revision, reports
+// DRBDConfigured=True at its current generation, and sees every other member as Connected.
+// Tests then degrade exactly one aspect to prove which one the guard reacts to.
+func mkOperationalGctx(ftt, gmdr byte, members ...zoneMember) *globalContext {
+	gctx := mkZonalGctx(ftt, gmdr, members...)
+	gctx.configuration.Topology = v1alpha1.TopologyIgnored
+	gctx.datameshRevision = guardRevision
+
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		rc.rvr.Name = rc.name
+		rc.rvr.Generation = 1
+		rc.rvr.Status.DatameshRevision = guardRevision
+		rc.rvr.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Configured",
+			ObservedGeneration: 1,
+		}}
+		for j := range gctx.allReplicas {
+			if i == j {
+				continue
+			}
+			rc.rvr.Status.Peers = append(rc.rvr.Status.Peers,
+				mkPeerConnected(gctx.allReplicas[j].name))
+		}
+	}
+	return gctx
+}
+
+// mk2D2TBGctx builds the tie-breaker replacement window: 2D + the terminating tie-breaker
+// (id 2, the guard subject) + its replacement (id 3), everything operational.
+func mk2D2TBGctx() *globalContext {
+	return mkOperationalGctx(1, 0,
+		zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+		zoneMember{2, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+	)
+}
+
+// dropPeer removes the peer entry for peerName from the replica's reported peers, so that side
+// no longer confirms the connection.
+func dropPeer(gctx *globalContext, id uint8, peerName string) {
+	rvr := rctxByID(gctx, id).rvr
+	peers := rvr.Status.Peers[:0]
+	for _, p := range rvr.Status.Peers {
+		if p.Name != peerName {
+			peers = append(peers, p)
+		}
+	}
+	rvr.Status.Peers = peers
+}
 
 var _ = Describe("guardTBSufficient", func() {
 	mkGctx := func(ftt, gmdr byte, members ...zoneMember) *globalContext {
@@ -520,13 +680,8 @@ var _ = Describe("guardTBSufficient", func() {
 		Expect(r.Message).To(ContainSubstring("TieBreaker required"))
 	})
 
-	It("pass: 2D+2TB, FTT=1 → still 1 TB left", func() {
-		gctx := mkGctx(1, 0,
-			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
-			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
-			zoneMember{2, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
-			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
-		)
+	It("pass: 2D+2TB, FTT=1 → the operational replacement stays", func() {
+		gctx := mk2D2TBGctx()
 		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
 		Expect(r.Blocked).To(BeFalse())
 	})
@@ -563,6 +718,161 @@ var _ = Describe("guardTBSufficient", func() {
 			zoneMember{4, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
 		)
 		r := guardTBSufficient(gctx, rctxByID(gctx, 4))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 4D+2TB, FTT=2 → exactly one operational TB remains (strict `<`, not `<=`)", func() {
+		// tbMin=1 and the subject is already excluded from the count: one remaining operational
+		// tie-breaker is exactly sufficient, so blocking here would be a false positive.
+		gctx := mkOperationalGctx(2, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{4, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+			zoneMember{5, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		)
+		r := guardTBSufficient(gctx, rctxByID(gctx, 4))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	// ── Operational criteria: membership of the replacement is not enough ─────
+	//
+	// AddReplica(TB) completing only proves that the agents applied the datamesh revision, not
+	// that DRBD connections exist. Each test below degrades exactly ONE aspect of the
+	// replacement (id 3) in an otherwise-operational 2D+2TB window and expects the release of
+	// the old tie-breaker (id 2) to stay blocked.
+
+	It("blocked: the replacement has not applied the current datamesh revision", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.DatameshRevision = guardRevision - 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("datamesh revision 6 applied, want 7"))
+	})
+
+	It("blocked: the replacement has no DRBDConfigured condition", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.Conditions = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement's DRBDConfigured is stale (ObservedGeneration behind)", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Generation = 2 // condition still reports generation 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement's DRBDConfigured is False", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr.Status.Conditions[0].Status = metav1.ConditionFalse
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("DRBD is not configured"))
+	})
+
+	It("blocked: the replacement is itself terminating", func() {
+		gctx := mk2D2TBGctx()
+		now := metav1.Now()
+		rctxByID(gctx, 3).rvr.DeletionTimestamp = &now
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("replica is terminating"))
+	})
+
+	It("blocked: the replacement's RVR is gone", func() {
+		gctx := mk2D2TBGctx()
+		rctxByID(gctx, 3).rvr = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("replica object is gone"))
+	})
+
+	// One test per diskful connection: an unconfirmed link to ANY diskful member means the
+	// replacement cannot break a tie for that member.
+	for _, d := range []struct {
+		id   uint8
+		name string
+	}{{0, "rv-1-0"}, {1, "rv-1-1"}} {
+		It(fmt.Sprintf("blocked: the replacement's connection to %s is not confirmed", d.name), func() {
+			gctx := mk2D2TBGctx()
+			dropPeer(gctx, 3, d.name)      // the replacement does not report the diskful...
+			dropPeer(gctx, d.id, "rv-1-3") // ...and the diskful does not report the replacement
+
+			r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+			Expect(r.Blocked).To(BeTrue())
+			Expect(r.Message).To(ContainSubstring("connection to " + d.name + " is not confirmed"))
+		})
+	}
+
+	It("blocked: the only side reporting the connection is stale (agent not ready)", func() {
+		// The replacement itself does not report the connection; the diskful does, but its
+		// agent is not ready, so its Peers list is stale and proves nothing.
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+		rctxByID(gctx, 0).rvr.Status.Conditions[0] = metav1.Condition{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+			ObservedGeneration: 1,
+		}
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("connection to rv-1-0 is not confirmed"))
+	})
+
+	It("blocked: the only side reporting the connection is behind on the datamesh revision", func() {
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+		rctxByID(gctx, 0).rvr.Status.DatameshRevision = guardRevision - 1
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("connection to rv-1-0 is not confirmed"))
+	})
+
+	It("pass: a current Connected report from ONE side is enough", func() {
+		// The replacement does not report the connection to rv-1-0, but rv-1-0 (fresh agent,
+		// current revision) reports the replacement as Connected — that confirms the link.
+		gctx := mk2D2TBGctx()
+		dropPeer(gctx, 3, "rv-1-0")
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: two tie-breakers terminating at once do not release each other", func() {
+		gctx := mk2D2TBGctx()
+		now := metav1.Now()
+		rctxByID(gctx, 2).rvr.DeletionTimestamp = &now
+		rctxByID(gctx, 3).rvr.DeletionTimestamp = &now
+
+		Expect(guardTBSufficient(gctx, rctxByID(gctx, 2)).Blocked).To(BeTrue())
+		Expect(guardTBSufficient(gctx, rctxByID(gctx, 3)).Blocked).To(BeTrue())
+	})
+
+	It("ignores a non-operational tie-breaker in a layout that needs no tie-breaker at all", func() {
+		// 3D+1TB: tbMin=0, so the guard never looks at operational state.
+		gctx := mkOperationalGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "", false},
+		)
+		rctxByID(gctx, 3).rvr.Status.Conditions = nil
+
+		r := guardTBSufficient(gctx, rctxByID(gctx, 3))
 		Expect(r.Blocked).To(BeFalse())
 	})
 })
@@ -675,6 +985,71 @@ var _ = Describe("guardZoneGMDRPreserved", func() {
 		r := guardZoneGMDRPreserved(gctx, &ReplicaContext{})
 		Expect(r.Blocked).To(BeFalse())
 	})
+
+	It("D→TB retype is still modelled as a plain data loss (no retype-aware variant)", func() {
+		// Unlike zone FTT, GMDR has no retype-aware variant on purpose: a
+		// TieBreaker carries no data, so the subject really does stop being a
+		// data copy. The verdicts below must stay exactly those of a plain removal.
+		mk := func(gmdr byte) *globalContext {
+			return mkZonalGctx(1, gmdr,
+				zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+				zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+				zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+			)
+		}
+		// GMDR=0: after the retype 2 copies remain, losing a zone leaves 1 > 0.
+		gctx := mk(0)
+		Expect(guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0)).Blocked).To(BeFalse())
+
+		// GMDR=1: losing a foreign zone leaves 1 ≤ 1 → blocked.
+		gctx = mk(1)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("zone GMDR"))
+	})
+
+	// ── №3: the subject is subtracted only when it is itself UpToDate ─────────
+
+	It("pass: 3 zones × 1D, GMDR=0, subject has no backing volume", func() {
+		// The subject holds no copy, so the two UpToDate replicas both survive the removal:
+		// losing either foreign zone still leaves one copy (1 > 0). Subtracting the subject
+		// from the total anyway left 0 and blocked the retype of the very replica that has
+		// nothing to lose.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3 zones × 1D, GMDR=0, subject's backing volume is not UpToDate", func() {
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		setDiskState(gctx, 0, v1alpha1.DiskStateFailed) // subject's disk failed
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: every UpToDate copy sits in one foreign zone and the subject holds none", func() {
+		// Regression for a byte underflow: with the subject subtracted unconditionally the
+		// adjusted total (2-1=1) was smaller than the zone count (2), `adjustedTotal -
+		// adjustedZoneUTD` wrapped around to 255 and the guard passed — although losing zone b
+		// would leave no UpToDate copy at all. Excluding the subject only when it is UpToDate
+		// removes the underflow as a class: the total can never be below any zone's count.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", false}, // subject: degraded
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
+		r := guardZoneGMDRPreserved(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring("zone GMDR"))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -694,13 +1069,13 @@ var _ = Describe("guardZoneFTTPreserved", func() {
 		Expect(r.Blocked).To(BeFalse())
 	})
 
-	It("pass: 3D (1+1+1), remove from zone-a → q_after=1", func() {
-		// votersAfter=2, q_after=2. Losing zone-b: 2-1-1=0? No:
-		// votersAfter=2, adjustedZoneVoters for zone-b=1. dSurviving=2-1=1. 1 < 2 → check TB.
-		// No TB → blocked.
-		// Hmm, so removing from 3D (1+1+1) with TransZonal is blocked by zone-FTT?
-		// After removal: 2D, q_after=2. Losing zone-b: 1D surviving. 1 < 2, no TB → blocked.
-		// This makes sense: 2D in TransZonal can't survive a zone loss without TB.
+	It("blocked: 3D (1+1+1), remove from zone-a (generic variant is not relaxed)", func() {
+		// votersAfter=2, q_after=2. Losing zone-b: adjustedZoneVoters=1,
+		// dSurviving=2-1=1 < 2 and there is no TB → blocked.
+		// Correct for a plain removal: 2D in TransZonal cannot survive a zone loss
+		// without a TieBreaker. The D→TB retype variant of this guard
+		// (guardZoneFTTPreservedForRetypeToTieBreaker) reaches the opposite verdict
+		// on the same layout, because there the subject SURVIVES as a TieBreaker.
 		gctx := mkZonalGctx(1, 1,
 			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
 			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
@@ -797,6 +1172,92 @@ var _ = Describe("guardZoneFTTPreserved", func() {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// guardZoneFTTPreservedForRetypeToTieBreaker
+//
+
+var _ = Describe("guardZoneFTTPreservedForRetypeToTieBreaker", func() {
+	It("skip: non-TransZonal topology", func() {
+		gctx := mkZonalGctx(1, 1,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		gctx.configuration.Topology = v1alpha1.TopologyIgnored
+
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("pass: 3D (1+1+1) → 2D+1TB survives losing any zone (r3→r2 migration)", func() {
+		// votersAfter=2, q_after=2, subject in zone-a becomes the TB of zone-a.
+		// zone-a (subject zone): adjustedZoneVoters=0, dSurviving=2 ≥ 2 ✓.
+		// zone-b: dSurviving=1, tbSurviving=0+1(subject)=1 → 1 == 2-1 && 1 > 0 ✓.
+		// zone-c: symmetric ✓.
+		// The generic variant blocks the very same layout (see the spec above).
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+		)
+		Expect(guardZoneFTTPreserved(gctx, rctxByID(gctx, 0)).Blocked).
+			To(BeTrue(), "precondition: the generic variant blocks this layout")
+
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("blocked: 2D in zone-a + 1D in zone-b, subject in zone-a (own zone gets no TB)", func() {
+		// The subject's future TieBreaker dies together with its own zone, so
+		// losing zone-a leaves 1D+0TB: votersAfter=2, q_after=2,
+		// dSurviving=2-1=1 < 2 and tbSurviving=0 → blocked.
+		// A wrong implementation that credits the subject's OWN zone with +1 TB
+		// would let this pass.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring(`losing zone "a"`))
+	})
+
+	It("blocked: 2D in zone-a + 1D in zone-b, subject in zone-b (2D zone loss breaks quorum)", func() {
+		// Losing zone-a leaves 0D + 1TB: dSurviving=0 < q_after-1=1 → blocked.
+		// Together with the previous spec this makes the 2-zone 2D+1D layout
+		// genuinely non-convergible — the honest verdict is CannotConverge.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeTrue())
+		Expect(r.Message).To(ContainSubstring(`losing zone "a"`))
+	})
+
+	It("pass: existing TB in another zone is counted once, alongside the subject", func() {
+		// 3D (1+1+1) + TB in zone-c, subject in zone-a. votersAfter=2, q_after=2.
+		// zone-b: dSurviving=1, tbSurviving = 1 - 0 + 1 = 2 ✓.
+		// zone-c: dSurviving=1, tbSurviving = 1 - 1 + 1 = 1 ✓ (existing TB lost, subject remains).
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeDiskful, "a", true},
+			zoneMember{1, v1alpha1.DatameshMemberTypeDiskful, "b", true},
+			zoneMember{2, v1alpha1.DatameshMemberTypeDiskful, "c", true},
+			zoneMember{3, v1alpha1.DatameshMemberTypeTieBreaker, "c", false},
+		)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, rctxByID(gctx, 0))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("no voters → pass", func() {
+		gctx := mkZonalGctx(0, 0)
+		r := guardZoneFTTPreservedForRetypeToTieBreaker(gctx, &ReplicaContext{})
+		Expect(r.Blocked).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // guardZoneTBSufficient
 //
 
@@ -810,6 +1271,16 @@ var _ = Describe("guardZoneTBSufficient", func() {
 		gctx.configuration.Topology = v1alpha1.TopologyIgnored
 
 		r := guardZoneTBSufficient(gctx, rctxByID(gctx, 2))
+		Expect(r.Blocked).To(BeFalse())
+	})
+
+	It("skip: no diskful voters (voters==0) — TB not required", func() {
+		// Boundary of the swapped predicate: TieBreakersForDiskful(0, ftt) is 0 (the diskful>0 term
+		// fails), so the guard early-exits — the branch the pre-refactor `voters == 0` term handled.
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{0, v1alpha1.DatameshMemberTypeTieBreaker, "a", false},
+		)
+		r := guardZoneTBSufficient(gctx, rctxByID(gctx, 0))
 		Expect(r.Blocked).To(BeFalse())
 	})
 
@@ -1503,6 +1974,32 @@ var _ = Describe("guardQMRLowerNeeded", func() {
 		Expect(r.Blocked).To(BeTrue())
 	})
 })
+
+// guardQMRRaiseNeeded/guardQMRLowerNeeded derive their target from the shared
+// ReplicatedVolumeConfiguration.QuorumMinimumRedundancy() (qmr = GMDR + 1). This table pins that
+// wiring across the valid GMDR range: the raise guard passes iff qmr < target, the lower guard
+// passes iff qmr > target, and both block at qmr == target.
+var _ = DescribeTable("guardQMR{Raise,Lower}Needed target = GMDR+1 across the grid",
+	func(gmdr, qmr byte, wantRaisePasses, wantLowerPasses bool) {
+		gctx := &globalContext{
+			datamesh:      datameshContext{quorumMinimumRedundancy: qmr},
+			configuration: v1alpha1.ReplicatedVolumeConfiguration{GuaranteedMinimumDataRedundancy: gmdr},
+		}
+		Expect(guardQMRRaiseNeeded(gctx, nil).Blocked).To(Equal(!wantRaisePasses), "raise guard")
+		Expect(guardQMRLowerNeeded(gctx, nil).Blocked).To(Equal(!wantLowerPasses), "lower guard")
+	},
+	// GMDR=0 → target qmr=1
+	Entry("GMDR=0, qmr=1 (=target)", byte(0), byte(1), false, false),
+	Entry("GMDR=0, qmr=2 (>target)", byte(0), byte(2), false, true),
+	// GMDR=1 → target qmr=2
+	Entry("GMDR=1, qmr=1 (<target)", byte(1), byte(1), true, false),
+	Entry("GMDR=1, qmr=2 (=target)", byte(1), byte(2), false, false),
+	Entry("GMDR=1, qmr=3 (>target)", byte(1), byte(3), false, true),
+	// GMDR=2 → target qmr=3
+	Entry("GMDR=2, qmr=2 (<target)", byte(2), byte(2), true, false),
+	Entry("GMDR=2, qmr=3 (=target)", byte(2), byte(3), false, false),
+	Entry("GMDR=2, qmr=4 (>target)", byte(2), byte(4), false, true),
+)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // guardShadowDiskfulSupported

@@ -34,35 +34,43 @@ type TestLayout struct {
 	Attached int
 }
 
-// ExpectedReplicas returns the total replica count (D + TB + Access)
-// derived from FTT/GMDR using the same formula as the controller.
-// Attached does not add replicas — it only changes role.
+// ExpectedReplicas returns the total replica count (D + TB + Access) derived from
+// FTT/GMDR via the controller's own layout formula. Attached does not add replicas
+// — it only changes role.
 func (l TestLayout) ExpectedReplicas() int {
-	D := int(l.FTT) + int(l.GMDR) + 1
-	n := D + l.Access
-	if D%2 == 0 && D > 0 && int(l.FTT) == D/2 {
-		n++
-	}
-	return n
+	d, tb := l.intendedLayout()
+	return d + tb + l.Access
+}
+
+// intendedLayout returns the diskful voter and tie-breaker counts for this layout
+// straight from the api source of truth (ReplicatedVolumeConfiguration.IntendedLayout),
+// so the framework carries no local copy of the D/TB formula.
+func (l TestLayout) intendedLayout() (diskful, tiebreakers int) {
+	return v1alpha1.ReplicatedVolumeConfiguration{
+		FailuresToTolerate:              l.FTT,
+		GuaranteedMinimumDataRedundancy: l.GMDR,
+	}.IntendedLayout()
 }
 
 // SetupLayout creates a fully formed RV with the specified layout
 // (D + TB + Access + extra attachments), waits for all members to be ready,
 // and returns the TestRV handle.
 //
-// The flow is optimized to parallelize creation and defer awaits:
+// The tie-breaker (when the layout requires one) is created by the controller
+// during formation, so the datamesh already holds D + TB members once formation
+// completes. The framework MUST NOT create the tie-breaker by hand: doing so
+// would race the controller's formation and, once formation also adds one, leave
+// an excess TieBreaker that the layout converger reports as
+// MembershipLayoutConverged=TransitionUnsupported.
 //
-//	Phase 1: Create RV (MaxAttachments = max(Attached, Access))
-//	Phase 2: Await D diskful members (to learn occupied nodes/IDs)
-//	Phase 3: Create TB RVR + Access/extra RVAs (fire-and-forget)
-//	Phase 4: Await FormationComplete, TB Healthy, RVAs Attached
+//	Phase 1: Create RV (MaxAttachments = Attached)
+//	Phase 2: Await formation complete (D + TB members present)
+//	Phase 3: Create Access/extra RVAs (fire-and-forget)
+//	Phase 4: Await RVAs Attached and the full member count
 func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	GinkgoHelper()
 	Expect(l.Attached).To(BeNumerically(">=", l.Access),
 		"Attached must be >= Access (Access replicas are always attached)")
-
-	D := int(l.FTT) + int(l.GMDR) + 1
-	needTB := D%2 == 0 && D > 0 && int(l.FTT) == D/2
 
 	// --- Phase 1: create RV ---
 
@@ -72,29 +80,21 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	}
 	trv.Create(ctx)
 
-	// --- Phase 2: wait for D diskful members ---
+	// --- Phase 2: wait for formation (diskful + tie-breaker) ---
 
-	trv.Await(ctx, match.RV.Members(D))
+	d, tb := l.intendedLayout()
+	trv.Await(ctx, match.RV.FormationComplete())
+	trv.Await(ctx, match.RV.Members(d+tb))
 
-	// --- Phase 3: create TB + RVAs (fire-and-forget) ---
-
-	var tbRVR *TestRVR
-	var tbNodeName string
-	if needTB {
-		tbNodeName = f.Discovery.AnyNode(trv.OccupiedNodes()...)
-		tbRVR = f.TestRVRExact(trv.Name(), trv.FreeReplicaID()).
-			Node(tbNodeName).
-			Type(v1alpha1.ReplicaTypeTieBreaker)
-		tbRVR.Create(ctx)
-	}
+	// --- Phase 3: create Access + extra RVAs (fire-and-forget) ---
+	//
+	// OccupiedNodes now already includes the auto-created tie-breaker node,
+	// so Access replicas avoid colliding with it without any special-casing.
 
 	var allRVAs []*TestRVA
 	var accessNodes []string
 	for range l.Access {
 		except := trv.OccupiedNodes()
-		if tbNodeName != "" {
-			except = append(except, tbNodeName)
-		}
 		except = append(except, accessNodes...)
 		node := f.Discovery.AnyNode(except...)
 		allRVAs = append(allRVAs, trv.Attach(ctx, node))
@@ -108,19 +108,17 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 		}
 		trvr.Await(ctx, tkmatch.Present())
 		obj := trvr.Object()
-		if obj.Spec.Type != v1alpha1.ReplicaTypeAccess {
+		// Only diskful members can be attached (Primary); the tie-breaker is
+		// diskless and Access members are counted separately above.
+		if obj.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			allRVAs = append(allRVAs, trv.Attach(ctx, obj.Spec.NodeName))
 			extra--
 		}
 	}
-	Expect(extra).To(Equal(0), "not enough non-Access members to satisfy Attached count")
+	Expect(extra).To(Equal(0), "not enough diskful members to satisfy Attached count")
 
-	// --- Phase 4: await everything ---
+	// --- Phase 4: await attachments and the full member count ---
 
-	trv.Await(ctx, match.RV.FormationComplete())
-	if tbRVR != nil {
-		tbRVR.Await(ctx, tkmatch.Phase(string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)))
-	}
 	for _, trva := range allRVAs {
 		trva.Await(ctx, tkmatch.ConditionReason(
 			v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,

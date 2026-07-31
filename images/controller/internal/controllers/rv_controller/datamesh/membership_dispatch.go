@@ -154,7 +154,7 @@ func planAddReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 func planAddDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
 	voters := voterCount(gctx)
 	needsQUp := voters%2 != 0 // odd voters → adding makes even → q↑ needed
-	needsQMRUp := gctx.datamesh.quorumMinimumRedundancy < gctx.configuration.GuaranteedMinimumDataRedundancy+1
+	needsQMRUp := gctx.datamesh.quorumMinimumRedundancy < gctx.configuration.QuorumMinimumRedundancy()
 	viaSd := gctx.features.ShadowDiskful
 
 	switch {
@@ -206,7 +206,7 @@ func planRemoveReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, 
 func planRemoveDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
 	voters := voterCount(gctx)
 	needsQDown := voters%2 == 0 // even voters → removing makes odd → q↓ needed
-	needsQMRDown := gctx.datamesh.quorumMinimumRedundancy > gctx.configuration.GuaranteedMinimumDataRedundancy+1
+	needsQMRDown := gctx.datamesh.quorumMinimumRedundancy > gctx.configuration.QuorumMinimumRedundancy()
 
 	switch {
 	case !needsQDown && !needsQMRDown:

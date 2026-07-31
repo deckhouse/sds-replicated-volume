@@ -223,7 +223,7 @@ var _ = Describe("TestRV safety invariants", func() {
 		Expect(err.Error()).To(ContainSubstring("check violated"))
 	})
 
-	It("QuorumCorrect fires on RV itself", func() {
+	It("QuorumThresholdCorrect fires on RV itself", func() {
 		trv := newTestRVForTest("test-rv")
 		trv.ActivateSafetyInvariants()
 

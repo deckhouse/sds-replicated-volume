@@ -18,6 +18,7 @@ package datamesh
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
@@ -58,20 +59,34 @@ var commonRemoveGuards = []any{
 	guardNotAttached,
 }
 
-// loseVoterGuards are guards for transitions where a replica loses voter status
-// (RemoveReplica(D), ChangeReplicaType(D→...)).
+// loseVoterGuardsCommon are the lose-voter guards that do not depend on what the
+// subject becomes. The zone FTT guard does depend on it and is appended per
+// destination below (see loseVoterGuards / loseVoterToTieBreakerGuards).
+var loseVoterGuardsCommon = []any{
+	guardVolumeAccessLocalForDemotion,
+	guardGMDRPreserved,
+	guardFTTPreserved,
+	guardZoneGMDRPreserved,
+}
+
+// loseVoterGuards are guards for transitions where a replica loses voter status and
+// does NOT stay a quorum participant (RemoveReplica(D), ChangeReplicaType(D→A),
+// ChangeReplicaType(D→sD)).
 //
 // Plans MUST also add defense-in-depth guards explicitly:
 //   - Voter parity: guardVotersEven or guardVotersOdd
 //   - QMR: guardQMRLowerNeeded (qmr↓ plans)
 //   - Feature: guardShadowDiskfulSupported (sD variants)
-var loseVoterGuards = []any{
-	guardVolumeAccessLocalForDemotion,
-	guardGMDRPreserved,
-	guardFTTPreserved,
-	guardZoneGMDRPreserved,
-	guardZoneFTTPreserved,
-}
+var loseVoterGuards = slices.Concat(loseVoterGuardsCommon, []any{guardZoneFTTPreserved})
+
+// loseVoterToTieBreakerGuards are guards for ChangeReplicaType(D→TB): the subject
+// loses voter status but stays a quorum participant as a TieBreaker in its own zone,
+// so the zone FTT arithmetic uses the retype-aware variant. Everything else is
+// identical to loseVoterGuards.
+//
+// Plans MUST also add the voter-parity guard explicitly (guardVotersEven / guardVotersOdd).
+var loseVoterToTieBreakerGuards = slices.Concat(
+	loseVoterGuardsCommon, []any{guardZoneFTTPreservedForRetypeToTieBreaker})
 
 // loseTBGuards are guards for transitions where a replica loses TieBreaker status
 // (RemoveReplica(TB), ChangeReplicaType(TB→...)).
@@ -263,13 +278,18 @@ func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext
 }
 
 // guardGMDRPreserved blocks if removing this voter would violate the GMDR guarantee.
-// Condition: ADR > target_GMDR, where ADR = UpToDate_D_count − 1.
-func guardGMDRPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+// Condition: ADR > target_GMDR, where ADR is the UpToDate_D_count that survives the removal.
+//
+// The subject is subtracted from the count only when it is itself an UpToDate data copy
+// (isUpToDateDiskful): removing a replica that carries no UpToDate copy does not reduce
+// redundancy, and pretending otherwise blocks exactly the transitions that have nothing to lose
+// (a degraded replica is the best retype candidate). For an UpToDate subject the arithmetic is
+// unchanged.
+func guardGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	utd := upToDateDiskfulCount(gctx)
-	var adr byte
-	if utd > 0 {
-		adr = utd - 1
+	adr := upToDateDiskfulCount(gctx)
+	if isUpToDateDiskful(rctx) && adr > 0 {
+		adr--
 	}
 	if adr <= targetGMDR {
 		return dmte.GuardResult{
@@ -285,9 +305,9 @@ func guardGMDRPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult
 func guardFTTPreserved(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 	targetFTT := gctx.configuration.FailuresToTolerate
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
-	dMin := targetFTT + targetGMDR + 1
+	dMin := v1alpha1.IntendedDiskfulCount(targetFTT, targetGMDR)
 	voters := voterCount(gctx)
-	if voters <= dMin {
+	if int(voters) <= dMin {
 		return dmte.GuardResult{
 			Blocked: true,
 			Message: fmt.Sprintf("would violate FTT (Diskful=%d, need > %d)", voters, dMin),
@@ -490,9 +510,15 @@ func guardTransZonalTBPlacement(gctx *globalContext, rctx *ReplicaContext) dmte.
 //
 // For each zone z:
 //
-//	UpToDate_surviving = (UpToDate_D_count − 1) − UpToDate_in_zone(z)
-//	  (adjusted if z is the zone of the removed D)
+//	UpToDate_surviving = UpToDate_D_count_after_removal − UpToDate_in_zone(z)_after_removal
 //	if UpToDate_surviving <= target_GMDR → blocked
+//
+// The subject is excluded exactly once and only when it is itself an UpToDate data copy
+// (isUpToDateDiskful): it is then counted both in the total and in its own zone, so both are
+// decremented; a subject that carries no UpToDate copy is in neither count and leaves both
+// untouched. Subtracting it from the total unconditionally punished a degraded subject twice —
+// and, when every UpToDate copy sat in one foreign zone, made the byte subtraction below
+// underflow into a false pass.
 func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
 		return dmte.GuardResult{}
@@ -501,22 +527,22 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 	targetGMDR := gctx.configuration.GuaranteedMinimumDataRedundancy
 	totalUTD := upToDateDiskfulCount(gctx)
 	perZone := upToDateDiskfulCountPerZone(gctx)
+	subjectIsUTD := isUpToDateDiskful(rctx)
 	removedZone := ""
 	if rctx.member != nil {
 		removedZone = rctx.member.Zone
 	}
 
+	adjustedTotal := totalUTD
+	if subjectIsUTD && adjustedTotal > 0 {
+		adjustedTotal--
+	}
+
 	for _, zc := range perZone {
 		zone, zoneUTD := zc.Zone, zc.Count
 		adjustedZoneUTD := zoneUTD
-		if zone == removedZone {
-			if adjustedZoneUTD > 0 {
-				adjustedZoneUTD--
-			}
-		}
-		var adjustedTotal byte
-		if totalUTD > 0 {
-			adjustedTotal = totalUTD - 1
+		if subjectIsUTD && zone == removedZone && adjustedZoneUTD > 0 {
+			adjustedZoneUTD--
 		}
 		surviving := adjustedTotal - adjustedZoneUTD
 		if surviving <= targetGMDR {
@@ -534,6 +560,10 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 // guardZoneFTTPreserved blocks if removing this voter would cause any zone
 // loss to violate quorum. Only applies to TransZonal topology.
 //
+// Use for transitions after which the subject is no longer a quorum participant:
+// RemoveReplica(D), ChangeReplicaType(D→A), ChangeReplicaType(D→sD).
+// For D→TB use guardZoneFTTPreservedForRetypeToTieBreaker instead.
+//
 // For each zone z:
 //
 //	D_surviving = (D_count − 1) − D_in_zone(z)
@@ -542,6 +572,26 @@ func guardZoneGMDRPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 //	q_after = floor((D_count − 1) / 2) + 1
 //	Quorum holds if D_surviving >= q_after, or D_surviving == q_after−1 with TB_surviving > 0
 func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	return evaluateZoneFTT(gctx, rctx, false)
+}
+
+// guardZoneFTTPreservedForRetypeToTieBreaker is the ChangeReplicaType(D→TB) variant of
+// guardZoneFTTPreserved. The subject does not disappear: it stays a quorum participant
+// as a TieBreaker in its own zone. Modelling the retype as a plain D removal blocks
+// legitimate TransZonal r3→r2 migrations (3D in three zones becomes 2D+1TB, which
+// survives the loss of any zone) — the volume would stay Converging forever.
+//
+// Difference from the generic variant: for every zone z other than the subject's zone
+// the surviving TieBreaker count includes the subject (+1). For the subject's own zone
+// it does not — that future TieBreaker dies together with its zone.
+func guardZoneFTTPreservedForRetypeToTieBreaker(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	return evaluateZoneFTT(gctx, rctx, true)
+}
+
+// evaluateZoneFTT is the shared zone-loss quorum arithmetic behind the two zone FTT
+// guards. When subjectBecomesTieBreaker is true the subject is counted as a surviving
+// TieBreaker for every zone except its own (see guardZoneFTTPreservedForRetypeToTieBreaker).
+func evaluateZoneFTT(gctx *globalContext, rctx *ReplicaContext, subjectBecomesTieBreaker bool) dmte.GuardResult {
 	if gctx.configuration.Topology != v1alpha1.TopologyTransZonal {
 		return dmte.GuardResult{}
 	}
@@ -569,6 +619,9 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 		}
 		dSurviving := votersAfter - adjustedZoneVoters
 		tbSurviving := totalTB - findZoneCount(tbPerZone, zone)
+		if subjectBecomesTieBreaker && zone != removedZone {
+			tbSurviving++
+		}
 
 		if dSurviving >= qAfter {
 			continue
@@ -591,23 +644,43 @@ func guardZoneFTTPreserved(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 //
 // Preconditions for removing a TB (RemoveReplica(TB), ChangeReplicaType(TB→...)).
 
-// guardTBSufficient blocks if removing this TB would leave fewer TBs than required.
-// TB_min = 1 if D_count is even AND target_FTT == D_count/2, else 0.
-func guardTBSufficient(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
+// guardTBSufficient blocks if releasing this TB would leave fewer OPERATIONAL TBs than
+// required. TB_min is derived from the current voter count and target FTT via the shared
+// v1alpha1.TieBreakersForDiskful formula (single source of truth for the D/TB layout).
+// Note: this uses the current (actual) voter count, not the intended diskful count, so it
+// stays correct during transitions where the two differ.
+//
+// The count is deliberately restricted to OPERATIONAL tie-breakers (isTieBreakerOperational)
+// and excludes the subject. This is what makes replacing a tie-breaker strictly create-first:
+// the old one is released only once its replacement actually provides tiebreak protection —
+// completing AddReplica(TB) proves that the agents applied the revision, not that DRBD
+// connections exist. Until then the terminating tie-breaker stays a working datamesh member
+// (its finalizer holds it), so the protection is never lost for a moment. The layout
+// convergence loop in rv_controller creates the replacement; if no free eligible node exists
+// it reports CannotConverge and the old tie-breaker keeps working (see the rv_controller
+// README, "tie-breaker replacement").
+//
+// The comparison is strict (`<`, not `<=`): the subject is already excluded from the count,
+// so operationalAfterRemoval is exactly what the datamesh keeps, and blocking at equality
+// would refuse a legitimate release when the remaining tie-breakers are exactly sufficient.
+func guardTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	voters := voterCount(gctx)
-	tbs := tbCount(gctx)
 	targetFTT := gctx.configuration.FailuresToTolerate
 
-	var tbMin byte
-	if voters%2 == 0 && voters > 0 && targetFTT == voters/2 {
-		tbMin = 1
+	tbMin := byte(v1alpha1.TieBreakersForDiskful(int(voters), int(targetFTT)))
+	if tbMin == 0 {
+		return dmte.GuardResult{}
 	}
 
-	if tbs <= tbMin {
-		return dmte.GuardResult{
-			Blocked: true,
-			Message: fmt.Sprintf("TieBreaker required for quorum (Diskful=%d even, FTT=%d)", voters, targetFTT),
+	operationalAfterRemoval, notOperational := operationalTieBreakerCount(gctx, rctx.ID())
+	if operationalAfterRemoval < tbMin {
+		msg := fmt.Sprintf(
+			"TieBreaker required for quorum (Diskful=%d even, FTT=%d): %d operational TieBreaker(s) would remain, need %d",
+			voters, targetFTT, operationalAfterRemoval, tbMin)
+		if len(notOperational) > 0 {
+			msg += "; " + strings.Join(notOperational, "; ")
 		}
+		return dmte.GuardResult{Blocked: true, Message: msg}
 	}
 	return dmte.GuardResult{}
 }
@@ -623,8 +696,9 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 	voters := voterCount(gctx)
 	targetFTT := gctx.configuration.FailuresToTolerate
 
-	// TB is only required when D is even and FTT == D/2.
-	if voters%2 != 0 || voters == 0 || targetFTT != voters/2 {
+	// TB is only required when D is even and FTT == D/2; TieBreakersForDiskful encodes that rule
+	// (returns 1 exactly in that case), so an early exit when it returns 0 means "no TB needed".
+	if v1alpha1.TieBreakersForDiskful(int(voters), int(targetFTT)) == 0 {
 		return dmte.GuardResult{}
 	}
 
@@ -730,7 +804,7 @@ func guardVotersOdd(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
 // guardQMRRaiseNeeded blocks if qmr is already at or above the target (config.GMDR + 1).
 // Defense: plans with qmr↑ expect qmr < config.GMDR + 1.
 func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	targetQMR := gctx.configuration.QuorumMinimumRedundancy()
 	if gctx.datamesh.quorumMinimumRedundancy >= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
@@ -744,7 +818,7 @@ func guardQMRRaiseNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResul
 // guardQMRLowerNeeded blocks if qmr is already at or below the target (config.GMDR + 1).
 // Defense: plans with qmr↓ expect qmr > config.GMDR + 1.
 func guardQMRLowerNeeded(gctx *globalContext, _ *ReplicaContext) dmte.GuardResult {
-	targetQMR := gctx.configuration.GuaranteedMinimumDataRedundancy + 1
+	targetQMR := gctx.configuration.QuorumMinimumRedundancy()
 	if gctx.datamesh.quorumMinimumRedundancy <= targetQMR {
 		return dmte.GuardResult{
 			Blocked: true,
