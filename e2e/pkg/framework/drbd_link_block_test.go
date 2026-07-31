@@ -312,61 +312,38 @@ var _ = Describe("DRBDLinkBlock options", func() {
 })
 
 var _ = Describe("DRBDLinkBlock watchdog TTL", func() {
-	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
-
-	It("derives the TTL from the deadline the spec is actually running under", func() {
-		ctx, cancel := context.WithDeadline(context.Background(), now.Add(20*time.Minute))
-		defer cancel()
-
-		ttl, err := drbdLinkBlockTTL(ctx, now)
-
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ttl).To(Equal(20*time.Minute + drbdLinkBlockTTLBuffer))
+	It("is the plain constant on a stand that needs no stretching", func() {
+		Expect(drbdLinkBlockTTL(1.0)).To(Equal(DRBDLinkBlockWatchdogTTL))
 	})
 
-	It("grows with the deadline, so E2E_TIMEOUT_MULTIPLIER cannot cut the blockade short", func() {
-		// The framework scales every SpecTimeout by the multiplier before the
-		// spec starts, so a doubled budget arrives here as a doubled deadline —
-		// and a TTL read off the deadline follows it without knowing about it.
-		plain, cancelPlain := context.WithDeadline(context.Background(), now.Add(20*time.Minute))
-		defer cancelPlain()
-		scaled, cancelScaled := context.WithDeadline(context.Background(), now.Add(40*time.Minute))
-		defer cancelScaled()
-
-		plainTTL, err := drbdLinkBlockTTL(plain, now)
-		Expect(err).NotTo(HaveOccurred())
-		scaledTTL, err := drbdLinkBlockTTL(scaled, now)
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(scaledTTL).To(BeNumerically(">", plainTTL))
-		Expect(scaledTTL - plainTTL).To(Equal(20 * time.Minute))
+	It("grows with E2E_TIMEOUT_MULTIPLIER, which also grew every SpecTimeout", func() {
+		Expect(drbdLinkBlockTTL(2.0)).To(Equal(2 * DRBDLinkBlockWatchdogTTL))
 	})
 
-	It("always outlives the window it protects", func() {
-		ctx, cancel := context.WithDeadline(context.Background(), now.Add(90*time.Second))
-		defer cancel()
-
-		ttl, err := drbdLinkBlockTTL(ctx, now)
-
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ttl).To(BeNumerically(">", 90*time.Second))
+	It("outlives every budget this package hands out on its own", func() {
+		// The invariant the constant rests on: a spec that blocks links must
+		// finish before the watchdog fires, or the link comes back mid-spec and
+		// the test reads a phantom recovery as a product bug. Both sides scale
+		// with the same multiplier, so the authored values are what to compare.
+		//
+		// This covers only the budgets the label policy derives. A spec is free
+		// to declare a SpecTimeout of its own, which the policy does not cap and
+		// this package cannot see; every spec that blocks links therefore
+		// asserts the same invariant against DRBDLinkBlockWatchdogTTL where it
+		// declares that budget.
+		Expect(DRBDLinkBlockWatchdogTTL).To(BeNumerically(">", defaultLongHaulSpecTimeout))
 	})
 
-	It("refuses a context without a deadline instead of inventing a constant", func() {
-		_, err := drbdLinkBlockTTL(context.Background(), now)
-
-		Expect(err).To(MatchError(ContainSubstring("carries no deadline")))
-		Expect(err).To(MatchError(ContainSubstring("SpecTimeout")))
-	})
-
-	It("refuses a budget that has already run out", func() {
-		ctx, cancel := context.WithDeadline(context.Background(), now.Add(-time.Second))
-		defer cancel()
-
-		_, err := drbdLinkBlockTTL(ctx, now)
-
-		Expect(err).To(MatchError(ContainSubstring("budget expired")))
-	})
+	It("cannot be read off the spec's own budget, which is why it is a constant",
+		SpecTimeout(time.Minute), func(ctx SpecContext) {
+			// Ginkgo enforces this very SpecTimeout with a timer of its own and
+			// cancels the context by hand (NewSpecContext in ginkgo/internal),
+			// so the budget a spec declares is invisible to the code running
+			// under it. A TTL derived from ctx.Deadline() failed every real run
+			// while passing unit tests that fabricated a deadline.
+			_, ok := ctx.Deadline()
+			Expect(ok).To(BeFalse())
+		})
 })
 
 var _ = Describe("DRBDLinkBlock rules", func() {

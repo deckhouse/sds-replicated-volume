@@ -25,7 +25,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -149,8 +148,7 @@ func Setup(opts ...SetupOption) *Framework {
 		opt(f)
 	}
 
-	mult := parseTimeoutMultiplier(os.Getenv("E2E_TIMEOUT_MULTIPLIER"))
-	registerTimeoutPolicy(mult)
+	registerTimeoutPolicy(timeoutMultiplier())
 	registerRequirementsTransformer()
 	registerDisruptiveTransformer()
 	registerLongHaulTransformer()

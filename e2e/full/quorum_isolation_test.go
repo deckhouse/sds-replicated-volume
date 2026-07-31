@@ -62,6 +62,35 @@ const (
 	quorumFreezeBudget   = 15 * time.Minute
 )
 
+// Budgets of the specs themselves. They are named rather than inlined into
+// SpecTimeout so the invariant below has something to compare against.
+//
+// quorumSpecTeardownMargin is what the invariant leaves between a budget and the
+// watchdog's TTL. A spec that runs out its budget still has to tear down, and
+// the teardown is where the blockade comes down and the writer is signalled and
+// given quorumIOStopWait to stop; the watchdog must stay out of that window too,
+// not merely out of the spec.
+const (
+	quorumPrimarySpecBudget    = 25 * time.Minute
+	quorumTieBreakerSpecBudget = 20 * time.Minute
+	quorumSpecTeardownMargin   = 5 * time.Minute
+)
+
+// INVARIANT: the watchdog that heals the stand after a killed run must outlive
+// both specs, teardown included. Were a budget raised past the TTL — the natural
+// reaction to a spec that times out — the blockade would lift while the spec
+// still relies on it, and the spec would read the watchdog's recovery as the
+// product's.
+//
+// Checked here because it can be checked nowhere else: the framework caps the
+// budgets it derives from labels, but a SpecTimeout written by hand is invisible
+// to it. Converting a negative constant to uint64 does not compile, so raising
+// either budget too far breaks the build rather than the spec.
+const (
+	_ = uint64(fw.DRBDLinkBlockWatchdogTTL - quorumPrimarySpecBudget - quorumSpecTeardownMargin)
+	_ = uint64(fw.DRBDLinkBlockWatchdogTTL - quorumTieBreakerSpecBudget - quorumSpecTeardownMargin)
+)
+
 // E2E-Q1/E2E-Q2 — disruptive: the negative side of quorum on a 2D+1TB volume.
 // The suite proves in several places that quorum is KEPT when it should be
 // (E2E-6 and the tie-breaker cases); these two prove that it is LOST when it
@@ -93,7 +122,7 @@ var _ = Describe("Layout: r2 volume loses quorum when a replica is cut off",
 	Label(fw.LabelDisruptive), Label(fw.LabelSlow), Label(fw.LabelFeatureQuorum), func() {
 
 		It("freezes an isolated primary while the diskful+tie-breaker majority keeps serving, then recovers",
-			SpecTimeout(25*time.Minute), require.MinNodes(2, 1), func(ctx SpecContext) {
+			SpecTimeout(quorumPrimarySpecBudget), require.MinNodes(2, 1), func(ctx SpecContext) {
 				By("creating a healthy 2D+1TB volume")
 				trv := f.TestRV().FTT(1).GMDR(0)
 				trv.Create(ctx)
@@ -175,10 +204,20 @@ var _ = Describe("Layout: r2 volume loses quorum when a replica is cut off",
 				// they are worth the most. Arming them per replica (the shape
 				// E2E-6 uses) keeps the majority under continuous watch while
 				// leaving the isolated replica free to fail as it must.
+				//
+				// They are switches, not plain matchers, because the recovery
+				// below has to run with them off — see the far-away window
+				// there.
+				var majorityGuards []*tkmatch.Switch
 				for _, r := range []*fw.TestRVR{survivorRVR, tbRVR} {
-					r.Always(match.RVR.NeverLoseQuorum())
-					r.Always(match.RVR.NeverCritical())
-					r.Always(match.RVR.NeverIOSuspended())
+					for _, sw := range []*tkmatch.Switch{
+						tkmatch.NewSwitch(match.RVR.NeverLoseQuorum()),
+						tkmatch.NewSwitch(match.RVR.NeverCritical()),
+						tkmatch.NewSwitch(match.RVR.NeverIOSuspended()),
+					} {
+						r.Always(sw)
+						majorityGuards = append(majorityGuards, sw)
+					}
 				}
 
 				By("silently dropping every replication packet of the primary, to both of its peers")
@@ -227,29 +266,60 @@ var _ = Describe("Layout: r2 volume loses quorum when a replica is cut off",
 					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 					v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady))
 
-				By("lifting the blockade")
-				// Nothing is done to help DRBD reconnect: it dials again on its
-				// own connect-int, and recovering from the outage is under test
-				// just as much as the outage itself.
-				block.Remove(ctx)
+				// The recovery runs with the majority guards off, and only it.
+				//
+				// A healing partition does not restore both links at once. The
+				// returning primary reaches one peer first, and every node that
+				// hears of a Primary it cannot see yet MUST outdate itself —
+				// far_away_change() in drbd_receiver.c does it whenever
+				// `primary_nodes & ~directly_reachable` is non-empty and the
+				// primary is not flagged TWOPC_PRI_INCAPABLE. Quorum is not part
+				// of that decision: our primary was frozen without quorum and
+				// still counted, because its disk was UpToDate. The majority
+				// therefore drops to Outdated, loses quorum and suspends I/O
+				// until its own handshake with the primary completes — sub-second
+				// on the stand, and only in the direction of caution, since the
+				// UUIDs match and no resync follows.
+				//
+				// Which peer wins the race is not ours to choose, so the guards
+				// cannot stay armed here. What replaces them is everything
+				// asserted below and after this scope: all three reconnected,
+				// quorum back on every node AND every replica, the resync
+				// converged with nothing out of sync, the layout and the datamesh
+				// unchanged, the writer moving again, all replicas Healthy. A
+				// recovery that stalls still fails; only the far-away window
+				// itself is let through.
+				withoutGuards(majorityGuards, func() {
+					By("lifting the blockade")
+					// Nothing is done to help DRBD reconnect: it dials again on
+					// its own connect-int, and recovering from the outage is
+					// under test just as much as the outage itself.
+					block.Remove(ctx)
 
-				By("all three replicas reconnect on their own, none left StandAlone")
-				for _, n := range []struct{ node, resource string }{
-					{victim, victimRes}, {survivor, survivorRes}, {tbNode, tbRes},
-				} {
-					awaitPeersReconnected(ctx, n.node, n.resource, 2)
-				}
-				for _, r := range []*fw.TestRVR{victimRVR, survivorRVR, tbRVR} {
-					r.Await(ctx, tkmatch.ConditionReason(
-						v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
-						v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected))
-				}
+					By("all three replicas reconnect on their own, none left StandAlone")
+					for _, n := range []struct{ node, resource string }{
+						{victim, victimRes}, {survivor, survivorRes}, {tbNode, tbRes},
+					} {
+						awaitPeersReconnected(ctx, n.node, n.resource, 2)
+					}
+					for _, r := range []*fw.TestRVR{victimRVR, survivorRVR, tbRVR} {
+						r.Await(ctx, tkmatch.ConditionReason(
+							v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+							v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonFullyConnected))
+					}
 
-				By("quorum returns everywhere, including the replica that lost it")
-				awaitNodeQuorum(ctx, victim, victimRes, true)
-				for _, r := range []*fw.TestRVR{victimRVR, survivorRVR, tbRVR} {
-					r.Await(ctx, match.RVR.Quorum(true))
-				}
+					By("quorum returns everywhere, including the replica that lost it")
+					// Kernel ground truth on all three nodes, not just the
+					// isolated one: the far-away window is exactly where the
+					// majority's quorum went, so its return is what says the
+					// window closed.
+					awaitNodeQuorum(ctx, victim, victimRes, true)
+					awaitNodeQuorum(ctx, survivor, survivorRes, true)
+					awaitNodeQuorum(ctx, tbNode, tbRes, true)
+					for _, r := range []*fw.TestRVR{victimRVR, survivorRVR, tbRVR} {
+						r.Await(ctx, match.RVR.Quorum(true))
+					}
+				})
 
 				By("the thawed primary serves I/O again")
 				victimRVR.DRBDR().Await(ctx, deviceIOResumed())
@@ -286,7 +356,7 @@ var _ = Describe("Layout: r2 volume loses quorum when a replica is cut off",
 			})
 
 		It("denies quorum to an isolated tie-breaker while both diskful replicas keep serving, then recovers",
-			SpecTimeout(20*time.Minute), require.MinNodes(2, 1), func(ctx SpecContext) {
+			SpecTimeout(quorumTieBreakerSpecBudget), require.MinNodes(2, 1), func(ctx SpecContext) {
 				By("creating a healthy 2D+1TB volume")
 				trv := f.TestRV().FTT(1).GMDR(0)
 				trv.Create(ctx)

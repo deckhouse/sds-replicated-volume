@@ -327,8 +327,8 @@ runs, and the case degenerates into a test of the orderly path. The rules pin
 both endpoint addresses and the ports of this resource, so exactly one volume's
 replication breaks; they carry a tag unique to the run, are removed by a
 `DeferCleanup` registered before the first rule, and are additionally removed by
-a detached watchdog on the node whose TTL is derived from the spec's own
-(multiplier-scaled) deadline.
+a detached watchdog on the node whose TTL is a constant well above any spec that
+blocks links, scaled by `E2E_TIMEOUT_MULTIPLIER`.
 
 Given: a healthy 2D+1TB volume, published on one of the two diskful nodes, with
 a raw-device writer running on that node. The tie-breaker is proven on its own
@@ -338,6 +338,13 @@ that flag, so this is what makes the arithmetic under test the intended one.
 Quorum-survival invariants (`NeverLoseQuorum`, `NeverCritical`,
 `NeverIOSuspended`) are armed on the majority side ONLY; the replica about to be
 isolated is deliberately unarmed, since losing quorum is what is demanded of it.
+They cover the outage and are lifted for the recovery alone, because a healing
+partition legitimately takes quorum away from the majority for a moment: the
+returning primary reaches one peer before the other, and a node that hears of a
+Primary it cannot see yet outdates itself (`far_away_change()`,
+`drbd_receiver.c:7214` — quorum plays no part in that decision, an UpToDate disk
+on the primary is enough). What replaces the invariants in that window are the
+positive assertions below.
 The workload declares ONE expected freeze with a finite upper bound
 (`IOWorkload.DeclareFreeze`), which removes the framework's veto on a stall
 without making the stall optional.
@@ -366,7 +373,8 @@ Then:
 - After the rules are removed (and nothing is done to help DRBD reconnect): all
   three replicas reconnect on their own with no connection left `StandAlone`,
   every replica reports `FullyConnected=True/FullyConnected`, quorum returns
-  everywhere including the isolated replica, the thawed replica reports
+  everywhere — asserted on all three NODES, not just the isolated one — the
+  thawed replica reports
   `deviceIOSuspended: false` and `Attached=True/Attached`, and the attachment is
   `Ready=True/Ready`.
 - ⚡ The data path moves again (`ioResumed`): every beat is a write, an

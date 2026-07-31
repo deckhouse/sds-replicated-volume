@@ -53,6 +53,24 @@ const drbdConnectionStateStandAlone = "StandAlone"
 // connected and carries no pending resync.
 const drbdReplicationEstablished = "Established"
 
+// withoutGuards turns every guard off for the duration of fn and back on
+// afterwards, whatever fn does.
+//
+// tkmatch.WithDisabled is the same idea for a single switch; a spec arms one
+// guard per invariant per replica, and flipping them one at a time would leave
+// the set half-disabled the moment an assertion inside the scope fails.
+func withoutGuards(guards []*tkmatch.Switch, fn func()) {
+	for _, g := range guards {
+		g.Disable()
+	}
+	defer func() {
+		for _, g := range guards {
+			g.Enable()
+		}
+	}()
+	fn()
+}
+
 // isolateReplica silently drops every replication packet of trv's replica on
 // nodeName, in both directions, and returns the handle that lifts the blockade.
 //

@@ -48,10 +48,25 @@ const (
 	drbdLinkBlockDeleteLoop = 200 // hard bound on the delete loop, so a node can never spin forever
 )
 
-// drbdLinkBlockTTLBuffer is added to the spec's own remaining budget to get the
-// watchdog TTL. It covers what happens after the spec's deadline: the cleanup
-// nodes, the suite teardown, and the operator reading the failure.
-const drbdLinkBlockTTLBuffer = 5 * time.Minute
+// DRBDLinkBlockWatchdogTTL bounds how long a blockade can outlive the run that
+// created it, and nothing else: in every path where the test process is still
+// alive the rules are dropped by Remove or by the registered cleanup, long
+// before this elapses. It is reached only when neither can run — the process was
+// killed, the machine went to sleep, the cluster became unreachable — and it is
+// then the sole reason the stand heals at all.
+//
+// Both bounds on the value are real. Too short and the watchdog fires while the
+// spec is still running: the link comes back on its own, the spec observes a
+// recovery it never asked for, and the failure reads as a product bug. Too long
+// and a killed run leaves a stand with silently dropped DRBD traffic for that
+// long. Hence a value comfortably above any spec that blocks links, and no more.
+//
+// INVARIANT: it MUST exceed the SpecTimeout of every spec that calls
+// BlockDRBDLinks. Both sides scale with E2E_TIMEOUT_MULTIPLIER, so comparing the
+// authored values is enough. It is exported for that comparison: a spec declares
+// its own budget, which no policy here caps, so only the spec can check its
+// budget against this one.
+const DRBDLinkBlockWatchdogTTL = 40 * time.Minute
 
 // drbdLinkBlockTagRe keeps the run tag to characters that are literal in the
 // shell, in `grep -F` and in an iptables comment: it travels through all three.
@@ -196,12 +211,13 @@ type DRBDLinkBlock struct {
 //     path can leave the link blocked. Remove is idempotent, so a spec may call
 //     it at the point where it expects recovery and let the cleanup find
 //     nothing left to do.
-//   - A watchdog on the node removes the rules by tag after a TTL derived from
-//     this spec's OWN remaining budget (and therefore from
-//     E2E_TIMEOUT_MULTIPLIER, which the framework already applied to the
-//     SpecTimeout). It is detached from the exec session, so the stand heals
-//     even when the test process is killed outright or the cluster becomes
-//     unreachable.
+//   - A watchdog on the node removes the rules by tag after
+//     DRBDLinkBlockWatchdogTTL, scaled by E2E_TIMEOUT_MULTIPLIER. It is detached
+//     from the exec session, so the stand heals even when the test process is
+//     killed outright or the cluster becomes unreachable. The calling spec MUST
+//     declare a SpecTimeout below that TTL, or the watchdog can lift the
+//     blockade while the spec still relies on it; the TTL is exported so the
+//     spec can assert that at compile time next to the budget it declares.
 //   - Every rule carries a comment tag unique to this run, which is what makes
 //     removal exact and leftovers greppable (see e2e/full/RUNNING.md).
 //   - A node without iptables, or without its `comment`/`multiport` matches,
@@ -211,10 +227,7 @@ func (f *Framework) BlockDRBDLinks(ctx context.Context, nodeName string, links [
 	RequireDisruptiveSpec(fmt.Sprintf(
 		"silently dropping the DRBD replication traffic of %s on node %q", describeLinks(links), nodeName))
 
-	ttl, err := drbdLinkBlockTTL(ctx, time.Now())
-	if err != nil {
-		Fail(fmt.Sprintf("blocking the DRBD links on node %q: %v", nodeName, err))
-	}
+	ttl := drbdLinkBlockTTL(timeoutMultiplier())
 
 	b, err := f.newDRBDLinkBlock(nodeName, links, f.UniqueName()+"-netblock", ttl)
 	if err != nil {
@@ -372,27 +385,18 @@ func describeLinks(links []DRBDLink) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// drbdLinkBlockTTL derives the watchdog TTL from the deadline the spec is
-// ACTUALLY running under, never from a constant.
+// drbdLinkBlockTTL scales the watchdog TTL by the same multiplier the framework
+// applies to every SpecTimeout, so a stand slow enough to need a stretched
+// budget gets a blockade that outlives it.
 //
-// The framework scales every SpecTimeout by E2E_TIMEOUT_MULTIPLIER, so a
-// hard-coded TTL would cut a slow stand's scenario in half — the blockade would
-// disappear mid-spec and the failure would look like a product bug. Reading the
-// context's deadline picks the multiplier up for free.
-func drbdLinkBlockTTL(ctx context.Context, now time.Time) (time.Duration, error) {
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return 0, errors.New(
-			"the context carries no deadline, so the watchdog TTL cannot be derived from the" +
-				" spec's own budget: call this from a spec body that declares an explicit" +
-				" SpecTimeout (the framework scales it by E2E_TIMEOUT_MULTIPLIER) and pass that" +
-				" spec's SpecContext")
-	}
-	remaining := deadline.Sub(now)
-	if remaining <= 0 {
-		return 0, fmt.Errorf("the spec's budget expired %s ago, so there is no window to block anything in", -remaining)
-	}
-	return (remaining + drbdLinkBlockTTLBuffer).Round(time.Second), nil
+// The budget of the running spec would be the natural input here, and it is not
+// available: Ginkgo enforces SpecTimeout with a timer of its own and
+// deliberately does NOT build the SpecContext with context.WithDeadline (see
+// NewSpecContext in ginkgo/internal), so ctx.Deadline() reports no deadline no
+// matter what the spec declared. Reading it yielded a TTL that could never be
+// computed in a real run — hence the constant, guarded by the invariant on it.
+func drbdLinkBlockTTL(multiplier float64) time.Duration {
+	return (time.Duration(float64(DRBDLinkBlockWatchdogTTL) * multiplier)).Round(time.Second)
 }
 
 // newDRBDLinkBlock validates everything that ends up inside a node command.

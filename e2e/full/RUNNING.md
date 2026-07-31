@@ -60,8 +60,8 @@ cluster shape than `e2e/agent`.
   carries an `-m comment` tag unique to the run (`e2e-<runID>-…-netblock`).
   Three things remove them: a `DeferCleanup` registered before the first rule,
   an explicit removal inside the spec where recovery is expected, and a detached
-  watchdog started on the node itself, which drops the rules by tag after a TTL
-  derived from the spec's own deadline. The watchdog is what heals the stand
+  watchdog started on the node itself, which drops the rules by tag after 40
+  minutes, scaled by `E2E_TIMEOUT_MULTIPLIER`. The watchdog is what heals the stand
   after a `kill -9` or a lost connection; it leaves a note in
   `/var/tmp/sds-rv-e2e-netblock/<tag>.watchdog.log` on the node. To check for
   leftovers by hand, see "Forced cleanup" below.
@@ -440,10 +440,11 @@ done
 ```
 
 Stray firewall rules from E2E-Q1/E2E-Q2 are a separate case: the node's own
-watchdog removes them once its TTL expires (a few minutes past the spec's
-deadline), so wait it out before touching anything — and if a rule is still
-there afterwards, that is a bug worth reporting, not just cleaning. To remove
-one by hand, on the affected node:
+watchdog removes them once its TTL expires (40 minutes from the moment the rules
+went in, multiplied by the `E2E_TIMEOUT_MULTIPLIER` of the run that left them),
+so wait it out before touching anything — and if a rule is still there
+afterwards, that is a bug worth reporting, not just cleaning. To remove one by
+hand, on the affected node:
 
 ```bash
 # List them first: every rule of the suite carries a "…-netblock" comment.
