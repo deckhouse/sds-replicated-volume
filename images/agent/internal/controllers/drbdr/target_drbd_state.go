@@ -240,7 +240,13 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 	intendedDisk := iState.BackingDisk()
 
 	if actualDisk != "" && actualDisk != intendedDisk {
-		res = append(res, DetachAction{Minor: minor})
+		// The detach is intentional only when the intended state is diskless (a retype to
+		// TieBreaker/Access). A Diskful resource switching its backing device also detaches,
+		// but it re-attaches right away and must not be marked as a diskless client.
+		res = append(res, DetachAction{
+			Minor:               minor,
+			IntentionalDiskless: iState.Type() == v1alpha1.DRBDResourceTypeDiskless,
+		})
 		return
 	}
 
