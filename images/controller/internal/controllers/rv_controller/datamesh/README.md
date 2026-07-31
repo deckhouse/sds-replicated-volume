@@ -104,7 +104,7 @@ determines the layout (how many replicas, what quorum settings) and placement
 
   | Strategy | Effect on existing volumes |
   |----------|----------------------------|
-  | **RollingUpdate** (default) | Every volume of that class receives the new configuration and starts the corresponding layout transition (§8). Volumes pick it up as they reconcile; `maxParallel` throttling is not implemented, so the rollout is not staged. |
+  | **RollingUpdate** (default) | Volumes of that class receive the new configuration and start the corresponding layout transition (§8), at most `rollingUpdate.maxParallel` of them at a time (default 5). The volumes that still need the configuration are ordered by name and the leading ones take the free slots together; a slot is freed by `MembershipLayoutConverged=True/Converged`, so a configuration that cannot converge reaches at most `maxParallel` volumes. The rest keep their own configuration and report `ConfigurationReady=False/ConfigurationRolloutInProgress`. |
   | **NewVolumesOnly** | Only volumes created afterwards get the new configuration. A volume that already has one keeps both its configuration and the generation it came from, and reports `ConfigurationReady=False/NewerConfigurationHeld`. Nothing gates on that condition — the volume keeps operating on its own configuration. The escape is to switch the strategy to `RollingUpdate` or to recreate the volume, never a silent replacement. |
 
   Generation tracking (`ConfigurationGeneration` vs `ConfigurationObservedGeneration`)
@@ -646,10 +646,13 @@ transitioning to the new layout. Specifically:
 
 Which volumes receive an RSC configuration change is decided by the class
 rollout strategy (§2): under `RollingUpdate` every RV referencing that RSC
-does, under `NewVolumesOnly` only volumes created afterwards. A volume that
-receives the update detects the drift during reconciliation and begins a
-transition to the new layout. Multiple RVs may transition concurrently —
-`maxParallel` throttling is not implemented.
+does eventually, under `NewVolumesOnly` only volumes created afterwards. A
+volume that receives the update detects the drift during reconciliation and
+begins a transition to the new layout. Multiple RVs may transition
+concurrently, but no more than `rollingUpdate.maxParallel` of one class at a
+time: the volumes still awaiting the configuration are ordered by name and the
+leading ones fill the free slots at once, each slot freed by the
+`MembershipLayoutConverged=True/Converged` of the volume holding it.
 
 ---
 

@@ -66,6 +66,7 @@ func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
 	b := fake.NewClientBuilder().WithScheme(scheme)
 	b = testhelpers.WithRVAByReplicatedVolumeNameIndex(b)
 	b = testhelpers.WithRVRByReplicatedVolumeNameIndex(b)
+	b = testhelpers.WithRVByReplicatedStorageClassNameIndex(b)
 	return b
 }
 

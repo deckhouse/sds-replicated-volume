@@ -158,9 +158,11 @@ described in [Volume Statistics](#volume-statistics), evaluated in this preceden
 | 2 | False | ConfigurationRolloutDisabled | `staleConfiguration > 0` AND `ConfigurationRolloutStrategy.type=NewVolumesOnly` | `N volume(s) not yet aligned with the storage class configuration; automatic rollout is disabled` |
 | 3 | True | RolledOutToAllVolumes | no pending and no stale volumes, i.e. `aligned == tracked volumes` | All volumes have configuration matching the storage class |
 
-> **Note:** the `maxParallel`/rollout-throttling semantics are not implemented, so the messages
-> report the honest stale count rather than active rollout progress, and the reason is chosen by
-> the strategy **type** alone.
+> **Note:** the reason is chosen by the strategy **type** alone, and the messages report the honest
+> stale count. `rollingUpdate.maxParallel` throttling is enforced by `rv_controller` (each volume
+> either rolls out or reports `ConfigurationReady=False/ConfigurationRolloutInProgress` while it
+> waits for a slot), and both kinds of volume are stale for this class-level aggregate — the budget
+> changes how fast the count drops, not what it counts.
 
 Under `NewVolumesOnly` a volume that already has a configuration keeps it and reports
 `ConfigurationReady=False/NewerConfigurationHeld` (see `rv_controller`). Such a held volume is
@@ -178,8 +180,9 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 | False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) |
 | False | ManualConflictResolution | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=Manual` |
 
-> **Note:** like the configuration rollout, conflict resolution is read by strategy **type** only —
-> its `maxParallel` throttling is not implemented either.
+> **Note:** conflict resolution is read by strategy **type** only, and unlike the configuration
+> rollout its `maxParallel` throttling is **not implemented** anywhere: the parameter is accepted
+> and ignored.
 
 ## Phase
 

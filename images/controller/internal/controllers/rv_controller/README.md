@@ -246,11 +246,12 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 | True | Ready | Configuration is valid and matches the source |
 | False | WaitingForStorageClass | RSC not found, RSC configuration not ready, or RSC has not published a configuration for its current `metadata.generation` yet (Auto mode only) |
 | False | NewerConfigurationHeld | The RSC has a newer configuration, but `configurationRolloutStrategy.type=NewVolumesOnly` keeps this volume on the one it already has (Auto mode only) |
+| False | ConfigurationRolloutInProgress | The RSC has a newer configuration and `configurationRolloutStrategy.type=RollingUpdate`, but the free slots of `rollingUpdate.maxParallel` went to volumes of the class that sort earlier by name (Auto mode only) |
 | False | InvalidConfiguration | Configuration is invalid: RSP not found or TransZonal zone count mismatch |
 
-`NewerConfigurationHeld` is a reporting state, not a block: nothing gates on `ConfigurationReady`,
-so the volume keeps operating on its own configuration. The class-level aggregate counts such a
-volume as `staleConfiguration` (see `rsc_controller`).
+`NewerConfigurationHeld` and `ConfigurationRolloutInProgress` are reporting states, not blocks:
+nothing gates on `ConfigurationReady`, so the volume keeps operating on its own configuration. The
+class-level aggregate counts such a volume as `staleConfiguration` (see `rsc_controller`).
 
 ### MembershipLayoutConverged
 
@@ -467,9 +468,11 @@ with manual RVR operations (a user retyping/creating a replica in parallel) can 
 outside the whitelist (e.g. an extra tie-breaker) → `TransitionUnsupported`, and convergence safely
 stops. Which volumes migrate is decided upstream, by the configuration rollout
 (`reconcileRVConfiguration`): under `NewVolumesOnly` a volume that already has a configuration
-never sees the new layout at all, while under `RollingUpdate` every volume of the class does — at
-once, because `maxParallel` throttling is not implemented. Unstaged is safe for r3→r2 (no resync),
-but a blocker for future resync-bearing transitions.
+never sees the new layout at all, while under `RollingUpdate` at most `rollingUpdate.maxParallel`
+volumes of the class carry it before it has converged — the ones still awaiting it are ordered by
+name and the leading ones take the free slots together, each slot freed only by a
+`MembershipLayoutConverged=True/Converged`. A layout no volume can converge on (this section's
+`TransitionUnsupported`) therefore reaches at most `maxParallel` volumes.
 
 Migration monitoring:
 
@@ -1290,8 +1293,15 @@ flowchart TD
     RSPNotFound -->|No| ValidateZones{"Zone count valid?"}
     ValidateZones -->|No| SetInvalid2["False: InvalidConfiguration<br/>(zone count mismatch)"]
     SetInvalid2 --> End
-    ValidateZones -->|Yes| SetConfig
-    CheckTransZonal -->|No| SetConfig
+    ValidateZones -->|Yes| CheckBudget
+    CheckTransZonal -->|No| CheckBudget
+
+    CheckBudget{"Auto mode AND<br/>volume already has a config?"}
+    CheckBudget -->|Yes| Gate{"Free slot in the class<br/>RollingUpdate budget?"}
+    CheckBudget -->|No| SetConfig
+    Gate -->|No| Queue["Observe only:<br/>ConfigurationObservedGeneration = intended<br/>False: ConfigurationRolloutInProgress<br/>requeue after 5s"]
+    Queue --> End
+    Gate -->|Yes| SetConfig
 
     SetConfig["Set rv.Status.Configuration<br/>(DeepCopy) + generation"]
     SetConfig --> SetReady2["True: Ready"]
@@ -1299,7 +1309,7 @@ flowchart TD
 ```
 
 **Generation tracking:**
-- Auto mode: `ConfigurationGeneration` = the RSC configuration generation whose **content** is stored in `rv.Status.Configuration`; `ConfigurationObservedGeneration` = the newest RSC configuration generation the volume has seen. The two differ exactly while a newer configuration is held back by `NewVolumesOnly`.
+- Auto mode: `ConfigurationGeneration` = the RSC configuration generation whose **content** is stored in `rv.Status.Configuration`; `ConfigurationObservedGeneration` = the newest RSC configuration generation the volume has seen. The two differ exactly while the volume has seen a newer configuration it has not applied: either it is held back by `NewVolumesOnly`, or it is waiting for a free `RollingUpdate` slot. Both cases advance only the observed generation, so the class aggregate does not hang in "pending observation" while the volume keeps its own configuration.
 - Manual mode: both are 0 (no RSC rollout tracking)
 
 **RSC status freshness:** the RSC configuration is read only when `rsc.status.configurationGeneration == rsc.metadata.generation`. While the class controller has not accepted the latest spec edit, its status still carries the previous generation; applying it would hand a volume a configuration the user has already replaced — and under `NewVolumesOnly` the volume would hold that superseded configuration forever, because it stops being "new" the moment it gets one. The wait resolves itself: the RV watches RSC `status.configurationGeneration`, so the next publish triggers a reconcile. A spec edit the class controller never accepts (invalid configuration) keeps volumes waiting — deliberately, instead of silently provisioning from a stale configuration.
@@ -1307,6 +1317,23 @@ flowchart TD
 **NewVolumesOnly (observe, do not apply):** when the class rollout strategy is `NewVolumesOnly` and the volume already has a configuration whose content differs from the intended one, the volume keeps both its content and its `ConfigurationGeneration`, advances `ConfigurationObservedGeneration` (so the class aggregate does not hang in "pending observation"), and reports `ConfigurationReady=False/NewerConfigurationHeld`. A nil strategy — the class controller has not written the default yet — counts as `RollingUpdate`. Strategy transitions need no extra handling: `NewVolumesOnly → RollingUpdate` rolls held volumes out through the normal path, and `RollingUpdate → NewVolumesOnly` rolls nothing back. The hold applies even if the intended configuration is invalid: the volume is not "fixed" silently, the escape is a strategy switch or a volume recreation.
 
 **Content-based fast path:** Instead of generation-based skipping, the function compares `*rv.Status.Configuration == *intended` (struct equality on 5 scalar fields). This avoids generation collision bugs when switching between Auto and Manual modes. It runs before the `NewVolumesOnly` hold on purpose: equal content means the volume is already aligned with the new generation, so there is nothing to hold back.
+
+**RollingUpdate budget (`maxParallel`):** a volume that already carries a configuration is admitted to the rollout only when the class has a free slot; the helpers live in [`reconciler_rollout.go`](reconciler_rollout.go). The gate sits behind the fast path, the `NewVolumesOnly` hold and the validation: an aligned volume needs no slot, a held volume is not rolling out at all, and an invalid configuration must be reported as invalid rather than queued.
+
+The decision needs no ledger and no sibling watch. One indexed list of the class (`getRVsByRSC`) is classified against the intended configuration and the generation the class published it under, with the in-memory volume always replacing its own listed copy:
+
+- **active** — stores the intended configuration but has not been observed to finish with it: either it adopted that content in an earlier configuration epoch (`status.configurationGeneration` is behind), or it has not published `MembershipLayoutConverged=True/Converged` for its current `metadata.generation`. It occupies a slot.
+- **converged** — adopted the intended configuration in the current epoch and published that verdict. Its slot is free.
+- **pending** — stores an older configuration and needs a slot.
+- **excluded** — deleting, Manual, forming, or never configured. Neither occupies nor waits for a slot.
+
+Convergence is read from the condition rather than from the member counts, because the counts can match the intended layout while the volume is not converged at all: a retype already flipped on a replica spec (`Converging`), or a replacement tie-breaker that cannot be placed (`CannotConverge`). Those signals come from the replicas of that volume, which the classifier does not read — one indexed listing is its whole I/O budget. Reading a peer's condition is sound because `reconcileLayoutStatus` recomputes it in the same pass, and therefore writes it in the same object version, as `status.configuration`. A missing or stale verdict counts as active, which costs the volume one extra pass and never releases a slot early.
+
+The generation is checked alongside the content because equal content does not identify the epoch: a class edited `A → B → A` leaves a volume that converged on the first `A` byte-identical to one that has just adopted the second, and a lagging listing serves exactly that object together with the verdict it earned back then. `status.configurationGeneration` is stamped by the very write that admits a volume, so it is never late — no volume of the current epoch is mistaken for an older one. A volume of an older epoch is counted as active rather than dropped: it needs no slot (its next pass takes the content-equal fast path and restamps the generation), but a stale reader cannot tell it apart from one that really is mid-rollout, and dropping it is what would let the class exceed `maxParallel`.
+
+The free slots (`maxParallel - activeCount`, never below zero) go to the leading pending volumes by name — all of them in the same pass, so `maxParallel: 2` starts two migrations at once rather than chaining them. The order is total and stable, so every worker computes the same frontier from the same cache, and a stale listing can only under-admit: a volume that has just been admitted is still seen either as active or as a pending volume ahead of the same later names. A volume that misses out keeps its content and `ConfigurationGeneration`, advances `ConfigurationObservedGeneration`, reports `ConfigurationReady=False/ConfigurationRolloutInProgress`, and requeues after 5s — nothing else wakes it when a sibling converges.
+
+Lowering `maxParallel` below the number of active volumes does not stop them (that would strand half-migrated layouts); it only admits nobody new. A volume that can never converge (`MembershipLayoutConverged=False/TransitionUnsupported` or a blocked migration) holds its slot indefinitely, which is the point: the budget bounds how many volumes a bad configuration reaches, not just how fast a good one spreads. `MaxConcurrentReconciles` is unrelated — it is a worker count, not a rollout policy.
 
 **Data Flow:**
 
@@ -1316,15 +1343,16 @@ flowchart TD
 | `rv.Spec.ManualConfiguration` | Manual mode source (guaranteed present by CEL) |
 | `rsc` | ReplicatedStorageClass (may be nil; Auto mode only) |
 | `rsc.Generation` / `rsc.Status.ConfigurationGeneration` | Freshness gate: the published configuration must belong to the current spec generation |
-| `rsc.Spec.ConfigurationRolloutStrategy` | Rollout strategy (nil = RollingUpdate) |
+| `rsc.Spec.ConfigurationRolloutStrategy` | Rollout strategy (nil = RollingUpdate) and its `rollingUpdate.maxParallel` budget (nil = 5, the default the class controller writes) |
 | `rsc.Status.Configuration` | RSC configuration (Auto mode source) |
 | RSP (loaded via `getRSPZoneCount`) | Zone count for TransZonal validation |
+| Volumes of the class (listed via `getRVsByRSC`) | Rollout budget accounting (Auto mode, existing volumes only) |
 
 | Output | Description |
 |--------|-------------|
-| `rv.Status.Configuration` | Set/updated configuration (unchanged while a newer one is held) |
+| `rv.Status.Configuration` | Set/updated configuration (unchanged while a newer one is held or queued) |
 | `rv.Status.ConfigurationGeneration` | RSC generation the stored content came from (Auto) or 0 (Manual) |
-| `rv.Status.ConfigurationObservedGeneration` | Newest RSC generation seen; equal to ConfigurationGeneration unless a newer configuration is held |
+| `rv.Status.ConfigurationObservedGeneration` | Newest RSC generation seen; equal to ConfigurationGeneration unless a newer configuration is held (`NewVolumesOnly`) or queued for a rollout slot (`RollingUpdate`) |
 | `ConfigurationReady` condition | Reports configuration state |
 
 ---

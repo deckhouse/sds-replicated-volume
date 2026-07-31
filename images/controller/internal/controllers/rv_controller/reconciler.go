@@ -1427,10 +1427,12 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 //     whether the stored configuration needs an update.
 //
 // In Auto mode the RSC configuration is read only when the class has published it for its
-// current spec generation, and it is applied only when the class rollout strategy allows it
-// (see the NewVolumesOnly branch). ConfigurationGeneration always names the generation the
-// stored content came from; ConfigurationObservedGeneration names the newest generation the
-// volume has seen. The two differ exactly while a newer configuration is held back.
+// current spec generation, and it is applied only when the class rollout strategy allows it:
+// NewVolumesOnly holds it back from every existing volume (see that branch), RollingUpdate lets
+// it through in batches of maxParallel (see the rollout budget below and reconciler_rollout.go).
+// ConfigurationGeneration always names the generation the stored content came from;
+// ConfigurationObservedGeneration names the newest generation the volume has seen. The two differ
+// exactly while a newer configuration is held back or waiting for a rollout slot.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileRVConfiguration(
@@ -1451,6 +1453,10 @@ func (r *Reconciler) reconcileRVConfiguration(
 	// volumes only, so a volume that already has one must keep it. It is set in the Auto branch
 	// only, and therefore implies rsc != nil.
 	holdNewerConfiguration := false
+	// throttleRollout reports that the intended configuration comes from a storage class, so the
+	// class-wide rollout budget applies to it. It is set in the Auto branch only, and therefore
+	// implies rsc != nil.
+	throttleRollout := false
 
 	switch rv.Spec.ConfigurationMode {
 	case v1alpha1.ReplicatedVolumeConfigurationModeManual:
@@ -1486,6 +1492,7 @@ func (r *Reconciler) reconcileRVConfiguration(
 		intended = rsc.Status.Configuration
 		intendedGeneration = rsc.Status.ConfigurationGeneration
 		holdNewerConfiguration = rsc.Spec.ConfigurationRolloutStrategy.GetType() == v1alpha1.ConfigurationRolloutNewVolumesOnly
+		throttleRollout = true
 	}
 
 	// Fast-path: config content matches intended → update generation tracking, skip the rest.
@@ -1554,6 +1561,44 @@ func (r *Reconciler) reconcileRVConfiguration(
 				fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d requires a valid zone count, RSP has %d zones",
 					intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount))
 			return rf.Continue().ReportChangedIf(changed)
+		}
+	}
+
+	// Throttle the rollout across the class: RollingUpdate.maxParallel caps how many volumes may
+	// be migrating to the new configuration at once, so an unsatisfiable configuration damages a
+	// bounded number of them (see reconciler_rollout.go). Only a volume that already carries a
+	// configuration is throttled: a new one is not migrating anything.
+	//
+	// The gate sits behind the validation on purpose — an invalid configuration must be reported
+	// as such rather than queued, and a volume waiting for a slot must not be told the queue is
+	// what stops it when the configuration would be rejected anyway.
+	if throttleRollout && rv.Status.Configuration != nil {
+		classRVs, err := r.getRVsByRSC(rf.Ctx(), rsc.Name)
+		if err != nil {
+			return rf.Failf(err, "listing ReplicatedVolumes of ReplicatedStorageClass %s", rsc.Name)
+		}
+
+		maxParallel := computeIntendedRolloutMaxParallel(rsc)
+		cohort := computeActualRolloutCohort(rv, classRVs, intended, intendedGeneration)
+		if !computeTargetRolloutAdmission(rv, cohort, maxParallel) {
+			// Keep the applied content and the generation it came from (they are always
+			// consistent), and only record that the newer generation has been observed, so the
+			// class aggregate does not hang in "pending observation" while the volume queues.
+			if rv.Status.ConfigurationObservedGeneration != intendedGeneration {
+				rv.Status.ConfigurationObservedGeneration = intendedGeneration
+				changed = true
+			}
+
+			// The message deliberately carries no live counters: it is rewritten into the object
+			// on every change, and a class-wide progress number would repatch every waiting
+			// volume each time any other volume converges.
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress,
+				fmt.Sprintf("ReplicatedStorageClass %q rolls its configuration (generation %d) out to at most %d volume(s) at a time; "+
+					"the volume keeps its configuration (generation %d) until a slot is free",
+					rsc.Name, intendedGeneration, maxParallel, rv.Status.ConfigurationGeneration)) || changed
+
+			return rf.ContinueAndRequeueAfter(configurationRolloutRequeueInterval).ReportChangedIf(changed)
 		}
 	}
 
@@ -2128,6 +2173,30 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 		return nil, nil
 	}
 	return &rv, nil
+}
+
+// getRVsByRSC lists the ReplicatedVolumes that reference the given storage class, through the
+// spec.replicatedStorageClassName index. The returned slice is unordered — callers that need a
+// deterministic order must sort it themselves.
+//
+// The volumes come straight from the informer cache without a deep copy, because a rollout
+// decision reads a handful of fields from every volume of the class and copying them all would
+// be wasteful. Callers MUST treat them as strictly read-only: mutating one corrupts the cache
+// for every other reader.
+func (r *Reconciler) getRVsByRSC(ctx context.Context, rscName string) ([]*v1alpha1.ReplicatedVolume, error) {
+	var list v1alpha1.ReplicatedVolumeList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+
+	rvs := make([]*v1alpha1.ReplicatedVolume, len(list.Items))
+	for i := range list.Items {
+		rvs[i] = &list.Items[i]
+	}
+	return rvs, nil
 }
 
 func (r *Reconciler) patchRV(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume) error {

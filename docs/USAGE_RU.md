@@ -180,11 +180,26 @@ kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(
 
 Такие тома попадают в счётчик `status.volumes.staleConfiguration` класса, а `ConfigurationRolledOut` становится `False/ConfigurationRolloutDisabled`. Удержание намеренное и сохраняется, даже если удерживаемая конфигурация перестала соответствовать кластеру: чтобы выпустить том из этого состояния, переключите стратегию обратно на `RollingUpdate` (все удерживаемые тома раскатаются обычным путём) либо пересоздайте том. Переключение с `RollingUpdate` на `NewVolumesOnly` ничего не откатывает — уже применённая конфигурация остаётся применённой.
 
+**Ограничение параллельности раскатки.** При `RollingUpdate` параметр `configurationRolloutStrategy.rollingUpdate.maxParallel` (по умолчанию `5`) задаёт, сколько томов класса мигрируют одновременно:
+
+```shell
+kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"configurationRolloutStrategy":{"type":"RollingUpdate","rollingUpdate":{"maxParallel":2}}}}'
+```
+
+Тома, которым ещё нужна новая конфигурация, упорядочены по имени, и свободные слоты занимают первые из них — сразу все, то есть при `maxParallel: 2` первые два тома мигрируют параллельно. Слот освобождается, когда его том репортит `MembershipLayoutConverged=True/Converged`, и переходит к следующему имени в этом порядке. Ожидающие тома сохраняют собственную конфигурацию и репортят:
+
+```shell
+kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationReady")]}{.status}/{.reason}: {.message}{end}{"\n"}'
+# False/ConfigurationRolloutInProgress: ... rolls its configuration (generation N) out to at most 2 volume(s) at a time ...
+```
+
+Ожидающие тома попадают в счётчик `status.volumes.staleConfiguration` класса, поэтому `ConfigurationRolledOut` остаётся `False/ConfigurationRolloutInProgress`, пока не мигрирует весь класс. Уменьшение `maxParallel` не останавливает уже мигрирующие тома — оно лишь не пускает в раскатку новые. Том, который не может сойтись на новой конфигурации (см. ограничения ниже), удерживает свой слот бессрочно, и в этом и состоит смысл параметра: он ограничивает не только скорость раскатки удачной правки, но и число томов, до которых доберётся неудачная.
+
 **Ограничения.**
 
 - Автоматического обратного пути нет: изменение `replication` в сторону большего числа реплик (r2→r3) репортится на каждом томе как `MembershipLayoutConverged=False/TransitionUnsupported` и не выполняет никаких действий — требуется ручная разборка.
 - Откат правки, пока том ещё мигрирует, не отменяет уже запущенный перевод реплики в tie-breaker, и такой том больше не вернётся в `Converged` сам. В зависимости от момента отката том останется либо в раскладке `2D+1TB` при желаемой `3D` (`MembershipLayoutConverged=False/TransitionUnsupported`), либо с репликой, у которой `spec.type` застрял в значении `TieBreaker`, тогда как раскладка по-прежнему `3D` (`MembershipLayoutConverged=False/Converging`, имя реплики указано в сообщении condition). Данные не теряются ни в одном из случаев. Во втором случае реплику нужно восстановить одним патчем: вернуть `spec.type` в `Diskful` и одновременно вернуть поля backing volume (`spec.lvmVolumeGroupName`, а для thin-пула ещё и `spec.lvmVolumeGroupThinPoolName`), взяв значения из `status.datamesh.members` тома.
-- При `RollingUpdate` правка применяется сразу ко всем томам класса: ограничение параллельности раскатки (`configurationRolloutStrategy.rollingUpdate.maxParallel`) пока не реализовано.
+- `eligibleNodesConflictResolutionStrategy.rollingRepair.maxParallel` принимается, но не реализован: перенос томов с узлов, переставших быть eligible, не ограничивается по параллельности. Это другой параметр, не тот `maxParallel` из конфигурационной раскатки выше — он-то как раз работает.
 
 #### Удаление ресурса ReplicatedStorageClass
 

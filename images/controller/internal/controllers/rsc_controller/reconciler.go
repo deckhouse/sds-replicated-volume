@@ -826,8 +826,11 @@ func isConfigurationRolloutEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
 // are repaired automatically. A strategy the controller has not defaulted yet counts as
 // RollingRepair — the default it is about to write.
 //
-// Both strategies are read by type only: throttling (maxParallel) is not implemented for either
-// of them, so the parameter cannot change the reported state.
+// Both strategies are read by type only. For the configuration rollout that is a deliberate
+// narrowing: rv_controller does enforce rollingUpdate.maxParallel, but a throttled volume is
+// stale for this aggregate exactly like a volume that has not been reached yet, so the budget
+// cannot change the reported state. For conflict resolution, rollingRepair.maxParallel is simply
+// not implemented — the parameter is accepted and ignored.
 func isEligibleNodesConflictResolutionEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return rsc.Spec.EligibleNodesConflictResolutionStrategy.GetType() == v1alpha1.EligibleNodesConflictResolutionRollingRepair
 }
