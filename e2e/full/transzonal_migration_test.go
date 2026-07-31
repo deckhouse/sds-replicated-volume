@@ -143,6 +143,10 @@ var _ = Describe("Layout: r3->r2 migration with TransZonal topology",
 				By("verifying quorum and the tie-breaker peer at the DRBD level")
 				Expect(trv.Object().Status.Datamesh.Quorum).To(BeEquivalentTo(2))
 				expectDRBDQuorum(ctx, trv)
+				// The peers see the tie-breaker (below); this is the other side of
+				// the same claim, taken on the tie-breaker's own node: it gave its
+				// disk up on purpose rather than lost it.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 				tbPeer := drbdPeerNameOn(trv, memberNodesOfType(trv, v1alpha1.DatameshMemberTypeTieBreaker)[0])
 				for _, dNode := range memberNodesOfType(trv, v1alpha1.DatameshMemberTypeDiskful) {
 					st := f.DRBDStatus(ctx, dNode, drbdResourceOn(trv, dNode))

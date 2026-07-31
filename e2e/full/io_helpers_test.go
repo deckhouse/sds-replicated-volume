@@ -17,6 +17,9 @@ limitations under the License.
 package full
 
 import (
+	"fmt"
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
@@ -127,5 +130,84 @@ func ioProgressedBy(
 	Expect(st.GapExceeded).To(BeFalse(), "io workload %s stalled earlier in the run: %s", w.RunID(), st)
 	Expect(st.LastSequence).To(BeNumerically(">=", prev.LastSequence+writes),
 		"io workload %s did not advance past sequence %d: %s", w.RunID(), prev.LastSequence, st)
+	return st
+}
+
+// ioFreezeSettleTimeout bounds the wait for a provoked freeze to show up, and
+// ioFreezeSettlePoll how often the node is asked. The wait covers the whole
+// chain the scenario is about: DRBD's own timers declaring the peers dead, the
+// quorum re-evaluation that follows, and finally MaxHeartbeatGap elapsing with
+// no write landing. The spec's context caps it, so a run with a raised
+// E2E_TIMEOUT_MULTIPLIER is bounded by the scaled SpecTimeout as usual.
+const (
+	ioFreezeSettleTimeout = 6 * time.Minute
+	ioFreezeSettlePoll    = 5 * time.Second
+)
+
+// ioFroze asserts that the data path STOPPED and that the writer blocked rather
+// than died, and returns the status that established the freeze.
+//
+// It is the positive half of a declared freeze (fw.IOWorkload.DeclareFreeze):
+// declaring one only removes the framework's veto, so the spec still has to
+// prove the freeze happened. A run in which the isolated replica sailed on
+// writing fails here — which is the whole point of the scenario, since a volume
+// that keeps serving I/O without quorum is the defect being hunted.
+//
+// Terminated == nil is not a formality either. With `on-no-quorum: suspend-io`
+// the writer must BLOCK; a writer that exited means the volume answered with
+// errors instead of freezing (the `io-error` behaviour), which is a different
+// and separately reportable defect.
+func ioFroze(ctx SpecContext, w *fw.IOWorkload) fw.IOWorkloadStatus {
+	GinkgoHelper()
+
+	var frozen fw.IOWorkloadStatus
+	Eventually(ctx, func() error {
+		st := w.Observe(ctx)
+		switch {
+		case st.Terminated != nil:
+			StopTrying(fmt.Sprintf(
+				"io workload %s terminated instead of blocking: with on-no-quorum=suspend-io the"+
+					" writer must be frozen, and an exit means the device answered with errors: %s",
+				w.RunID(), st)).Now()
+		case !st.Running:
+			StopTrying(fmt.Sprintf("io workload %s is no longer running: %s", w.RunID(), st)).Now()
+		case !st.Stalled:
+			return fmt.Errorf("io workload %s is still writing: %s", w.RunID(), st)
+		}
+		frozen = st
+		return nil
+	}).WithTimeout(ioFreezeSettleTimeout).WithPolling(ioFreezeSettlePoll).Should(Succeed(),
+		"io workload %s never stopped writing, so the replica kept serving I/O without quorum", w.RunID())
+
+	// The freeze has to HOLD: a single stalled snapshot could be a slow probe,
+	// while a sequence that did not move between two reads is a stopped data
+	// path.
+	after := w.Observe(ctx)
+	Expect(after.Terminated).To(BeNil(), "io workload %s terminated during the freeze: %s", w.RunID(), after)
+	Expect(after.Running).To(BeTrue(), "io workload %s stopped running during the freeze: %s", w.RunID(), after)
+	Expect(after.LastSequence).To(Equal(frozen.LastSequence),
+		"io workload %s advanced from sequence %d to %d while it was supposed to be frozen: %s",
+		w.RunID(), frozen.LastSequence, after.LastSequence, after)
+	return frozen
+}
+
+// ioResumed asserts the writer picked its work up again after the freeze that
+// ioFroze established, and returns the new baseline.
+//
+// Because every beat is a write, an fdatasync, a read-back and a checksum
+// comparison, the sequence advancing is itself the proof that the data path is
+// whole again. The historical gap is deliberately NOT re-checked here: the
+// freeze was declared up front and proven by ioFroze, so failing on it now
+// would only fail the spec for the outcome it was written to demonstrate.
+func ioResumed(ctx SpecContext, w *fw.IOWorkload, frozen fw.IOWorkloadStatus) fw.IOWorkloadStatus {
+	GinkgoHelper()
+
+	st := w.AwaitProgress(ctx, ioContinuityWrites)
+	Expect(st.Terminated).To(BeNil(), "io workload %s terminated instead of resuming: %s", w.RunID(), st)
+	Expect(st.Running).To(BeTrue(), "io workload %s is not running: %s", w.RunID(), st)
+	Expect(st.Stalled).To(BeFalse(), "io workload %s is still stalled: %s", w.RunID(), st)
+	Expect(st.LastSequence).To(BeNumerically(">=", frozen.LastSequence+ioContinuityWrites),
+		"io workload %s did not resume past the sequence %d it froze at: %s",
+		w.RunID(), frozen.LastSequence, st)
 	return st
 }

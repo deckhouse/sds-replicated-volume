@@ -22,16 +22,23 @@ import (
 )
 
 // DetachArgs returns the arguments for drbdsetup detach command.
-var DetachArgs = func(minor uint) []string {
-	return []string{
+// When diskless is true, --diskless is appended so that the kernel keeps the device
+// marked as an intentionally diskless client instead of an unintentionally diskless one.
+var DetachArgs = func(minor uint, diskless bool) []string {
+	args := []string{
 		"detach",
 		strconv.FormatUint(uint64(minor), 10),
 	}
+	if diskless {
+		args = append(args, "--diskless")
+	}
+	return args
 }
 
 // ExecuteDetach detaches the backing device from a replicated device.
-func ExecuteDetach(ctx context.Context, minor uint) error {
-	cmd := ExecCommandContext(ctx, DRBDSetupCommand, DetachArgs(minor)...)
+// When diskless is true, --diskless is passed to mark the device as an intentionally diskless client.
+func ExecuteDetach(ctx context.Context, minor uint, diskless bool) error {
+	cmd := ExecCommandContext(ctx, DRBDSetupCommand, DetachArgs(minor, diskless)...)
 	_, err := executeCommand(cmd, nil)
 	return err
 }

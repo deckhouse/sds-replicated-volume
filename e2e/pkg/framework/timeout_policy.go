@@ -19,6 +19,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -33,6 +34,18 @@ const (
 	defaultSlowSpecTimeout     = 1 * time.Minute
 	defaultLongHaulSpecTimeout = 30 * time.Minute
 )
+
+// envTimeoutMultiplier stretches every budget the framework derives, so one
+// variable retimes a suite for a slow stand.
+const envTimeoutMultiplier = "E2E_TIMEOUT_MULTIPLIER"
+
+// timeoutMultiplier is the multiplier in effect for this run. It reads the
+// environment on every call rather than caching: the value is also needed by
+// helpers that run long after Setup, and a copy taken at Setup would be one more
+// thing to keep in sync for no gain.
+func timeoutMultiplier() float64 {
+	return parseTimeoutMultiplier(os.Getenv(envTimeoutMultiplier))
+}
 
 // parseTimeoutMultiplier parses a timeout multiplier value from a string.
 // Returns 1.0 for empty, invalid, zero, or negative values.

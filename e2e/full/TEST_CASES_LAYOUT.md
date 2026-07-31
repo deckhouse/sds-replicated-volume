@@ -15,6 +15,13 @@ pipeline that tells an operator to perform them —
 `sds_rv_membership_layout_converged` → scrape → the
 `D8ReplicatedVolumeLayoutDegraded` rule → a firing `ClusterAlert` (BE2E-4).
 
+It also covers both sides of quorum on a 2D+1TB volume. The positive side is
+E2E-6: the tie-breaker holds quorum at 2/3 while a diskful node reboots. The
+negative side is the pair E2E-Q1/E2E-Q2: a replica cut off from its peers by a
+silent packet drop MUST lose quorum, freeze its I/O and recover — a bug that
+makes quorum too permissive passes every positive case by construction, so the
+negative pair is the only thing standing between such a bug and the stand.
+
 The migration trigger is always an **in-place edit of `rsc.spec.replication`** on an
 existing ReplicatedStorageClass. `rv.spec.replicatedStorageClassName` is never
 changed (that path is out of scope until verdict D-3). Replication modes map to
@@ -66,6 +73,12 @@ Then:
 - ⚡ The two surviving diskful replicas keep the very same `LVMLogicalVolume`
   objects (same UID, still present): the retype moves one member, it does not
   rebuild the storage under the other two.
+- ⚡ On the tie-breaker's own node, `drbdsetup status` reports the device as
+  `disk-state: Diskless` **and** `client: yes` — diskless on purpose, not
+  diskless by accident. A retype that reaches the kernel as a plain
+  `drbdsetup detach` instead of `detach --diskless` produces the very same API
+  state and an unintentionally diskless device, which raises
+  `D8DrbdDeviceIsUnintentionalDiskless` for every migrated volume.
 - On the RSC, `ConfigurationRolledOut=True/RolledOutToAllVolumes` and
   `status.volumes.aligned == 1`.
 - ⚡ I/O continuity is proven on the data path, not only through conditions:
@@ -96,6 +109,10 @@ Then:
   tie-breaker is part of the formation membership, not a post-formation doctoring
   step (so DMTE and bitmap-bug B-1 are never entered).
 - `MembershipLayoutConverged=True/Converged`; the volume serves I/O.
+- On the tie-breaker's node, `drbdsetup status` reports `disk-state: Diskless`
+  and `client: yes`: a tie-breaker created at formation gets its minor from
+  `new-minor --diskless`, which is the creation half of the property E2E-1
+  checks on the retype path.
 
 ---
 
@@ -120,6 +137,9 @@ Then:
   than the deleted replica — which is also what proves the observation is not the
   pre-deletion state.
 - `MembershipLayoutConverged` returns to `True/Converged`.
+- The healed tie-breaker is an intentional diskless client on its node
+  (`disk-state: Diskless`, `client: yes`) — the P2 heal creates a real
+  tie-breaker, not a replica that merely has no disk.
 - ⚡ Verified device writes keep advancing through the healing; the io-workload's
   historical gap check (every progress wait + the whole journal at cleanup) turns
   the writer into a continuous availability claim for the entire spec, not a pair
@@ -152,7 +172,9 @@ Then:
 - `MembershipLayoutConverged=False/TransitionUnsupported`; the message contains the exact
   arithmetic `have 2D+1TB, want 3D`.
 - The replica composition is untouched: no new RVR, still 2D+1TB (2 Diskful + 1
-  TieBreaker), RVR count unchanged.
+  TieBreaker), RVR count unchanged — down to the node, where the tie-breaker's
+  device is still an intentional diskless client (`disk-state: Diskless`,
+  `client: yes`): the rejected upsize never reached the data path.
 - ⚡ The volume keeps serving on the data path, not only in its conditions: the
   attachment stays `Ready=True/Ready` (the condition the CSI driver gates
   publishing on), the attached diskful replica stays `Ready=True/Ready`, and
@@ -222,6 +244,10 @@ Then:
   **by UID** and stays gone for an observation window (a name that comes back
   under a different UID is a recreation, not a release), and both surviving
   diskful replicas keep the very same LVs (same UID, still present).
+- For every volume, the retyped replica is an intentional diskless client on its
+  node (`disk-state: Diskless`, `client: yes`). Checked per volume rather than
+  once: the rollout retypes each volume separately, so a detach that forgets
+  `--diskless` could affect only some of the waves.
 - The RSC aggregate reaches `status.volumes.aligned == N` and
   `staleConfiguration == 0` without stalling; `ConfigurationRolledOut=True`.
 
@@ -247,6 +273,12 @@ per replica on the surviving diskful and the tie-breaker — `NeverLoseQuorum`,
 The victim replica is deliberately NOT armed: it legitimately dips while its
 node is down and briefly reports Critical while it rejoins.
 
+⚡ Before the outage the tie-breaker is proven, on its own node, to be an
+intentional diskless client (`disk-state: Diskless`, `client: yes`). The kernel
+counts a diskless voter differently depending on that flag — an unintentionally
+diskless device counts itself as `unknown` rather than `diskless` — so this is
+what makes the quorum arithmetic under test the one the layout was designed for.
+
 When: the other diskful node is rebooted.
 
 Then:
@@ -270,9 +302,146 @@ Then:
 
 ---
 
+## freezes an isolated primary while the diskful+tie-breaker majority keeps serving, then recovers
+
+E2E-Q1 · case 7 · ⚡ Disruptive · Describe: `Layout: r2 volume loses quorum when a replica is cut off`
+
+⚡ **A 2D+1TB volume must FREEZE the replica that lost quorum while the majority
+keeps serving, and both sides must come back after the link returns.**
+
+Covers the negative side of quorum, which no other case in the suite asserts:
+every existing quorum case demands that quorum is KEPT (`NeverLoseQuorum`,
+never `IOSuspended`), and a bug that makes quorum too permissive satisfies those
+demands all the better the worse it is. E2E-Q1 and E2E-Q2 are the only cases
+that require quorum to be LOST where it must be.
+
+Labelled `Disruptive` — auto-injects `Serial` + lowest priority; skipped unless
+`E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`.
+
+⚡ **The outage is a SILENT PACKET DROP** (`iptables … -j DROP`) on the
+replication link of this one volume, applied through
+`Framework.BlockDRBDLinks`, never `drbdsetup disconnect` and never `-j REJECT`.
+Both alternatives tear the connection down in-band and at once, so DRBD's
+timeout code — the code that decides a peer is dead in a real outage — never
+runs, and the case degenerates into a test of the orderly path. The rules pin
+both endpoint addresses and the ports of this resource, so exactly one volume's
+replication breaks; they carry a tag unique to the run, are removed by a
+`DeferCleanup` registered before the first rule, and are additionally removed by
+a detached watchdog on the node whose TTL is a constant well above any spec that
+blocks links, scaled by `E2E_TIMEOUT_MULTIPLIER`.
+
+Given: a healthy 2D+1TB volume, published on one of the two diskful nodes, with
+a raw-device writer running on that node. The tie-breaker is proven on its own
+node to be an intentional diskless client (`disk-state: Diskless`,
+`client: yes`) — the kernel counts a diskless voter differently depending on
+that flag, so this is what makes the arithmetic under test the intended one.
+Quorum-survival invariants (`NeverLoseQuorum`, `NeverCritical`,
+`NeverIOSuspended`) are armed on the majority side ONLY; the replica about to be
+isolated is deliberately unarmed, since losing quorum is what is demanded of it.
+They cover the outage and are lifted for the recovery alone, because a healing
+partition legitimately takes quorum away from the majority for a moment: the
+returning primary reaches one peer before the other, and a node that hears of a
+Primary it cannot see yet outdates itself (`far_away_change()`,
+`drbd_receiver.c:7214` — quorum plays no part in that decision, an UpToDate disk
+on the primary is enough). What replaces the invariants in that window are the
+positive assertions below.
+The workload declares ONE expected freeze with a finite upper bound
+(`IOWorkload.DeclareFreeze`), which removes the framework's veto on a stall
+without making the stall optional.
+
+When: every replication packet between the attached diskful replica and BOTH of
+its peers is dropped silently, in both directions.
+
+Then:
+- ⚡ The kernel on the isolated node is observed to declare both peers dead
+  BEFORE anything about quorum is asserted (a dropped packet is invisible until
+  DRBD's timers expire, and quorum is only re-evaluated at that declaration).
+- ⚡ The isolated replica loses quorum and freezes: `drbdsetup` reports
+  `quorum:no` with `suspended:yes` **and** `suspended-quorum:yes` (the cause
+  matters — a plain `suspended` is also raised by a user freeze or by fencing),
+  the replica reports `quorum: false` (the value `false`, not merely "not
+  true"), `Ready=False/QuorumLost` and `Attached=False/IOSuspended`.
+- ⚡ The writer BLOCKS and does not die: the sequence stops advancing across two
+  reads while the process is still alive. A writer that kept going would mean
+  the volume served I/O without quorum; a writer that exited would mean it
+  answered with errors instead of freezing (the `io-error` behaviour), which is
+  a separate defect.
+- ⚡ In the very same window the surviving diskful replica and the tie-breaker
+  hold `quorum:yes` on their nodes, report `quorum: true`, are not frozen, and
+  the surviving diskful stays `Ready=True/Ready`. This asymmetry — one side
+  frozen, the other provably alive — is the point of the case.
+- After the rules are removed (and nothing is done to help DRBD reconnect): all
+  three replicas reconnect on their own with no connection left `StandAlone`,
+  every replica reports `FullyConnected=True/FullyConnected`, quorum returns
+  everywhere — asserted on all three NODES, not just the isolated one — the
+  thawed replica reports
+  `deviceIOSuspended: false` and `Attached=True/Attached`, and the attachment is
+  `Ready=True/Ready`.
+- ⚡ The data path moves again (`ioResumed`): every beat is a write, an
+  `fdatasync`, a read-back and a checksum comparison, so progress is itself the
+  integrity proof.
+- The resync converges: both diskful devices are `UpToDate`, replication between
+  them is `Established`, and the node-reported `out-of-sync` counter is zero (an
+  unreported counter is NOT accepted as zero).
+- The layout is intact (2D+1TB, `MembershipLayoutConverged=True/Converged`, the
+  same datamesh members as before), and all three replicas are `Healthy` again;
+  the closing `Await`s surface any invariant violation the armed replicas
+  recorded on a snapshot no assertion looked at.
+
+---
+
+## denies quorum to an isolated tie-breaker while both diskful replicas keep serving, then recovers
+
+E2E-Q2 · case 8 · ⚡ Disruptive · Describe: `Layout: r2 volume loses quorum when a replica is cut off`
+
+⚡ **An isolated tie-breaker must produce no quorum of its own, and must cost the
+two diskful voters nothing.**
+
+Covers the second half of the negative quorum pair (see E2E-Q1). A tie-breaker
+does not vote: the controller gives every non-voter an impossibly high quorum
+threshold precisely so that it can never satisfy the quorum condition alone, and
+its quorum comes from connected diskful peers. Cut off from both, it must have
+none — a build in which it reported quorum here is the "quorum is too
+permissive" class of bug this pair exists for.
+
+Labelled `Disruptive`; the outage is the same silent packet drop as in E2E-Q1.
+
+Given: a healthy 2D+1TB volume published on one diskful node, with a raw-device
+writer running there, and the tie-breaker proven to be an intentional diskless
+client. Quorum-survival invariants are armed on BOTH diskful replicas; the
+tie-breaker is unarmed. **No freeze is declared** — two voters out of two are a
+majority of themselves, so the plain continuity rule applies and any stall fails
+the case exactly as it does everywhere else in the suite.
+
+When: every replication packet between the tie-breaker and both diskful replicas
+is dropped silently, in both directions.
+
+Then:
+- The kernel on the tie-breaker's node is observed to declare both peers dead
+  first, and the replica reports `FullyConnected=False/NotConnected`.
+- ⚡ The isolated tie-breaker has `quorum:no` on its node, reports
+  `quorum: false` and `Ready=False/QuorumViaPeers`. The status and the reason
+  are matched in ONE snapshot: `QuorumViaPeers` is published with both `True`
+  and `False` (it names the mechanism, not the verdict), so two independent
+  waits could each match on a different snapshot.
+- ⚡ In the very same window both diskful replicas hold `quorum:yes`, report
+  `quorum: true`, are not frozen, and verified device writes keep advancing —
+  losing the tie-breaker may not cost a single beat.
+- After the rules are removed: all three replicas reconnect on their own with
+  none left `StandAlone`, quorum returns to the tie-breaker, which reports
+  `Ready=True/QuorumViaPeers` and is STILL an intentional diskless client (it
+  came back through a reconnect, not a re-create, so its `device_conf` flag must
+  be the one it was created with).
+- The writer's sequence advanced across the whole outage, the attachment is
+  `Ready=True/Ready`, the resync converges with a zero `out-of-sync` counter,
+  the layout is intact (2D+1TB, converged, same members) and all three replicas
+  are `Healthy`.
+
+---
+
 ## rejects storage/topology changes and accepts a replication edit
 
-E2E-7 · case 7 · Describe: `Layout: incompatible ReplicatedStorageClass updates are rejected`
+E2E-7 · case 9 · Describe: `Layout: incompatible ReplicatedStorageClass updates are rejected`
 
 **Storage/topology changes are rejected with a field-naming error; replication edits pass.**
 
@@ -293,14 +462,15 @@ When / Then:
   `spec.topology is immutable` (CEL transition rule).
 - After the rejections the RSC spec is unchanged (topology `Ignored`, storage
   type `LVMThin`, no bogus thinPoolName) and the volume layout is untouched
-  (2D+1TB).
+  (2D+1TB) — including on the node, where the tie-breaker is still an
+  intentional diskless client (`disk-state: Diskless`, `client: yes`).
 - A subsequent legitimate `spec.replication` edit is accepted.
 
 ---
 
 ## retypes a non-attached replica and keeps the attached node diskful
 
-E2E-LOCAL · case 8 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with volumeAccess=Local`
+E2E-LOCAL · case 10 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with volumeAccess=Local`
 
 ⚡ **With `volumeAccess: Local` the retype must never demote the node the workload runs on.**
 
@@ -318,7 +488,9 @@ Then:
 - ⚡ The attached node is still a **Diskful** member — asserted as an `Always`
   invariant for the whole migration window, not only at the end. A `Local` volume
   whose local replica became a tie-breaker would be cut off from its own data.
-- The tie-breaker landed on some other node and released its backing LV.
+- The tie-breaker landed on some other node, released its backing LV, and on
+  that node reports `disk-state: Diskless` with `client: yes` — the retype gave
+  the disk up on purpose (`detach --diskless`).
 - Verified device writes advance before, during and after the retype; the
   attachment stays `Attached`.
 
@@ -326,7 +498,7 @@ Then:
 
 ## migrates 3D in three zones to 2D+1TB with the tie-breaker in the third zone
 
-E2E-TZ · case 9 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with TransZonal topology`
+E2E-TZ · case 11 · ⚡ Disruptive · Describe: `Layout: r3->r2 migration with TransZonal topology`
 
 ⚡ **A 3D volume spread over three zones migrates to 2D+1TB with the tie-breaker holding the third zone.**
 
@@ -354,14 +526,16 @@ Then:
   between zones).
 - Tie-break is intact at the DRBD level: `rv.status.datamesh.quorum == 2`, both
   diskful nodes report `quorum` in `drbdsetup status` and are connected to the
-  tie-breaker peer.
+  tie-breaker peer — and, from the tie-breaker's own node, its device is
+  `disk-state: Diskless` with `client: yes`, i.e. it holds the third zone as a
+  deliberate diskless client rather than as a replica that lost its disk.
 - Verified device writes advance before, during and after the retype.
 
 ---
 
 ## replaces a deleted tie-breaker create-first when a free node exists
 
-E2E-TB1 · case 10 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
+E2E-TB1 · case 12 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 **Deleting a tie-breaker starts a strict create-first replacement: the new one joins before the old one leaves.**
 
@@ -397,7 +571,9 @@ Then:
   is dropped from `status.datamesh.members`.
 - The volume returns to a converged 2D+1TB whose tie-breaker is the replacement;
   on both diskful nodes DRBD now shows exactly the other diskful and the new
-  tie-breaker as peers, mirrored by `rvr.status.peers`.
+  tie-breaker as peers, mirrored by `rvr.status.peers`. On its own node the
+  replacement reports `disk-state: Diskless` with `client: yes` — a freshly
+  created tie-breaker is an intentional diskless client.
 - ⚡ Tiebreak protection is never lost: an `Always` invariant requires every
   snapshot to hold two diskful members **and at least one tie-breaker**, so a
   bare 2D — where losing either diskful node freezes I/O — cannot occur even for
@@ -417,7 +593,7 @@ Then:
 
 ## keeps a terminating tie-breaker working when no node can host a replacement
 
-E2E-TB2 · case 11 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
+E2E-TB2 · case 13 · ⚡ Disruptive · Describe: `Layout: tie-breaker replacement`
 
 ⚡ **With every eligible node occupied, the deleted tie-breaker keeps serving quorum and the volume says `CannotConverge`; the documented manual escape ends the deadlock.**
 
@@ -464,7 +640,9 @@ Then (phase 2 — the documented manual escape):
   configuration of both diskful nodes.
 - P2 places the pending replacement on the freed node; the volume returns to
   2D+1TB with `MembershipLayoutConverged=True/Converged`, and DRBD on both diskful nodes
-  shows the other diskful plus the new tie-breaker.
+  shows the other diskful plus the new tie-breaker. Now that the replacement
+  finally has a node, its device exists and is an intentional diskless client
+  (`disk-state: Diskless`, `client: yes`).
 - `rv.status.datamesh.quorum == 2` is an `Always` invariant of the whole spec,
   cross-checked at the DRBD level at both ends; the writer never stalls.
 
@@ -472,7 +650,7 @@ Then (phase 2 — the documented manual escape):
 
 ## holds the old volume at 3D, creates new ones as 2D+1TB, and releases the hold on RollingUpdate
 
-E2E-NVO · case 12 · Describe: `Layout: NewVolumesOnly holds existing volumes`
+E2E-NVO · case 14 · Describe: `Layout: NewVolumesOnly holds existing volumes`
 
 **`configurationRolloutStrategy: NewVolumesOnly` holds existing volumes at their layout and says so; switching to `RollingUpdate` releases them.**
 
@@ -497,12 +675,17 @@ Then:
   `ConfigurationReady=True/Ready`, and the RSC reports
   `ConfigurationRolledOut=True/RolledOutToAllVolumes` with
   `status.volumes.aligned == 2`.
+- ⚡ Both volumes end up with an intentional diskless tie-breaker on its node
+  (`disk-state: Diskless`, `client: yes`), and this is the one case that checks
+  the two ways of getting there side by side: the new volume was **formed** as
+  2D+1TB (`new-minor --diskless`), the held one **retyped** into it
+  (`detach --diskless`).
 
 ---
 
 ## restores an r2 volume to 2D+1TB by creating a diskful replica by hand
 
-BE2E-1 · case 13 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+BE2E-1 · case 15 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
 
 ⚡ **After an r2 volume loses a diskful replica, creating a `ReplicatedVolumeReplica`
 by hand brings it back to 2D+1TB — the join goes through `diskful-q-up/v1`, the
@@ -555,6 +738,9 @@ Then:
   volume is 2D+1TB again, `MembershipLayoutConverged=True/Converged`, quorum
   raised back to 2 and enforced at the DRBD level, with the new peer visible on
   the surviving node.
+- The tie-breaker, which stayed diskless while a replica passed through the
+  Access vestibule and out of it, is still an intentional diskless client on its
+  node (`disk-state: Diskless`, `client: yes`).
 - The metric returns to `1`/`Converged`, so the alert can no longer fire.
 - Verified device writes advance again after the recovery.
 
@@ -562,7 +748,7 @@ Then:
 
 ## restores an r3 volume to 3D by creating a diskful replica by hand
 
-BE2E-2 · case 14 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
+BE2E-2 · case 16 · ⚡ Disruptive · Describe: `Layout: manual recovery of a lost diskful replica`
 
 **The r3 half of the parity claim: losing one of three diskful replicas is
 repaired by hand through `diskful/v1`, which has no Access stage at all.**
@@ -594,7 +780,7 @@ Then:
 
 ## reports an excess diskful without removing it and converges after a manual delete
 
-BE2E-3 · case 15 · ⚡ Disruptive · Describe: `Layout: an excess replica is reported and removed by hand`
+BE2E-3 · case 17 · ⚡ Disruptive · Describe: `Layout: an excess replica is reported and removed by hand`
 
 ⚡ **A volume with more replicas than its configuration asks for is reported
 honestly and is never trimmed automatically; deleting the excess RVR by hand is
@@ -628,13 +814,16 @@ Then (phase 2 — the manual shrink):
   is needed here**, unlike BE2E-1/2: with 3 voters against `dMin=2` the FTT/GMDR
   guards allow the departure, which is why the recipe is "just delete it".
 - The volume returns to 2D+1TB, `True/Converged`, quorum 2 cross-checked at the
-  DRBD level; the metric returns to `1`/`Converged` and the writer never stalled.
+  DRBD level, with the tie-breaker still an intentional diskless client on its
+  node (`disk-state: Diskless`, `client: yes`) — the shrink went through the
+  excess diskful and left it alone; the metric returns to `1`/`Converged` and the
+  writer never stalled.
 
 ---
 
 ## raises a firing D8ReplicatedVolumeLayoutDegraded for every volume that lost a diskful replica
 
-BE2E-4 · case 16 · ⚡ LongHaul · Describe: `Layout: a degraded layout raises a ClusterAlert`
+BE2E-4 · case 18 · ⚡ LongHaul · Describe: `Layout: a degraded layout raises a ClusterAlert`
 
 ⚡ **The alerting pipeline end to end: collector → ServiceMonitor scrape → the
 `D8ReplicatedVolumeLayoutDegraded` rule → Alertmanager → a firing `ClusterAlert`
@@ -666,6 +855,10 @@ run at the same time and the spec costs one wait, not two.
 Then:
 - Both volumes report `False/TransitionUnsupported` with the exact arithmetic
   (`have 2D, want 3D` and `have 1D+1TB, want 2D+1TB`).
+- The tie-breaker that survives in the degraded `1D+1TB` layout is still an
+  intentional diskless client on its node (`disk-state: Diskless`,
+  `client: yes`): the degradation this case alerts on must not drag a second
+  alert (`D8DrbdDeviceIsUnintentionalDiskless`) behind it.
 - ⚡ Precondition before the long wait: the metric reads `0` with
   `reason=TransitionUnsupported` for both volumes. It is what makes a failure
   diagnosable — if the series is present and no alert arrives, the defect is in

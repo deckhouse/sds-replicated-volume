@@ -79,6 +79,9 @@ var _ = Describe("Layout: incompatible ReplicatedStorageClass updates are reject
 					Expect(g.ThinPoolName).NotTo(Equal("e2e-bogus-pool"))
 				}
 				Expect(membershipLayoutOf(trv)).To(Equal(ptr.To("2D+1TB")))
+				// The rejected updates must not have reached the data path either:
+				// the tie-breaker's device is still an intentional diskless client.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("accepting a legitimate replication edit")
 				trsc.Update(ctx, func(rsc *v1alpha1.ReplicatedStorageClass) {

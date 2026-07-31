@@ -97,6 +97,10 @@ type IOWorkloadOptions struct {
 	// consecutive verified writes: a stall longer than this fails the workload
 	// even when writes have resumed by the time anyone looks (checked on every
 	// progress wait and, over the whole journal, at cleanup).
+	//
+	// A spec whose subject IS a freeze of the data path widens the historical
+	// half of that rule for ONE gap with IOWorkload.DeclareFreeze; the live
+	// half (Stalled) is never widened.
 	MaxHeartbeatGap time.Duration
 
 	// StartTimeout bounds the wait for the first verified write, StopTimeout
@@ -134,11 +138,22 @@ type IOWorkloadStatus struct {
 	// writes in the observed journal tail. Unlike Gap it is historical: a
 	// stall that already ended still shows here for as long as its boundary
 	// stays within the observed tail (and always at the final verification,
-	// which reads the whole journal). GapExceeded says it went over
-	// MaxHeartbeatGap — the writer stopped writing for longer than the spec
-	// tolerates at some point, even if it is writing again now.
+	// which reads the whole journal).
 	MaxObservedGap time.Duration
-	GapExceeded    bool
+
+	// Stalls lists every historical gap longer than MaxHeartbeatGap, oldest
+	// first. It is the evidence behind GapExceeded and it is what tells one
+	// long freeze from several short ones.
+	Stalls []ioGap
+
+	// GapExceeded says the stall history BREAKS THE POLICY of this workload.
+	// With no declared freeze the policy is the plain one — not a single gap
+	// may exceed MaxHeartbeatGap — so this is "the writer stopped writing for
+	// longer than the spec tolerates at some point, even if it is writing
+	// again now". A spec that declared a freeze (DeclareFreeze) additionally
+	// tolerates exactly ONE gap, and only up to the bound it named; anything
+	// beyond that still sets this flag. See IOWorkload.DeclareFreeze.
+	GapExceeded bool
 
 	// Terminated is set once the writer wrote its last record.
 	Terminated *IOWorkloadTermination
@@ -161,8 +176,12 @@ func (s IOWorkloadStatus) String() string {
 	if s.Stalled {
 		parts = append(parts, "stalled")
 	}
-	if s.GapExceeded {
+	if len(s.Stalls) > 0 {
 		parts = append(parts, fmt.Sprintf("stalled-for=%s", s.MaxObservedGap.Truncate(time.Millisecond)))
+		parts = append(parts, fmt.Sprintf("stalls=%d", len(s.Stalls)))
+	}
+	if s.GapExceeded {
+		parts = append(parts, "gap-policy-broken")
 	}
 	if s.Terminated != nil {
 		parts = append(parts, fmt.Sprintf("terminated(failed=%t)=%q", s.Terminated.Failed, s.Terminated.Message))
@@ -186,6 +205,42 @@ type IOWorkload struct {
 	minor     int
 	poll      time.Duration
 	cleanedUp bool
+	freeze    ioFreezeAllowance
+}
+
+// ioFreezeAllowance is a spec's declaration that ONE stall of the data path is
+// the expected outcome rather than a defect — see IOWorkload.DeclareFreeze.
+//
+// It is deliberately not an "off switch": undeclared it allows nothing, and
+// declared it allows exactly one gap and only up to a bound the spec had to
+// name. Everything else keeps failing exactly as it does without a
+// declaration, so the relaxation cannot leak into the rest of the suite.
+type ioFreezeAllowance struct {
+	declared bool
+	max      time.Duration
+}
+
+// violated reports whether a stall history breaks the policy. gaps are the
+// historical gaps that already exceed MaxHeartbeatGap, so an undeclared
+// workload is broken by any of them at all.
+func (a ioFreezeAllowance) violated(gaps []ioGap) bool {
+	if !a.declared {
+		return len(gaps) > 0
+	}
+	if len(gaps) > 1 {
+		return true // one freeze was declared, not a series of them
+	}
+	return len(gaps) == 1 && gaps[0].Duration > a.max
+}
+
+// describe renders the policy for failure messages, so a report says what was
+// tolerated and not merely that something was not.
+func (a ioFreezeAllowance) describe(maxGap time.Duration) string {
+	if !a.declared {
+		return fmt.Sprintf("tolerated: no gap longer than %s", maxGap)
+	}
+	return fmt.Sprintf("tolerated: no gap longer than %s, plus ONE declared freeze of up to %s",
+		maxGap, a.max)
 }
 
 // StartIOWorkload starts a raw-device writer on opts.NodeName and returns once
@@ -311,6 +366,38 @@ func (w *IOWorkload) DevicePath() string { return w.opts.DevicePath }
 // JournalPath is the heartbeat journal on the node, useful in failure reports.
 func (w *IOWorkload) JournalPath() string { return w.journalPath() }
 
+// DeclareFreeze tells the workload that this spec EXPECTS the data path to
+// stop once, for at most max, and that such a stall is therefore not a defect.
+//
+// It exists for the scenarios whose subject IS the freeze: a volume configured
+// with `on-no-quorum: suspend-io` is supposed to block its writer when quorum
+// is lost, so a spec that provokes exactly that would otherwise be failed by
+// its own success — on every progress wait, and again at cleanup, where the
+// whole-journal verification would fail a spec that had long since passed.
+//
+// What it does NOT do:
+//
+//   - It does not switch the continuity checks off. The bound MUST be finite
+//     and positive, and it MUST exceed MaxHeartbeatGap (a bound below it would
+//     tolerate nothing and only read as if it did). A gap beyond the bound
+//     still fails, and so does a SECOND gap of any length: one freeze was
+//     declared, not a series.
+//   - It does not make the freeze optional. Declaring it only removes the
+//     framework's veto; the spec still has to PROVE the freeze happened, or it
+//     proves nothing at all. A run in which the writer sailed through the
+//     disruption must fail as loudly as an unexpected stall does today.
+//   - It does not touch Stalled, which stays a plain live observation, so a
+//     spec can wait for the freeze to begin.
+//
+// It may be called once per workload; a second declaration would silently
+// widen the allowance and is refused.
+func (w *IOWorkload) DeclareFreeze(maxFreeze time.Duration) {
+	GinkgoHelper()
+	if err := w.declareFreeze(maxFreeze); err != nil {
+		Fail(fmt.Sprintf("io workload %q on node %q: %v", w.opts.RunID, w.opts.NodeName, err))
+	}
+}
+
 // Observe returns the current status of the writer.
 func (w *IOWorkload) Observe(ctx context.Context) IOWorkloadStatus {
 	GinkgoHelper()
@@ -357,6 +444,32 @@ func (w *IOWorkload) Cleanup(ctx context.Context) {
 // Core: everything below returns errors so it can be unit-tested with a stub
 // runner, without a cluster.
 // ---------------------------------------------------------------------------
+
+// declareFreeze records the spec's freeze allowance, refusing every form of it
+// that would amount to switching the continuity checks off.
+func (w *IOWorkload) declareFreeze(maxFreeze time.Duration) error {
+	switch {
+	case w.freeze.declared:
+		return fmt.Errorf(
+			"a freeze of up to %s is already declared: declare the ONE expected freeze once,"+
+				" with the widest bound the scenario needs — a second declaration would widen"+
+				" the allowance where the report says nothing about it", w.freeze.max)
+	case maxFreeze <= 0:
+		return fmt.Errorf(
+			"the expected freeze needs a finite positive upper bound, got %s: a spec that"+
+				" cannot say how long the data path may stop is asking for the continuity"+
+				" checks to be switched off, which this is not", maxFreeze)
+	case maxFreeze <= w.opts.MaxHeartbeatGap:
+		return fmt.Errorf(
+			"the declared freeze bound %s does not exceed MaxHeartbeatGap %s, so it would"+
+				" tolerate nothing while reading as if it did: raise the bound above the"+
+				" heartbeat gap, or drop the declaration", maxFreeze, w.opts.MaxHeartbeatGap)
+	}
+	w.freeze = ioFreezeAllowance{declared: true, max: maxFreeze}
+	fmt.Fprintf(GinkgoWriter, "[%s] [io-workload] run=%s expects one freeze of up to %s on node %s\n",
+		time.Now().Format("15:04:05.000"), w.opts.RunID, maxFreeze, w.opts.NodeName)
+	return nil
+}
 
 // start brings the writer up: identity first, then an idempotent spawn, then
 // the wait for proof that the data path works.
@@ -572,8 +685,9 @@ func (w *IOWorkload) statusFrom(p ioProbe) IOWorkloadStatus {
 	}
 	if gap, endedBy := p.Journal.maxInterBeatGap(); endedBy != nil {
 		st.MaxObservedGap = gap
-		st.GapExceeded = gap > w.opts.MaxHeartbeatGap
 	}
+	st.Stalls = p.Journal.gapsOver(w.opts.MaxHeartbeatGap)
+	st.GapExceeded = w.freeze.violated(st.Stalls)
 	if t := p.Journal.Termination; t != nil {
 		st.Terminated = &IOWorkloadTermination{Failed: t.Failed, At: t.At, Message: t.Message}
 	}
@@ -595,10 +709,11 @@ func (w *IOWorkload) awaitProgress(ctx context.Context, minWrites int64) (IOWork
 				return false, fmt.Errorf("the writer failed: %s", st.Terminated.Message)
 			}
 			// A stall boundary visible in the tail is final evidence: the writer
-			// stopped for longer than tolerated, no later progress undoes that.
+			// stopped for longer than the policy allows, no later progress
+			// undoes that.
 			if st.GapExceeded {
-				return false, fmt.Errorf("the writer stalled for %s (tolerated max %s): %s",
-					st.MaxObservedGap.Truncate(time.Millisecond), w.opts.MaxHeartbeatGap, st)
+				return false, fmt.Errorf("the writer stalled: %v (%s): %s",
+					st.Stalls, w.freeze.describe(w.opts.MaxHeartbeatGap), st)
 			}
 			return st.LastSequence >= target, nil
 		})
@@ -719,9 +834,10 @@ func (w *IOWorkload) cleanup(ctx context.Context) error {
 
 // verifyFinal is the last continuity check: the workload must have written
 // something, must not have ended on an I/O or identity failure, and must not
-// have stalled beyond MaxHeartbeatGap at any point of the run. The caller
-// hands it a full-journal observation, so the stall check covers the whole
-// run, not just the last probe's tail.
+// have stalled beyond what its gap policy allows at any point of the run —
+// MaxHeartbeatGap, plus the one freeze the spec declared, if it declared one.
+// The caller hands it a full-journal observation, so the stall check covers
+// the whole run, not just the last probe's tail.
 func (w *IOWorkload) verifyFinal(st IOWorkloadStatus) error {
 	switch {
 	case st.Terminated != nil && st.Terminated.Failed:
@@ -735,8 +851,8 @@ func (w *IOWorkload) verifyFinal(st IOWorkloadStatus) error {
 	case st.LastSequence < 0:
 		return fmt.Errorf("the writer completed no verified write (journal: %s)", w.journalPath())
 	case st.GapExceeded:
-		return fmt.Errorf("the writer stalled for %s during the run (tolerated max %s; journal: %s)",
-			st.MaxObservedGap.Truncate(time.Millisecond), w.opts.MaxHeartbeatGap, w.journalPath())
+		return fmt.Errorf("the writer stalled during the run: %v (%s; journal: %s)",
+			st.Stalls, w.freeze.describe(w.opts.MaxHeartbeatGap), w.journalPath())
 	}
 	return nil
 }

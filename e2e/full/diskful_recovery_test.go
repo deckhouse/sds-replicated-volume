@@ -147,6 +147,10 @@ var _ = Describe("Layout: manual recovery of a lost diskful replica",
 				f.AwaitDRBDPeers(ctx, survivor, survivorResource,
 					tieBreakerPeer, fw.DRBDPeerName(newRVR.ID()))
 				expectDRBDQuorum(ctx, trv)
+				// The join ran a replica through the diskless Access vestibule and
+				// back out of it; the tie-breaker, which stays diskless for good,
+				// must still be an intentional diskless client afterwards.
+				trv.AwaitIntentionalDiskless(ctx, 1)
 
 				By("the metric returns to 1/Converged, so the alert cannot fire any more")
 				awaitLayoutMetric(ctx, trv,

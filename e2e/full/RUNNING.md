@@ -53,6 +53,18 @@ cluster shape than `e2e/agent`.
   via a `DeferCleanup` registered before the first write. If a run is
   killed mid-spec, check for leftovers:
   `kubectl get nodes -L topology.kubernetes.io/zone -l e2e.deckhouse.io/node-scope`.
+- **The quorum-isolation specs edit a node's firewall** (`quorum_isolation_test.go`,
+  E2E-Q1/E2E-Q2). They insert `iptables … -j DROP` rules that silently drop the
+  replication traffic of ONE volume — both endpoint addresses and the resource's
+  ports are pinned, so nothing else on the node is affected — and every rule
+  carries an `-m comment` tag unique to the run (`e2e-<runID>-…-netblock`).
+  Three things remove them: a `DeferCleanup` registered before the first rule,
+  an explicit removal inside the spec where recovery is expected, and a detached
+  watchdog started on the node itself, which drops the rules by tag after 40
+  minutes, scaled by `E2E_TIMEOUT_MULTIPLIER`. The watchdog is what heals the stand
+  after a `kill -9` or a lost connection; it leaves a note in
+  `/var/tmp/sds-rv-e2e-netblock/<tag>.watchdog.log` on the node. To check for
+  leftovers by hand, see "Forced cleanup" below.
 - Don't assume the cluster matches `HEAD`. CRD drift, controller and
   agent image drift vs. local `git HEAD`, and base-image kernel/userspace
   drift are the most common causes of failure from a fresh build.
@@ -388,6 +400,9 @@ After green:
 - `kubectl -n d8-sds-replicated-volume get pods` — controller and agent
   pods all `RESTARTS == 0`.
 - On every node, `drbdsetup status | grep -E '^(sdsrv-|e2e-)'` — empty.
+- After a run that included E2E-Q1/E2E-Q2, on every node:
+  `iptables -L -n | grep netblock` — empty. A leftover rule blocks one volume's
+  replication and nothing else, so it is easy to miss; see below for removing it.
 
 ## Forced cleanup
 
@@ -422,6 +437,26 @@ done
 for o in $(kubectl get rv,rvr,rva,drbdresource,llv,rsc -o name | grep '/e2e-'); do
   kubectl patch "$o" --type=json -p='[{"op":"replace","path":"/metadata/finalizers","value":[]}]' || true
 done
+```
+
+Stray firewall rules from E2E-Q1/E2E-Q2 are a separate case: the node's own
+watchdog removes them once its TTL expires (40 minutes from the moment the rules
+went in, multiplied by the `E2E_TIMEOUT_MULTIPLIER` of the run that left them),
+so wait it out before touching anything — and if a rule is still there
+afterwards, that is a bug worth reporting, not just cleaning. To remove one by
+hand, on the affected node:
+
+```bash
+# List them first: every rule of the suite carries a "…-netblock" comment.
+node=<node>
+pod=$(kubectl -n d8-sds-node-configurator get pods -l app=sds-node-configurator \
+  --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
+nsenter="kubectl -n d8-sds-node-configurator exec -c sds-node-configurator-agent $pod -- \
+  /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p --"
+$nsenter iptables -L INPUT -n --line-numbers | grep netblock
+$nsenter iptables -L OUTPUT -n --line-numbers | grep netblock
+# Then delete by line number, highest first (deleting shifts the ones below).
+$nsenter iptables -D INPUT <n>
 ```
 
 If you find leftovers after a *failed* spec — that's a bug. Capture

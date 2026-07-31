@@ -42,6 +42,16 @@ func (l TestLayout) ExpectedReplicas() int {
 	return d + tb + l.Access
 }
 
+// DisklessReplicas returns how many replicas of this layout are diskless by
+// design: the tie-breaker the FTT/GMDR pair asks for, plus every Access
+// replica. Derived from the same source of truth as ExpectedReplicas, so a spec
+// that asserts on the diskless replicas of a layout does not have to restate
+// when a tie-breaker appears.
+func (l TestLayout) DisklessReplicas() int {
+	_, tb := l.intendedLayout()
+	return tb + l.Access
+}
+
 // intendedLayout returns the diskful voter and tie-breaker counts for this layout
 // straight from the api source of truth (ReplicatedVolumeConfiguration.IntendedLayout),
 // so the framework carries no local copy of the D/TB formula.
@@ -63,10 +73,20 @@ func (l TestLayout) intendedLayout() (diskful, tiebreakers int) {
 // an excess TieBreaker that the layout converger reports as
 // MembershipLayoutConverged=TransitionUnsupported.
 //
+// The diskless members of the layout (the tie-breaker and every Access
+// replica) are asserted on their nodes before the layout is handed over: a
+// replica this helper created as diskless must be an INTENTIONAL diskless
+// client in the kernel, not a replica that merely has no disk. Without that
+// check the arrangement looks identical either way in the API, while the second
+// form is a defect that fires D8DrbdDeviceIsUnintentionalDiskless in
+// production — so every spec built on a layout with a tie-breaker or an Access
+// replica now proves the difference on the node.
+//
 //	Phase 1: Create RV (MaxAttachments = Attached)
 //	Phase 2: Await formation complete (D + TB members present)
 //	Phase 3: Create Access/extra RVAs (fire-and-forget)
 //	Phase 4: Await RVAs Attached and the full member count
+//	Phase 5: Assert every diskless member is an intentional diskless client
 func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	GinkgoHelper()
 	Expect(l.Attached).To(BeNumerically(">=", l.Access),
@@ -126,6 +146,10 @@ func (f *Framework) SetupLayout(ctx SpecContext, l TestLayout) *TestRV {
 	}
 
 	trv.Await(ctx, match.RV.Members(l.ExpectedReplicas()))
+
+	// --- Phase 5: the diskless members are diskless on purpose ---
+
+	trv.AwaitIntentionalDiskless(ctx, l.DisklessReplicas())
 
 	return trv
 }
