@@ -36,7 +36,7 @@ For all-flash configurations, the general recommendation for aggregate network t
 
 ### Additional recommendations
 
-Avoid hardware RAID for disks used in the storage pool — prefer JBOD or direct disk access.  
+Avoid hardware RAID for disks used in the Storage Pool — prefer JBOD or direct disk access.  
 For capacity-oriented workloads — LVM + HDD mode.  
 For performance-oriented workloads and snapshots — LVMThin + SSD/NVMe (always monitor free space in the thin pool to avoid over-provisioning issues).
 
@@ -440,7 +440,7 @@ Yes, this is the expected behavior. All [`spec`](./cr.html#replicatedstorageclas
 
 The child StorageClass is only deleted if the status of the [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource is `Created`. Otherwise, you will need to either restore the [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource to a working state or delete the StorageClass yourself.
 
-## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?
+## I noticed that an error occurred when trying to create a Storage Pool / StorageClass, but in the end the necessary entity was successfully created. Is this behavior acceptable?
 
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
@@ -707,7 +707,7 @@ Note that in the old StorageClasses, you should pick up the option from the para
 | `linstor.csi.linbit.com/placementCount: "1"` | [`replication: "None"`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication)   | | A single volume replica with data will be created                  |
 | `linstor.csi.linbit.com/placementCount: "2"` | [`replication: "Availability"`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication) | | Two volume replicas with data will be created                  |
 | `linstor.csi.linbit.com/placementCount: "3"` | [`replication: "ConsistencyAndAvailability"`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication) | Yes | Three volume replicas with data will be created                   |
-| `linstor.csi.linbit.com/storagePool: "name"` | [`storagePool: "name"`](./cr.html#replicatedstorageclass-v1alpha1-spec-storagepool)   | | Name of the storage pool to use for storage               |
+| `linstor.csi.linbit.com/storagePool: "name"` | [`storagePool: "name"`](./cr.html#replicatedstorageclass-v1alpha1-spec-storagepool)   | | Name of the Storage Pool to use for storage               |
 | `linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"` | [`volumeAccess: "Local"`](./cr.html#replicatedstorageclass-v1alpha1-spec-volumeaccess) | | Pods are not allowed to access data volumes remotely (only local access to the disk within the Node is allowed) |
 
 On top of these, the following parameters are available:
@@ -721,7 +721,7 @@ You can read more about working with [ReplicatedStorageClass](./cr.html#replicat
 
 ### Migrating to ReplicatedStoragePool
 
-The [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource allows you to create a Storage Pool in the module's backend. It is recommended to create this resource for the Storage Pools that already exist and specify the existing [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources in this resource. In this case, the controller will see that the corresponding Storage Pool has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, see the [usage examples](./usage.html).
+The [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource allows you to create a Storage Pool in the module's backend. It is recommended to create this resource for the Storage Pools that already exist and specify the existing [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources in this resource. In this case, the controller will see that the corresponding Storage Pool has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/usage.html) documentation to learn more about LVMVolumeGroup resources. To learn more about working with ReplicatedStoragePool resources, see the [usage examples](./usage.html).
 
 ## How do I migrate from the sds-drbd module to sds-replicated-volume?
 
@@ -795,7 +795,7 @@ During the migration, the module control plane and its CSI will be unavailable. 
 
 If there are no faulty resources, then the migration was successful.
 
-**Caution.** The resources `DRBDStoragePool` and `DRBDStorageClass` will be automatically migrated to [ReplicatedStoragePool](./cr.html#replicatedstoragepool) and [ReplicatedStorageClass](./cr.html#replicatedstorageclass) during the process; no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if any `DRBDStoragePool` or `DRBDStorageClass` resources are left in the cluster. If they exist after the migration, please inform our support team.
+**Caution.** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to [ReplicatedStoragePool](./cr.html#replicatedstoragepool) and [ReplicatedStorageClass](./cr.html#replicatedstorageclass) during the process; no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if any DRBDStoragePool or DRBDStorageClass resources are left in the cluster. If they exist after the migration, please inform our support team.
 
 ## Why is it not recommended to use RAID for disks that are used by the sds-replicated-volume module?
 

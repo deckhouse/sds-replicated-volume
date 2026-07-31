@@ -6,9 +6,9 @@ moduleStatus: preview
 
 Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control-plane используется `LINSTOR` (непосредственная настройка бэкенда пользователем запрещена).
 
-Модуль позволяет создавать `Storage Pool` и `StorageClass` через создание [пользовательских ресурсов Kubernetes](./cr.html).
+Модуль позволяет создавать Storage Pool и StorageClass через создание [пользовательских ресурсов Kubernetes](./cr.html).
 
-Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
+Для создания Storage Pool потребуются настроенные на узлах кластера LVMVolumeGroup. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
 Доступные режимы доступа: `RWO`; `RWX` — только в DVP. Синхронизация данных при репликации выполняется только в синхронном режиме; асинхронный режим не поддерживается.
 
@@ -22,7 +22,7 @@ moduleStatus: preview
 
 ### Включение модулей
 
-1. Создайте ресурс `ModuleConfig` для включения модуля [sds-node-configurator](/modules/sds-node-configurator/):
+1. Создайте ресурс ModuleConfig для включения модуля [sds-node-configurator](/modules/sds-node-configurator/):
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -130,7 +130,7 @@ moduleStatus: preview
    EOF
    ```
 
-1. Дождитесь, когда ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
+1. Дождитесь, когда ресурс LVMVolumeGroup перейдёт в состояние `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-0 -w
@@ -160,7 +160,7 @@ moduleStatus: preview
    EOF
    ```
 
-1. Дождитесь, когда ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
+1. Дождитесь, когда ресурс LVMVolumeGroup перейдёт в состояние `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-1 -w
@@ -190,7 +190,7 @@ moduleStatus: preview
    EOF
    ```
 
-1. Дождитесь, когда ресурс `LVMVolumeGroup` перейдёт в состояние `Ready`:
+1. Дождитесь, когда ресурс LVMVolumeGroup перейдёт в состояние `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-2 -w
@@ -215,7 +215,7 @@ moduleStatus: preview
    EOF
    ```
 
-1. Дождитесь, когда ресурс `ReplicatedStoragePool` перейдёт в состояние `Completed`:
+1. Дождитесь, когда ресурс ReplicatedStoragePool перейдёт в состояние `Completed`:
 
    ```shell
    d8 k get rsp data -w
@@ -254,7 +254,7 @@ moduleStatus: preview
    EOF
    ```
 
-1. Дождитесь, когда ресурс `ReplicatedStorageClass` перейдёт в состояние `Created`:
+1. Дождитесь, когда ресурс ReplicatedStorageClass перейдёт в состояние `Created`:
 
    ```shell
    d8 k get rsc replicated-storage-class -w

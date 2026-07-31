@@ -110,7 +110,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
    vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
    ```
 
-   Данный VG будет автоматически обнаружен и в кластере для него будет создан соответствующий ресурс `LVMVolumeGroup`.
+   Данный VG будет автоматически обнаружен и в кластере для него будет создан соответствующий ресурс LVMVolumeGroup.
 
 1. Полученный ресурс укажите в параметрах [ReplicatedStoragePool](./cr.html#replicatedstoragepool) в поле `spec.lvmVolumeGroups[].name` (для LVMThin-пула необходимо дополнительно указать имя в `spec.lvmVolumeGroups[].thinPoolName`).
 
@@ -717,7 +717,7 @@ StorageClass'ы в данном модуле управляются через �
 
 ### Миграция на ReplicatedStoragePool
 
-Ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) позволяет создавать Storage Pool в бэкенде модуля. Рекомендуется создать этот ресурс даже для уже существующих Storage Pool и указать в этом ресурсе существующие [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup). В этом случае контроллер увидит, что соответствующие Storage Pool созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`. Подробнее про работу с ресурсами `LVMVolumeGroup` можно прочитать в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html), а с ресурсами `ReplicatedStoragePool` — в [примерах конфигурации](./usage.html).
+Ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) позволяет создавать Storage Pool в бэкенде модуля. Рекомендуется создать этот ресурс даже для уже существующих Storage Pool и указать в этом ресурсе существующие [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup). В этом случае контроллер увидит, что соответствующие Storage Pool созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`. Подробнее про работу с ресурсами LVMVolumeGroup можно прочитать в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html), а с ресурсами ReplicatedStoragePool — в [примерах конфигурации](./usage.html).
 
 ## Как выполнить миграцию с модуля sds-drbd на модуль sds-replicated-volume?
 
@@ -791,7 +791,7 @@ StorageClass'ы в данном модуле управляются через �
 
 Если неисправные ресурсы не обнаружены, значит миграция была успешной.
 
-**Внимание.** Ресурсы `DRBDStoragePool` и `DRBDStorageClass` в процессе будут автоматически мигрированы на [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и [ReplicatedStorageClass](./cr.html#replicatedstorageclass), вмешательства пользователя для этого не требуется. Логика работы этих ресурсов не изменится. Однако стоит проверить, не осталось ли в кластере ресурсов `DRBDStoragePool` или `DRBDStorageClass`; если после миграции они существуют — сообщите, пожалуйста, в нашу техническую поддержку.
+**Внимание.** Ресурсы DRBDStoragePool и DRBDStorageClass в процессе будут автоматически мигрированы на [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и [ReplicatedStorageClass](./cr.html#replicatedstorageclass), вмешательства пользователя для этого не требуется. Логика работы этих ресурсов не изменится. Однако стоит проверить, не осталось ли в кластере ресурсов DRBDStoragePool или DRBDStorageClass; если после миграции они существуют — сообщите, пожалуйста, в нашу техническую поддержку.
 
 ## Почему не рекомендуется использовать RAID для дисков, которые используются модулем sds-replicated-volume?
 

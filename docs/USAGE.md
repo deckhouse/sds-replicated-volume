@@ -8,7 +8,7 @@ The module is only guaranteed to work if the [system requirements](./readme.html
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, create `ReplicatedStoragePool` and `ReplicatedStorageClass` according to the instructions below.
+Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, create ReplicatedStoragePool and ReplicatedStorageClass according to the instructions below.
 
 ## Configuring the module
 
@@ -58,7 +58,7 @@ Configuration examples can be found in the [sds-node-configurator](/modules/sds-
 
    For all [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources specified in the [`spec`](./cr.html#replicatedstoragepool-v1alpha1-spec) of the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource, the following rules must be met:
 
-   - They must reside on different nodes. Do not specify multiple `LVMVolumeGroup` resources located on the same node.
+   - They must reside on different nodes. Do not specify multiple LVMVolumeGroup resources located on the same node.
    - All nodes must be of a type other than `CloudEphemeral` (["Node types"](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types)).
 
 1. Check the controller progress and results in the [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) field of the created [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource.

@@ -8,7 +8,7 @@ description: "Использование и примеры работы sds-repl
 Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
 {{< /alert >}}
 
-После включения модуля `sds-replicated-volume` в конфигурации Deckhouse создайте `ReplicatedStoragePool` и `ReplicatedStorageClass` по инструкции ниже.
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse создайте ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
 
 ## Конфигурация модуля
 
@@ -58,7 +58,7 @@ description: "Использование и примеры работы sds-repl
 
    Для всех ресурсов [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), указанных в [`spec`](./cr.html#replicatedstoragepool-v1alpha1-spec) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool), должны соблюдаться следующие правила:
 
-   - Они должны быть на разных узлах. Не указывайте несколько ресурсов `LVMVolumeGroup`, расположенных на одном и том же узле.
+   - Они должны быть на разных узлах. Не указывайте несколько ресурсов LVMVolumeGroup, расположенных на одном и том же узле.
    - Все узлы должны иметь тип, отличный от `CloudEphemeral` ([«Типы узлов»](/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2)).
 
 1. Проверьте ход и результаты работы контроллера в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) созданного ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool).

@@ -22,7 +22,7 @@ Run all commands on a machine that has administrator access to the Kubernetes AP
 
 ### Enabling modules
 
-1. Create a `ModuleConfig` resource to enable the [sds-node-configurator](/modules/sds-node-configurator/) module:
+1. Create a ModuleConfig resource to enable the [sds-node-configurator](/modules/sds-node-configurator/) module:
 
    ```yaml
    d8 k apply -f - <<EOF
@@ -130,7 +130,7 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    EOF
    ```
 
-1. Wait for the `LVMVolumeGroup` resource to become `Ready`:
+1. Wait for the LVMVolumeGroup resource to become `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-0 -w
@@ -160,7 +160,7 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    EOF
    ```
 
-1. Wait for the `LVMVolumeGroup` resource to become `Ready`:
+1. Wait for the LVMVolumeGroup resource to become `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-1 -w
@@ -190,7 +190,7 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    EOF
    ```
 
-1. Wait for the `LVMVolumeGroup` resource to become `Ready`:
+1. Wait for the LVMVolumeGroup resource to become `Ready`:
 
    ```shell
    d8 k get lvg vg-1-on-worker-2 -w
@@ -215,7 +215,7 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    EOF
    ```
 
-1. Wait for the `ReplicatedStoragePool` resource to become `Completed`:
+1. Wait for the ReplicatedStoragePool resource to become `Completed`:
 
    ```shell
    d8 k get rsp data -w
@@ -254,7 +254,7 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    EOF
    ```
 
-1. Wait for the `ReplicatedStorageClass` resource to become `Created`:
+1. Wait for the ReplicatedStorageClass resource to become `Created`:
 
    ```shell
    d8 k get rsc replicated-storage-class -w
