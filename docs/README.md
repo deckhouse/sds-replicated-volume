@@ -4,17 +4,7 @@ description: "The sds-replicated-volume module: General Concepts and Principles.
 moduleStatus: preview
 ---
 
-This module manages replicated block storage based on `DRBD`. `LINSTOR` is used as the control plane (direct backend configuration by the user is prohibited).
-
-The module lets you create a Storage Pool and a StorageClass by creating [Kubernetes custom resources](./cr.html).
-
-To create a Storage Pool, configure [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources on the cluster nodes. LVM is configured by the [sds-node-configurator](/modules/sds-node-configurator/) module.
-
-Supported access modes: `RWO`; `RWX` — only in DVP. Data synchronization during volume replication runs in synchronous mode only; asynchronous mode is not supported.
-
-The module supports the `LVM` and `LVMThin` modes. Learn more about the differences [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
-
-After you enable the module, create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
+The `sds-replicated-volume` module manages replicated block storage based on `DRBD`. `LINSTOR` is used as the control plane: you define a Storage Pool and a StorageClass with [Kubernetes custom resources](./cr.html); direct backend configuration is prohibited.
 
 ## Quickstart guide
 
@@ -276,11 +266,14 @@ The module is only guaranteed to work if the requirements below are met. For oth
 
 The cluster must meet the following requirements (for both single-zone and multi-zone clusters):
 
-- Before enabling `sds-replicated-volume`, enable the [sds-node-configurator](/modules/sds-node-configurator/) module.
+- Before enabling `sds-replicated-volume`, enable the [sds-node-configurator](/modules/sds-node-configurator/) module. A Storage Pool is built from LVMVolumeGroup resources managed by that module.
 - Connect the [snapshot-controller](/modules/snapshot-controller/) module.
 - Use at least 3 nodes. Prefer 4 or more to mitigate node failures. If the cluster has a single node, use [sds-local-volume](/modules/sds-local-volume/) instead of `sds-replicated-volume`.
 - Do not configure the LINSTOR backend directly.
 - Do not manually create a StorageClass for the `replicated.csi.storage.deckhouse.io` CSI driver.
+- Supported access modes: `RWO`; `RWX` — only in DVP.
+- Volume replication uses synchronous data synchronization only; asynchronous mode is not supported.
+- Supported storage modes: `LVM` and `LVMThin`. Differences are described [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
 - Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
 - Use network infrastructure with a bandwidth of 10 Gbps or higher.
 - For maximum performance, keep network latency between nodes within 0.5–1 ms. Latencies greater than 5 ms cause serious performance issues.
