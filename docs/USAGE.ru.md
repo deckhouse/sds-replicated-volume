@@ -8,7 +8,7 @@ description: "Использование и примеры работы sds-repl
 Использование в других условиях возможно, но стабильная работа в таких случаях не гарантируется.
 {{< /alert >}}
 
-После включения модуля `sds-replicated-volume` в конфигурации Deckhouse создайте ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse создайте [ReplicatedStoragePool](#создание-ресурса-replicatedstoragepool) и [ReplicatedStorageClass](#создание-ресурса-replicatedstorageclass) по инструкции ниже.
 
 ## Конфигурация модуля
 

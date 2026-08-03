@@ -6,6 +6,45 @@ moduleStatus: preview
 
 The `sds-replicated-volume` module manages replicated block storage based on `DRBD`. `LINSTOR` is used as the control plane: you define a Storage Pool and a StorageClass with [Kubernetes custom resources](./cr.html); direct backend configuration is prohibited.
 
+After you enable the module, create a [ReplicatedStoragePool](./usage.html#creating-a-replicatedstoragepool-resource) and a [ReplicatedStorageClass](./usage.html#creating-a-replicatedstorageclass-resource).
+
+## System requirements and recommendations
+
+The module is only guaranteed to work if the requirements below are met. For other configurations, the module may work, but smooth operation is not guaranteed.
+
+### Requirements
+
+The cluster must meet the following requirements (for both single-zone and multi-zone clusters):
+
+- Before enabling `sds-replicated-volume`, enable the [sds-node-configurator](/modules/sds-node-configurator/) module. A Storage Pool is built from LVMVolumeGroup resources managed by that module.
+- Connect the [snapshot-controller](/modules/snapshot-controller/) module.
+- Use at least 3 nodes. Prefer 4 or more to mitigate node failures. If the cluster has a single node, use [sds-local-volume](/modules/sds-local-volume/) instead of `sds-replicated-volume`.
+- Do not configure the LINSTOR backend directly.
+- Do not manually create a StorageClass for the `replicated.csi.storage.deckhouse.io` CSI driver.
+- Supported access modes: `RWO`; `RWX` — only in DVP.
+- Volume replication uses synchronous data synchronization only; asynchronous mode is not supported.
+- Supported storage modes: `LVM` and `LVMThin`. Differences are described [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
+- Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
+- Use network infrastructure with a bandwidth of 10 Gbps or higher.
+- For maximum performance, keep network latency between nodes within 0.5–1 ms. Latencies greater than 5 ms cause serious performance issues.
+- Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
+- For DRBD replication to work, allow communication between nodes on ports `7000–7999` using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
+
+  After changing `drbdPortRange`, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources keep their assigned ports.
+
+### Recommendations
+
+Follow these recommendations when planning storage:
+
+- Avoid using RAID. Details are [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
+- Use local physical disks. Details are [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
+- For the cluster to stay operational with degraded performance, network latency between nodes must not exceed 10 ms.
+- For guaranteed data consistency, use [ReplicatedStorageClass](./cr.html#replicatedstorageclass) with the `ConsistencyAndAvailability` replication mode ([`spec.replication`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication)) — this mode is used by default.
+
+{{< alert level="warning" >}}
+Changing the mode to `Availability` may lead to a split brain and data loss if network connectivity fails.
+{{< /alert >}}
+
 ## Quickstart guide
 
 Run all commands on a machine that has administrator access to the Kubernetes API.
@@ -258,37 +297,3 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
 
    If a StorageClass named `replicated-storage-class` is shown, the module configuration is complete. Users can create PVs by specifying this StorageClass. With the settings above, a volume is created with three replicas on different nodes.
 
-## System requirements and recommendations
-
-The module is only guaranteed to work if the requirements below are met. For other configurations, the module may work, but smooth operation is not guaranteed.
-
-### Requirements
-
-The cluster must meet the following requirements (for both single-zone and multi-zone clusters):
-
-- Before enabling `sds-replicated-volume`, enable the [sds-node-configurator](/modules/sds-node-configurator/) module. A Storage Pool is built from LVMVolumeGroup resources managed by that module.
-- Connect the [snapshot-controller](/modules/snapshot-controller/) module.
-- Use at least 3 nodes. Prefer 4 or more to mitigate node failures. If the cluster has a single node, use [sds-local-volume](/modules/sds-local-volume/) instead of `sds-replicated-volume`.
-- Do not configure the LINSTOR backend directly.
-- Do not manually create a StorageClass for the `replicated.csi.storage.deckhouse.io` CSI driver.
-- Supported access modes: `RWO`; `RWX` — only in DVP.
-- Volume replication uses synchronous data synchronization only; asynchronous mode is not supported.
-- Supported storage modes: `LVM` and `LVMThin`. Differences are described [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
-- Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
-- Use network infrastructure with a bandwidth of 10 Gbps or higher.
-- For maximum performance, keep network latency between nodes within 0.5–1 ms. Latencies greater than 5 ms cause serious performance issues.
-- Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
-- For DRBD replication to work, allow communication between nodes on ports `7000–7999` using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
-
-  After changing `drbdPortRange`, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources keep their assigned ports.
-
-### Recommendations
-
-Follow these recommendations when planning storage:
-
-- Avoid using RAID. Details are [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
-- Use local physical disks. Details are [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
-- For the cluster to stay operational with degraded performance, network latency between nodes must not exceed 10 ms.
-- For guaranteed data consistency, use [ReplicatedStorageClass](./cr.html#replicatedstorageclass) with the `ConsistencyAndAvailability` replication mode ([`spec.replication`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication)) — this mode is used by default.
-
-  **Caution.** Changing the mode to `Availability` may lead to a split brain and data loss if network connectivity fails.

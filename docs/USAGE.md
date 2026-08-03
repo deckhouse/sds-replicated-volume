@@ -8,7 +8,7 @@ The module is only guaranteed to work if the [system requirements](./readme.html
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, create ReplicatedStoragePool and ReplicatedStorageClass according to the instructions below.
+Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, create a [ReplicatedStoragePool](#creating-a-replicatedstoragepool-resource) and a [ReplicatedStorageClass](#creating-a-replicatedstorageclass-resource) according to the instructions below.
 
 ## Configuring the module
 
