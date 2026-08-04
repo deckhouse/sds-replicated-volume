@@ -362,7 +362,7 @@ The script supports the following parameters:
 Problems can occur at different levels of component operation.
 Use this cheat sheet to quickly navigate the diagnosis of various problems with volumes created by LINSTOR:
 
-![cheatsheet](./images/linstor-debug-cheatsheet.svg)
+![LINSTOR volume problems diagnosis flowchart](./images/linstor-debug-cheatsheet.svg)
 <!--- Source: https://docs.google.com/drawings/d/19hn3nRj6jx4N_haJE0OydbGKgd-m8AUSr0IqfHfT6YA/edit --->
 
 Some common problems are described below.
