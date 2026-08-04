@@ -73,7 +73,9 @@ description: "Использование и примеры работы sds-repl
 
 1. Проверьте результаты операции в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
-**Внимание.** Поле [`spec.type`](./cr.html#replicatedstoragepool-v1alpha1-spec-type) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool) **неизменяемое**. Контроллер не реагирует на изменения в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) ресурса.
+{{< alert level="warning" >}}
+Поле [`spec.type`](./cr.html#replicatedstoragepool-v1alpha1-spec-type) ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool) **неизменяемое**. Контроллер не реагирует на изменения в поле [`status`](./cr.html#replicatedstoragepool-v1alpha1-status) ресурса.
+{{< /alert >}}
 
 #### Удаление ресурса ReplicatedStoragePool
 
@@ -125,8 +127,10 @@ description: "Использование и примеры работы sds-repl
 
    Больше примеров с различными сценариями использования и схемами описаны в [документации](./layouts.html).
 
-> Перед процессом создания StorageClass запустится процесс валидации предоставленной конфигурации.
-> В случае обнаружения ошибок StorageClass создан не будет, а в поле `status` ресурса ReplicatedStorageClass отобразится информация об ошибке.
+{{< alert level="info" >}}
+Перед процессом создания StorageClass запустится процесс валидации предоставленной конфигурации.
+В случае обнаружения ошибок StorageClass создан не будет, а в поле `status` ресурса ReplicatedStorageClass отобразится информация об ошибке.
+{{< /alert >}}
 
 Результатом обработки ресурса ReplicatedStorageClass станет создание необходимого StorageClass в Kubernetes.
 
@@ -146,7 +150,9 @@ description: "Использование и примеры работы sds-repl
 
 1. Дождитесь, пока `sds-replicated-volume-controller` обнаружит удаление и выполнит все необходимые операции для корректного удаления дочернего StorageClass.
 
-> `sds-replicated-volume-controller` выполнит удаление дочернего StorageClass только в случае, если в поле `status.phase` ресурса ReplicatedStorageClass будет указано значение `Created`. В иных случаях будет удалён только ресурс ReplicatedStorageClass, а дочерний StorageClass затронут не будет.
+{{< alert level="warning" >}}
+`sds-replicated-volume-controller` выполнит удаление дочернего StorageClass только в случае, если в поле `status.phase` ресурса ReplicatedStorageClass будет указано значение `Created`. В иных случаях будет удалён только ресурс ReplicatedStorageClass, а дочерний StorageClass затронут не будет.
+{{< /alert >}}
 
 ## Дополнительные возможности для приложений
 

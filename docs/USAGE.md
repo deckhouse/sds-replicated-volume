@@ -128,8 +128,10 @@ Currently, the `sds-replicated-volume-controller` does not handle the deletion o
 
    More examples with different usage scenarios and layouts are described in the [documentation](./layouts.html).
 
-> Before a StorageClass is created, the provided configuration is validated.
-> If errors are found, the StorageClass is not created, and error details appear in the `status` field of the ReplicatedStorageClass resource.
+{{< alert level="info" >}}
+Before a StorageClass is created, the provided configuration is validated.
+If errors are found, the StorageClass is not created, and error details appear in the `status` field of the ReplicatedStorageClass resource.
+{{< /alert >}}
 
 Processing the ReplicatedStorageClass resource results in creating the required StorageClass in Kubernetes.
 
@@ -149,7 +151,9 @@ It is currently **not possible** to change the parameters of a StorageClass crea
 
 1. Wait for the `sds-replicated-volume-controller` to detect the deletion and perform all necessary operations to properly delete the child StorageClass.
 
-> The `sds-replicated-volume-controller` deletes the child StorageClass only if the `status.phase` field of the ReplicatedStorageClass resource is set to `Created`. Otherwise, only the ReplicatedStorageClass resource is deleted, and the child StorageClass is not affected.
+{{< alert level="warning" >}}
+The `sds-replicated-volume-controller` deletes the child StorageClass only if the `status.phase` field of the ReplicatedStorageClass resource is set to `Created`. Otherwise, only the ReplicatedStorageClass resource is deleted, and the child StorageClass is not affected.
+{{< /alert >}}
 
 ## Additional features for applications
 
