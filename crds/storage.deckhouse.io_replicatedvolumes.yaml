@@ -82,8 +82,9 @@ spec:
                 description: |-
                   ConfigurationMode selects how the volume configuration is determined.
 
-                  Auto: configuration is derived from the referenced ReplicatedStorageClass.
-                  Manual: configuration is specified directly in the manualConfiguration field.
+                  Might be:
+                  - Auto — configuration is derived from the referenced ReplicatedStorageClass.
+                  - Manual — configuration is specified directly in the manualConfiguration field.
                 enum:
                 - Auto
                 - Manual

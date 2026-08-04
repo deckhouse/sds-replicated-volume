@@ -256,8 +256,8 @@ spec:
                   The storage class's reclaim policy.
 
                   Might be:
-                  - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
-                  - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
+                  - Delete — If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well
+                  - Retain — If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage
                 enum:
                 - Delete
                 - Retain
@@ -269,7 +269,7 @@ spec:
                   Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
 
                   The Storage class's replication mode. Might be:
-                  - None — single replica, no replication. Requires topology to be 'Ignored'.
+                  - None — single replica, no replication. Requires topology to be `Ignored`.
                   - Availability — 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
                   - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO.
                   - ConsistencyAndAvailability — 3 replicas; can lose 1 node and keeps consistency.
@@ -325,8 +325,8 @@ spec:
                       Type defines the volumes type.
 
                       Might be:
-                      - LVM (for Thick)
-                      - LVMThin (for Thin)
+                      - LVM — for Thick
+                      - LVMThin — for Thin
                     enum:
                     - LVM
                     - LVMThin
@@ -374,15 +374,16 @@ spec:
 
                   Might be:
                   - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
-                    To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
+                    To use this topology, the available zones must be specified in the `zones` param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
                   - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
                   - Ignored — the topology information will not be used to place replicas of the volumes.
                     The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
-                    Required when replication is 'None'.
+                    Required when replication is `None`.
 
-                  > **Caution.** The 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
-
-                  > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
+                  > **Caution.**
+                  > - The `Ignored` value can be used only if there are no zones in the cluster (there are no nodes with the `topology.kubernetes.io/zone` label).
+                  > - For the system to operate correctly, either every cluster node must be labeled with `topology.kubernetes.io/zone`, or none of them should have this label.
+                  > - This field is immutable and cannot be changed after the resource is created.
                 enum:
                 - TransZonal
                 - Zonal
@@ -417,7 +418,7 @@ spec:
                   - Availability, ConsistencyAndAvailability: at least 3 zones required
                   - Consistency: at least 2 zones required
 
-                  When replication is 'None', zones act as a node constraint
+                  When replication is `None`, zones act as a node constraint
                   limiting where the single replica can be placed.
                 items:
                   maxLength: 63

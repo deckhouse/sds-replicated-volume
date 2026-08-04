@@ -39,7 +39,6 @@ spec:
       openAPIV3Schema:
         properties:
           apiVersion:
-            x-doc-skip: true
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
 
@@ -48,7 +47,6 @@ spec:
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            x-doc-skip: true
             description: |-
               Kind is a string value representing the REST resource this object represents.
 
@@ -58,7 +56,6 @@ spec:
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
-            x-doc-skip: true
             type: object
           spec:
             properties:

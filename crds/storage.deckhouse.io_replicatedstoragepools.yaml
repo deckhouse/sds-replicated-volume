@@ -86,7 +86,7 @@ spec:
                   the required space.
 
                   > **Caution.** Every LVMVolumeGroup resource has to have the same type Thin/Thick
-                  as it is in current resource's 'Spec.Type' field.
+                  as it is in current resource's `Spec.Type` field.
                 items:
                   properties:
                     name:
@@ -199,8 +199,8 @@ spec:
                   Defines the volumes type.
 
                   Might be:
-                  - LVM (for Thick)
-                  - LVMThin (for Thin)
+                  - LVM — for Thick
+                  - LVMThin — for Thin
                 enum:
                 - LVM
                 - LVMThin
