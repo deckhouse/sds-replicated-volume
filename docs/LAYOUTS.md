@@ -28,7 +28,7 @@ The StorageClass created from this resource has the following characteristics:
   - All volume replicas are created in the same zone to which the scheduler has scheduled the pod that uses that volume.
   - No data can be accessed over the network: pods can only be created on the nodes where the data replica resides.
 
-- Volume replica layout for a single `StatefulSet`:
+- Volume replica layout for a single StatefulSet:
 ![Zonal StorageClass volume replica layout for a StatefulSet](./images/zonal.png)
 
 - Recommendations on how to use a zonal StorageClass:

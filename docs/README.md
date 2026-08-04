@@ -28,7 +28,7 @@ The cluster must meet the following requirements (for both single-zone and multi
 - Use network infrastructure with a bandwidth of 10 Gbps or higher.
 - For maximum performance, keep network latency between nodes within 0.5–1 ms. Latencies greater than 5 ms cause serious performance issues.
 - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
-- For DRBD replication to work, allow communication between nodes on ports `7000–7999` using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
+- For DRBD replication to work, allow communication between nodes on ports 7000–7999 using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
 
   After changing `drbdPortRange`, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources keep their assigned ports.
 
