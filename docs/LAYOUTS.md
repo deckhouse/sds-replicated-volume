@@ -28,8 +28,8 @@ The StorageClass created from this resource has the following characteristics:
   - All volume replicas are created in the same zone to which the scheduler has scheduled the pod that uses that volume.
   - No data can be accessed over the network: pods can only be created on the nodes where the data replica resides.
 
-- Volume replica layout for a single StatefulSet:
-![Scheme](./images/zonal.png)
+- Volume replica layout for a single `StatefulSet`:
+![Zonal StorageClass volume replica layout for a StatefulSet](./images/zonal.png)
 
 - Recommendations on how to use a zonal StorageClass:
 
@@ -41,7 +41,9 @@ The StorageClass created from this resource has the following characteristics:
 
   - This StorageClass is best suited for cases where high read speeds are essential, as the data is always on the local disk. This is achieved by the [`volumeAccess`](./cr.html#replicatedstorageclass-v1alpha1-spec-volumeaccess) parameter set to `Local`, which prevents pods from being created on nodes with no local volume replica and data access over the network.
 
-**Caution.** Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
+{{< alert level="warning" >}}
+Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
+{{< /alert >}}
 
 ## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
@@ -72,7 +74,7 @@ The StorageClass created from this resource has the following characteristics:
   - Access to data over the network is permitted: pods can be created on nodes that do not have a local volume replica. If this is the case, 30 minutes after creating a pod on such a node, the process of populating a local volume replica will commence, which involves copying all volume data from other replicas to this node over the network. This enables flexibility in pod distribution — if a node with a local replica crashes, the pod can be rescheduled to a worker node without local data, and after 30 minutes the data will start replicating to that node. However, this may result in a temporary increase in network traffic between zones (as the data will be retrieved from replicas in other zones) and a temporary decrease in read rates (since the data initially can only be accessed over the network).
 
 - Volume replica layout:
-![Scheme](./images/trans-zonal.png)
+![Trans-zonal StorageClass volume replica layout](./images/trans-zonal.png)
 
 - Recommendations on how to use a trans-zonal StorageClass:
 
@@ -84,4 +86,6 @@ The StorageClass created from this resource has the following characteristics:
 
   - This StorageClass is recommended if high write rates are not considered a priority. The synchronous replication protocol used in DRBD treats a write operation as completed only after receiving confirmation from all replicas of a successful write to the local disk. With three replicas distributed across different zones, the write latency will be higher than with a zonal StorageClass. The exception to this is when the network parameters within a zone and between the zones are similar.
 
-**Caution.** Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of a trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in [`spec.zones`](./cr.html#replicatedstorageclass-v1alpha1-spec-zones) of the trans-zonal StorageClass configuration.
+{{< alert level="warning" >}}
+Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of a trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in [`spec.zones`](./cr.html#replicatedstorageclass-v1alpha1-spec-zones) of the trans-zonal StorageClass configuration.
+{{< /alert >}}
