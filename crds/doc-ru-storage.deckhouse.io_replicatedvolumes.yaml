@@ -16,13 +16,13 @@ spec:
                   Способ определения конфигурации тома.
 
                   Может быть:
-                  - Auto — конфигурация берётся из указанного ReplicatedStorageClass (поле 'replicatedStorageClassName').
-                  - Manual — конфигурация задаётся напрямую в поле 'manualConfiguration'.
+                  - Auto — конфигурация берётся из указанного ReplicatedStorageClass (поле `replicatedStorageClassName`).
+                  - Manual — конфигурация задаётся напрямую в поле `manualConfiguration`.
               manualConfiguration:
                 description: |
                   Конфигурация тома, заданная напрямую.
 
-                  Обязательна, когда 'configurationMode' равен Manual, и должна быть пустой, когда 'configurationMode' равен Auto.
+                  Обязательна, когда `configurationMode` равен Manual, и должна быть пустой, когда `configurationMode` равен Auto.
                 properties:
                   failuresToTolerate:
                     description: |
@@ -38,9 +38,9 @@ spec:
                       Топология размещения реплик.
 
                       Может быть:
-                      - TransZonal (реплики распределяются между зонами)
-                      - Zonal (реплики размещаются в одной зоне)
-                      - Ignored (топология не учитывается).
+                      - TransZonal — реплики распределяются между зонами
+                      - Zonal — реплики размещаются в одной зоне
+                      - Ignored — топология не учитывается.
                   volumeAccess:
                     description: |
                       Режим доступа к тому.
@@ -53,7 +53,7 @@ spec:
                 description: |
                   Имя ReplicatedStorageClass, предоставляющего конфигурацию тома.
 
-                  Обязательно, когда 'configurationMode' равен Auto, и должно быть пустым, когда 'configurationMode' равен Manual.
+                  Обязательно, когда `configurationMode` равен Auto, и должно быть пустым, когда `configurationMode` равен Manual.
               size:
                 description: |
                   Запрошенный размер тома.
@@ -117,12 +117,10 @@ spec:
                     description: |
                       Итоговая топология размещения.
 
-                      Может быть: TransZonal, Zonal, Ignored.
                   volumeAccess:
                     description: |
                       Итоговый режим доступа к тому.
 
-                      Может быть: Local, EventuallyLocal, PreferablyLocal, Any.
               configurationGeneration:
                 description: |
                   Поколение (generation) ReplicatedStorageClass, из которого была взята конфигурация.
@@ -182,7 +180,6 @@ spec:
                     description: |
                       Алгоритм хеширования для общего секрета.
 
-                      Может быть: SHA256, SHA1, DummyForTest.
                   size:
                     description: |
                       Желаемый размер тома.
@@ -294,7 +291,6 @@ spec:
                             description: |
                               Текущий статус шага.
 
-                              Может быть: Pending, Active, Completed.
                     toReplicaType:
                       description: |
                         Целевой тип реплики для переходов ChangeReplicaType.
@@ -307,7 +303,6 @@ spec:
                       description: |
                         Тип перехода.
 
-                        Может быть: AddReplica, Attach, ChangeQuorum, ChangeReplicaType, ChangeSystemNetworks, Detach, DisableMultiattach, EnableMultiattach, ForceDetach, ForceRemoveReplica, Formation, RemoveReplica, RepairNetworkAddresses, ResizeVolume.
               effectiveLayout:
                 description: |
                   Описывает реальный (в текущий момент) уровень защиты и здоровья datamesh на основе наблюдаемого состояния кластера.

@@ -20,13 +20,13 @@ spec:
                 description: |
                   Имя LVMLogicalVolume, используемого в качестве нижележащего (backing) устройства.
 
-                  Обязательно, когда 'type' равен Diskful, и должно быть пустым, когда 'type' равен Diskless.
+                  Обязательно, когда `type` равен Diskful, и должно быть пустым, когда `type` равен Diskless.
               maintenance:
                 description: |
                   Режим обслуживания.
 
                   Когда задан, согласование (reconciliation) ресурса приостанавливается, но статус продолжает обновляться. Может быть:
-                  - NoResourceReconciliation (согласование ресурса не выполняется).
+                  - NoResourceReconciliation — согласование ресурса не выполняется.
               nodeID:
                 description: |
                   Числовой идентификатор узла в DRBD (от 0 до 31).
@@ -79,9 +79,9 @@ spec:
                         Протокол репликации DRBD.
 
                         Может быть:
-                        - A (асинхронная репликация)
-                        - B (полусинхронная репликация)
-                        - C (синхронная репликация).
+                        - A — асинхронная репликация
+                        - B — полусинхронная репликация
+                        - C — синхронная репликация.
 
                         > **Внимание.** Это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
                     sharedSecret:
@@ -91,12 +91,13 @@ spec:
                       description: |
                         Алгоритм хеширования для общего секрета DRBD.
 
-                        Может быть: SHA256, SHA1, DummyForTest.
                     type:
                       description: |
                         Тип пира.
 
-                        Может быть: Diskful (с диском) или Diskless (без диска).
+                        Может быть:
+                        - Diskful — с диском
+                        - Diskless — без диска
               quorum:
                 description: |
                   Требуемое число голосов для наличия кворума.
@@ -107,17 +108,18 @@ spec:
                 description: |
                   Желаемая роль DRBD-ресурса.
 
-                  Может быть: Primary или Secondary.
               size:
                 description: |
                   Размер устройства.
 
-                  Обязательно, когда 'type' равен Diskful, и должно быть пустым, когда 'type' равен Diskless.
+                  Обязательно, когда `type` равен Diskful, и должно быть пустым, когда `type` равен Diskless.
               state:
                 description: |
                   Желаемое состояние DRBD-ресурса.
 
-                  Может быть: Up (поднят) или Down (опущен).
+                  Может быть:
+                  - Up — поднят
+                  - Down — опущен
               systemNetworks:
                 description: |
                   Список имён системных сетей, которые используются для соединений DRBD.
@@ -125,7 +127,9 @@ spec:
                 description: |
                   Тип DRBD-ресурса.
 
-                  Может быть: Diskful (с диском) или Diskless (без диска).
+                  Может быть:
+                  - Diskful — с диском
+                  - Diskless — без диска
           status:
             properties:
               activeConfiguration:
@@ -158,12 +162,10 @@ spec:
                     description: |
                       Роль DRBD-ресурса в активной конфигурации.
 
-                      Может быть: Primary или Secondary.
                   state:
                     description: |
                       Состояние DRBD-ресурса в активной конфигурации.
 
-                      Может быть: Up или Down.
                   type:
                     description: |
                       Текущий эффективный тип конфигурации DRBD (Diskful или Diskless).
@@ -271,12 +273,10 @@ spec:
                       description: |
                         Роль пира в DRBD.
 
-                        Может быть: Primary или Secondary.
                     type:
                       description: |
                         Тип пира.
 
-                        Может быть: Diskful или Diskless.
               quorum:
                 description: |
                   Признак наличия кворума у DRBD-ресурса.

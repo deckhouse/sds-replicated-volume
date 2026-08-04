@@ -24,13 +24,13 @@ spec:
                   Определяет тип Volume'ов.
 
                   Может быть:
-                  - LVM (для классических LVM-томов)
-                  - LVMThin (для Thin-томов)
+                  - LVM — для классических LVM-томов
+                  - LVMThin — для Thin-томов
               lvmVolumeGroups:
                 description: |
                   Список LVMVolumeGroup-ресурсов, Volume Group'ы/Thin-pool'ы которых будут использованы для создания Storage-pool'ов в бэкенде LINSTOR.
 
-                  > **Внимание.** Каждый LVMVolumeGroup-ресурс обязан иметь тот же тип (Thin/Thick), что указан в поле 'Spec.Type' текущего ресурса.
+                  > **Внимание.** Каждый LVMVolumeGroup-ресурс обязан иметь тот же тип (Thin/Thick), что указан в поле `Spec.Type` текущего ресурса.
                 items:
                   properties:
                     name:
@@ -144,9 +144,9 @@ spec:
                   Операционное состояние Storage Pool.
 
                   Может быть:
-                  - Ready (конфигурация корректна, eligible nodes рассчитаны)
-                  - WaitingForLVMVolumeGroups (ожидание готовности указанных LVMVolumeGroup)
-                  - InvalidConfiguration (некорректная конфигурация ресурса)
+                  - Ready — конфигурация корректна, eligible nodes рассчитаны
+                  - WaitingForLVMVolumeGroups — ожидание готовности указанных LVMVolumeGroup
+                  - InvalidConfiguration — некорректная конфигурация ресурса
               reason:
                 description: |
                   Дополнительная информация о текущем состоянии ресурса.
