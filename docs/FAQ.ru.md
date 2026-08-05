@@ -114,8 +114,10 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
 1. Вручную назначьте на Volume Group LVM-тег `storage.deckhouse.io/enabled=true`:
 
    ```shell
-   vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
+   vgchange <VG_NAME> --add-tag storage.deckhouse.io/enabled=true
    ```
+
+   `<VG_NAME>` — имя существующей LVM Volume Group.
 
    Данный VG будет автоматически обнаружен и в кластере для него будет создан соответствующий ресурс LVMVolumeGroup.
 
@@ -130,37 +132,46 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
 1. Добавьте новую Volume Group в существующий [ReplicatedStoragePool](./cr.html#replicatedstoragepool), отредактировав ресурс:
 
    ```shell
-   d8 k edit replicatedstoragepool your-pool-name
+   d8 k edit replicatedstoragepool <POOL_NAME>
    ```
+
+   `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.
 
    Добавьте новую Volume Group в секцию [`spec.lvmVolumeGroups`](./cr.html#replicatedstoragepool-v1alpha1-spec-lvmvolumegroups):
 
    ```yaml
    spec:
      lvmVolumeGroups:
-     - name: existing-vg-name
-     - name: new-vg-name  # Добавьте эту строку
+     - name: <EXISTING_VG_NAME>
+     - name: <NEW_VG_NAME>  # Добавьте эту строку
    ```
+
+   `<EXISTING_VG_NAME>` — имя LVMVolumeGroup, уже указанной в пуле.  
+   `<NEW_VG_NAME>` — имя добавляемой LVMVolumeGroup.
 
 1. Для LVMThin-пулов дополнительно укажите имя тонкого пула:
 
    ```yaml
    spec:
      lvmVolumeGroups:
-     - name: existing-vg-name
-       thinPoolName: existing-thin-pool
-     - name: new-vg-name
-       thinPoolName: new-thin-pool  # Добавьте эту строку
+     - name: <EXISTING_VG_NAME>
+       thinPoolName: <EXISTING_THIN_POOL_NAME>
+     - name: <NEW_VG_NAME>
+       thinPoolName: <NEW_THIN_POOL_NAME>  # Добавьте эту строку
    ```
+
+   `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>` — как выше.  
+   `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>` — имена thin pool в соответствующих Volume Group.
 
 1. Сохраните изменения. Контроллер автоматически создаст Storage Pool в LINSTOR для новой Volume Group и добавит её в существующий [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
 1. Проверьте статус расширения:
 
    ```shell
-   d8 k get replicatedstoragepool your-pool-name -o yaml
+   d8 k get replicatedstoragepool <POOL_NAME> -o yaml
    ```
 
+   `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.  
    В статусе должна отобразиться информация о новой Volume Group.
 
 ## Как увеличить ограничение на количество DRBD-томов / изменить порты, по которым DRBD-кластера общаются между собой?
@@ -257,7 +268,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
 - Создает резервную копию базы данных.
 - Управляет количеством дисковых реплик, добавляя новые при необходимости.
 - Настраивает TieBreaker для ресурсов с двумя репликами.
-- Логирует все действия в файл `linstor_replicas_manager_<дата_и_время>.log`.
+- Логирует все действия в файл `linstor_replicas_manager_<DATE_TIME>.log`.
 - Предоставляет рекомендации по устранению проблем, таких как застрявшие реплики.
 
 Переменные для настройки `replicas_manager.sh`:
@@ -864,8 +875,10 @@ NAS обычно предполагает использование RAID на �
 1. Если какой-то сертификат близок к окончанию, удалите соответствующий секрет:
 
    ```shell
-   d8 k -n d8-sds-replicated-volume delete secret <нужные секреты>
+   d8 k -n d8-sds-replicated-volume delete secret <SECRET_NAME>
    ```
+
+   `<SECRET_NAME>` — имя Secret, у которого истекает сертификат.
 
 1. Перезапустите Deckhouse:
 

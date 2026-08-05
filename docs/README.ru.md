@@ -112,12 +112,14 @@ moduleStatus: preview
 1. После эвакуации удалите с узла лейблы модуля и удалите узел из LINSTOR:
 
    ```shell
-   export NODE_NAME=<node-name>
+   export NODE_NAME=<NODE_NAME>
    d8 k get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
      d8 k label node $NODE_NAME "$label"-
    done
    d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
    ```
+
+   `<NODE_NAME>` — имя узла Kubernetes.
 
 ### Настройка хранилища на узлах
 

@@ -112,12 +112,14 @@ To remove module resources from a node without removing the node from the cluste
 1. After eviction, remove the module labels from the node and remove the node from LINSTOR:
 
    ```shell
-   export NODE_NAME=<node-name>
+   export NODE_NAME=<NODE_NAME>
    d8 k get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
      d8 k label node $NODE_NAME "$label"-
    done
    d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
    ```
+
+   `<NODE_NAME>` — name of the Kubernetes node.
 
 ### Configuring storage on nodes
 

@@ -108,8 +108,10 @@ Add the corresponding StorageClass name to `spec.settings.defaultClusterStorageC
 1. Manually add the `storage.deckhouse.io/enabled=true` LVM tag to the Volume Group:
 
    ```shell
-   vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
+   vgchange <VG_NAME> --add-tag storage.deckhouse.io/enabled=true
    ```
+
+   `<VG_NAME>` — name of the existing LVM Volume Group.
 
    This VG will be automatically discovered and a corresponding LVMVolumeGroup resource will be created in the cluster for it.
 
@@ -124,37 +126,46 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
 1. Add the new Volume Group to the existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) by editing the resource:
 
    ```shell
-   d8 k edit replicatedstoragepool your-pool-name
+   d8 k edit replicatedstoragepool <POOL_NAME>
    ```
+
+   `<POOL_NAME>` — name of the ReplicatedStoragePool resource.
 
    Add the new Volume Group to the [`spec.lvmVolumeGroups`](./cr.html#replicatedstoragepool-v1alpha1-spec-lvmvolumegroups) section:
 
    ```yaml
    spec:
      lvmVolumeGroups:
-     - name: existing-vg-name
-     - name: new-vg-name  # Add this line
+     - name: <EXISTING_VG_NAME>
+     - name: <NEW_VG_NAME>  # Add this line
    ```
+
+   `<EXISTING_VG_NAME>` — name of an LVMVolumeGroup already listed in the pool.  
+   `<NEW_VG_NAME>` — name of the LVMVolumeGroup to add.
 
 1. For LVMThin pools, additionally specify the thin pool name:
 
    ```yaml
    spec:
      lvmVolumeGroups:
-     - name: existing-vg-name
-       thinPoolName: existing-thin-pool
-     - name: new-vg-name
-       thinPoolName: new-thin-pool  # Add this line
+     - name: <EXISTING_VG_NAME>
+       thinPoolName: <EXISTING_THIN_POOL_NAME>
+     - name: <NEW_VG_NAME>
+       thinPoolName: <NEW_THIN_POOL_NAME>  # Add this line
    ```
+
+   `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>` — as above.  
+   `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>` — thin pool names in the corresponding Volume Groups.
 
 1. Save the changes. The controller will automatically create a Storage Pool in LINSTOR for the new Volume Group and add it to the existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
 1. Check the expansion status:
 
    ```shell
-   d8 k get replicatedstoragepool your-pool-name -o yaml
+   d8 k get replicatedstoragepool <POOL_NAME> -o yaml
    ```
 
+   `<POOL_NAME>` — name of the ReplicatedStoragePool resource.  
    Information about the new Volume Group should be displayed in the status.
 
 ## How to increase the limit on the number of DRBD volumes / change the ports through which DRBD clusters communicate with each other?
@@ -250,7 +261,7 @@ Upon execution, the script performs the following actions:
 - Creates a backup of the database.
 - Manages the number of disk replicas, adding new ones as needed.
 - Configures TieBreaker for resources with two replicas.
-- Logs all actions to a file named `linstor_replicas_manager_<date_time>.log`.
+- Logs all actions to a file named `linstor_replicas_manager_<DATE_TIME>.log`.
 - Provides recommendations for resolving issues, such as stuck replicas.
 
 Configuration variables for `replicas_manager.sh`:
@@ -841,8 +852,10 @@ DRBD uses the network for data replication. When using NAS, network load will in
 1. If any certificate is close to expiration, delete the corresponding secret:
 
    ```shell
-   d8 k -n d8-sds-replicated-volume delete secret <secret names>
+   d8 k -n d8-sds-replicated-volume delete secret <SECRET_NAME>
    ```
+
+   `<SECRET_NAME>` — name of the Secret whose certificate is about to expire.
 
 1. Restart Deckhouse:
 
