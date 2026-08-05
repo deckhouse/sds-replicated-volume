@@ -16,8 +16,8 @@ spec:
                   Способ определения конфигурации тома.
 
                   Может быть:
-                  - Auto — конфигурация берётся из указанного ReplicatedStorageClass (поле `replicatedStorageClassName`).
-                  - Manual — конфигурация задаётся напрямую в поле `manualConfiguration`.
+                  - `Auto` — конфигурация берётся из указанного ReplicatedStorageClass (поле `replicatedStorageClassName`);
+                  - `Manual` — конфигурация задаётся напрямую в поле `manualConfiguration`.
               manualConfiguration:
                 description: |
                   Конфигурация тома, заданная напрямую.
@@ -38,9 +38,9 @@ spec:
                       Топология размещения реплик.
 
                       Может быть:
-                      - TransZonal — реплики распределяются между зонами
-                      - Zonal — реплики размещаются в одной зоне
-                      - Ignored — топология не учитывается.
+                      - `TransZonal` — реплики распределяются между зонами;
+                      - `Zonal` — реплики размещаются в одной зоне;
+                      - `Ignored` — топология не учитывается.
                   volumeAccess:
                     description: |
                       Режим доступа к тому.
@@ -356,6 +356,13 @@ spec:
                     replicaName:
                       description: |
                         Имя ресурса ReplicatedVolumeReplica.
+              membershipLayout:
+                description: |
+                  Краткое человекочитаемое представление фактической раскладки datamesh (diskful-голосующие и tie-breaker'ы), например `3D` или `2D+1TB`.
+
+                  Выводится из участников datamesh; произвольная строка (не enum). Совпадение с целевой раскладкой смотрите в condition `MembershipLayoutConverged`.
+
+                  Не задаётся (отсутствует), пока раскладка ещё не вычислена: на этапе формирования контроллер вообще не публикует layout. Пустая строка никогда не публикуется.
               size:
                 description: |
                   Фактическая полезная ёмкость тома в байтах.

@@ -50,6 +50,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |
+          Low-level representation of a DRBD resource on a specific node in the cluster.
+
+          The resource is managed by the agent and describes the desired and actual configuration of the DRBD device, its peers, and replication. It is not intended for manual creation or editing.
         properties:
           apiVersion:
             description: |-
@@ -59,6 +63,7 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -68,16 +73,21 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
             properties:
               actualNameOnTheNode:
+                description: |
+                  Actual name of the DRBD resource on the node.
                 maxLength: 253
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
               allowTwoPrimaries:
+                description: |
+                  Allow two `Primary` roles simultaneously (dual-primary mode).
                 default: false
                 type: boolean
               lvmLogicalVolumeName:
@@ -93,6 +103,10 @@ spec:
                 - NoResourceReconciliation
                 type: string
               nodeID:
+                description: |
+                  Numeric node identifier in DRBD (from 0 to 31).
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maximum: 31
                 minimum: 0
                 type: integer
@@ -100,6 +114,10 @@ spec:
                 - message: nodeID is immutable
                   rule: self == oldSelf
               nodeName:
+                description: |
+                  Name of the node where the DRBD resource is located.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -115,9 +133,13 @@ spec:
                   Only valid for Diskful resources.
                 type: boolean
               peers:
+                description: |
+                  List of peers (neighboring nodes) with which the DRBD resource replicates.
                 items:
                   properties:
                     allowRemoteRead:
+                      description: |
+                        Allow reading data from this peer.
                       default: true
                       type: boolean
                     name:
@@ -130,13 +152,19 @@ spec:
                       pattern: ^[0-9A-Za-z.+_-]*$
                       type: string
                     nodeID:
+                      description: |
+                        Numeric peer identifier in DRBD (from 0 to 31).
                       maximum: 31
                       minimum: 0
                       type: integer
                     paths:
+                      description: |
+                        List of network paths to the peer.
                       items:
                         properties:
                           address:
+                            description: |
+                              Network address (IPv4 and port) for connecting to the peer.
                             properties:
                               ipv4:
                                 maxLength: 15
@@ -171,6 +199,8 @@ spec:
                         rule: self.all(x, self.exists_one(y, x.systemNetworkName ==
                           y.systemNetworkName))
                     pauseSync:
+                      description: |
+                        Pause synchronization with this peer.
                       default: false
                       type: boolean
                     protocol:
@@ -185,6 +215,8 @@ spec:
                       - message: protocol is immutable
                         rule: self == oldSelf
                     sharedSecret:
+                      description: |
+                        Shared secret for authenticating the connection to the peer.
                       maxLength: 256
                       type: string
                     sharedSecretAlg:
@@ -213,10 +245,14 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               quorum:
+                description: |
+                  Required number of votes for quorum.
                 maximum: 32
                 minimum: 0
                 type: integer
               quorumMinimumRedundancy:
+                description: |
+                  Minimum redundancy (number of up-to-date replicas) required to retain quorum.
                 maximum: 32
                 minimum: 0
                 type: integer
@@ -244,6 +280,8 @@ spec:
                 - Down
                 type: string
               systemNetworks:
+                description: |
+                  List of system network names used for DRBD connections.
                 items:
                   maxLength: 64
                   type: string
@@ -266,8 +304,12 @@ spec:
           status:
             properties:
               activeConfiguration:
+                description: |
+                  Current active (actually applied) configuration of the DRBD resource.
                 properties:
                   allowTwoPrimaries:
+                    description: |
+                      Whether dual-primary mode is allowed in the active configuration.
                     type: boolean
                   llvFinalizersToRelease:
                     description: |-
@@ -291,10 +333,16 @@ spec:
                     maxLength: 128
                     type: string
                   nonVoting:
+                    description: |
+                      Whether the disk participates in quorum voting in the active configuration.
                     type: boolean
                   quorum:
+                    description: |
+                      Required number of votes for quorum in the active configuration.
                     type: integer
                   quorumMinimumRedundancy:
+                    description: |
+                      Minimum redundancy in the active configuration.
                     type: integer
                   role:
                     description: DRBDRole represents the role of a DRBD resource.
@@ -321,6 +369,8 @@ spec:
                     type: string
                 type: object
               addresses:
+                description: |
+                  Actual network addresses used by the DRBD resource.
                 items:
                   properties:
                     address:
@@ -351,6 +401,8 @@ spec:
                 - message: addresses[].systemNetworkName must be unique
                   rule: self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))
               conditions:
+                description: |
+                  List of conditions that reflect the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -458,6 +510,8 @@ spec:
                   application I/O can be served locally or requires peer involvement.
                 type: string
               peers:
+                description: |
+                  Actual state of the DRBD resource peers.
                 items:
                   properties:
                     allowRemoteRead:
@@ -465,6 +519,8 @@ spec:
                         from this peer.
                       type: boolean
                     connectionState:
+                      description: |
+                        Connection state with the peer.
                       type: string
                     diskState:
                       description: |-
@@ -474,17 +530,25 @@ spec:
                         application I/O can be served locally or requires peer involvement.
                       type: string
                     name:
+                      description: |
+                        Name of the peer node.
                       maxLength: 253
                       minLength: 1
                       type: string
                     nodeID:
+                      description: |
+                        Numeric peer identifier in DRBD.
                       maximum: 31
                       minimum: 0
                       type: integer
                     paths:
+                      description: |
+                        Actual network paths to the peer.
                       items:
                         properties:
                           address:
+                            description: |
+                              Network address (IPv4 and port) of the connection to the peer.
                             properties:
                               ipv4:
                                 maxLength: 15
@@ -499,8 +563,12 @@ spec:
                             - port
                             type: object
                           established:
+                            description: |
+                              Whether the connection is established over this path.
                             type: boolean
                           systemNetworkName:
+                            description: |
+                              System network name of this path.
                             maxLength: 64
                             minLength: 1
                             type: string
@@ -543,6 +611,8 @@ spec:
                 - message: peers[].nodeID must be unique
                   rule: self.all(x, self.exists_one(y, x.nodeID == y.nodeID))
               quorum:
+                description: |
+                  Whether the DRBD resource has quorum.
                 type: boolean
               size:
                 anyOf:

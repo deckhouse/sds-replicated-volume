@@ -53,6 +53,7 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -62,11 +63,16 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
             properties:
               nodeName:
+                description: |
+                  Name of the node to which the volume must be attached.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -74,6 +80,10 @@ spec:
                 - message: nodeName is immutable
                   rule: self == oldSelf
               replicatedVolumeName:
+                description: |
+                  Name of the ReplicatedVolume that must be attached to the node.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 127
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
@@ -88,6 +98,8 @@ spec:
           status:
             properties:
               conditions:
+                description: |
+                  List of conditions that reflect the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

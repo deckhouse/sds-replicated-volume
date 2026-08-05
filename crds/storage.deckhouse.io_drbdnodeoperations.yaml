@@ -34,6 +34,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |
+          Interface for managing node-level DRBD operations in the cluster.
+
+          The resource is created to perform a maintenance operation on a specific node; the agent on that node performs the operation and reports the result in the status.
         properties:
           apiVersion:
             description: |-
@@ -43,6 +47,7 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -52,11 +57,16 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
             properties:
               nodeName:
+                description: |
+                  Name of the node where the operation will be performed.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -64,8 +74,13 @@ spec:
                 - message: nodeName is immutable
                   rule: self == oldSelf
               type:
-                description: DRBDNodeOperationType represents the type of operation
-                  to perform on a DRBD node.
+                description: |-
+                  Type of the DRBD node operation.
+
+                  Might be:
+                  - `UpdateDRBD`: Update DRBD on the node.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 enum:
                 - UpdateDRBD
                 type: string
@@ -79,15 +94,22 @@ spec:
           status:
             properties:
               completedAt:
+                description: |
+                  Time when the operation completed.
                 format: date-time
                 type: string
               message:
+                description: |
+                  Additional human-readable message about the current operation state.
                 maxLength: 1024
                 type: string
               phase:
-                description: DRBDOperationPhase represents the phase of a DRBD operation.
+                description: |-
+                  Current phase of the operation.
                 type: string
               startedAt:
+                description: |
+                  Time when the operation started.
                 format: date-time
                 type: string
             type: object
