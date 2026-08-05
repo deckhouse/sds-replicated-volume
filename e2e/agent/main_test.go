@@ -76,6 +76,9 @@ func TestDRBDResource(t *testing.T) {
 	})
 
 	e.Run("LLVFinalizer", func(e envtesting.E) {
+		var drbdrConfiguredTimeout suite.DRBDRConfiguredTimeout
+		e.Options(&drbdrConfiguredTimeout)
+
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "lf", 0)
 
 		e.Run("DownUp", func(e envtesting.E) {
@@ -83,15 +86,15 @@ func TestDRBDResource(t *testing.T) {
 		})
 
 		e.Run("DownUpDiskless", func(e envtesting.E) {
-			suite.SetupLLVFinalizerDownUpDiskless(e, cl, drbdr, llv.Name)
+			suite.SetupLLVFinalizerDownUpDiskless(e, cl, drbdr, llv.Name, drbdrConfiguredTimeout)
 		})
 
 		e.Run("DownUpDownUpDiskless", func(e envtesting.E) {
-			suite.SetupLLVFinalizerDownUpDownUpDiskless(e, cl, drbdr, llv.Name)
+			suite.SetupLLVFinalizerDownUpDownUpDiskless(e, cl, drbdr, llv.Name, drbdrConfiguredTimeout)
 		})
 
 		e.Run("DownDisklessThenUp", func(e envtesting.E) {
-			suite.SetupLLVFinalizerDownDisklessThenUp(e, cl, drbdr, llv.Name)
+			suite.SetupLLVFinalizerDownDisklessThenUp(e, cl, drbdr, llv.Name, drbdrConfiguredTimeout)
 		})
 	})
 

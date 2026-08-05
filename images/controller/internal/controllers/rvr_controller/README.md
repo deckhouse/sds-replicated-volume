@@ -103,6 +103,8 @@ Reconcile (root) [Pure orchestration]
 │   │   └── mirrors drbdr.Status.Peers to rvr.Status.Peers
 │   ├── ensureStatusBackingVolume ← details
 │   ├── ensureStatusQuorum ← details
+│   ├── ensureStatusInitialQuorumReachedAt ← details
+│   │   └── latches the first observed quorum of a datamesh member
 │   ├── ensureConditionAttached ← details
 │   │   └── applyAttachedCond*
 │   ├── ensureConditionFullyConnected ← details
@@ -124,13 +126,14 @@ Reconcile (root) [Pure orchestration]
 │   ├── rvrShouldNotExist → computeTerminatingMessage (DRBDR + BV cleanup progress)
 │   ├── computeNormalPhaseAndMessage (AgentNotReady / member health / pre-member lifecycle)
 │   │   └── computeMemberPhaseAndMessage (Critical/Synchronizing/Degraded/PartiallyDegraded/Progressing/Healthy)
+│   │       ├── memberEverHadQuorum (joining vs. lost quorum: latch + migration fallback)
 │   │       ├── computeMemberProblemsAndSeverity (problem detection + severity)
 │   │       └── computeMemberProgress (in-progress operational changes)
 │   └── computeDeletionNote (appended when DeletionTimestamp set but not rvrShouldNotExist)
 └── patchRVRStatus
 ```
 
-Links to detailed algorithms: [`computeRVRPhaseAndMessage`](#computervrrphaseandmessage-details), [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshRequestAndConfiguredCond`](#ensurestatusdatameshrequesstandconfiguredcond-details)
+Links to detailed algorithms: [`computeRVRPhaseAndMessage`](#computervrrphaseandmessage-details), [`reconcileBackingVolume`](#reconcilebackingvolume-details), [`reconcileDRBDResource`](#reconciledrbdresource-details), [`ensureStatusAddressesAndType`](#ensurestatusaddressesandtype-details), [`ensureStatusAttachment`](#ensurestatusattachment-details), [`ensureStatusPeers`](#ensurestatuspeers-details), [`ensureConditionAttached`](#ensureconditionattached-details), [`ensureConditionFullyConnected`](#ensureconditionfullyconnected-details), [`ensureStatusBackingVolume`](#ensurestatusbackingvolume-details), [`ensureConditionBackingVolumeUpToDate`](#ensureconditionbackingvolumeinsync-details), [`ensureStatusQuorum`](#ensurestatusquorum-details), [`ensureStatusInitialQuorumReachedAt`](#ensurestatusinitialquorumreachedat-details), [`ensureConditionReady`](#ensureconditionready-details), [`ensureConditionSatisfyEligibleNodes`](#ensureconditionsatisfyeligiblenodes-details), [`ensureStatusDatameshRequestAndConfiguredCond`](#ensurestatusdatameshrequesstandconfiguredcond-details)
 
 ## Algorithm Flow
 
@@ -158,7 +161,8 @@ flowchart TD
         StatusAttach --> Peers[ensureStatusPeers]
         Peers --> BVStatus[ensureStatusBackingVolume]
         BVStatus --> StatusQuorum[ensureStatusQuorum]
-        StatusQuorum --> CondAttach[ensureConditionAttached]
+        StatusQuorum --> InitialQuorum[ensureStatusInitialQuorumReachedAt]
+        InitialQuorum --> CondAttach[ensureConditionAttached]
         CondAttach --> PeersCond[ensureConditionFullyConnected]
         PeersCond --> BVInSync[ensureConditionBackingVolumeUpToDate]
         BVInSync --> CondReady[ensureConditionReady]
@@ -333,12 +337,23 @@ Message combines cleanup progress from DRBDConfigured and BackingVolumeReady con
 
 | Phase | When |
 |-------|------|
-| Critical | Ready=False/QuorumLost or QuorumViaPeers, OR Attached=False/IOSuspended |
+| Critical | (Ready=False/QuorumLost or QuorumViaPeers) **and the member has reached quorum before**, OR Attached=False/IOSuspended |
+| Progressing (joining) | Ready=False/QuorumLost or QuorumViaPeers **and the member has never reached quorum** — message `Waiting for initial quorum. <quorum message>` |
 | Synchronizing | BackingVolumeUpToDate=False/Synchronizing |
 | Degraded | Ready=True but serious problems: disk Failed, NotConnected, AttachmentFailed, ProvisioningFailed, ResizeFailed, ConfigurationFailed |
 | PartiallyDegraded | Ready=True but minor problems: PartiallyConnected, RequiresSynchronization, DetachmentFailed |
 | Progressing | No health problems, but operational change in progress: resize, type conversion, DRBD reconfig, DRBD resize |
 | Healthy | Ready=True, no problems, no in-progress changes |
+
+**Joining vs. losing quorum**: `Critical` means IO is frozen, so it is reported only for a replica that has actually served IO. A replica that has just joined the datamesh has no quorum until its peer connections come up (0.5–1.2 s on a healthy cluster), and reporting `Critical` for it would be false — there is no IO to freeze. `memberEverHadQuorum` makes the distinction:
+
+- `status.initialQuorumReachedAt` is set (the latch maintained by [`ensureStatusInitialQuorumReachedAt`](#ensurestatusinitialquorumreachedat-details)) — quorum was held before, so this is a real loss: `Critical`.
+- Otherwise, the recorded `status.phase` (the one published by the previous reconciliation) is consulted as a migration fallback for objects that predate the latch: `Healthy`, `PartiallyDegraded`, `Degraded`, `Synchronizing` and `Critical` mean the replica had progressed past bring-up, so a quorum loss right after an upgrade is still `Critical`. The joining phase (`Progressing`) is deliberately **not** in that set — counting it would let the fallback arm itself on the next snapshot and defeat the latch.
+- Neither — the member is still joining: `Progressing`.
+
+The bring-up chain of a new replica is therefore `Pending → Configuring → WaitingForDatamesh → Configuring → Progressing → PartiallyDegraded → Healthy`; before this rule it passed through `Critical` between `Configuring` and `PartiallyDegraded` on every volume formation, TieBreaker replacement and partner heal.
+
+**Monitoring consequence**: the `sds:rvr_degraded_count` recording rule (`monitoring/prometheus-rules/sds-replicated-volume.yaml`) counts `PartiallyDegraded|Degraded|Critical|AgentNotReady`. Replica bring-up no longer produces a `Critical` spike in it; `PartiallyDegraded` during bring-up is unchanged. The rule itself needs no edit.
 
 **Deletion note**: When DeletionTimestamp is set but `rvrShouldNotExist` is false (replica is still operational — e.g., datamesh leave in progress), a deletion note is appended to the normal phase message. The note comes from the Configured condition (datamesh leave progress, e.g. "Leaving datamesh: 3/4 replicas confirmed revision 7") or a generic ". Deletion pending" fallback.
 
@@ -362,6 +377,7 @@ The controller manages the following status fields on RVR:
 | `peers` | Peer connectivity status | Merged from datamesh + DRBDR |
 | `quorum` | Whether this replica has quorum | From DRBDR status |
 | `quorumSummary` | Detailed quorum info (voting peers, thresholds) | Computed from DRBDR + peers |
+| `initialQuorumReachedAt` | First time this controller observed the replica holding quorum as a datamesh member; cleared on leaving the datamesh | Latched when `quorum` is first true for a member |
 
 ### Attachment
 
@@ -605,6 +621,7 @@ flowchart TD
         EnsureStatusPeers[ensureStatusPeers]
         EnsureBVStatus[ensureStatusBackingVolume]
         EnsureStatusQuorum[ensureStatusQuorum]
+        EnsureInitialQuorum[ensureStatusInitialQuorumReachedAt]
         EnsureDmPendingAndCond[ensureStatusDatameshRequestAndConfiguredCond]
         EnsureCondAttach[ensureConditionAttached]
         EnsureCondFC[ensureConditionFullyConnected]
@@ -655,6 +672,7 @@ flowchart TD
     EnsureStatusPeers -->|peers| RVRStatusFields
     EnsureBVStatus -->|backingVolume| RVRStatusFields
     EnsureStatusQuorum -->|quorum, quorumSummary| RVRStatusFields
+    EnsureInitialQuorum -->|initialQuorumReachedAt| RVRStatusFields
     EnsureCondAttach -->|Attached| RVRStatusConds
     EnsureCondFC -->|FullyConnected| RVRStatusConds
     EnsureBVInSync -->|BackingVolumeUpToDate| RVRStatusConds
@@ -673,7 +691,7 @@ flowchart TD
 
 **File:** `reconciler_conditions.go`
 
-**Purpose**: Computes the phase and human-readable message for an RVR from its current conditions. The function has three layers: true terminating (rvrShouldNotExist), normal phase computation (AgentNotReady / member health / pre-member lifecycle), and deletion note (when DeletionTimestamp is set but replica is still operational). Called after all condition ensure helpers have run, before the status patch.
+**Purpose**: Computes the phase and human-readable message for an RVR from its current conditions, plus `status.initialQuorumReachedAt` and the previously recorded `status.phase` for the joining-vs-lost-quorum distinction (see [Phase](#phase)). The function has three layers: true terminating (rvrShouldNotExist), normal phase computation (AgentNotReady / member health / pre-member lifecycle), and deletion note (when DeletionTimestamp is set but replica is still operational). Called after all condition ensure helpers have run, before the status patch — so the `status.phase` it reads is still the one published by the previous reconciliation.
 
 **Algorithm (top-level)**:
 
@@ -716,7 +734,9 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start([Start]) --> CheckQuorum{Ready=False<br/>QuorumLost or QuorumViaPeers?}
-    CheckQuorum -->|Yes| Critical1([Critical + problems])
+    CheckQuorum -->|Yes| CheckHadQuorum{memberEverHadQuorum?<br/>latch set OR operational phase recorded}
+    CheckHadQuorum -->|Yes| Critical1([Critical + problems])
+    CheckHadQuorum -->|No| Joining(["Progressing: Waiting for initial quorum + problems"])
 
     CheckQuorum -->|No| CheckIO{Attached=False<br/>IOSuspended?}
     CheckIO -->|Yes| Critical2([Critical + problems])
@@ -1180,7 +1200,7 @@ flowchart TD
     MirrorPeers --> ForeignGuard{"Foreign peer guard:<br/>name starts with<br/>ReplicatedVolumeName + dash?"}
     ForeignGuard -->|No| ErrorForeign[Return error: foreign peer detected]
     ErrorForeign --> End3([Done])
-    ForeignGuard -->|Yes| ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + AllowRemoteRead=false → Access<br/>Diskless + AllowRemoteRead=true → TieBreaker"]
+    ForeignGuard -->|Yes| ComputeType["Compute Type from drbdr peer:<br/>Diskful → Diskful<br/>Diskless + datamesh member is TieBreaker → TieBreaker<br/>Diskless otherwise (other member type,<br/>member not found, no datamesh) → Access"]
     ComputeType --> ComputeAttached[Compute Attached from Role=Primary]
     ComputeAttached --> CopyFields["Copy ConnectionState, DiskState,<br/>ReplicationState, Paths"]
     CopyFields --> End2([Done])
@@ -1192,6 +1212,7 @@ flowchart TD
 |-------|-------------|
 | `drbdr.Status.Peers` | Peer status from DRBD |
 | `rvr.Spec.ReplicatedVolumeName` | Used for foreign peer guard (name prefix check) |
+| `rv.Status.Datamesh` | Disambiguates diskless peer roles (TieBreaker vs Access); never overrides the Diskful/diskless boundary reported by DRBD |
 
 | Output | Description |
 |--------|-------------|
@@ -1405,6 +1426,40 @@ flowchart TD
 |--------|-------------|
 | `status.quorum` | Quorum flag |
 | `status.quorumSummary` | Detailed quorum info |
+
+---
+
+### ensureStatusInitialQuorumReachedAt Details
+
+**File:** `reconciler_status.go`
+
+**Purpose**: Maintains the `rvr.Status.InitialQuorumReachedAt` latch — the first time this controller observed the replica holding quorum as a datamesh member. Runs right after `ensureStatusQuorum`, which is what mirrors `drbdr.Status.Quorum` into `rvr.Status.Quorum`.
+
+**Algorithm**:
+
+```mermaid
+flowchart TD
+    Start([Start]) --> CheckMember{datameshRevision > 0?}
+    CheckMember -->|No| ClearLatch[Clear initialQuorumReachedAt]
+    CheckMember -->|Yes| CheckLatch{latch unset AND status.quorum true?}
+    CheckLatch -->|Yes| SetLatch["Set initialQuorumReachedAt = now"]
+    CheckLatch -->|No| End([Done])
+    ClearLatch --> End
+    SetLatch --> End
+```
+
+**Data Flow**:
+
+| Input | Description |
+|-------|-------------|
+| `rvr.Status.Quorum` | Quorum flag mirrored by `ensureStatusQuorum` |
+| `rvr.Status.DatameshRevision` | Membership: 0 clears the latch (one latch per membership epoch) |
+
+| Output | Description |
+|--------|-------------|
+| `status.initialQuorumReachedAt` | First time this controller saw the member hold quorum |
+
+**Why the latch**: "quorum has not been reached yet" (a member whose peer connections are still coming up) and "quorum was lost" look identical on a single snapshot — both are members with `quorum=false` and unconnected peers. `computeMemberPhaseAndMessage` needs the distinction to avoid reporting a joining replica as `Critical` (see [Phase](#phase)), so the first observed `quorum=true` is persisted. The value is the controller's own observation, not the historical moment quorum was first reached.
 
 ---
 

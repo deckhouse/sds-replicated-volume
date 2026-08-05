@@ -33,6 +33,7 @@ import (
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="MembershipLayout",type=string,JSONPath=".status.membershipLayout",priority=1
 // +kubebuilder:printcolumn:name="ConfigurationReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='ConfigurationReady')].status"
 // +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 // +kubebuilder:printcolumn:name="StorageClass",type=string,priority=1,JSONPath=".spec.replicatedStorageClassName"
@@ -153,6 +154,52 @@ type ReplicatedVolumeConfiguration struct {
 	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess"`
 }
 
+// IntendedLayout returns the datamesh layout intended by this configuration:
+// the number of diskful voters and tie-breakers.
+//
+//	diskful     = FailuresToTolerate + GuaranteedMinimumDataRedundancy + 1
+//	tiebreakers = TieBreakersForDiskful(diskful, FailuresToTolerate)
+//
+// This is the source of truth for the layout comparison (the MembershipLayoutConverged condition and the
+// tie-breaker guard reuse it).
+func (c ReplicatedVolumeConfiguration) IntendedLayout() (diskful, tiebreakers int) {
+	diskful = IntendedDiskfulCount(c.FailuresToTolerate, c.GuaranteedMinimumDataRedundancy)
+	tiebreakers = TieBreakersForDiskful(diskful, int(c.FailuresToTolerate))
+	return diskful, tiebreakers
+}
+
+// QuorumMinimumRedundancy returns qmr, the minimum number of up-to-date replicas the datamesh must
+// keep available for IO (qmr = GuaranteedMinimumDataRedundancy + 1).
+//
+// Unlike IntendedLayout, which returns int for the layout comparison, this returns byte to mirror
+// the GMDR/FTT spec fields and the byte q/qmr call sites, avoiding casts on the DMTE hot path. All
+// controller code derives qmr through this helper instead of re-deriving GMDR+1.
+func (c ReplicatedVolumeConfiguration) QuorumMinimumRedundancy() byte {
+	return c.GuaranteedMinimumDataRedundancy + 1
+}
+
+// IntendedDiskfulCount returns the number of diskful voters a datamesh needs for the given FTT/GMDR
+// (D = FailuresToTolerate + GuaranteedMinimumDataRedundancy + 1). It is the single source of truth
+// for the diskful formula: all controller code derives D through this helper (directly or via
+// IntendedLayout) instead of re-deriving FTT+GMDR+1.
+func IntendedDiskfulCount(ftt, gmdr byte) int {
+	return int(ftt) + int(gmdr) + 1
+}
+
+// TieBreakersForDiskful returns the number of tie-breaker members required for a
+// datamesh with the given diskful voter count and FailuresToTolerate.
+//
+// A tie-breaker is required only when the diskful voter count is even and FTT equals
+// half of it: then losing FTT voters would leave a non-majority, and a single diskless
+// tie-breaker restores quorum. It is the single source of truth for the TB rule: all controller
+// code derives the TB count through this helper instead of re-deriving the even/half condition.
+func TieBreakersForDiskful(diskful, ftt int) int {
+	if diskful > 0 && diskful%2 == 0 && ftt == diskful/2 {
+		return 1
+	}
+	return 0
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
 	// +listType=map
@@ -197,6 +244,15 @@ type ReplicatedVolumeStatus struct {
 
 	// Datamesh is the computed datamesh configuration for the volume.
 	Datamesh ReplicatedVolumeDatamesh `json:"datamesh"`
+
+	// MembershipLayout is a short, human-readable representation of the actual datamesh layout
+	// (diskful voters and tie-breakers), e.g. "3D" or "2D+1TB". Derived from the datamesh
+	// members; freely produced (not an enum). See the MembershipLayoutConverged condition for whether
+	// it matches the intended layout.
+	// Unset (absent) while the layout has not been computed yet: during formation the
+	// controller does not report a layout at all. An empty string is never published.
+	// +optional
+	MembershipLayout *string `json:"membershipLayout,omitempty"`
 
 	// EffectiveLayout describes the real-time protection level and health
 	// of the datamesh, based on observable cluster state.

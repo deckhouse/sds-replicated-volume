@@ -59,6 +59,10 @@ var _ = Describe("RV resize", func() {
 					Expect(rvr.Status.Size.Cmp(resource.Quantity{})).To(BeNumerically(">", 0))
 				}
 			}
+
+			// A resize walks every device of the volume, the diskless ones
+			// included: they must come out of it still diskless on purpose.
+			trv.AwaitIntentionalDiskless(ctx, layout.DisklessReplicas())
 		},
 
 		Entry("1D",

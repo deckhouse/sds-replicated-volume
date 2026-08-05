@@ -48,6 +48,14 @@ type globalContext struct {
 	// Apply callbacks mutate these; the reconciler writes them back to rv.Status after engine processing.
 	datamesh datameshContext
 
+	// datameshRevision is rv.Status.DatameshRevision as observed at the start of this
+	// reconciliation cycle. Read-only: the live counter is owned by the engine (which holds
+	// &rv.Status.DatameshRevision and bumps it when it activates a step), so this snapshot is
+	// the revision every replica is expected to have applied by now. Used by readiness checks
+	// that ask "has this replica applied the CURRENT datamesh configuration?"
+	// (see isTieBreakerOperational).
+	datameshRevision int64
+
 	// baselineGMDR is the committed GMDR level: min(qmr-1, config.GMDR).
 	// Mutated by step callbacks after replicas confirm qmr changes;
 	// written back to rv.Status.BaselineGuaranteedMinimumDataRedundancy.
@@ -385,6 +393,7 @@ func buildContexts(
 	gctx := &globalContext{
 		deletionTimestamp: rv.DeletionTimestamp.DeepCopy(),
 		configuration:     *rv.Status.Configuration,
+		datameshRevision:  rv.Status.DatameshRevision,
 		datamesh: datameshContext{
 			quorum:                  rv.Status.Datamesh.Quorum,
 			quorumMinimumRedundancy: rv.Status.Datamesh.QuorumMinimumRedundancy,

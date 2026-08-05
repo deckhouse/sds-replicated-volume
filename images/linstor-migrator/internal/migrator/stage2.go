@@ -28,6 +28,7 @@ import (
 
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"
 )
 
 const (
@@ -106,7 +107,7 @@ func (m *Migrator) runStage2(ctx context.Context) error {
 				for rvName := range jobs {
 					done, perr := m.processStage2RV(ctx, rvName)
 					if perr != nil {
-						if isTransientAPIError(perr) {
+						if kubeutils.IsTransientAPIError(perr) {
 							m.log.Warn("transient API error during stage 2, will retry on next tick",
 								"replicatedVolume", rvName, "err", perr)
 							continue
@@ -149,32 +150,23 @@ func (m *Migrator) updateMigrationStateStage2Completed(ctx context.Context) erro
 // listAdoptReplicatedVolumeNames returns a set of ReplicatedVolume names (map keys are metadata.name of each RV
 // that still has the adopt-RVR annotation). Values are empty structs and are not used.
 func (m *Migrator) listAdoptReplicatedVolumeNames(ctx context.Context) (map[string]struct{}, error) {
-	for {
-		var list srvv1alpha1.ReplicatedVolumeList
-		if err := m.client.List(ctx, &list); err != nil {
-			if isTransientAPIError(err) {
-				m.log.Warn("transient error listing ReplicatedVolumes, retrying", "err", err)
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(m.retryInterval):
-				}
-				continue
-			}
-			return nil, fmt.Errorf("list ReplicatedVolumes: %w", err)
-		}
-		out := make(map[string]struct{})
-		for i := range list.Items {
-			rv := &list.Items[i]
-			if rv.Annotations == nil {
-				continue
-			}
-			if _, ok := rv.Annotations[srvv1alpha1.AdoptRVRAnnotationKey]; ok {
-				out[rv.Name] = struct{}{}
-			}
-		}
-		return out, nil
+	var list srvv1alpha1.ReplicatedVolumeList
+	if err := m.retryTransient(ctx, "list ReplicatedVolumes with adopt annotation", func() error {
+		return m.client.List(ctx, &list)
+	}); err != nil {
+		return nil, fmt.Errorf("list ReplicatedVolumes: %w", err)
 	}
+	out := make(map[string]struct{})
+	for i := range list.Items {
+		rv := &list.Items[i]
+		if rv.Annotations == nil {
+			continue
+		}
+		if _, ok := rv.Annotations[srvv1alpha1.AdoptRVRAnnotationKey]; ok {
+			out[rv.Name] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 // processStage2RV returns done=true when the name should be removed from tracking (processed or gone).

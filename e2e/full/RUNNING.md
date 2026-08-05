@@ -21,6 +21,50 @@ cluster shape than `e2e/agent`.
   cleanup-path bugs. Forced cleanup is only acceptable after a
   framework-side timeout that we already understand (see "Forced
   cleanup" below).
+  - **One deliberate exception lives in the suite itself**: the spec
+    `Layout: tie-breaker replacement` → `keeps a terminating tie-breaker
+    working when no node can host a replacement`
+    (`tb_replacement_test.go`, E2E-TB2) removes the finalizer of the
+    terminating tie-breaker RVR by hand. That is not a shortcut around a
+    slow controller — the deadlock it escapes is *by design*: with every
+    eligible node occupied, strict create-first cannot place a
+    replacement, and the controller deliberately keeps the terminating
+    tie-breaker serving quorum instead of dropping it. The manual escape
+    is the operator recipe documented in
+    `sds-replicated-volume/debug_and_problem_solving.md`, and the spec
+    exists to validate that recipe end to end (pre-conditions → finalizer
+    → orphan → ForceRemove → P2 recreates the tie-breaker).
+    **Do not copy this into other specs**: the framework exports the escape
+    hatch as `TestRVR.RemoveFinalizers`, but anywhere else a finalizer that
+    does not go away on its own is a bug to report, not to patch out.
+  - **Simulating the loss of a diskful replica does NOT need that escape.**
+    The recovery/alert specs (`diskful_recovery_test.go`,
+    `layout_alert_test.go`) reach "this volume lost a replica" by temporarily
+    switching the volume to a Manual `FTT=0/GMDR=0` configuration — which is
+    what stops `guardFTTPreserved` from blocking the departure of a voter —
+    deleting the RVR through the ordinary API path, and restoring the original
+    configuration. The controller releases its own finalizer, so the shortcut
+    is never needed and those specs are not `Disruptive` on that account.
+    See `simulateDiskfulLoss` in `layout_helpers_test.go`.
+- **Some specs mutate node labels** (`topology.kubernetes.io/zone`,
+  `e2e.deckhouse.io/node-scope`) to build synthetic zones or to carve out
+  an exact eligible set. They are `Disruptive` + `Serial` and restore the
+  previous state — including deleting labels that did not exist before —
+  via a `DeferCleanup` registered before the first write. If a run is
+  killed mid-spec, check for leftovers:
+  `kubectl get nodes -L topology.kubernetes.io/zone -l e2e.deckhouse.io/node-scope`.
+- **The quorum-isolation specs edit a node's firewall** (`quorum_isolation_test.go`,
+  E2E-Q1/E2E-Q2). They insert `iptables … -j DROP` rules that silently drop the
+  replication traffic of ONE volume — both endpoint addresses and the resource's
+  ports are pinned, so nothing else on the node is affected — and every rule
+  carries an `-m comment` tag unique to the run (`e2e-<runID>-…-netblock`).
+  Three things remove them: a `DeferCleanup` registered before the first rule,
+  an explicit removal inside the spec where recovery is expected, and a detached
+  watchdog started on the node itself, which drops the rules by tag after 40
+  minutes, scaled by `E2E_TIMEOUT_MULTIPLIER`. The watchdog is what heals the stand
+  after a `kill -9` or a lost connection; it leaves a note in
+  `/var/tmp/sds-rv-e2e-netblock/<tag>.watchdog.log` on the node. To check for
+  leftovers by hand, see "Forced cleanup" below.
 - Don't assume the cluster matches `HEAD`. CRD drift, controller and
   agent image drift vs. local `git HEAD`, and base-image kernel/userspace
   drift are the most common causes of failure from a fresh build.
@@ -65,9 +109,37 @@ controlled by environment variables:
 | `E2E_RSP_THIN`            | RSP name to use as the thin pool                                    | `e2e-thin`   |
 | `E2E_RSP_THICK`           | RSP name to use as the thick pool                                   | `e2e-thick`  |
 | `E2E_TIMEOUT_MULTIPLIER`  | Multiply all `SpecTimeout` and `Eventually` budgets (e.g. `2.0`)    | `1.0`        |
-| `E2E_ALLOW_DISRUPTIVE`    | Set to `true` to run `Disruptive` specs; otherwise auto-skipped     | unset        |
+| `E2E_ALLOW_DISRUPTIVE`    | Runs the `Disruptive` specs (boolean, see below); otherwise they are auto-skipped | unset |
+| `E2E_ALLOW_LONG_HAUL`     | Runs the `LongHaul` specs (boolean, see below); otherwise they are auto-skipped | unset |
+| `E2E_RUN_ALL`             | Umbrella switch: runs **every** opt-in class — `Disruptive` and `LongHaul` (boolean, see below) | unset |
 | `E2E_FLAKE_ATTEMPTS`      | `--flake-attempts=N` for `hack/run-e2e-new.sh`                      | `1`          |
 | `E2E_SUITE`               | Selects sub-suite for `hack/run-e2e-new.sh` (`full`, `agent`, …)    | `control-plane` |
+| `E2E_ROLLOUT_VOLUMES`     | How many volumes the r3->r2 rollout spec migrates in one class edit (see below) | `20` |
+
+`E2E_ROLLOUT_VOLUMES` is read as a **decimal integer >= 1**, once, before the
+specs are built; anything else (` 20`, `2.5`, `twenty`) stops the run with a
+message naming the variable and the value, rather than being silently defaulted.
+It sets N for *limits an r3->r2 rollout to two concurrent volumes and migrates
+them all*: the class's rollout budget stays at 2, so N decides how many waves of
+two the rollout is served in — the default of 20 makes it ten. The value must
+exceed 2, otherwise no volume would ever wait for a slot and the spec would
+prove nothing; the suite refuses to start on a smaller one. The spec's
+`SpecTimeout` is sized from N, so a larger count also gets a larger budget —
+`E2E_TIMEOUT_MULTIPLIER` stretches it further on a slow stand. The volumes are
+created at the default size of `TestRV` (1Mi), so the count costs a pool almost
+nothing: N x 3 diskful LVs of one LVM extent each, a few hundred MiB at the
+default N against the tens of GiB a thin pool of a stand has free.
+
+The three opt-in switches are parsed as **booleans**, by the same rule
+(`strconv.ParseBool`): `true`/`TRUE`/`True`/`1`/`t` enable the class, while an
+unset variable, `false`/`0`/`f` and anything `ParseBool` cannot read (`yes`,
+`on`, a typo) leave it skipped. `E2E_RUN_ALL=true` enables a class regardless of
+its own variable — there is no negative veto. A class that is off is reported by
+Ginkgo as *Skipped* with the instruction to switch it on, never as a pass.
+
+Nothing sets these variables for you: no CI workflow runs the e2e suites, and
+`hack/run-e2e-new.sh` only picks a label filter. Export them in your own shell
+for the run you are about to start.
 
 ## Run it
 
@@ -181,7 +253,8 @@ The suite uses Ginkgo labels heavily. Key ones:
 | `Smoke`                                | Minimal sanity set (~1 spec).                                            |
 | `Slow`                                 | Long-running specs.                                                      |
 | `Upgrade`                              | Migration from v0 (linstor) control plane to v1 (datamesh).              |
-| `Disruptive`                           | Destructive actions; auto-skipped unless `E2E_ALLOW_DISRUPTIVE=true`.    |
+| `Disruptive`                           | Destructive actions (node reboot, system node labels, a hand-removed finalizer, raw-device writes); auto-injects `Serial` + lowest priority; auto-skipped unless `E2E_ALLOW_DISRUPTIVE=true` or `E2E_RUN_ALL=true`. |
+| `LongHaul`                             | Very long opt-in specs — tens of minutes of *waiting* (an alert with `for: 15m`). Default `SpecTimeout` is raised to 30min, the HIGHEST spec priority is auto-injected and `Serial` is deliberately **not** (a serial spec runs after every worker exits, so its wait could overlap nothing). Auto-skipped unless `E2E_ALLOW_LONG_HAUL=true` or `E2E_RUN_ALL=true`; a focused run (`--focus`/`--focus-file`) bypasses the gate. |
 | `Bug:<short-tag>`                      | Known bug; excluded by suite default `LabelFilter = "!/^Bug:/"`.         |
 | `Req:MinNodes:<diskful>:<extra>:<pool>`| Runtime requirement; auto-skipped if cluster doesn't satisfy it.         |
 | `Req:ControlPlane:New`                 | Only on new (controller-based) control plane.                            |
@@ -192,6 +265,20 @@ The suite uses Ginkgo labels heavily. Key ones:
 - `fast` — `Smoke || Full` (currently equivalent to `smoke`; no spec carries `Full`)
 - `safe` — `!Disruptive`
 - `all` — empty filter; the suite default `!/^Bug:/` applies
+
+**A preset only widens the label filter — it never enables an opt-in class.**
+`all` included: the script sets no environment variable at all, so `Disruptive`
+and `LongHaul` specs are still skipped at runtime unless you export their
+switch. A full run is therefore:
+
+```bash
+E2E_RUN_ALL=true E2E_SUITE=full bash hack/run-e2e-new.sh all
+```
+
+`all` is deliberately not taught to export `E2E_RUN_ALL` for you: that would
+silently turn "run everything" into "reboot nodes, rewrite system labels and
+strip a finalizer", which is exactly the decision the opt-in gates exist to keep
+in your hands.
 
 ## Parallelism
 
@@ -313,6 +400,9 @@ After green:
 - `kubectl -n d8-sds-replicated-volume get pods` — controller and agent
   pods all `RESTARTS == 0`.
 - On every node, `drbdsetup status | grep -E '^(sdsrv-|e2e-)'` — empty.
+- After a run that included E2E-Q1/E2E-Q2, on every node:
+  `iptables -L -n | grep netblock` — empty. A leftover rule blocks one volume's
+  replication and nothing else, so it is easy to miss; see below for removing it.
 
 ## Forced cleanup
 
@@ -347,6 +437,26 @@ done
 for o in $(kubectl get rv,rvr,rva,drbdresource,llv,rsc -o name | grep '/e2e-'); do
   kubectl patch "$o" --type=json -p='[{"op":"replace","path":"/metadata/finalizers","value":[]}]' || true
 done
+```
+
+Stray firewall rules from E2E-Q1/E2E-Q2 are a separate case: the node's own
+watchdog removes them once its TTL expires (40 minutes from the moment the rules
+went in, multiplied by the `E2E_TIMEOUT_MULTIPLIER` of the run that left them),
+so wait it out before touching anything — and if a rule is still there
+afterwards, that is a bug worth reporting, not just cleaning. To remove one by
+hand, on the affected node:
+
+```bash
+# List them first: every rule of the suite carries a "…-netblock" comment.
+node=<node>
+pod=$(kubectl -n d8-sds-node-configurator get pods -l app=sds-node-configurator \
+  --field-selector spec.nodeName=$node -o jsonpath='{.items[0].metadata.name}')
+nsenter="kubectl -n d8-sds-node-configurator exec -c sds-node-configurator-agent $pod -- \
+  /opt/deckhouse/sds/bin/nsenter -t 1 -m -u -i -n -p --"
+$nsenter iptables -L INPUT -n --line-numbers | grep netblock
+$nsenter iptables -L OUTPUT -n --line-numbers | grep netblock
+# Then delete by line number, highest first (deleting shifts the ones below).
+$nsenter iptables -D INPUT <n>
 ```
 
 If you find leftovers after a *failed* spec — that's a bug. Capture

@@ -159,9 +159,15 @@ func (rv) FormationComplete() types.GomegaMatcher {
 	})
 }
 
-// QuorumCorrect matches when the datamesh quorum equals
+// QuorumThresholdCorrect matches when the datamesh quorum THRESHOLD equals
 // voters/2+1. Only Diskful and LiminalDiskful are voters.
-func (rv) QuorumCorrect() types.GomegaMatcher {
+//
+// This verifies the controller's threshold arithmetic and nothing else: it
+// does NOT say that quorum is actually held by anyone. Whether a replica
+// holds quorum is kernel truth and lives in rvr.status.quorum — assert it
+// per replica with RVR.Quorum / RVR.NeverLoseQuorum (see
+// TestRV.ActivateSafetyInvariants for the standard arming).
+func (rv) QuorumThresholdCorrect() types.GomegaMatcher {
 	return tkmatch.NewMatcher(func(obj client.Object) (bool, string) {
 		r := asRV(obj)
 		dm := &r.Status.Datamesh
@@ -187,7 +193,7 @@ func (rv) QuorumCorrect() types.GomegaMatcher {
 
 // SafetyChecks returns the standard set of RV-level check matchers.
 func (rv) SafetyChecks() []types.GomegaMatcher {
-	return []types.GomegaMatcher{RV.QuorumCorrect()}
+	return []types.GomegaMatcher{RV.QuorumThresholdCorrect()}
 }
 
 // DatameshSizeGE matches when rv.Status.Datamesh.Size >= target.

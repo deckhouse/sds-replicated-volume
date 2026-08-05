@@ -18,6 +18,7 @@ package datamesh
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -124,18 +125,29 @@ func voterCount(gctx *globalContext) byte {
 	return n
 }
 
-// upToDateDiskfulCount returns the number of voter members that have a backing
-// volume and are UpToDate (BackingVolume.State == UpToDate).
-// D∅ members are excluded (they are voters but have no attached disk).
+// isUpToDateDiskful reports whether the replica counts as an UpToDate data copy: a voter member
+// with a backing volume whose RVR reports BackingVolume.State == UpToDate. D∅ members are
+// excluded (they are voters but have no attached disk).
+//
+// Single source of the criterion: it is what upToDateDiskfulCount and upToDateDiskfulCountPerZone
+// count, and the guards that model the loss of a subject (guardGMDRPreserved,
+// guardZoneGMDRPreserved) ask the very same question about the subject before subtracting it from
+// those counts. Two spellings of the criterion would let the counters and the correction drift
+// apart.
+func isUpToDateDiskful(rc *ReplicaContext) bool {
+	if rc == nil || rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
+		return false
+	}
+	return rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
+		rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
+}
+
+// upToDateDiskfulCount returns the number of members that count as an UpToDate data copy
+// (see isUpToDateDiskful).
 func upToDateDiskfulCount(gctx *globalContext) byte {
 	var n byte
 	for i := range gctx.allReplicas {
-		rc := &gctx.allReplicas[i]
-		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
-			continue
-		}
-		if rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
-			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+		if isUpToDateDiskful(&gctx.allReplicas[i]) {
 			n++
 		}
 	}
@@ -156,6 +168,62 @@ func tbCount(gctx *globalContext) byte {
 // computeTargetQ computes quorum threshold from voter count: floor(voters/2) + 1.
 func computeTargetQ(voters byte) byte {
 	return voters/2 + 1
+}
+
+// operationalTieBreakerCount returns the number of TieBreaker members that are operational
+// right now, excluding the replica with excludeID (the subject of the transition being
+// guarded), together with a diagnostic line per non-operational TieBreaker.
+//
+// Used by guardTBSufficient to answer "would releasing this TieBreaker leave the datamesh
+// with enough WORKING tie-breakers?" — membership alone is not an answer, see
+// isTieBreakerOperational.
+func operationalTieBreakerCount(gctx *globalContext, excludeID uint8) (byte, []string) {
+	var (
+		count       byte
+		diagnostics []string
+	)
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member == nil || rc.member.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		if rc.id == excludeID {
+			continue
+		}
+		if ok, why := isTieBreakerOperational(gctx, rc); ok {
+			count++
+		} else {
+			diagnostics = append(diagnostics, fmt.Sprintf("%s: %s", rc.Name(), why))
+		}
+	}
+	slices.Sort(diagnostics)
+	return count, diagnostics
+}
+
+// isTieBreakerOperational reports whether the TieBreaker member behind rctx actually provides
+// tiebreak protection right now. If it does not, the second return value explains why (used in
+// guard messages).
+//
+// This is the engine-side adapter of IsTieBreakerOperational: it resolves the data-bearing peers
+// the TieBreaker is expected to be connected to (full-mesh members) from the contexts and defers
+// the criteria themselves to the shared helper — rv_controller formation gates on the very same
+// question and must not answer it differently (see tiebreaker_readiness.go).
+func isTieBreakerOperational(gctx *globalContext, rctx *ReplicaContext) (bool, string) {
+	allMembers := allMemberIDs(gctx)
+	fmMembers := fullMeshMemberIDs(gctx)
+	expected := expectedPeerIDs(rctx.member.Type, rctx.id, allMembers, fmMembers)
+
+	peers := make([]TieBreakerPeer, 0, expected.Len())
+	for peerID := range expected.All() {
+		peer := TieBreakerPeer{ID: peerID}
+		if rc := gctx.replicas[peerID]; rc != nil {
+			peer.Name = rc.Name()
+			peer.RVR = rc.rvr
+		}
+		peers = append(peers, peer)
+	}
+
+	return IsTieBreakerOperational(rctx.rvr, peers, gctx.datameshRevision)
 }
 
 // zoneCount is a zone name + count pair returned by per-zone count helpers.
@@ -212,15 +280,10 @@ func voterCountPerZone(gctx *globalContext) []zoneCount {
 	})
 }
 
-// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts, sorted by zone name.
+// upToDateDiskfulCountPerZone returns per-zone UpToDate D counts (see isUpToDateDiskful),
+// sorted by zone name.
 func upToDateDiskfulCountPerZone(gctx *globalContext) []zoneCount {
-	return countPerZone(gctx, func(rc *ReplicaContext) bool {
-		if rc.member == nil || !rc.member.Type.IsVoter() || !rc.member.Type.HasBackingVolume() {
-			return false
-		}
-		return rc.rvr != nil && rc.rvr.Status.BackingVolume != nil &&
-			rc.rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate
-	})
+	return countPerZone(gctx, isUpToDateDiskful)
 }
 
 // tbCountPerZone returns per-zone TieBreaker counts, sorted by zone name.

@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-linstor-scheduler-extender",
   "author": "Deckhouse <contact@deckhouse.io>",
-  "version": 1,
+  "version": 2,
   "statements": [
     {
       "vulnerability": {
@@ -42,8 +42,111 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Уязвимость затрагивает kubelet на Windows при работе с логами контейнеров. linstor-scheduler-extender работает только на Linux и не использует код kubelet"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-9042"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает kubelet на Windows-узлах (API nodes/*/logs/query). linstor-scheduler-extender работает только на Linux, код kubelet в бинарный файл не компилируется: из модуля k8s.io/kubernetes линкуется только пакет pkg/util/goroutinemap"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-0426"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает checkpoint API самого kubelet. Код kubelet в бинарный файл не компилируется: из модуля k8s.io/kubernetes линкуется только пакет pkg/util/goroutinemap"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-13281"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость (SSRF в Portworx volume plugin) затрагивает kube-controller-manager. linstor-scheduler-extender является расширением планировщика и не использует код kube-controller-manager"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-1767"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает устаревший механизм in-tree gitRepo volume в kubelet. Исправленной версии нет, но linstor-scheduler-extender не монтирует тома и не использует код kubelet"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-5187"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает kube-apiserver (удаление узлом самого себя через OwnerReference). linstor-scheduler-extender не содержит код kube-apiserver"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2021-25743"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает вывод kubectl в терминал. linstor-scheduler-extender не содержит код kubectl и не выводит данные в интерактивный терминал"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-3177"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает admission plugin ServiceAccount в kube-apiserver. linstor-scheduler-extender не содержит код kube-apiserver"
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto@v0.53.0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Advisory затрагивает неподдерживаемый пакет golang.org/x/crypto/openpgp. golang.org/x/crypto подтягивается транзитивно только ради cryptobyte, chacha20 и ssh; `go mod why golang.org/x/crypto/openpgp` показывает, что main module не нуждается в пакете openpgp, поэтому он не компилируется в бинарный файл. Релиза golang.org/x/crypto без openpgp не существует, поэтому исправить обновлением нельзя"
     }
   ],
-  "timestamp": "2025-12-11T00:00:00Z"
+  "timestamp": "2026-07-27T00:00:00Z"
 }
-

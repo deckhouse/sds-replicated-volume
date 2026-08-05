@@ -59,6 +59,7 @@ type MigratorSetupResult struct {
 	RSCResults        []*rscResult
 	PodResults        []*PodPVCResult
 	MigratedResources []string
+	PVToRSC           map[string]string
 
 	OldRSPs       []RSPBaseline
 	PodNames      []string
@@ -222,6 +223,7 @@ func PrepareMigratorScenario(
 	slog.Info("========== Recording migrated resource names ==========")
 
 	migratedResources := make([]string, 0, len(podResults))
+	pvToRSC := make(map[string]string, len(podResults))
 	for _, pod := range podResults {
 		var pvc corev1.PersistentVolumeClaim
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: pod.PVCName, Namespace: cfg.Namespace}, &pvc); err != nil {
@@ -232,9 +234,11 @@ func PrepareMigratorScenario(
 			return nil, fmt.Errorf("PVC %s has no bound PV (VolumeName is empty)", pod.PVCName)
 		}
 		migratedResources = append(migratedResources, pvName)
+		pvToRSC[pvName] = pod.RSCName
 	}
 
 	result.MigratedResources = migratedResources
+	result.PVToRSC = pvToRSC
 	slog.Info("========== Migrated resource names recorded ==========", "count", len(migratedResources))
 
 	slog.Info("Saving Linstor state before migration")
@@ -252,6 +256,7 @@ func PrepareMigratorScenario(
 		FileChecksums:     result.FileChecksums,
 		LinstorBefore:     result.LinstorBefore,
 		MigratedResources: result.MigratedResources,
+		PVToRSC:           result.PVToRSC,
 	})
 	if stateErr != nil {
 		return nil, fmt.Errorf("failed to save migrator scenario state: %w", stateErr)
@@ -299,6 +304,7 @@ func PrepareOrRestoreMigratorScenario(
 			LinstorBefore:     restoredState.LinstorBefore,
 			StateFilePath:     restoredFilePath,
 			MigratedResources: restoredState.MigratedResources,
+			PVToRSC:           restoredState.PVToRSC,
 		}, nil
 	}
 

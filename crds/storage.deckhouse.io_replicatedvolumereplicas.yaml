@@ -381,6 +381,24 @@ spec:
                     - Access
                     type: string
                 type: object
+              initialQuorumReachedAt:
+                description: |-
+                  InitialQuorumReachedAt is the first time the controller observed this replica
+                  holding quorum as a datamesh member. It is a latch: it is set once per membership
+                  epoch and cleared when the replica leaves the datamesh (datameshRevision back to 0),
+                  so a replica that re-joins goes through joining again.
+
+                  It exists to distinguish "quorum has not been reached yet" (a member whose peer
+                  connections are still coming up, and which therefore cannot have frozen any I/O)
+                  from "quorum was lost" (a member whose I/O is frozen) — the two are identical on a
+                  single snapshot. See status.phase.
+
+                  This is the controller's own observation, not a historical fact about the volume:
+                  for a replica that was already a member before this field existed, it is the time
+                  of the first reconciliation that observed quorum, not the time quorum was first
+                  reached.
+                format: date-time
+                type: string
               message:
                 description: Message is a human-readable detail about the current
                   state.

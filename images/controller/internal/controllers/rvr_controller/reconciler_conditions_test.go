@@ -18,6 +18,7 @@ package rvrcontroller
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -2330,6 +2331,8 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 	It("returns Critical when Ready is False/QuorumLost", func() {
 		rvr := mkRVR("node-1")
 		rvr.Status.DatameshRevision = 5
+		// The latch marks a member that reached quorum earlier — this is a real loss.
+		rvr.Status.InitialQuorumReachedAt = ptr.To(metav1.NewTime(time.Unix(1700000000, 0)))
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
 			"Quorum: diskful 1/2, data quorum: 1/1")
@@ -2343,6 +2346,7 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		rvr := mkRVR("node-1")
 		rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
 		rvr.Status.DatameshRevision = 5
+		rvr.Status.InitialQuorumReachedAt = ptr.To(metav1.NewTime(time.Unix(1700000000, 0)))
 		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
 			"Diskless replica; quorum via connected peers (data quorum: 0/2)")
@@ -2350,6 +2354,154 @@ var _ = Describe("computeRVRPhaseAndMessage", func() {
 		phase, msg := computeRVRPhaseAndMessage(rvr)
 		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
 		Expect(msg).To(Equal("Diskless replica; quorum via connected peers (data quorum: 0/2)"))
+	})
+
+	It("keeps the Critical message byte-for-byte when the latch is set and problems exist", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.InitialQuorumReachedAt = ptr.To(metav1.NewTime(time.Unix(1700000000, 0)))
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+		Expect(msg).To(Equal("Quorum: diskful 1/2, data quorum: 1/1. Partially connected to peers"))
+	})
+
+	// ── Joining member: quorum has not been reached yet (not Critical) ──
+
+	It("returns Progressing when a freshly joined member has never had quorum", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		// Latch nil and the recorded phase is a joining one — quorum was never reached,
+		// so there is no I/O to freeze.
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(Equal("Waiting for initial quorum. Quorum: diskful 1/2, data quorum: 1/1"))
+	})
+
+	It("returns Progressing for a joining diskless member (QuorumViaPeers) with WaitingForDatamesh recorded", func() {
+		rvr := mkRVR("node-1")
+		rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers,
+			"Diskless replica; quorum via connected peers (data quorum: 0/2)")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(Equal("Waiting for initial quorum. Diskless replica; quorum via connected peers (data quorum: 0/2)"))
+	})
+
+	It("keeps the joining phase stable on the next snapshot (latch does not self-arm)", func() {
+		// Second snapshot of the same joining member: the phase recorded by the previous
+		// reconciliation is now Progressing. It must not count as "quorum was reached",
+		// otherwise the migration fallback would arm itself and report Critical.
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseProgressing
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(Equal("Waiting for initial quorum. Quorum: diskful 1/2, data quorum: 1/1"))
+	})
+
+	It("appends problems to the joining message", func() {
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondFullyConnectedReasonPartiallyConnected,
+			"Connected to 1 of 2 peers")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+		Expect(msg).To(Equal("Waiting for initial quorum. Quorum: diskful 1/2, data quorum: 1/1. Partially connected to peers"))
+	})
+
+	// ── Migration fallback: objects created before status.initialQuorumReachedAt existed ──
+
+	DescribeTable("returns Critical without the latch when an operational phase is already recorded",
+		func(recorded v1alpha1.ReplicatedVolumeReplicaPhase) {
+			rvr := mkRVR("node-1")
+			rvr.Status.DatameshRevision = 5
+			rvr.Status.Phase = recorded
+			setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+				metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+				"Quorum: diskful 1/2, data quorum: 1/1")
+
+			phase, msg := computeRVRPhaseAndMessage(rvr)
+			Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+			Expect(msg).To(Equal("Quorum: diskful 1/2, data quorum: 1/1"))
+		},
+		Entry("Healthy", v1alpha1.ReplicatedVolumeReplicaPhaseHealthy),
+		Entry("PartiallyDegraded", v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded),
+		Entry("Degraded", v1alpha1.ReplicatedVolumeReplicaPhaseDegraded),
+		Entry("Synchronizing", v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing),
+		Entry("Critical", v1alpha1.ReplicatedVolumeReplicaPhaseCritical),
+	)
+
+	It("does not treat the empty recorded phase as operational", func() {
+		// A brand-new member has no recorded phase at all.
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost,
+			"Quorum: diskful 1/2, data quorum: 1/1")
+
+		phase, _ := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+	})
+
+	It("still reports Critical for IOSuspended on a member without the latch", func() {
+		// IOSuspended is not a quorum branch: a suspended device means I/O really is
+		// frozen, regardless of whether the initial quorum was ever recorded.
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended,
+			"I/O suspended on device /dev/drbd10012")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+		Expect(msg).To(Equal("I/O suspended on device /dev/drbd10012"))
+	})
+
+	It("does not change non-quorum member-health branches for a member without the latch", func() {
+		// Ready=True: the quorum branch is not taken at all, so the latch is irrelevant.
+		rvr := mkRVR("node-1")
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Phase = v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondReadyReasonReady,
+			"Quorum: diskful 2/2, data quorum: 2/1")
+		setCond(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType,
+			metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateReasonFailed,
+			"Backing volume failed due to I/O errors")
+
+		phase, msg := computeRVRPhaseAndMessage(rvr)
+		Expect(phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded))
+		Expect(msg).To(Equal("Quorum: diskful 2/2, data quorum: 2/1. Disk failed"))
 	})
 
 	It("returns Critical when Attached is False/IOSuspended", func() {

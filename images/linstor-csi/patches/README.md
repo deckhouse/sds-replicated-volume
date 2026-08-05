@@ -34,3 +34,9 @@ This patch introduces a mechanism to automatically create a filesystem on a volu
 ### 006-fix-cve.patch
 
 CVE fix
+
+### 007-fix-cve.patch
+
+CVE fix
+
+Bump golang.org/x/net, golang.org/x/text, golang.org/x/sys and google.golang.org/grpc to versions without known vulnerabilities.

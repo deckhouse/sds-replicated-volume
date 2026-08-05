@@ -539,6 +539,7 @@ func listCurrentRSPsByName(ctx context.Context, c client.Client) (map[string]srv
 
 type RSPSnapshot struct {
 	CurrentByName map[string]srvv1.ReplicatedStoragePool
+	Labels        map[string]map[string]string // rspName → labels
 }
 
 func CollectRSPSnapshot(ctx context.Context, c client.Client) (*RSPSnapshot, error) {
@@ -546,7 +547,13 @@ func CollectRSPSnapshot(ctx context.Context, c client.Client) (*RSPSnapshot, err
 	if err != nil {
 		return nil, err
 	}
-	return &RSPSnapshot{CurrentByName: currentByName}, nil
+	labels := make(map[string]map[string]string, len(currentByName))
+	for name, rsp := range currentByName {
+		if rsp.Labels != nil {
+			labels[name] = rsp.Labels
+		}
+	}
+	return &RSPSnapshot{CurrentByName: currentByName, Labels: labels}, nil
 }
 
 func CheckRSPOldNamesRemovedFromSnapshot(snapshot *RSPSnapshot, oldRSPs []RSPBaseline) []error {
@@ -829,6 +836,7 @@ type RVSnapshot struct {
 	PVsByResource       map[string]*corev1.PersistentVolume
 	RVCount             int
 	LinstorState        *LinstorState
+	Labels              map[string]map[string]string // rvName → labels
 }
 
 func CollectRVSnapshot(ctx context.Context, c client.Client, linstorState *LinstorState) (*RVSnapshot, error) {
@@ -856,12 +864,19 @@ func CollectRVSnapshot(ctx context.Context, c client.Client, linstorState *Linst
 		}
 		return nil, fmt.Errorf("failed to get PV %s for checks: %w", resourceName, err)
 	}
+	rvLabels := make(map[string]map[string]string, len(rvsByName))
+	for name, rv := range rvsByName {
+		if rv.Labels != nil {
+			rvLabels[name] = rv.Labels
+		}
+	}
 	return &RVSnapshot{
 		UniqueResourceNames: uniqueResourceNames,
 		RVsByName:           rvsByName,
 		PVsByResource:       pvsByResource,
 		RVCount:             len(rvList.Items),
 		LinstorState:        linstorState,
+		Labels:              rvLabels,
 	}, nil
 }
 
@@ -908,17 +923,17 @@ func CheckRVMaxAttachmentsFromSnapshot(snapshot *RVSnapshot) []error {
 	return errors
 }
 
-func CheckRVConfigurationModeFromSnapshot(snapshot *RVSnapshot) []error {
+func CheckRVConfigurationModeFromSnapshot(snapshot *RVSnapshot, expectedMode string) []error {
 	var errors []error
 	for resourceName := range snapshot.UniqueResourceNames {
 		rv, ok := snapshot.RVsByName[resourceName]
 		if !ok {
 			continue
 		}
-		if rv.Spec.ConfigurationMode != srvv1.ReplicatedVolumeConfigurationModeManual {
+		if string(rv.Spec.ConfigurationMode) != expectedMode {
 			errors = append(errors, fmt.Errorf(
-				"RV %s has spec.configurationMode=%q (expected Manual)",
-				resourceName, rv.Spec.ConfigurationMode,
+				"RV %s has spec.configurationMode=%q (expected %q)",
+				resourceName, rv.Spec.ConfigurationMode, expectedMode,
 			))
 		}
 	}
@@ -1070,10 +1085,6 @@ func CheckRVAdoptAnnotationsAbsentFromSnapshot(snapshot *RVSnapshot) []error {
 	return errors
 }
 
-// noPersistentVolumeLabelAffirmativeKey marks the presence (value "true") of the
-// no-persistent-volume label on RVs created without a corresponding PV.
-const noPersistentVolumeLabelAffirmativeKey = "sds-replicated-volume.deckhouse.io/no-persistent-volume"
-
 // CheckRVNoPersistentVolumeLabelFromSnapshot verifies that each RV has the
 // no-persistent-volume label set to "true".
 func CheckRVNoPersistentVolumeLabelFromSnapshot(snapshot *RVSnapshot) []error {
@@ -1086,15 +1097,15 @@ func CheckRVNoPersistentVolumeLabelFromSnapshot(snapshot *RVSnapshot) []error {
 		if rv.Labels == nil {
 			errors = append(errors, fmt.Errorf(
 				"RV %s has nil labels, expected label %q=%q",
-				resourceName, noPersistentVolumeLabelAffirmativeKey, "true",
+				resourceName, noPersistentVolumeLabelKey, "true",
 			))
 			continue
 		}
-		value, exists := rv.Labels[noPersistentVolumeLabelAffirmativeKey]
+		value, exists := rv.Labels[noPersistentVolumeLabelKey]
 		if !exists || value != "true" {
 			errors = append(errors, fmt.Errorf(
 				"RV %s has label %q=%q, expected %q",
-				resourceName, noPersistentVolumeLabelAffirmativeKey, value, "true",
+				resourceName, noPersistentVolumeLabelKey, value, "true",
 			))
 		}
 	}
@@ -1120,6 +1131,93 @@ func CheckRVNoPersistentVolumeLabelAbsentFromSnapshot(snapshot *RVSnapshot) []er
 		}
 	}
 	return errors
+}
+
+// CheckRVReplicatedStorageClassNameFromSnapshot verifies each RV has the expected
+// ReplicatedStorageClassName matching the PV storageClassName.
+// pvToRSC maps PV name to expected ReplicatedStorageClass name.
+func CheckRVReplicatedStorageClassNameFromSnapshot(snapshot *RVSnapshot, pvToRSC map[string]string) []error {
+	var errs []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		expectedRSC, ok := pvToRSC[resourceName]
+		if !ok {
+			errs = append(errs, fmt.Errorf("RV %q: no expected RSC name in pvToRSC map", resourceName))
+			continue
+		}
+		if rv.Spec.ReplicatedStorageClassName != expectedRSC {
+			errs = append(errs, fmt.Errorf("RV %q: replicatedStorageClassName = %q, want %q", resourceName, rv.Spec.ReplicatedStorageClassName, expectedRSC))
+		}
+	}
+	return errs
+}
+
+// CheckRVManualConfigurationNilFromSnapshot verifies spec.manualConfiguration is nil for all RVs.
+func CheckRVManualConfigurationNilFromSnapshot(snapshot *RVSnapshot) []error {
+	var errs []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		if rv.Spec.ManualConfiguration != nil {
+			errs = append(errs, fmt.Errorf("RV %q: manualConfiguration is not nil, expected nil in Auto mode", resourceName))
+		}
+	}
+	return errs
+}
+
+// CheckRVSwitchToAutoLabelAbsentFromSnapshot verifies no RV carries the
+// switch-to-auto-configuration label (it was removed during stage 4).
+func CheckRVSwitchToAutoLabelAbsentFromSnapshot(snapshot *RVSnapshot) []error {
+	var errs []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		if rv.Labels != nil {
+			if _, ok := rv.Labels[switchToAutoConfigurationLabelKey]; ok {
+				errs = append(errs, fmt.Errorf("RV %q: switch-to-auto-configuration label should be absent", resourceName))
+			}
+		}
+	}
+	return errs
+}
+
+// CheckRVAutoConfigurationBlockedLabelAbsentFromSnapshot verifies no RV carries the
+// auto-configuration-blocked label (happy path — all RVs switched successfully).
+func CheckRVAutoConfigurationBlockedLabelAbsentFromSnapshot(snapshot *RVSnapshot) []error {
+	var errs []error
+	for resourceName := range snapshot.UniqueResourceNames {
+		rv, ok := snapshot.RVsByName[resourceName]
+		if !ok {
+			continue
+		}
+		if rv.Labels != nil {
+			if _, ok := rv.Labels[autoConfigurationBlockedLabelKey]; ok {
+				errs = append(errs, fmt.Errorf("RV %q: auto-configuration-blocked label should be absent in happy path", resourceName))
+			}
+		}
+	}
+	return errs
+}
+
+// CheckRSPNoConversionRSPsFromSnapshot verifies no RSP carries the migration-conversion-rsp
+// label (temporary conversion RSPs were cleaned up by stage 4).
+func CheckRSPNoConversionRSPsFromSnapshot(snapshot *RSPSnapshot) []error {
+	var errs []error
+	for rspName, labels := range snapshot.Labels {
+		if labels != nil {
+			if _, ok := labels[migrationConversionRSPLabelKey]; ok {
+				errs = append(errs, fmt.Errorf("RSP %q: migration-conversion-rsp label should be absent after stage 4 cleanup", rspName))
+			}
+		}
+	}
+	return errs
 }
 
 func CheckRVSizeMatchesPVFromSnapshot(snapshot *RVSnapshot) []error {

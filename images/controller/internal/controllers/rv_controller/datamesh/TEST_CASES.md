@@ -128,7 +128,7 @@ across all canonical layouts, topologies, and feature variants.
   3D+1TB layout (FTT=1, GMDR=1). Voters=3 (odd) → TB_min=0. Leave request for TB. Transition created, member removed.
 
 - ⚡ **Guard: TB required — even D, FTT=D/2.**
-  2D+1TB layout (FTT=1, GMDR=0). Voters=2 (even), FTT=1=D/2 → TB_min=1. TB_count=1 ≤ TB_min=1 → blocked. Message contains "TieBreaker required for quorum (Diskful=2 even, FTT=1)".
+  2D+1TB layout (FTT=1, GMDR=0). Voters=2 (even), FTT=1=D/2 → TB_min=1. The subject is the only TieBreaker and is excluded from the count, so 0 operational TieBreakers would remain (0 < 1) → blocked. Message contains "TieBreaker required for quorum (Diskful=2 even, FTT=1)". Full guard model: §25, "Leaving-TB guards".
 
 - **Guard: TB not required — odd D.**
   3D+1TB layout (FTT=1, GMDR=1). Voters=3 (odd) → TB_min=0. Guard passes. Transition created.
@@ -373,7 +373,10 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
   2D with FTT=1: D_min = FTT + GMDR + 1 = 1+0+1 = 2. D_count=2 ≤ D_min=2 → blocked. Message contains "FTT".
 
 - ⚡ **guardGMDRPreserved blocks when UpToDate D too low.**
-  2D with config.GMDR=1. One D is NOT UpToDate. ADR = UpToDate_D - 1 = 1 - 1 = 0. 0 ≤ 1 → blocked. Message contains "GMDR".
+  2D with config.GMDR=1. The leaving D is the one that is NOT UpToDate, so it is not subtracted: ADR = 1 ≤ 1 → blocked. Message contains "GMDR".
+
+- ⚡ **guardGMDRPreserved does not block RemoveReplica(D) of a replica that holds no UpToDate copy.**
+  3D with config.GMDR=1, the leaving D is not UpToDate: ADR = 2 > 1 → RemoveReplica transition is created. The relaxation is shared by every lose-voter plan (`loseVoterGuardsCommon`), not only D→TB.
 
 - ⚡ **guardVolumeAccessLocal blocks attached D removal.**
   3D, member #1 Attached=true, VolumeAccess=Local. guardNotAttached fires first (attached → Detach dispatched). On second pass: active Detach → guardNotAttached blocks with "transition in progress".
@@ -517,7 +520,7 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 
 - **D→A guard: VolumeAccess=Local blocks.**
 - **D→A guard: GMDR blocks.**
-  2D with config.GMDR=1. ADR = UpToDate_D - 1. Not enough UpToDate → blocked.
+  2D with config.GMDR=1, the demoted D is not UpToDate: ADR = 1 ≤ 1 → blocked.
 
 ### Voter pairs: TB↔D
 
@@ -544,8 +547,16 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **d-to-tb-q-down/v1: D∅→TB+q↓, q lowered, BV cleared.**
   2D. Step 2: type=TieBreaker, BV cleared, q lowered (2→1).
 
-- **D→TB guard: VolumeAccess=Local blocks.**
+- ⚡ **D→TB: VolumeAccess=Local does NOT block an unattached demotion (both plan variants).**
+  A TieBreaker serves no IO in any access mode, so `guardVolumeAccessNotLocal` is not on the D→TB
+  plans (it belongs to Access plans and to `sd-to-tb/v1`). Transition is created.
+- ⚡ **D→TB guard: VolumeAccess=Local blocks an ATTACHED demotion.**
+  `guardVolumeAccessLocalForDemotion`; message "volumeAccess=Local requires Diskful on attached node".
 - **D→TB guard: GMDR blocks.**
+- ⚡ **D→TB TransZonal 3D in three zones: passes the retype-aware zone FTT guard.**
+  Post-state 2D+1TB survives losing any zone (1D+1TB). The generic guard blocks the same layout.
+- **D→TB TransZonal control: D→A in the same layout stays blocked ("zone FTT").**
+- **D→TB TransZonal control: RemoveReplica(D) in the same layout stays blocked ("zone FTT").**
 
 ### Liminal dispatch
 
@@ -1363,19 +1374,64 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **8D + A with ChangeType→D request → blocked.**
 - ⚡ **8D + TB with ChangeType→sD request → blocked.**
 
-### Zone guards
+### Leaving-D guards
 
 - **guardGMDRPreserved: 3D all UpToDate, GMDR=1 → ADR=2 > 1 → passes.**
 - **guardGMDRPreserved: 2D all UpToDate, GMDR=1 → ADR=1 ≤ 1 → blocked.**
 - **guardGMDRPreserved: 1D UpToDate, GMDR=0 → ADR=0 ≤ 0 → blocked.**
+- ⚡ **guardGMDRPreserved: 3D GMDR=1, subject is not UpToDate → ADR=2 > 1 → passes.**
+  Two fixtures, one per branch of the criterion (no backing volume / backing volume not UpToDate):
+  the subject is not part of the UpToDate count, so nothing is subtracted from it.
+- **guardGMDRPreserved: 2D GMDR=1, subject is not UpToDate → ADR=1 ≤ 1 → still blocked.**
+  The relaxation is exactly one copy, not a blanket pass.
 - **guardFTTPreserved: 3D, FTT=1 GMDR=1 → D=3 ≤ D_min=3 → blocked.**
 - **guardFTTPreserved: 4D, FTT=1 GMDR=1 → D=4 > 3 → passes.**
 - **guardFTTPreserved: 2D+TB, FTT=1 GMDR=0 → D=2 ≤ 2 → blocked.**
-- **guardTBSufficient: 2D+1TB FTT=1 → last TB needed → blocked.**
-- **guardTBSufficient: 2D+2TB FTT=1 → still 1 TB left → passes.**
-- **guardTBSufficient: 3D+1TB FTT=1 → odd D, TB not required → passes.**
-- **guardTBSufficient: 4D+1TB FTT=2 → even D, FTT=D/2 → blocked.**
-- **guardTBSufficient: 4D+1TB FTT=1 → FTT≠D/2 → passes.**
+
+### Leaving-TB guards
+
+`guardTBSufficient` counts **operational** TieBreakers only (`isTieBreakerOperational`:
+RVR present and not terminating, current `DatameshRevision`, `DRBDConfigured=True` at a current
+`ObservedGeneration`, every connection to a data-bearing member confirmed `Connected` by a fresh
+side), **excludes the subject** from that count, and compares strictly — blocked iff
+`operational < TB_min`, where TB_min comes from `v1alpha1.TieBreakersForDiskful(current voters,
+target FTT)`. Membership alone is not protection: completing `AddReplica(TB)` only proves that the
+agents applied the revision. See TRANSITIONS.md § "TieBreaker replacement (strict create-first)".
+
+Layout arithmetic (TB_min):
+
+- **2D+1TB FTT=1 → TB_min=1, the subject is the only TB → 0 would remain → blocked.**
+  Message contains "TieBreaker required for quorum (Diskful=2 even, FTT=1)".
+- **2D+2TB FTT=1, the remaining TB is operational → passes.**
+  The replacement window: the replacement applied the current datamesh revision, reports
+  `DRBDConfigured=True` for its current generation, and both of its connections to the Diskful
+  members are confirmed.
+- **3D+1TB FTT=1 → odd D → TB_min=0 → passes.**
+- **4D+1TB FTT=2 → even D, FTT=D/2 → TB_min=1, 0 would remain → blocked.**
+- **4D+1TB FTT=1 → FTT≠D/2 → TB_min=0 → passes.**
+- ⚡ **4D+2TB FTT=2 → exactly one operational TB remains → passes (strict `<`, not `<=`).**
+  The subject is already out of the count, so equality is exactly sufficient; `<=` would refuse a
+  legitimate release.
+- **TB_min=0 short-circuits before operational state is looked at.**
+  3D+1TB with the subject's own conditions cleared → still passes.
+
+Operational criteria — a replacement that is a member but not operational does not release the old
+TieBreaker. Each case degrades exactly ONE aspect of an otherwise fully operational 2D+2TB window;
+the subject is the terminating TieBreaker, the degraded replica is its replacement:
+
+- **Replacement behind on the datamesh revision → blocked** ("datamesh revision 6 applied, want 7").
+- **Replacement has no DRBDConfigured condition → blocked** ("DRBD is not configured").
+- ⚡ **Replacement's DRBDConfigured is stale (ObservedGeneration behind the RVR generation) → blocked.**
+- **Replacement's DRBDConfigured is False → blocked.**
+- ⚡ **Replacement is itself terminating → blocked** ("replica is terminating").
+- **Replacement's RVR is gone → blocked** ("replica object is gone").
+- ⚡ **Connection to a Diskful member confirmed by neither side → blocked**
+  ("connection to rv-1-0 is not confirmed"); one case per data-bearing member.
+- ⚡ **The only side reporting the connection is stale (agent not ready) → blocked.**
+- ⚡ **The only side reporting the connection is behind on the datamesh revision → blocked.**
+- ⚡ **A current Connected report from ONE side is enough → passes.**
+  Confirmation is symmetric: the replacement need not report the link itself.
+- ⚡ **Two TieBreakers terminating at once do not release each other → both blocked.**
 
 ### TransZonal guards
 
@@ -1394,8 +1450,31 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - **guardZoneFTTPreserved: 4D+TB (2+1+1+TB), remove from 2-zone → passes.**
 - ⚡ **guardZoneFTTPreserved: 5D (2+2+1), remove from 1-zone → blocked.**
   After removal: 4D, losing zone-a(2) → 2 < q=3 → blocked.
+- **guardZoneGMDRPreserved: D→TB is still modelled as a plain data loss (no retype-aware variant).**
+  GMDR=0 passes, GMDR=1 blocks — identical to a plain removal, since a TieBreaker carries no data.
+- ⚡ **guardZoneGMDRPreserved: 3 zones × 1D GMDR=0, subject is not UpToDate → passes.**
+  Two fixtures, one per branch of the criterion: no backing volume at all, and a backing volume in
+  a non-UpToDate state. The subject is in neither the total nor its zone count, so both stay
+  untouched and losing a foreign zone still leaves 1 > 0.
+- ⚡ **guardZoneGMDRPreserved: every UpToDate copy in one foreign zone, subject holds none → blocked.**
+  Regression for a byte underflow: subtracting the subject unconditionally made the adjusted total
+  (1) smaller than the zone count (2), so `total − zone` wrapped to 255 and the guard passed
+  although losing that zone would leave no copy at all.
+- **guardZoneFTTPreservedForRetypeToTieBreaker: skip non-TransZonal.**
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: 3D (1+1+1) → passes where the generic variant blocks.**
+  The subject survives as the TieBreaker of its zone, so every foreign zone loss leaves 1D+1TB.
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: 2D in zone-a + 1D in zone-b, subject in zone-a → blocked.**
+  The subject's future TieBreaker dies with its own zone: losing zone-a leaves 1D+0TB. A wrong
+  implementation that credits the subject's OWN zone with +1 TB would let this pass.
+- ⚡ **guardZoneFTTPreservedForRetypeToTieBreaker: same layout, subject in zone-b → blocked.**
+  Losing zone-a leaves 0D+1TB. Together with the previous case this makes the 2-zone 2D+1D layout
+  genuinely non-convergible (`rv_controller` reports CannotConverge).
+- **guardZoneFTTPreservedForRetypeToTieBreaker: existing TB in another zone counted once, alongside the subject.**
 - **guardZoneTBSufficient: 2D+1TB TransZonal, remove last TB → blocked.**
 - **guardZoneTBSufficient: 2D+2TB, remove one → passes.**
+  This guard counts **membership** only; operational readiness of the remaining TieBreaker is
+  `guardTBSufficient`'s question. Both are on `loseTBGuards`, so a non-operational replacement
+  still holds the old TieBreaker.
 - **guardZoneTBSufficient: 3D+1TB, odd D → passes.**
 - **guardZoneTBSufficient: 4D+1TB FTT=2 → blocked.**
 - **guardZoneTBSufficient: 4D+1TB FTT=1 → FTT≠D/2 → passes.**

@@ -297,6 +297,24 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	QuorumSummary *ReplicatedVolumeReplicaStatusQuorumSummary `json:"quorumSummary,omitempty"`
 
+	// InitialQuorumReachedAt is the first time the controller observed this replica
+	// holding quorum as a datamesh member. It is a latch: it is set once per membership
+	// epoch and cleared when the replica leaves the datamesh (datameshRevision back to 0),
+	// so a replica that re-joins goes through joining again.
+	//
+	// It exists to distinguish "quorum has not been reached yet" (a member whose peer
+	// connections are still coming up, and which therefore cannot have frozen any I/O)
+	// from "quorum was lost" (a member whose I/O is frozen) — the two are identical on a
+	// single snapshot. See status.phase.
+	//
+	// This is the controller's own observation, not a historical fact about the volume:
+	// for a replica that was already a member before this field existed, it is the time
+	// of the first reconciliation that observed quorum, not the time quorum was first
+	// reached.
+	//
+	// +optional
+	InitialQuorumReachedAt *metav1.Time `json:"initialQuorumReachedAt,omitempty"`
+
 	// Peers contains the status of connections to peer replicas.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.name == y.name))",message="peers[].name must be unique"
 	// +kubebuilder:validation:MaxItems=31
@@ -332,9 +350,13 @@ const (
 	// (disk failed, fully isolated, attachment failed, provisioning/config failed).
 	ReplicatedVolumeReplicaPhaseDegraded ReplicatedVolumeReplicaPhase = "Degraded"
 	// ReplicatedVolumeReplicaPhaseCritical indicates IO is frozen (quorum lost or IO suspended).
+	// Reported only for a replica that has already served IO: a datamesh member that reached
+	// quorum at least once (see status.initialQuorumReachedAt). A member still waiting for its
+	// initial quorum has no IO to freeze and is reported as Progressing instead.
 	ReplicatedVolumeReplicaPhaseCritical ReplicatedVolumeReplicaPhase = "Critical"
 	// ReplicatedVolumeReplicaPhaseProgressing indicates an operational change is in progress
-	// (resize, type conversion, DRBD reconfiguration) with no health problems detected.
+	// (resize, type conversion, DRBD reconfiguration, joining the datamesh) with no health
+	// problems detected.
 	ReplicatedVolumeReplicaPhaseProgressing ReplicatedVolumeReplicaPhase = "Progressing"
 	// ReplicatedVolumeReplicaPhaseAgentNotReady indicates the agent is not responding on the node.
 	ReplicatedVolumeReplicaPhaseAgentNotReady ReplicatedVolumeReplicaPhase = "AgentNotReady"

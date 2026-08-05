@@ -1,0 +1,43 @@
+From da76300755f055dbe74b325912c08cdd92ffc207 Mon Sep 17 00:00:00 2001
+From: "v.oleynikov" <vasily.oleynikov@flant.com>
+Date: Mon, 27 Jul 2026 08:24:36 +0300
+Subject: [PATCH] do not require an ALT jre package
+
+OpenJDK 11 is imported into the image from container-base
+(openjdk-11.0.31), so no jre package is installed and the rpm
+dependency cannot be satisfied. OpenJDK ships its own tzdb.dat,
+so tzdata-java is not needed either.
+
+Signed-off-by: v.oleynikov <vasily.oleynikov@flant.com>
+---
+ linstor.spec | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/linstor.spec b/linstor.spec
+index cf465ae..f7a51ae 100644
+--- a/linstor.spec
++++ b/linstor.spec
+@@ -71,9 +71,9 @@ cp %{_builddir}/%{NAME_VERS}/docs/linstor.toml-example %{buildroot}/%{_sysconfdi
+ %package common
+ Summary: Common files shared between controller and satellite
+ Group: System Environment/Daemons
+-Requires: jre-11-headless
+-## This should really be included in the jre-headless dependencies, but it isn't.
+-Requires: tzdata-java
++## No JRE requirement: the image imports OpenJDK 11 from container-base
++## (openjdk-11.0.31) instead of installing an ALT jre package, and OpenJDK
++## ships its own tzdb.dat, so tzdata-java is not needed either.
+ 
+ %description common
+ Linstor shared components between linstor-controller and linstor-satellite
+@@ -92,7 +92,6 @@ Linstor shared components between linstor-controller and linstor-satellite
+ Summary: Linstor controller specific files
+ Group: System Environment/Daemons
+ Requires: linstor-common = %{version}
+-Requires(post): jre-11-headless
+ 
+ %description controller
+ Linstor controller manages linstor satellites and persistant data storage.
+-- 
+2.43.0
+

@@ -1,4 +1,5 @@
 # DRBDSETUP COMMAND CALLER'S GUIDE
+
 - [DRBDSETUP COMMAND CALLER'S GUIDE](#drbdsetup-command-callers-guide)
   - [PREREQUISITES](#prerequisites)
   - [ERROR REPORTING FOR AUTOMATION](#error-reporting-for-automation)
@@ -52,6 +53,7 @@
 
 Before calling any `drbdsetup` or `drbdmeta` command that operates on a minor
 number, ensure the lock directory exists:
+
 ```bash
 mkdir -p /var/run/drbd/lock
 ```
@@ -60,7 +62,8 @@ This directory is required by all commands that operate on a minor number
 (`new-minor`, `attach`, `detach`, `disk-options`, `resize`, `new-current-uuid`,
 etc.) and by all `drbdmeta` operations. Without it, these commands fail with
 exit code `20`:
-```console
+
+```text
 open(/var/run/drbd/lock/drbd-147-<minor>): No such file or directory
 ```
 
@@ -115,6 +118,7 @@ When DRBD kernel module cannot be loaded (`modprobe drbd` fails):
 **CRITICAL:** Different option types require different syntax!
 
 ### Boolean Options
+
 ```bash
 # Method 1: Use equals sign
 --auto-promote=yes
@@ -130,6 +134,7 @@ When DRBD kernel module cannot be loaded (`modprobe drbd` fails):
 ```
 
 ### Flag Options
+
 ```bash
 # Flags are presence-only switches.
 # They do not take yes/no values.
@@ -145,6 +150,7 @@ When DRBD kernel module cannot be loaded (`modprobe drbd` fails):
 ```
 
 ### Enum Numeric String Options
+
 ```bash
 # Both syntaxes work:
 --protocol=C              # With equals
@@ -164,8 +170,9 @@ consistency.
 
 **Required for:** `new-peer` command only
 
-**Error if omitted:** 
-```console
+**Error if omitted:**
+
+```text
 Failure: (126) UnknownMandatoryTag
 additional info from kernel:
 name missing
@@ -175,6 +182,7 @@ name missing
 explicit connection name)
 
 **Example:**
+
 ```bash
 drbdsetup new-peer myres 2 --_name=peer-node --protocol=C
 ```
@@ -187,9 +195,11 @@ explicitly.
 ## RESOURCE MANAGEMENT
 
 ### `new-resource`
+
 **Purpose:** Create a new DRBD resource
 
 **Synopsis:**
+
 ```bash
 drbdsetup new-resource <resource_name> <node_id> [options]
 ```
@@ -229,8 +239,7 @@ drbdsetup new-resource <resource_name> <node_id> [options]
   - `Failure: (126) UnknownMandatoryTag`
   - `Failure: (162) Invalid configuration request`
   - `Failure: (122) kmalloc() failed. Out of memory?`
-  - optional `additional info from kernel:` lines such as `required attribute
-    missing`, `unknown mandatory attribute`, `invalid attribute value`
+  - optional `additional info from kernel:` lines such as `required attribute missing`, `unknown mandatory attribute`, `invalid attribute value`
 - `20` - Local `drbdsetup` error, no kernel `(n)` code. Match stderr such as:
   - `Missing argument '...'`
   - `Excess arguments:`
@@ -245,9 +254,11 @@ drbdsetup new-resource <resource_name> <node_id> [options]
 ---
 
 ### `resource-options`
+
 **Purpose:** Change options of an existing resource
 
 **Synopsis:**
+
 ```bash
 drbdsetup resource-options <resource_name> [options]
 ```
@@ -283,9 +294,11 @@ drbdsetup resource-options <resource_name> [options]
 ---
 
 ### `rename-resource`
+
 **Purpose:** Rename a resource on the local node
 
 **Synopsis:**
+
 ```bash
 drbdsetup rename-resource <resource_name> <new_name>
 ```
@@ -325,9 +338,11 @@ drbdsetup rename-resource <resource_name> <new_name>
 ---
 
 ### `down`
+
 **Purpose:** Completely tear down a resource (all-in-one shutdown)
 
 **Synopsis:**
+
 ```bash
 drbdsetup down [<resource_name>|all]
 ```
@@ -372,9 +387,11 @@ drbdsetup down [<resource_name>|all]
 ---
 
 ### `del-resource`
+
 **Purpose:** Remove a resource (after all minors and connections are removed)
 
 **Synopsis:**
+
 ```bash
 drbdsetup del-resource <resource_name>
 ```
@@ -405,9 +422,11 @@ drbdsetup del-resource <resource_name>
 ## DEVICE MANAGEMENT
 
 ### `new-minor`
+
 **Purpose:** Create a new DRBD device/volume within a resource
 
 **Synopsis:**
+
 ```bash
 drbdsetup new-minor <resource_name> <minor> <volume> [options]
 ```
@@ -459,9 +478,11 @@ drbdsetup new-minor <resource_name> <minor> <volume> [options]
 ---
 
 ### `del-minor`
+
 **Purpose:** Remove a replicated device/volume from a resource
 
 **Synopsis:**
+
 ```bash
 drbdsetup del-minor <minor>
 ```
@@ -489,9 +510,11 @@ drbdsetup del-minor <minor>
 ---
 
 ### `resize`
+
 **Purpose:** Resize a replicated device after growing backing devices
 
 **Synopsis:**
+
 ```bash
 drbdsetup resize <minor> [options]
 ```
@@ -541,9 +564,11 @@ drbdsetup resize <minor> [options]
 - Cannot resize during active resync
 
 ### `new-current-uuid`
+
 **Purpose:** Generate a new current UUID
 
 **Synopsis:**
+
 ```bash
 drbdsetup new-current-uuid <minor> [options]
 ```
@@ -578,16 +603,17 @@ drbdsetup new-current-uuid <minor> [options]
 - Requires "Just Created" metadata for `--clear-bitmap` and `--force-resync`
 - **--clear-bitmap scenario:** After metadata has been initialized on all nodes,
   do the initial handshake, then call with `--clear-bitmap`
-- **Bootstrap scenario:** On the running primary: `new-current-uuid
-  --clear-bitmap`, copy disk/metadata, then `new-current-uuid`
+- **Bootstrap scenario:** On the running primary: `new-current-uuid --clear-bitmap`, copy disk/metadata, then `new-current-uuid`
 - Changes data generation identifiers and therefore resync decisions
 
 ## DISK MANAGEMENT
 
 ### `attach`
+
 **Purpose:** Attach a backing device and meta-data device to a volume
 
 **Synopsis:**
+
 ```bash
 drbdsetup attach <minor> <lower_dev> <meta_dev> <meta_idx> [options]
 ```
@@ -667,9 +693,11 @@ meta-data
 ---
 
 ### `disk-options`
+
 **Purpose:** Change disk options on an attached device
 
 **Synopsis:**
+
 ```bash
 drbdsetup disk-options <minor> [options]
 ```
@@ -705,9 +733,11 @@ drbdsetup disk-options <minor> [options]
 ---
 
 ### `detach`
+
 **Purpose:** Detach the backing device from a replicated device
 
 **Synopsis:**
+
 ```bash
 drbdsetup detach <minor> [options]
 ```
@@ -750,9 +780,11 @@ drbdsetup detach <minor> [options]
 ## ROLE MANAGEMENT
 
 ### `primary`
+
 **Purpose:** Change the role of a node in a resource to primary
 
 **Synopsis:**
+
 ```bash
 drbdsetup primary <resource_name> [options]
 ```
@@ -804,9 +836,11 @@ drbdsetup primary <resource_name> [options]
 ---
 
 ### `secondary`
+
 **Purpose:** Change the role of a node in a resource to secondary
 
 **Synopsis:**
+
 ```bash
 drbdsetup secondary <resource_name> [options]
 ```
@@ -848,9 +882,11 @@ drbdsetup secondary <resource_name> [options]
 ## CONNECTION/PEER MANAGEMENT
 
 ### `new-peer`
+
 **Purpose:** Make a peer node known to the resource
 
 **Synopsis:**
+
 ```bash
 drbdsetup new-peer <resource_name> <peer_node_id> --_name=<connection_name> [options]
 ```
@@ -953,9 +989,11 @@ apply after-split-brain policies -
 ---
 
 ### `del-peer`
+
 **Purpose:** Remove a peer connection
 
 **Synopsis:**
+
 ```bash
 drbdsetup del-peer <resource_name> <peer_node_id> [options]
 ```
@@ -990,9 +1028,11 @@ drbdsetup del-peer <resource_name> <peer_node_id> [options]
 ---
 
 ### `forget-peer`
+
 **Purpose:** Remove all references to a peer from meta-data
 
 **Synopsis:**
+
 ```bash
 drbdsetup forget-peer <resource_name> <peer_node_id>
 ```
@@ -1025,9 +1065,11 @@ drbdsetup forget-peer <resource_name> <peer_node_id>
 ---
 
 ### `new-path`
+
 **Purpose:** Add a network path (address pair) to a peer
 
 **Synopsis:**
+
 ```bash
 drbdsetup new-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 ```
@@ -1068,9 +1110,11 @@ drbdsetup new-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 ---
 
 ### `del-path`
+
 **Purpose:** Remove a network path from a peer
 
 **Synopsis:**
+
 ```bash
 drbdsetup del-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 ```
@@ -1090,8 +1134,7 @@ drbdsetup del-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
   - `Failure: (126) UnknownMandatoryTag`
   - `Failure: (158) Unknown resource`
   - `Failure: (162) Invalid configuration request`
-  - optional `additional info from kernel:` lines such as `Can not delete last
-    path, use disconnect first!` or `no such path`
+  - optional `additional info from kernel:` lines such as `Can not delete last path, use disconnect first!` or `no such path`
 - `20` - Local `drbdsetup` error, no kernel `(n)` code. Match stderr such as:
   - `does not look like an endpoint address '<arg>'`
   - `error sending config command`
@@ -1104,9 +1147,11 @@ drbdsetup del-path <resource_name> <peer_node_id> <local_addr> <remote_addr>
 ---
 
 ### `connect`
+
 **Purpose:** Establish connection to a peer
 
 **Synopsis:**
+
 ```bash
 drbdsetup connect <resource_name> <peer_node_id> [options]
 ```
@@ -1148,9 +1193,11 @@ drbdsetup connect <resource_name> <peer_node_id> [options]
 ---
 
 ### `disconnect`
+
 **Purpose:** Disconnect from a peer
 
 **Synopsis:**
+
 ```bash
 drbdsetup disconnect <resource_name> <peer_node_id> [options]
 ```
@@ -1187,9 +1234,11 @@ drbdsetup disconnect <resource_name> <peer_node_id> [options]
 ---
 
 ### `net-options`
+
 **Purpose:** Change network options on an existing connection
 
 **Synopsis:**
+
 ```bash
 drbdsetup net-options <resource_name> <peer_node_id> [options]
 ```
@@ -1240,9 +1289,11 @@ drbdsetup net-options <resource_name> <peer_node_id> [options]
 ---
 
 ### `peer-device-options`
+
 **Purpose:** Change per-peer-device (volume) options
 
 **Synopsis:**
+
 ```bash
 drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 ```
@@ -1271,9 +1322,7 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
   - `Failure: (126) UnknownMandatoryTag`
   - `Failure: (158) Unknown resource`
   - `Failure: (162) Invalid configuration request`
-  - optional `additional info from kernel:` lines such as `No bitmap slot
-    available in meta-data` or `Can not drop the bitmap when both sides have a
-    disk`
+  - optional `additional info from kernel:` lines such as `No bitmap slot available in meta-data` or `Can not drop the bitmap when both sides have a disk`
 - `20` - Local `drbdsetup` error, no kernel `(n)` code. Match stderr such as:
   - `error sending config command`
   - `error receiving config reply`
@@ -1286,9 +1335,11 @@ drbdsetup peer-device-options <resource_name> <peer_node_id> <volume> [options]
 ## INSPECTION AND MONITORING
 
 ### `show`
+
 **Purpose:** Show the current effective DRBD configuration
 
 **Synopsis:**
+
 ```bash
 drbdsetup show [<resource_name>|all] [options]
 ```
@@ -1305,8 +1356,7 @@ drbdsetup show [<resource_name>|all] [options]
 **Exit Codes and Errors:**
 - `0` - Configuration shown successfully
   - `show <missing-resource>` currently prints nothing and still exits `0`
-  - stderr may still contain dump-side lines such as `Failure: (158) Unknown
-    resource` or `Failure: (129) Interrupted by Signal`
+  - stderr may still contain dump-side lines such as `Failure: (158) Unknown resource` or `Failure: (129) Interrupted by Signal`
 - `20` - Local `drbdsetup` error, no stable kernel `(n)` code. Match stderr such
   as:
   - `error sending config command`
@@ -1330,9 +1380,11 @@ drbdsetup show [<resource_name>|all] [options]
 ---
 
 ### `status`
+
 **Purpose:** Show the current runtime state of DRBD resources
 
 **Synopsis:**
+
 ```bash
 drbdsetup status [<resource_name>|all] [options]
 ```
@@ -1350,8 +1402,7 @@ drbdsetup status [<resource_name>|all] [options]
 
 **Exit Codes and Errors:**
 - `0` - Status shown successfully
-  - stderr may still contain dump-side lines such as `Failure: (158) Unknown
-    resource` or `Failure: (129) Interrupted by Signal`
+  - stderr may still contain dump-side lines such as `Failure: (158) Unknown resource` or `Failure: (129) Interrupted by Signal`
 - `10` - Named resource does not exist. Match stderr:
   - `<name>: No such resource`
 - `20` - Local `drbdsetup` error, no stable kernel `(n)` code. Match stderr such
@@ -1378,9 +1429,11 @@ drbdsetup status [<resource_name>|all] [options]
 ---
 
 ### `events2`
+
 **Purpose:** Stream the current state and subsequent state changes
 
 **Synopsis:**
+
 ```bash
 drbdsetup events2 [<resource_name>|all] [options]
 ```
@@ -1429,14 +1482,17 @@ drbdsetup events2 [<resource_name>|all] [options]
 ## DRBDMETA OPERATIONS
 
 ### `drbdmeta create-md`
+
 **Purpose:** Initialize DRBD metadata before first attach
 
 **Synopsis:**
+
 ```bash
 drbdmeta [--force] <minor_or_device> <format> [format_args...] create-md [options] <max_peers>
 ```
 
 **Common v09 form:**
+
 ```bash
 drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> create-md [options] <max_peers>
 ```
@@ -1514,14 +1570,17 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 ---
 
 ### `drbdmeta dump-md`
+
 **Purpose:** Dump DRBD metadata in text form, including bitmap and activity log
 
 **Synopsis:**
+
 ```bash
 drbdmeta [--force] <minor_or_device> <format> [format_args...] dump-md
 ```
 
 **Common v09 form:**
+
 ```bash
 drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> dump-md
 ```
@@ -1562,14 +1621,17 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 ---
 
 ### `drbdmeta apply-al`
+
 **Purpose:** Replay the activity log into the bitmap and mark metadata clean
 
 **Synopsis:**
+
 ```bash
 drbdmeta [--force] <minor_or_device> <format> [format_args...] apply-al
 ```
 
 **Common v09 form:**
+
 ```bash
 drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> apply-al
 ```
@@ -1640,14 +1702,17 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 ---
 
 ### `drbdmeta read-dev-uuid`
+
 **Purpose:** Read and print the device UUID from metadata
 
 **Synopsis:**
+
 ```bash
 drbdmeta [--force] <minor_or_device> <format> [format_args...] read-dev-uuid
 ```
 
 **Common v09 form:**
+
 ```bash
 drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> read-dev-uuid
 ```
@@ -1719,14 +1784,17 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 ---
 
 ### `drbdmeta write-dev-uuid`
+
 **Purpose:** Write a device UUID into metadata
 
 **Synopsis:**
+
 ```bash
 drbdmeta [--force] <minor_or_device> <format> [format_args...] write-dev-uuid <uuid_hex>
 ```
 
 **Common v09 form:**
+
 ```bash
 drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|index> write-dev-uuid <uuid_hex>
 ```
@@ -1783,6 +1851,7 @@ drbdmeta [--force] <minor> v09 <meta_dev> <internal|flex-external|flex-internal|
 ## TYPICAL COMMAND SEQUENCES
 
 **Full resource setup and promotion:**
+
 ```bash
 drbdsetup new-resource myres 1
 drbdsetup new-minor myres 0 0
@@ -1795,6 +1864,7 @@ drbdsetup primary myres
 ```
 
 **Intentionally diskless resource (diskless client):**
+
 ```bash
 drbdsetup new-resource myres 1
 drbdsetup new-minor myres 0 0 --diskless    # No attach needed
@@ -1806,6 +1876,7 @@ drbdsetup connect myres 2
 ```
 
 **Inspect current config and state:**
+
 ```bash
 # Effective kernel configuration
 drbdsetup show myres
@@ -1818,11 +1889,13 @@ drbdsetup events2 myres --now
 ```
 
 **Full resource teardown:**
+
 ```bash
 drbdsetup down myres  # Simple: everything in one command
 ```
 
 **Manual teardown (equivalent to down):**
+
 ```bash
 drbdsetup secondary myres      # Demote if primary
 drbdsetup disconnect myres 2
@@ -1832,6 +1905,7 @@ drbdsetup del-resource myres
 ```
 
 **Resize a device:**
+
 ```bash
 # 1. Grow backing devices on all nodes
 # 2. On one node (must have a primary):
@@ -1840,6 +1914,7 @@ drbdsetup resize 0
 ```
 
 **Skip initial resync (both nodes):**
+
 ```bash
 # On both nodes:
 drbdmeta 0 v09 /dev/sda2 0 create-md --force 1
@@ -1854,6 +1929,7 @@ drbdsetup new-current-uuid 0 --clear-bitmap
 ```
 
 **Direct `drbdmeta` usage (v09):**
+
 ```bash
 # Initialize internal metadata with room for future peers
 drbdmeta 0 v09 /dev/vg0/lv0 internal create-md --force 31

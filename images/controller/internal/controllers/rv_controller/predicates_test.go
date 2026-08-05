@@ -710,6 +710,25 @@ var _ = Describe("rvrPredicates", func() {
 			}
 		})
 
+		It("returns true when Generation changes (spec.type retype for layout convergence)", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 1},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeDiskful},
+			}
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", Generation: 2},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeTieBreaker},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns true when DatameshRevision changes", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
@@ -957,6 +976,7 @@ var _ = Describe("rvrPredicates", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rvr-1",
+					Generation: 2,
 					Finalizers: []string{"test-finalizer"},
 				},
 				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
@@ -966,7 +986,7 @@ var _ = Describe("rvrPredicates", func() {
 			newRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rvr-1",
-					Generation: 2, // Generation change alone does not trigger (not in predicate).
+					Generation: 2, // Same generation → spec-driven reaction does not fire.
 					Finalizers: []string{"test-finalizer"},
 				},
 				Status: v1alpha1.ReplicatedVolumeReplicaStatus{

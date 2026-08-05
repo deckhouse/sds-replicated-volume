@@ -103,13 +103,31 @@ func (t *TrackedObject[T]) Always(m types.GomegaMatcher) {
 func (t *TrackedObject[T]) After(trigger, check types.GomegaMatcher) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.checks = append(t.checks, &continuousCheck{
+	c := &continuousCheck{
 		mode:         checkAfter,
 		check:        check,
 		trigger:      trigger,
 		active:       false,
 		registeredAt: callerLocation(2),
-	})
+	}
+	// Arm from the state the object is already in. A trigger that fired before
+	// registration is otherwise lost, and the check stays dormant until the
+	// trigger happens to reappear — so a check registered on an object that is
+	// already Healthy would miss the very next regression. Only arming looks at
+	// the current snapshot; violations are still counted from the next snapshot
+	// on, exactly like Always.
+	//
+	// A deleted object arms nothing, mirroring the evaluate path (InjectEvent marks
+	// the object deleted before running checks and then skips them). Its dying state
+	// is not a state the object is "in", and arming would outlive it: resetLocked
+	// clears snapshots but not checks, so a reincarnation of the same name would
+	// start out armed and fire on its first, legitimately unhealthy snapshot.
+	if len(t.snapshots) > 0 && !t.deleted {
+		if matched, _ := match.MatchObject(trigger, t.snapshots[len(t.snapshots)-1].Object); matched {
+			c.active = true
+		}
+	}
+	t.checks = append(t.checks, c)
 }
 
 // While registers a check that runs only on snapshots where condition

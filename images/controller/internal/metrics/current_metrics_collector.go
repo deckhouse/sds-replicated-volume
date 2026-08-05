@@ -25,6 +25,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -38,7 +40,17 @@ const (
 	currentMetricsNodeUnknown     = "unknown"
 	currentMetricsSCUnknown       = "unknown"
 	currentMetricsCollectTimeout  = 5 * time.Second
+
+	// currentMetricsReasonAbsent is the synthetic reason label used when a condition is missing
+	// from the object status entirely. Every reason a condition actually carries is exported
+	// verbatim, so this value never collides with a real one.
+	currentMetricsReasonAbsent = "Unknown"
 )
+
+// metricNameRVLayoutConverged is the only current metric whose name is kept in a constant: the
+// alert rule monitoring/prometheus-rules/replicated-volume-layout.yaml selects this very series,
+// and the unit test cross-checks the rule expression against this constant.
+const metricNameRVLayoutConverged = "sds_rv_membership_layout_converged"
 
 var registerCurrentMetricsCollectorOnce sync.Once
 
@@ -65,11 +77,14 @@ type currentMetricsCollector struct {
 	reader client.Reader
 	log    logr.Logger
 
-	rvCountDesc          *prometheus.Desc
-	rvrCountDesc         *prometheus.Desc
-	rvaCountDesc         *prometheus.Desc
-	rvrDeletingCountDesc *prometheus.Desc
-	datameshActiveDesc   *prometheus.Desc
+	rvCountDesc                    *prometheus.Desc
+	rvrCountDesc                   *prometheus.Desc
+	rvaCountDesc                   *prometheus.Desc
+	rvrDeletingCountDesc           *prometheus.Desc
+	datameshActiveDesc             *prometheus.Desc
+	rvNoPersistentVolumeDesc       *prometheus.Desc
+	rvAutoConfigurationBlockedDesc *prometheus.Desc
+	rvLayoutConvergedDesc          *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -106,6 +121,24 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelStorageClass, LabelNode, LabelType},
 			nil,
 		),
+		rvNoPersistentVolumeDesc: prometheus.NewDesc(
+			"sds_rv_no_persistent_volume",
+			"ReplicatedVolume objects carrying the no-persistent-volume label (set by linstor-migrator when the volume has no matching PersistentVolume). Emitted once per affected ReplicatedVolume with value 1. Built from controller cache at scrape time.",
+			[]string{LabelName},
+			nil,
+		),
+		rvAutoConfigurationBlockedDesc: prometheus.NewDesc(
+			"sds_rv_auto_configuration_blocked",
+			"ReplicatedVolume objects carrying the auto-configuration-blocked label (set by linstor-migrator when the volume cannot be switched to Auto configuration). Emitted once per affected ReplicatedVolume with value 1. Built from controller cache at scrape time.",
+			[]string{LabelName},
+			nil,
+		),
+		rvLayoutConvergedDesc: prometheus.NewDesc(
+			metricNameRVLayoutConverged,
+			"Whether the actual datamesh layout of a ReplicatedVolume matches the intended one: 1 if and only if the MembershipLayoutConverged condition is True with reason Converged, 0 in every other state. The reason label carries the condition reason verbatim; reason=\"Unknown\" means the condition is absent (e.g. the volume is still forming). Emitted once per ReplicatedVolume. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelReason},
+			nil,
+		),
 	}
 }
 
@@ -115,6 +148,9 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvaCountDesc
 	ch <- c.rvrDeletingCountDesc
 	ch <- c.datameshActiveDesc
+	ch <- c.rvNoPersistentVolumeDesc
+	ch <- c.rvAutoConfigurationBlockedDesc
+	ch <- c.rvLayoutConvergedDesc
 }
 
 func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -159,6 +195,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
+	collectRVMigratorLabels(ch, c.rvNoPersistentVolumeDesc, c.rvAutoConfigurationBlockedDesc, rvList.Items)
+	collectRVLayoutConverged(ch, c.rvLayoutConvergedDesc, rvList.Items)
 	collectRVRCounts(ch, c.rvrCountDesc, rvrList.Items)
 	collectRVACounts(ch, c.rvaCountDesc, rvList.Items, rvaList.Items)
 	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvrList.Items)
@@ -231,6 +269,92 @@ func collectRVCounts(
 		for _, phase := range phases {
 			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(sc, phase)], sc, phase)
 		}
+	}
+}
+
+// collectRVMigratorLabels emits one gauge (value 1) per ReplicatedVolume carrying a migrator
+// label: no-persistent-volume or auto-configuration-blocked. Only affected RVs produce series,
+// so healthy RVs contribute no samples and the metric is absent (alert resolves) once the label
+// is removed or the RV is deleted.
+func collectRVMigratorLabels(
+	ch chan<- prometheus.Metric,
+	noPersistentVolumeDesc *prometheus.Desc,
+	autoConfigurationBlockedDesc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+) {
+	noPersistentVolume := make(map[string]float64)
+	autoConfigurationBlocked := make(map[string]float64)
+	for i := range rvs {
+		rv := &rvs[i]
+		if rv.Labels[v1alpha1.NoPersistentVolumeLabelKey] == v1alpha1.NoPersistentVolumeLabelValue {
+			noPersistentVolume[rv.Name] = 1
+		}
+		if rv.Labels[v1alpha1.AutoConfigurationBlockedLabelKey] == v1alpha1.AutoConfigurationBlockedLabelValue {
+			autoConfigurationBlocked[rv.Name] = 1
+		}
+	}
+
+	emit := func(desc *prometheus.Desc, counts map[string]float64) {
+		names := make([]string, 0, len(counts))
+		for name := range counts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[name], name)
+		}
+	}
+
+	emit(noPersistentVolumeDesc, noPersistentVolume)
+	emit(autoConfigurationBlockedDesc, autoConfigurationBlocked)
+}
+
+// collectRVLayoutConverged emits exactly one gauge per ReplicatedVolume describing the state of its
+// MembershipLayoutConverged condition (written solely by rv_controller's reconcileLayoutStatus):
+// the value is 1 if and only if the condition is True with reason Converged, and 0 in every other
+// state, including Unknown ones.
+//
+// The reason label is the reason recorded in the status, verbatim
+// (Converging/CannotConverge/TransitionUnsupported/VolumeDeleting — see api/v1alpha1/rv_conditions.go).
+// The synthetic currentMetricsReasonAbsent is used in exactly one case: the condition is missing
+// from the status altogether (a forming volume never gets it). A recorded reason is never empty —
+// metav1.Condition.Reason is a required, non-empty API field — so no other fallback is needed.
+//
+// One series per volume means the series follows the cache snapshot on its own: a reason change
+// replaces the previous series on the next scrape, and a deleted ReplicatedVolume simply stops
+// being emitted (no DeleteLabelValues/finalizer bookkeeping).
+func collectRVLayoutConverged(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+) {
+	type layoutState struct {
+		reason string
+		value  float64
+	}
+
+	states := make(map[string]layoutState, len(rvs))
+	for i := range rvs {
+		rv := &rvs[i]
+		state := layoutState{reason: currentMetricsReasonAbsent}
+		if cond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType); cond != nil {
+			state.reason = cond.Reason
+			if cond.Status == metav1.ConditionTrue &&
+				cond.Reason == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged {
+				state.value = 1
+			}
+		}
+		states[rv.Name] = state
+	}
+
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, states[name].value, name, states[name].reason)
 	}
 }
 

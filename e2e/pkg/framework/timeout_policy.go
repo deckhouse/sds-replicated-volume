@@ -19,6 +19,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -29,9 +30,22 @@ import (
 )
 
 const (
-	defaultSpecTimeout     = 30 * time.Second
-	defaultSlowSpecTimeout = 1 * time.Minute
+	defaultSpecTimeout         = 30 * time.Second
+	defaultSlowSpecTimeout     = 1 * time.Minute
+	defaultLongHaulSpecTimeout = 30 * time.Minute
 )
+
+// envTimeoutMultiplier stretches every budget the framework derives, so one
+// variable retimes a suite for a slow stand.
+const envTimeoutMultiplier = "E2E_TIMEOUT_MULTIPLIER"
+
+// timeoutMultiplier is the multiplier in effect for this run. It reads the
+// environment on every call rather than caching: the value is also needed by
+// helpers that run long after Setup, and a copy taken at Setup would be one more
+// thing to keep in sync for no gain.
+func timeoutMultiplier() float64 {
+	return parseTimeoutMultiplier(os.Getenv(envTimeoutMultiplier))
+}
 
 // parseTimeoutMultiplier parses a timeout multiplier value from a string.
 // Returns 1.0 for empty, invalid, zero, or negative values.
@@ -64,12 +78,31 @@ func hasContextBody(args []any) bool {
 	return false
 }
 
-// collectNodeLabels returns the union of labels from parent containers
-// (via CurrentTreeConstructionNodeReport) and labels present in args.
+// inheritedLabels returns the labels of the containers enclosing the node that
+// is being constructed, and nil when the node has none.
+//
+// Ginkgo builds top-level containers (and any top-level It) while the package's
+// var initializers run — one phase BEFORE the spec tree exists — and
+// CurrentTreeConstructionNodeReport panics there instead of reporting an empty
+// hierarchy. A top-level node inherits nothing by definition, so nil is the
+// correct answer; the recover turns that phase check into the answer rather
+// than letting it kill the suite during init.
+func inheritedLabels() (labels []string) {
+	defer func() {
+		if recover() != nil {
+			labels = nil
+		}
+	}()
+	return CurrentTreeConstructionNodeReport().Labels()
+}
+
+// collectNodeLabels returns the union of labels inherited from parent
+// containers and labels present in args. It MUST be called during tree
+// construction only.
 func collectNodeLabels(args []any) []string {
 	seen := map[string]bool{}
 	var all []string
-	for _, label := range CurrentTreeConstructionNodeReport().Labels() {
+	for _, label := range inheritedLabels() {
 		if !seen[label] {
 			seen[label] = true
 			all = append(all, label)
@@ -96,7 +129,10 @@ func hasLabel(labels []string, target string) bool {
 // the SpecTimeout policy:
 //   - Default 30s for all context-accepting It nodes.
 //   - With the Slow label, default is 1min; explicit values > 30s are allowed.
-//   - Without Slow, explicit SpecTimeout > 30s is an error.
+//   - With the LongHaul label, default is 30min (it dominates Slow — a LongHaul
+//     spec waits for the cluster far past any Slow budget); explicit values
+//     > 30s are allowed.
+//   - With neither, explicit SpecTimeout > 30s is an error.
 //   - All final values are scaled by the given multiplier.
 func registerTimeoutPolicy(multiplier float64) {
 	AddTreeConstructionNodeArgsTransformer(
@@ -110,6 +146,7 @@ func registerTimeoutPolicy(multiplier float64) {
 
 			labels := collectNodeLabels(args)
 			isSlow := hasLabel(labels, LabelSlow)
+			isLongHaul := hasLabel(labels, LabelLongHaul)
 
 			var authored time.Duration
 			hasExplicit := false
@@ -122,17 +159,20 @@ func registerTimeoutPolicy(multiplier float64) {
 				return false
 			})
 
-			if hasExplicit && authored > defaultSpecTimeout && !isSlow {
+			if hasExplicit && authored > defaultSpecTimeout && !isSlow && !isLongHaul {
 				return text, args, []error{
 					fmt.Errorf(
-						"SpecTimeout(%s) on %q exceeds %s limit; add Label(%q) or reduce the timeout",
-						authored, text, defaultSpecTimeout, LabelSlow,
+						"SpecTimeout(%s) on %q exceeds %s limit; add Label(%q) or Label(%q), or reduce the timeout",
+						authored, text, defaultSpecTimeout, LabelSlow, LabelLongHaul,
 					),
 				}
 			}
 
 			base := defaultSpecTimeout
-			if isSlow {
+			switch {
+			case isLongHaul:
+				base = defaultLongHaulSpecTimeout
+			case isSlow:
 				base = defaultSlowSpecTimeout
 			}
 			if hasExplicit {

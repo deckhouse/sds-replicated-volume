@@ -13,3 +13,9 @@ CVE fix
 ### 003-fix-cve.patch
 
 CVE fix
+
+### 004-fix-cve.patch
+
+CVE fix
+
+Bump golang.org/x/net, golang.org/x/crypto, golang.org/x/sys, golang.org/x/text, google.golang.org/grpc, google.golang.org/protobuf, github.com/golang/glog and github.com/moby/spdystream to versions without known vulnerabilities.

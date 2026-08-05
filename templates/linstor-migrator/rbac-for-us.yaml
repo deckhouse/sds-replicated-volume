@@ -105,7 +105,7 @@ rules:
       - sds-replicated-volume
   - apiGroups: [""]
     resources: ["persistentvolumes"]
-    verbs: ["list"]
+    verbs: ["get", "list"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments"]
     verbs: ["list"]

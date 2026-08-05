@@ -181,6 +181,7 @@ func drbdrOpPredicates() []predicate.Predicate {
 
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to:
+// - Generation changes (spec updates, e.g. spec.type retype driven by layout convergence)
 // - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready
 // - DatameshRequest changes (preconfiguration readiness)
 // - DatameshRevision changes (rollout progress)
@@ -198,6 +199,13 @@ func rvrPredicates() []predicate.Predicate {
 				oldRVR, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
 				newRVR, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
 				if !okOld || !okNew || oldRVR == nil || newRVR == nil {
+					return true
+				}
+
+				// React to Generation change (spec updates). Layout convergence retypes a
+				// replica by patching spec.type; the RV must re-reconcile to drive the
+				// resulting ChangeRole transition (reconciliation is condition/spec-driven).
+				if newRVR.GetGeneration() != oldRVR.GetGeneration() {
 					return true
 				}
 

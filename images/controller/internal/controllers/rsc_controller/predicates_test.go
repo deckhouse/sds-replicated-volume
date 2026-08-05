@@ -224,6 +224,35 @@ var _ = Describe("rspPredicates", func() {
 				Expect(pred(e)).To(BeTrue())
 			}
 		})
+
+		It("returns true when new is a typed-nil pointer (conservative, must not panic)", func() {
+			// A typed nil ((*ReplicatedStoragePool)(nil)) is a non-nil interface holding a nil
+			// value, so the untyped-nil check does not catch it. GetGeneration promotes a method on
+			// the embedded ObjectMeta and would panic here if it ran before the type assertion.
+			oldRSP := &v1alpha1.ReplicatedStoragePool{ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"}}
+			var typedNil *v1alpha1.ReplicatedStoragePool
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRSP,
+				ObjectNew: typedNil,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when old is a typed-nil pointer (conservative, must not panic)", func() {
+			var typedNil *v1alpha1.ReplicatedStoragePool
+			newRSP := &v1alpha1.ReplicatedStoragePool{ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"}}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: typedNil,
+				ObjectNew: newRSP,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
 	})
 })
 
@@ -280,6 +309,71 @@ var _ = Describe("rvPredicates", func() {
 					ReplicatedStorageClassName: "rsc-1",
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 2,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when metadata.generation changes", func() {
+			// Reconciliation classifies volumes by condition freshness (condition
+			// ObservedGeneration vs metadata.generation), so a spec-only update changes the
+			// aggregate even when the status bytes stay identical.
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1", Generation: 1},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1", Generation: 2},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when status.ConfigurationGeneration changes", func() {
+			// The applied generation is one of the classification axes (a volume holding an
+			// older configuration is stale), so it must wake the storage class up.
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationGeneration:         1,
+					ConfigurationObservedGeneration: 2,
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationGeneration:         2,
 					ConfigurationObservedGeneration: 2,
 				},
 			}
@@ -365,6 +459,49 @@ var _ = Describe("rvPredicates", func() {
 							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
 							Status: metav1.ConditionTrue,
 							Reason: "Satisfied",
+						},
+					},
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when MembershipLayoutConverged condition changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+							Status: metav1.ConditionFalse,
+							Reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+						},
+					},
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					ConfigurationObservedGeneration: 1,
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
 						},
 					},
 				},
@@ -470,6 +607,35 @@ var _ = Describe("rvPredicates", func() {
 			e := event.TypedUpdateEvent[client.Object]{
 				ObjectOld: oldRV,
 				ObjectNew: nil,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when new is a typed-nil pointer (conservative, must not panic)", func() {
+			// A typed nil ((*ReplicatedVolume)(nil)) is a non-nil interface holding a nil value, so
+			// the untyped-nil check does not catch it. GetGeneration promotes a method on the
+			// embedded ObjectMeta and would panic here if it ran before the type assertion.
+			oldRV := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+			var typedNil *v1alpha1.ReplicatedVolume
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: typedNil,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when old is a typed-nil pointer (conservative, must not panic)", func() {
+			var typedNil *v1alpha1.ReplicatedVolume
+			newRV := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: typedNil,
+				ObjectNew: newRV,
 			}
 
 			for _, pred := range preds {

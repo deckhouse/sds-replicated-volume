@@ -1,0 +1,16 @@
+dirs:
+  - /etc/linstor
+  - /etc/linstor/client
+  - /etc/linstor/https
+  - /etc/linstor/https-pem
+  - /etc/linstor/ssl
+  - /etc/linstor/ssl-pem
+  - /etc/lvm/archive
+  - /etc/lvm/backup
+  - /lib/modules
+  - /run/lock
+  - /run/lvm
+  - /sys/fs/cgroup
+  - /var
+  - /var/lib/linstor.d
+  - /var/log

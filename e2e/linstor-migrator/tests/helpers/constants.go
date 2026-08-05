@@ -74,6 +74,21 @@ const (
 	// In this scenario all RVs are PV-backed, so this label must be absent.
 	noPersistentVolumeLabelKey = "sds-replicated-volume.deckhouse.io/no-persistent-volume"
 
+	// switchToAutoConfigurationLabelKey is set by linstor-migrator on RVs that
+	// have a matching PV and must be switched from Manual to Auto configuration
+	// during stage 4. After successful switch, this label is removed.
+	switchToAutoConfigurationLabelKey = "sds-replicated-volume.deckhouse.io/switch-to-auto-configuration"
+
+	// autoConfigurationBlockedLabelKey is set by linstor-migrator stage 4 on RVs
+	// that cannot be switched to Auto configuration (e.g. RSC is missing or
+	// in a terminal phase). Must be absent in the happy path.
+	autoConfigurationBlockedLabelKey = "sds-replicated-volume.deckhouse.io/auto-configuration-blocked"
+
+	// migrationConversionRSPLabelKey is set by linstor-migrator stage 4 on
+	// temporary ReplicatedStoragePools created for RSC conversion support.
+	// After stage 4 cleanup, this label must be absent from all RSPs.
+	migrationConversionRSPLabelKey = "sds-replicated-volume.deckhouse.io/migration-conversion-rsp"
+
 	// AutoReplicatedStoragePoolNamePrefix is the name prefix for ReplicatedStoragePool objects
 	// created by linstor-migrator from LINSTOR data. Must stay in sync with
 	// images/linstor-migrator/internal/config.AutoReplicatedStoragePoolNamePrefix.

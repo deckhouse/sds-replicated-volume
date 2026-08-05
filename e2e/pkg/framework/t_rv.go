@@ -107,10 +107,10 @@ type TestRV struct {
 	buildAdoptSharedSecret string
 
 	// Safety switches (populated by ActivateSafetyInvariants).
-	swQuorumCorrect    *tkmatch.Switch
-	swNeverLoseQuorum  *tkmatch.Switch
-	swNeverCritical    *tkmatch.Switch
-	swNeverIOSuspended *tkmatch.Switch
+	swQuorumThresholdCorrect *tkmatch.Switch
+	swNeverLoseQuorum        *tkmatch.Switch
+	swNeverCritical          *tkmatch.Switch
+	swNeverIOSuspended       *tkmatch.Switch
 }
 
 // ---------------------------------------------------------------------------
@@ -403,12 +403,20 @@ func (t *TestRV) routeLLVEvent(_ string, eventType watch.EventType, llv *snc.LVM
 // ---------------------------------------------------------------------------
 
 // ActivateSafetyInvariants creates Switch-wrapped safety checks on
-// the RV (QuorumCorrect) and all current+future RVRs (NeverLoseQuorum,
+// the RV (QuorumThresholdCorrect) and all current+future RVRs (NeverLoseQuorum,
 // NeverCritical, NeverIOSuspended). Use WithoutSafetyInvariants to
 // temporarily disable them during disruptive operations.
+//
+// The checks differ in when they start applying:
+//   - QuorumThresholdCorrect, NeverCritical, NeverIOSuspended apply unconditionally, from the
+//     first snapshot of the object. A replica that is still joining the datamesh is
+//     reported as Progressing, not Critical, so its bring-up does not trip them.
+//   - NeverLoseQuorum is armed after the replica has been Healthy once: status.quorum
+//     is legitimately false while a replica joins, and only becomes an invariant once
+//     the replica has held quorum.
 func (t *TestRV) ActivateSafetyInvariants() {
-	t.swQuorumCorrect = tkmatch.NewSwitch(match.RV.QuorumCorrect())
-	t.Always(t.swQuorumCorrect)
+	t.swQuorumThresholdCorrect = tkmatch.NewSwitch(match.RV.QuorumThresholdCorrect())
+	t.Always(t.swQuorumThresholdCorrect)
 
 	t.swNeverLoseQuorum = tkmatch.NewSwitch(match.RVR.NeverLoseQuorum())
 	t.swNeverCritical = tkmatch.NewSwitch(match.RVR.NeverCritical())
@@ -423,15 +431,15 @@ func (t *TestRV) ActivateSafetyInvariants() {
 // duration of fn, then re-enables them. Panics if
 // ActivateSafetyInvariants was not called first.
 func (t *TestRV) WithoutSafetyInvariants(fn func()) {
-	if t.swQuorumCorrect == nil {
+	if t.swQuorumThresholdCorrect == nil {
 		panic("WithoutSafetyInvariants called before ActivateSafetyInvariants")
 	}
-	t.swQuorumCorrect.Disable()
+	t.swQuorumThresholdCorrect.Disable()
 	t.swNeverLoseQuorum.Disable()
 	t.swNeverCritical.Disable()
 	t.swNeverIOSuspended.Disable()
 	defer func() {
-		t.swQuorumCorrect.Enable()
+		t.swQuorumThresholdCorrect.Enable()
 		t.swNeverLoseQuorum.Enable()
 		t.swNeverCritical.Enable()
 		t.swNeverIOSuspended.Enable()

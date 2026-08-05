@@ -40,16 +40,21 @@ import:
     to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}.tar.gz
     before: setup
 
+  - image: drbd-legacy-artifact
+    add: /drbd/drbd-{{ include "get_oss_version_by_id" (list "DRBD_LEGACY" $.Root) }}.tar.gz
+    to: /var/cache/spaas/tarballs/drbd-{{ include "get_oss_version_by_id" (list "DRBD_LEGACY" $.Root) }}.tar.gz
+    before: setup
+
 shell:
   beforeInstall:
-    - export DEBIAN_FRONTEND=noninteractive
+    {{- include "alt packages upgrade" $ | nindent 4 }}
     - |
-      apt-get update \
-      && apt-get -y install build-essential gcc glibc make coccinelle python3-dev vim-console \
+      apt-get -y install build-essential gcc glibc make coccinelle python3-dev vim-console \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
       && ln -sf /proc/mounts /etc/mtab
+    - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
 
 docker:

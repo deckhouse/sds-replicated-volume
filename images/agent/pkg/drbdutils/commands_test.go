@@ -19,6 +19,7 @@ package drbdutils_test
 import (
 	"errors"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
@@ -127,6 +128,50 @@ func TestExecuteNewMinorKnownErrors(t *testing.T) {
 			t.Fatalf("ExecuteNewAutoMinor() minor = %d, want 1", minor)
 		}
 	})
+}
+
+func TestDetachArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		diskless bool
+		want     []string
+	}{
+		{
+			name:     "plain detach",
+			diskless: false,
+			want:     []string{"detach", "7"},
+		},
+		{
+			name:     "intentional diskless detach",
+			diskless: true,
+			want:     []string{"detach", "7", "--diskless"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := drbdutils.DetachArgs(7, tt.diskless)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("DetachArgs(7, %t) = %v, want %v", tt.diskless, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExecuteDetachPassesDisklessFlag pins the whole detach chain down to the
+// executed command line: dropping --diskless here is what makes the kernel mark
+// the device as unintentionally diskless.
+func TestExecuteDetachPassesDisklessFlag(t *testing.T) {
+	fakeExec := &fakedrbdutils.Exec{}
+	fakeExec.ExpectCommands(&fakedrbdutils.ExpectedCmd{
+		Name: drbdutils.DRBDSetupCommand,
+		Args: []string{"detach", "7", "--diskless"},
+	})
+	fakeExec.Setup(t)
+
+	if err := drbdutils.ExecuteDetach(t.Context(), 7, true); err != nil {
+		t.Fatalf("ExecuteDetach() unexpected error: %v", err)
+	}
 }
 
 func TestExecuteRenameKnownErrors(t *testing.T) {

@@ -35,4 +35,41 @@ const (
 	ManagedByLabelKey = "storage.deckhouse.io/managed-by"
 	// ManagedByLabelValue is the value for ManagedByLabelKey.
 	ManagedByLabelValue = "sds-replicated-volume"
+
+	// NoPersistentVolumeLabelKey is set on ReplicatedVolume by linstor-migrator when the LINSTOR resource
+	// had no matching PersistentVolume in the cluster at migration time.
+	NoPersistentVolumeLabelKey = labelPrefix + "no-persistent-volume"
+
+	// NoPersistentVolumeLabelValue is the value for NoPersistentVolumeLabelKey (boolean-style marker).
+	NoPersistentVolumeLabelValue = "true"
+
+	// SwitchToAutoConfigurationLabelKey is set on ReplicatedVolume by linstor-migrator at migration
+	// time when the LINSTOR resource had a matching PersistentVolume. Stage 4 of the migrator uses
+	// this label to find ReplicatedVolumes that must be switched from Manual to Auto configuration
+	// once the referenced ReplicatedStorageClass becomes Ready.
+	SwitchToAutoConfigurationLabelKey = labelPrefix + "switch-to-auto-configuration"
+
+	// SwitchToAutoConfigurationLabelValue is the value for SwitchToAutoConfigurationLabelKey.
+	SwitchToAutoConfigurationLabelValue = "true"
+
+	// MigrationConversionReplicatedStoragePoolLabelKey is set by linstor-migrator stage 4 on
+	// temporary ReplicatedStoragePools it creates to help the RSC controller migrate away from the
+	// deprecated spec.storagePool field. Stage 4 uses this label to find and clean up only the
+	// pools it owns, avoiding deletion of foreign RSPs with the same name and surviving
+	// migrator restarts.
+	MigrationConversionReplicatedStoragePoolLabelKey = labelPrefix + "migration-conversion-rsp"
+
+	// MigrationConversionReplicatedStoragePoolLabelValue is the value for
+	// MigrationConversionReplicatedStoragePoolLabelKey.
+	MigrationConversionReplicatedStoragePoolLabelValue = "true"
+
+	// AutoConfigurationBlockedLabelKey is set on ReplicatedVolume by linstor-migrator stage 4
+	// when the volume cannot be switched to Auto configuration because either the referenced
+	// ReplicatedStorageClass is missing, or it is in a terminal phase (InsufficientNodes,
+	// InvalidConfiguration, Terminating). The ReplicatedVolume stays in Manual mode; the label
+	// allows operators to alert on volumes that require manual intervention.
+	AutoConfigurationBlockedLabelKey = labelPrefix + "auto-configuration-blocked"
+
+	// AutoConfigurationBlockedLabelValue is the value for AutoConfigurationBlockedLabelKey.
+	AutoConfigurationBlockedLabelValue = "true"
 )

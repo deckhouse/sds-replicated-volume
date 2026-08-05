@@ -50,13 +50,6 @@ const (
 	// LinstorLVMSuffix is the suffix appended to PV names to form the LVM logical volume name in LINSTOR.
 	LinstorLVMSuffix = "_00000"
 
-	// LabelKeyNoPersistentVolume is set on ReplicatedVolume by linstor-migrator when the LINSTOR resource
-	// had no matching PersistentVolume in the cluster at migration time.
-	LabelKeyNoPersistentVolume = "sds-replicated-volume.deckhouse.io/no-persistent-volume"
-
-	// LabelValueNoPersistentVolume is the value for LabelKeyNoPersistentVolume (boolean-style marker).
-	LabelValueNoPersistentVolume = "true"
-
 	// AutoReplicatedStoragePoolNamePrefix is the name prefix for ReplicatedStoragePool objects
 	// created automatically by the migrator from LINSTOR data.
 	AutoReplicatedStoragePoolNamePrefix = "linstor-auto-"
@@ -78,5 +71,7 @@ const (
 	StateStage2Started   = "stage2_started"
 	StateStage2Completed = "stage2_completed"
 	StateStage3Started   = "stage3_started"
+	StateStage3Completed = "stage3_completed"
+	StateStage4Started   = "stage4_started"
 	StateAllCompleted    = "all_completed"
 )

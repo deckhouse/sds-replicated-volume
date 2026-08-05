@@ -1,0 +1,75 @@
+# Alerts on the membership layout of ReplicatedVolumes (new control plane).
+#
+# The sds_rv_membership_layout_converged series is exported only by the new control plane
+# controller (images/controller/internal/metrics/current_metrics_collector.go), whose ServiceMonitor
+# is itself gated on newControlPlane, so on the old control plane the series does not exist and the
+# expression below yields an empty vector. That is why this file is a plain static .yaml with no
+# Helm templating and no newControlPlane gate: {{ $labels.* }} stays a Prometheus template.
+- name: kubernetes.replicated.volume.layout
+  rules:
+    - alert: D8ReplicatedVolumeLayoutDegraded
+      expr: max by (name, reason) (sds_rv_membership_layout_converged{reason=~"TransitionUnsupported|CannotConverge"} == 0)
+      for: 15m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "name,reason"
+        plk_create_group_if_not_exists__d8_replicated_volume_layout: "D8ReplicatedVolumeLayout,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_volume_layout: "D8ReplicatedVolumeLayout,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: ReplicatedVolume runs with a degraded membership layout
+        description: |
+          The ReplicatedVolume `{{ $labels.name }}` runs with a layout that does not match its configuration, and the control plane will not repair it on its own (reason `{{ $labels.reason }}`).
+
+          The volume keeps serving I/O: after a replica is lost, the quorum is lowered automatically. A volume configured for two diskful replicas is therefore left with a **single copy of the data**, so the next failure of that copy means downtime and possibly data loss. The layout does not heal by itself, so the repair is manual.
+
+          Reasons:
+
+          - `TransitionUnsupported` — the actual layout differs from the intended one and no automatic transition covers this mismatch (a lost diskful replica has to be re-added by hand; an excess replica has to be removed by hand).
+          - `CannotConverge` — an automatic transition does apply, but no admissible candidate is available (for example, no eligible node is left to host the missing replica).
+
+          The alert compares the actual layout against the one intended by the volume configuration, so a volume that is configured to run on a single replica reports `Converged` and never fires here.
+
+          The recommended course of action:
+
+          1. Look at the actual layout. It is shown in the `MembershipLayout` column (a priority-1 print column, hence `-o wide`), for example `1D` for a volume whose configuration asks for `2D+1TB`:
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o wide
+             ```
+
+          2. Read the exact arithmetic of the mismatch (`layout mismatch: have ..., want ...`) from the `MembershipLayoutConverged` condition:
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             ```
+
+          3. Inspect the replicas the volume currently has, and note which replica IDs (the `-N` name suffix) are taken:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
+             ```
+
+          4. If the volume is missing a diskful replica (`have 1D, want 2D+1TB` and similar), add one by hand. Create a `ReplicatedVolumeReplica` whose name is the volume name plus a free id in the range 0-31; leave the placement to the control plane by omitting `nodeName` and `lvmVolumeGroupName`:
+
+             ```yaml
+             apiVersion: storage.deckhouse.io/v1alpha1
+             kind: ReplicatedVolumeReplica
+             metadata:
+               name: {{ $labels.name }}-<free-id>
+             spec:
+               replicatedVolumeName: {{ $labels.name }}
+               type: Diskful
+             ```
+
+             The control plane schedules the replica, syncs the data and adds the member to the datamesh; the missing tie-breaker (if the configuration asks for one) is then created automatically.
+
+          5. If the volume has more replicas than intended (`have 3D, want 2D+1TB` and similar), delete the excess replica by hand — pick one that is not attached and is not the only up-to-date copy:
+
+             ```shell
+             kubectl delete rvr <replica-name>
+             ```
+
+          6. Watch the condition go back to `True`/`Converged`; the alert resolves once the layout matches the configuration again. If the layout does not converge, or the reason is `CannotConverge` and no node can be freed, contact tech support.

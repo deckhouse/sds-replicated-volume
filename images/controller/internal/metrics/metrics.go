@@ -38,6 +38,7 @@ const (
 	LabelPhase        = "phase"
 	LabelType         = "type"
 	LabelStep         = "step"
+	LabelReason       = "reason"
 )
 
 // Histogram bucket configurations.
