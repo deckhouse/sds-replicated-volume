@@ -154,7 +154,7 @@ description: "Использование и примеры работы sds-repl
    d8 k patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
    ```
 
-   `<RSC_NAME>` — имя ресурса ReplicatedStorageClass.
+   где `<RSC_NAME>` — имя ресурса ReplicatedStorageClass.
 
 2. Контроллер мигрирует каждый том на месте: одна diskful-реплика ретайпится в tie-breaker (без полного ресинка и без переноса данных), её логический том освобождается. Прогресс по каждому тому виден через condition `MembershipLayoutConverged` и колонку `MembershipLayout`:
 

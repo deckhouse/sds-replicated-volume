@@ -156,7 +156,7 @@ Editing `spec.replication` of an existing ReplicatedStorageClass changes the int
    d8 k patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
    ```
 
-   `<RSC_NAME>` — name of the ReplicatedStorageClass resource.
+   where `<RSC_NAME>`: Name of the ReplicatedStorageClass resource.
 
 2. The controller migrates each volume in place: one diskful replica is retyped into a tie-breaker (no full resync, no data movement) and its logical volume is released. Watch progress per volume via the `MembershipLayoutConverged` condition and the `MembershipLayout` print column:
 

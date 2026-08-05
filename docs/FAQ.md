@@ -111,7 +111,7 @@ Add the corresponding StorageClass name to `spec.settings.defaultClusterStorageC
    vgchange <VG_NAME> --add-tag storage.deckhouse.io/enabled=true
    ```
 
-   `<VG_NAME>` — name of the existing LVM Volume Group.
+   where `<VG_NAME>`: Name of the existing LVM Volume Group.
 
    This VG will be automatically discovered and a corresponding LVMVolumeGroup resource will be created in the cluster for it.
 
@@ -129,7 +129,7 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
    d8 k edit replicatedstoragepool <POOL_NAME>
    ```
 
-   `<POOL_NAME>` — name of the ReplicatedStoragePool resource.
+   where `<POOL_NAME>`: Name of the ReplicatedStoragePool resource.
 
    Add the new Volume Group to the [`spec.lvmVolumeGroups`](./cr.html#replicatedstoragepool-v1alpha1-spec-lvmvolumegroups) section:
 
@@ -140,8 +140,10 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
      - name: <NEW_VG_NAME>  # Add this line
    ```
 
-   `<EXISTING_VG_NAME>` — name of an LVMVolumeGroup already listed in the pool.  
-   `<NEW_VG_NAME>` — name of the LVMVolumeGroup to add.
+   where:
+
+   - `<EXISTING_VG_NAME>`: Name of an LVMVolumeGroup already listed in the pool.
+   - `<NEW_VG_NAME>`: Name of the LVMVolumeGroup to add.
 
 1. For LVMThin pools, additionally specify the thin pool name:
 
@@ -154,8 +156,10 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
        thinPoolName: <NEW_THIN_POOL_NAME>  # Add this line
    ```
 
-   `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>` — as above.  
-   `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>` — thin pool names in the corresponding Volume Groups.
+   where:
+
+   - `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>`: As above.
+   - `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>`: Thin pool names in the corresponding Volume Groups.
 
 1. Save the changes. The controller will automatically create a Storage Pool in LINSTOR for the new Volume Group and add it to the existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
@@ -165,7 +169,7 @@ To expand an existing [ReplicatedStoragePool](./cr.html#replicatedstoragepool) w
    d8 k get replicatedstoragepool <POOL_NAME> -o yaml
    ```
 
-   `<POOL_NAME>` — name of the ReplicatedStoragePool resource.  
+   where `<POOL_NAME>`: Name of the ReplicatedStoragePool resource.  
    Information about the new Volume Group should be displayed in the status.
 
 ## How to increase the limit on the number of DRBD volumes / change the ports through which DRBD clusters communicate with each other?
@@ -265,13 +269,13 @@ Upon execution, the script performs the following actions:
 - Provides recommendations for resolving issues, such as stuck replicas.
 
 Configuration variables for `replicas_manager.sh`:
-- `NON_INTERACTIVE` — enables non-interactive mode.
-- `TIMEOUT_SEC` — timeout between attempts, in seconds (default: 10).
-- `EXCLUDED_RESOURCES_FROM_CHECK` — regular expression to exclude resources from checks.
-- `CHUNK_SIZE` — chunk size for processing resources (default: 10).
-- `NODE_FOR_EVICT` — name of the node excluded from creating replicas.
-- `LINSTOR_NAMESPACE` — Kubernetes namespace (default: `d8-sds-replicated-volume`).
-- `DISKLESS_STORAGE_POOL` — pool for diskless replicas (default: `DfltDisklessStorPool`).
+- `NON_INTERACTIVE`: Enables non-interactive mode.
+- `TIMEOUT_SEC`: Timeout between attempts, in seconds (default: 10).
+- `EXCLUDED_RESOURCES_FROM_CHECK`: Regular expression to exclude resources from checks.
+- `CHUNK_SIZE`: Chunk size for processing resources (default: 10).
+- `NODE_FOR_EVICT`: Name of the node excluded from creating replicas.
+- `LINSTOR_NAMESPACE`: Kubernetes namespace (default: `d8-sds-replicated-volume`).
+- `DISKLESS_STORAGE_POOL`: Pool for diskless replicas (default: `DfltDisklessStorPool`).
 
 ## How to evict DRBD resources from a node?
 
@@ -855,7 +859,7 @@ DRBD uses the network for data replication. When using NAS, network load will in
    d8 k -n d8-sds-replicated-volume delete secret <SECRET_NAME>
    ```
 
-   `<SECRET_NAME>` — name of the Secret whose certificate is about to expire.
+   where `<SECRET_NAME>`: Name of the Secret whose certificate is about to expire.
 
 1. Restart Deckhouse:
 

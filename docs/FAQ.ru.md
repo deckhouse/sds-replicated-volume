@@ -117,7 +117,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
    vgchange <VG_NAME> --add-tag storage.deckhouse.io/enabled=true
    ```
 
-   `<VG_NAME>` — имя существующей LVM Volume Group.
+   где `<VG_NAME>` — имя существующей LVM Volume Group.
 
    Данный VG будет автоматически обнаружен и в кластере для него будет создан соответствующий ресурс LVMVolumeGroup.
 
@@ -135,7 +135,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
    d8 k edit replicatedstoragepool <POOL_NAME>
    ```
 
-   `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.
+   где `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.
 
    Добавьте новую Volume Group в секцию [`spec.lvmVolumeGroups`](./cr.html#replicatedstoragepool-v1alpha1-spec-lvmvolumegroups):
 
@@ -146,8 +146,10 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
      - name: <NEW_VG_NAME>  # Добавьте эту строку
    ```
 
-   `<EXISTING_VG_NAME>` — имя LVMVolumeGroup, уже указанной в пуле.  
-   `<NEW_VG_NAME>` — имя добавляемой LVMVolumeGroup.
+   где:
+
+   - `<EXISTING_VG_NAME>` — имя LVMVolumeGroup, уже указанной в пуле;
+   - `<NEW_VG_NAME>` — имя добавляемой LVMVolumeGroup.
 
 1. Для LVMThin-пулов дополнительно укажите имя тонкого пула:
 
@@ -160,8 +162,10 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
        thinPoolName: <NEW_THIN_POOL_NAME>  # Добавьте эту строку
    ```
 
-   `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>` — как выше.  
-   `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>` — имена thin pool в соответствующих Volume Group.
+   где:
+
+   - `<EXISTING_VG_NAME>` / `<NEW_VG_NAME>` — как выше;
+   - `<EXISTING_THIN_POOL_NAME>` / `<NEW_THIN_POOL_NAME>` — имена thin pool в соответствующих Volume Group.
 
 1. Сохраните изменения. Контроллер автоматически создаст Storage Pool в LINSTOR для новой Volume Group и добавит её в существующий [ReplicatedStoragePool](./cr.html#replicatedstoragepool).
 
@@ -171,7 +175,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
    d8 k get replicatedstoragepool <POOL_NAME> -o yaml
    ```
 
-   `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.  
+   где `<POOL_NAME>` — имя ресурса ReplicatedStoragePool.  
    В статусе должна отобразиться информация о новой Volume Group.
 
 ## Как увеличить ограничение на количество DRBD-томов / изменить порты, по которым DRBD-кластера общаются между собой?
@@ -272,12 +276,12 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
 - Предоставляет рекомендации по устранению проблем, таких как застрявшие реплики.
 
 Переменные для настройки `replicas_manager.sh`:
-- `NON_INTERACTIVE` — включает неинтерактивный режим.
-- `TIMEOUT_SEC` — таймаут между попытками, в секундах (по умолчанию: 10).
-- `EXCLUDED_RESOURCES_FROM_CHECK` — регулярное выражение для исключения ресурсов из проверок.
-- `CHUNK_SIZE` — размер чанка для обработки ресурсов (по умолчанию: 10).
-- `NODE_FOR_EVICT` — имя узла, исключаемого из создания реплик.
-- `LINSTOR_NAMESPACE` — неймспейс Kubernetes (по умолчанию: `d8-sds-replicated-volume`).
+- `NON_INTERACTIVE` — включает неинтерактивный режим;
+- `TIMEOUT_SEC` — таймаут между попытками, в секундах (по умолчанию: 10);
+- `EXCLUDED_RESOURCES_FROM_CHECK` — регулярное выражение для исключения ресурсов из проверок;
+- `CHUNK_SIZE` — размер чанка для обработки ресурсов (по умолчанию: 10);
+- `NODE_FOR_EVICT` — имя узла, исключаемого из создания реплик;
+- `LINSTOR_NAMESPACE` — неймспейс Kubernetes (по умолчанию: `d8-sds-replicated-volume`);
 - `DISKLESS_STORAGE_POOL` — пул для diskless реплик (по умолчанию: `DfltDisklessStorPool`).
 
 ## Как вытеснить DRBD-ресурсы с узла?
@@ -373,7 +377,7 @@ d8 k exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor stora
 - `--node-name` — имя узла, с которого необходимо вытеснить ресурсы. Параметр обязателен для использования в режиме `--non-interactive`;
 - `--skip-db-backup` — пропустить создание резервной копии БД LINSTOR перед выполнением операций;
 - `--ignore-advise` — выполнить операции, несмотря на предупреждения команды `linstor advise resource`. Использовать, если скрипт был прерван и количество реплик у части ресурсов не соответствует указанному в [ReplicatedStorageClass](./cr.html#replicatedstorageclass);
-- `--exclude-resources-from-check` — исключить из проверки ресурсы, перечисленные через символ `|`;
+- `--exclude-resources-from-check` — исключить из проверки ресурсы, перечисленные через символ `|`.
 
 ## Как диагностировать проблемы с томами?
 
@@ -878,7 +882,7 @@ NAS обычно предполагает использование RAID на �
    d8 k -n d8-sds-replicated-volume delete secret <SECRET_NAME>
    ```
 
-   `<SECRET_NAME>` — имя Secret, у которого истекает сертификат.
+   где `<SECRET_NAME>` — имя Secret, у которого истекает сертификат.
 
 1. Перезапустите Deckhouse:
 
