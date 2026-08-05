@@ -19,6 +19,7 @@ package controlplanemigration
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,7 +37,16 @@ const (
 	snapshotName          = "control-plane-migration-state"
 	controlPlaneCMName    = "control-plane-migration"
 	defaultMigrationState = "not_started"
+	// devVersionMarker marks a Deckhouse development build. Release channels, Alpha and Beta
+	// included, are production channels, so the marker is the only signal of a dev cluster.
+	devVersionMarker = "dev"
 )
+
+// isDevDeckhouseVersion reports whether the cluster runs a Deckhouse development build.
+// The matching pattern is the one already used by the module templates for dev-only behaviour.
+func isDevDeckhouseVersion(version string) bool {
+	return strings.HasPrefix(version, devVersionMarker) || strings.HasSuffix(version, devVersionMarker)
+}
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
@@ -79,10 +89,22 @@ func computeInternalNewControlPlane(ctx context.Context, input *pkg.HookInput) (
 	}()
 
 	userNewControlPlane := input.Values.Get("sdsReplicatedVolume.newControlPlane").Bool()
+	deckhouseVersion := input.Values.Get("global.deckhouseVersion").String()
+	devCluster := isDevDeckhouseVersion(deckhouseVersion)
+
+	if userNewControlPlane && !devCluster {
+		// The new control plane may only be enabled on dev clusters. The setting is rejected by
+		// a ValidatingAdmissionPolicy as well, so reaching this branch means the ModuleConfig
+		// predates the policy or was written around it.
+		input.Logger.Error(
+			"newControlPlane is ignored: enabling it is only allowed on Deckhouse dev builds",
+			"deckhouseVersion", deckhouseVersion,
+		)
+	}
 
 	var internalNewControlPlane bool
 
-	if userNewControlPlane {
+	if userNewControlPlane && devCluster {
 		internalNewControlPlane = true
 	} else {
 		cl := input.DC.MustGetK8sClient()

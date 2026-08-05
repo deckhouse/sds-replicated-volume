@@ -15,12 +15,19 @@ spec:
         resourceNames: ["{{ .Chart.Name }}"]
         operations: ["CREATE", "UPDATE"]
   validations:
+    {{- /* Every field is guarded by the full has() chain: a bare has(spec.settings.newControlPlane)
+           errors out with "no such key" when spec carries no settings at all, and with
+           failurePolicy: Fail that error denies any update of the ModuleConfig. */}}
     - expression: |
         oldObject == null ||
         !(
+          has(oldObject.spec) &&
+          has(oldObject.spec.settings) &&
           has(oldObject.spec.settings.newControlPlane) &&
           oldObject.spec.settings.newControlPlane == true &&
           (
+            !has(object.spec) ||
+            !has(object.spec.settings) ||
             !has(object.spec.settings.newControlPlane) ||
             object.spec.settings.newControlPlane == false
           )
@@ -35,5 +42,52 @@ metadata:
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 spec:
   policyName: {{ .Chart.Name }}-mc.deckhouse.io
+  validationActions: ["Deny","Audit"]
+{{- end }}
+{{- /* The new control plane is a development-only backend: it may be turned on only on Deckhouse
+       dev builds. Every release channel, Alpha and Beta included, is a production channel. */}}
+{{- if not (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion)) }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Chart.Name }}-mc-new-control-plane-dev-only.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["deckhouse.io"]
+        apiVersions: ["*"]
+        resources: ["moduleconfigs"]
+        resourceNames: ["{{ .Chart.Name }}"]
+        operations: ["CREATE", "UPDATE"]
+  validations:
+    {{- /* Only the transition to true is denied: a ModuleConfig which already has it enabled stays
+           editable, so the policy cannot wedge a cluster that was switched before it appeared. */}}
+    - expression: |
+        !(
+          has(object.spec) &&
+          has(object.spec.settings) &&
+          has(object.spec.settings.newControlPlane) &&
+          object.spec.settings.newControlPlane == true
+        ) ||
+        (
+          oldObject != null &&
+          has(oldObject.spec) &&
+          has(oldObject.spec.settings) &&
+          has(oldObject.spec.settings.newControlPlane) &&
+          oldObject.spec.settings.newControlPlane == true
+        )
+      message: "Enabling spec.settings.newControlPlane for {{ .Chart.Name }} is only allowed on Deckhouse dev builds"
+      reason: "Forbidden"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Chart.Name }}-mc-new-control-plane-dev-only.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  policyName: {{ .Chart.Name }}-mc-new-control-plane-dev-only.deckhouse.io
   validationActions: ["Deny","Audit"]
 {{- end }}
