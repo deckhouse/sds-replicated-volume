@@ -4,7 +4,7 @@ description: "The sds-replicated-volume module: General Concepts and Principles.
 moduleStatus: preview
 ---
 
-The `sds-replicated-volume` module manages replicated block storage based on `DRBD`. `LINSTOR` is used as the control plane: you define a Storage Pool and a StorageClass with [Kubernetes custom resources](./cr.html); direct backend configuration is prohibited.
+The `sds-replicated-volume` module manages replicated block storage based on `DRBD`. `LINSTOR` is used as the control plane. You define a Storage Pool and a StorageClass with [Kubernetes custom resources](./cr.html); direct configuration of the `LINSTOR` backend is not supported.
 
 After you enable the module, create a [ReplicatedStoragePool](./usage.html#creating-a-replicatedstoragepool-resource) and a [ReplicatedStorageClass](./usage.html#creating-a-replicatedstorageclass-resource).
 
@@ -16,19 +16,19 @@ The module is only guaranteed to work if the requirements below are met. For oth
 
 The cluster must meet the following requirements (for both single-zone and multi-zone clusters):
 
-- Before enabling `sds-replicated-volume`, enable the [sds-node-configurator](/modules/sds-node-configurator/) module. A Storage Pool is built from LVMVolumeGroup resources managed by that module.
-- Connect the [snapshot-controller](/modules/snapshot-controller/) module.
-- Use at least 3 nodes. Prefer 4 or more to mitigate node failures. If the cluster has a single node, use [sds-local-volume](/modules/sds-local-volume/) instead of `sds-replicated-volume`.
+- Before enabling `sds-replicated-volume`, enable the [`sds-node-configurator`](/modules/sds-node-configurator/) module. A Storage Pool is built from LVMVolumeGroup resources managed by that module.
+- Connect the [`snapshot-controller`](/modules/snapshot-controller/) module.
+- Use at least 3 nodes. Prefer 4 or more to mitigate node failures. If the cluster has a single node, use [`sds-local-volume`](/modules/sds-local-volume/) instead of `sds-replicated-volume`.
 - Do not configure the LINSTOR backend directly.
 - Do not manually create a StorageClass for the `replicated.csi.storage.deckhouse.io` CSI driver.
-- Supported access modes: `RWO`; `RWX` — only in DVP.
+- Supported access modes: `RWO` and `RWX` (in DVP only).
 - Volume replication uses synchronous data synchronization only; asynchronous mode is not supported.
-- Supported storage modes: `LVM` and `LVMThin`. Differences are described [in the FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
-- Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
+- Supported storage modes: `LVM` and `LVMThin`. Differences are described in the [FAQ](./faq.html#when-should-i-use-lvm-and-when-lvmthin).
+- Use stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html).
 - Use network infrastructure with a bandwidth of 10 Gbps or higher.
 - For maximum performance, keep network latency between nodes within 0.5–1 ms. Latencies greater than 5 ms cause serious performance issues.
-- Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
-- For DRBD replication to work, allow communication between nodes on ports 7000–7999 using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
+- Do not use another Software Defined Storage (SDS) to provide disks for the `sds-replicated-volume` module.
+- For DRBD replication to work, allow communication between nodes on ports `7000`–`7999` using the UDP protocol. For details, see the table ["Traffic Between Nodes"](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#traffic-between-nodes). If needed, override the port range with the [`drbdPortRange` setting](./configuration.html#parameters-drbdportrange) by specifying `minPort` and `maxPort`.
 
   After changing `drbdPortRange`, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources keep their assigned ports.
 
@@ -36,8 +36,8 @@ The cluster must meet the following requirements (for both single-zone and multi
 
 Follow these recommendations when planning storage:
 
-- Avoid using RAID. Details are [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
-- Use local physical disks. Details are [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
+- Avoid using RAID. Details are in the [FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
+- Use local physical disks. Details are in the [FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
 - For the cluster to stay operational with degraded performance, network latency between nodes must not exceed 10 ms.
 - For guaranteed data consistency, use [ReplicatedStorageClass](./cr.html#replicatedstorageclass) with the `ConsistencyAndAvailability` replication mode ([`spec.replication`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication)) — this mode is used by default.
 
@@ -51,9 +51,9 @@ Run all commands on a machine that has administrator access to the Kubernetes AP
 
 ### Enabling modules
 
-1. Create a ModuleConfig resource to enable the [sds-node-configurator](/modules/sds-node-configurator/) module:
+1. Create a ModuleConfig resource to enable the [`sds-node-configurator`](/modules/sds-node-configurator/) module:
 
-   ```yaml
+   ```shell
    d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
@@ -75,7 +75,7 @@ Run all commands on a machine that has administrator access to the Kubernetes AP
 
    The example below starts the module with default settings: service pods are created on all cluster nodes, the DRBD kernel module is installed, and the CSI driver is registered:
 
-   ```yaml
+   ```shell
    d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
@@ -102,7 +102,7 @@ Run all commands on a machine that has administrator access to the Kubernetes AP
 
 ### Selecting data nodes
 
-Specify the [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter when enabling the module.
+Specify the [`settings.dataNodes.nodeSelector`](./configuration.html#parameters-datanodes-nodeselector) parameter when enabling the module.
 
 Labels `storage.deckhouse.io/sds-replicated-volume-*` that were already added are not removed automatically: the current control plane has no automatic data eviction from nodes.
 
@@ -119,7 +119,7 @@ To remove module resources from a node without removing the node from the cluste
    d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
    ```
 
-   `<NODE_NAME>` — name of the Kubernetes node.
+   where `<NODE_NAME>` is the name of the Kubernetes node.
 
 ### Configuring storage on nodes
 
@@ -129,7 +129,11 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
 
    ```shell
    d8 k get bd
+   ```
 
+   Example output:
+
+   ```console
    NAME                                           NODE       CONSUMABLE   SIZE      PATH
    dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
    dev-457ab28d75c6e9c0dfd50febaac785c838f9bf97   worker-0   false        20Gi      /dev/vde
@@ -145,7 +149,8 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: LVMVolumeGroup
    metadata:
-     name: "vg-1-on-worker-0" # The name can be any fully qualified resource name in Kubernetes. This LVMVolumeGroup resource name will be used to create ReplicatedStoragePool in the future
+     # Use any fully qualified resource name in Kubernetes. This LVMVolumeGroup resource name will be used to create ReplicatedStoragePool in the future.
+     name: "vg-1-on-worker-0"
    spec:
      type: Local
      local:
@@ -157,7 +162,8 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
            values:
              - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
              - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
-     actualVGNameOnTheNode: "vg-1" # the name of the LVM VG to be created from the above block devices on the node
+     # Name of the LVM VG to be created from the above block devices on the node.
+     actualVGNameOnTheNode: "vg-1"
    EOF
    ```
 
@@ -239,7 +245,8 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
      name: data
    spec:
      type: LVM
-     lvmVolumeGroups: # Here, specify the names of the LVMVolumeGroup resources you created earlier
+     # Specify the names of the LVMVolumeGroup resources you created earlier.
+     lvmVolumeGroups:
        - name: vg-1-on-worker-0
        - name: vg-1-on-worker-1
        - name: vg-1-on-worker-2
@@ -257,7 +264,11 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    ```shell
    alias linstor='d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
    linstor sp l
+   ```
 
+   Example output:
+
+   ```console
    ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
    ┊ StoragePool          ┊ Node     ┊ Driver   ┊ PoolName ┊ FreeCapacity ┊ TotalCapacity ┊ CanSnapshots ┊ State ┊ SharedName                    ┊
    ╞═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
@@ -279,9 +290,11 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    metadata:
      name: replicated-storage-class
    spec:
-     storagePool: data # Here, specify the name of the ReplicatedStoragePool you created earlier
+     # Specify the name of the ReplicatedStoragePool you created earlier.
+     storagePool: data
      reclaimPolicy: Delete
-     topology: Ignored # - note that setting "ignored" means there should be no zones (nodes labeled topology.kubernetes.io/zone) in the cluster
+     # With this topology, there should be no zones in the cluster (meaning, no nodes labeled with topology.kubernetes.io/zone).
+     topology: Ignored
    EOF
    ```
 
@@ -298,4 +311,3 @@ Create LVM volume groups using [LVMVolumeGroup](/modules/sds-node-configurator/c
    ```
 
    If a StorageClass named `replicated-storage-class` is shown, the module configuration is complete. Users can create PVs by specifying this StorageClass. With the settings above, a volume is created with three replicas on different nodes.
-

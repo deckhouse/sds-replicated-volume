@@ -4,7 +4,7 @@ description: "Модуль sds-replicated-volume: общие концепции 
 moduleStatus: preview
 ---
 
-Модуль `sds-replicated-volume` управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control-plane используется `LINSTOR`: Storage Pool и StorageClass задаются через [пользовательские ресурсы Kubernetes](./cr.html), непосредственная настройка бэкенда запрещена.
+Модуль `sds-replicated-volume` управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control plane используется `LINSTOR`. Storage Pool и StorageClass задаются через [пользовательские ресурсы Kubernetes](./cr.html), непосредственная настройка бэкенда `LINSTOR` не поддерживается.
 
 После включения модуля создайте [ReplicatedStoragePool](./usage.html#создание-ресурса-replicatedstoragepool) и [ReplicatedStorageClass](./usage.html#создание-ресурса-replicatedstorageclass).
 
@@ -16,19 +16,19 @@ moduleStatus: preview
 
 Кластер должен соответствовать следующим требованиям (для однозональных и многозональных кластеров):
 
-- Перед включением `sds-replicated-volume` включите модуль [sds-node-configurator](/modules/sds-node-configurator/). Storage Pool строится на ресурсах LVMVolumeGroup, которые настраивает этот модуль.
-- Подключите модуль [snapshot-controller](/modules/snapshot-controller/).
-- Используйте минимум 3 узла. Рекомендуется 4 и более на случай выхода узлов из строя. Если в кластере один узел, используйте [sds-local-volume](/modules/sds-local-volume/) вместо `sds-replicated-volume`.
+- Перед включением `sds-replicated-volume` включите модуль [`sds-node-configurator`](/modules/sds-node-configurator/). Storage Pool строится на ресурсах LVMVolumeGroup, которые настраивает этот модуль.
+- Подключите модуль [`snapshot-controller`](/modules/snapshot-controller/).
+- Используйте минимум 3 узла. Рекомендуется 4 и более на случай выхода узлов из строя. Если в кластере один узел, используйте [`sds-local-volume`](/modules/sds-local-volume/) вместо `sds-replicated-volume`.
 - Не настраивайте бэкенд LINSTOR напрямую.
 - Не создавайте вручную StorageClass для CSI-драйвера `replicated.csi.storage.deckhouse.io`.
-- Поддерживаемые режимы доступа: `RWO`; `RWX` — только в DVP.
+- Поддерживаемые режимы доступа: `RWO` и `RWX` (только в DVP).
 - Репликация выполняется только синхронно; асинхронный режим не поддерживается.
 - Поддерживаемые режимы хранения: `LVM` и `LVMThin`. Подробнее о различиях — [в FAQ](./faq.html#когда-следует-использовать-lvm-а-когда-lvmthin).
-- Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/supported_versions.html#linux).
+- Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html).
 - Для сетевого соединения используйте инфраструктуру с пропускной способностью 10 Gbps или выше.
 - Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс. При задержках более 5 мс будут возникать серьёзные проблемы с производительностью.
-- Не используйте другой SDS (Software Defined Storage) для предоставления дисков SDS Deckhouse.
-- Чтобы работала репликация DRBD, разрешите взаимодействие между узлами по портам 7000–7999 по протоколу UDP. Подробнее — в таблице [«Трафик между узлами»](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#трафик-между-узлами). При необходимости переопределите диапазон портов с помощью [настройки `drbdPortRange`](./configuration.html#parameters-drbdportrange), указав `minPort` и `maxPort`.
+- Не используйте другой Software Defined Storage (SDS) для предоставления дисков модулю `sds-replicated-volume`.
+- Чтобы работала репликация DRBD, разрешите взаимодействие между узлами по портам `7000`–`7999` по протоколу UDP. Подробнее — в таблице [«Трафик между узлами»](/products/kubernetes-platform/documentation/v1/reference/network_interaction.html#трафик-между-узлами). При необходимости переопределите диапазон портов с помощью [настройки `drbdPortRange`](./configuration.html#parameters-drbdportrange), указав `minPort` и `maxPort`.
 
   После изменения параметров `drbdPortRange` перезапустите контроллер LINSTOR, чтобы новые настройки вступили в силу. Существующие DRBD-ресурсы сохранят назначенные им порты.
 
@@ -36,9 +36,9 @@ moduleStatus: preview
 
 При планировании хранилища соблюдайте следующие рекомендации:
 
-- Не используйте RAID. Подробнее [в FAQ](./faq.html#почему-не-рекомендуется-использовать-raid-для-дисков-которые-используются-модулем-sds-replicated-volume).
-- Используйте локальные физические диски. Подробнее [в FAQ](./faq.html#почему-вы-рекомендуете-использовать-локальные-диски-не-nas).
-- Для стабильной работы кластера с ухудшением производительности допустимая сетевая задержка между узлами не должна превышать 10 мс.
+- Не используйте RAID. Подробнее — [в FAQ](./faq.html#почему-не-рекомендуется-использовать-raid-для-дисков-которые-используются-модулем-sds-replicated-volume).
+- Используйте локальные физические диски. Подробнее — [в FAQ](./faq.html#почему-вы-рекомендуете-использовать-локальные-диски-не-nas).
+- При ухудшении производительности сети для сохранения стабильной работы кластера задержка между узлами не должна превышать 10 мс.
 - Для гарантированной консистентности данных используйте [ReplicatedStorageClass](./cr.html#replicatedstorageclass) с режимом репликации `ConsistencyAndAvailability` ([`spec.replication`](./cr.html#replicatedstorageclass-v1alpha1-spec-replication)) — этот режим используется по умолчанию.
 
 {{< alert level="warning" >}}
@@ -47,13 +47,13 @@ moduleStatus: preview
 
 ## Быстрый старт
 
-Все команды выполняются на машине с доступом к API Kubernetes и правами администратора.
+Выполняйте все команды на машине с доступом к API Kubernetes и правами администратора.
 
 ### Включение модулей
 
-1. Создайте ресурс ModuleConfig для включения модуля [sds-node-configurator](/modules/sds-node-configurator/):
+1. Создайте ресурс ModuleConfig для включения модуля [`sds-node-configurator`](/modules/sds-node-configurator/):
 
-   ```yaml
+   ```shell
    d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
@@ -75,7 +75,7 @@ moduleStatus: preview
 
    Пример ниже запускает модуль с настройками по умолчанию: служебные поды создаются на всех узлах кластера, устанавливается модуль ядра DRBD, регистрируется CSI-драйвер:
 
-   ```yaml
+   ```shell
    d8 k apply -f - <<EOF
    apiVersion: deckhouse.io/v1alpha1
    kind: ModuleConfig
@@ -102,9 +102,9 @@ moduleStatus: preview
 
 ### Выбор узлов для данных
 
-Параметр [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать при включении модуля.
+Параметр [`settings.dataNodes.nodeSelector`](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать при включении модуля.
 
-Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически: в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов.
+Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-*` не удаляются автоматически: в текущей версии control plane нет механизма автоматической эвакуации данных с узлов.
 
 Чтобы убрать ресурсы модуля с узла, не удаляя сам узел из кластера:
 
@@ -119,7 +119,7 @@ moduleStatus: preview
    d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
    ```
 
-   `<NODE_NAME>` — имя узла Kubernetes.
+   где `<NODE_NAME>` — имя узла Kubernetes.
 
 ### Настройка хранилища на узлах
 
@@ -129,7 +129,11 @@ moduleStatus: preview
 
    ```shell
    d8 k get bd
+   ```
 
+   Пример вывода:
+
+   ```console
    NAME                                           NODE       CONSUMABLE   SIZE      PATH
    dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
    dev-457ab28d75c6e9c0dfd50febaac785c838f9bf97   worker-0   false        20Gi      /dev/vde
@@ -145,7 +149,8 @@ moduleStatus: preview
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: LVMVolumeGroup
    metadata:
-     name: "vg-1-on-worker-0" # Имя может быть любым подходящим для имен ресурсов в Kubernetes. Именно это имя ресурса LVMVolumeGroup будет в дальнейшем использоваться для создания ReplicatedStoragePool
+     # Используйте любое подходящее имя для ресурсов в Kubernetes. Это имя ресурса LVMVolumeGroup будет в дальнейшем использоваться для создания ReplicatedStoragePool.
+     name: "vg-1-on-worker-0"
    spec:
      type: Local
      local:
@@ -157,7 +162,8 @@ moduleStatus: preview
            values:
              - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
              - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
-     actualVGNameOnTheNode: "vg-1" # имя LVM VG, которая будет создана на узле из указанных выше блочных устройств
+     # Имя LVM VG, которая будет создана на узле из указанных выше блочных устройств.
+     actualVGNameOnTheNode: "vg-1"
    EOF
    ```
 
@@ -239,7 +245,8 @@ moduleStatus: preview
      name: data
    spec:
      type: LVM
-     lvmVolumeGroups: # Здесь указываем имена ресурсов LVMVolumeGroup, которые создавались ранее
+     # Укажите здесь имена ресурсов LVMVolumeGroup, которые вы создали ранее.
+     lvmVolumeGroups:
        - name: vg-1-on-worker-0
        - name: vg-1-on-worker-1
        - name: vg-1-on-worker-2
@@ -257,7 +264,11 @@ moduleStatus: preview
    ```shell
    alias linstor='d8 k -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
    linstor sp l
+   ```
 
+   Пример вывода:
+
+   ```console
    ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
    ┊ StoragePool          ┊ Node     ┊ Driver   ┊ PoolName ┊ FreeCapacity ┊ TotalCapacity ┊ CanSnapshots ┊ State ┊ SharedName                    ┊
    ╞═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
@@ -279,9 +290,11 @@ moduleStatus: preview
    metadata:
      name: replicated-storage-class
    spec:
-     storagePool: data # Указываем имя ReplicatedStoragePool, созданного ранее
+     # Укажите имя созданного ранее ресурса ReplicatedStoragePool.
+     storagePool: data
      reclaimPolicy: Delete
-     topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+     # При такой топологии в кластере не должно быть зон (узлов с лейблами topology.kubernetes.io/zone).
+     topology: Ignored
    EOF
    ```
 
@@ -298,4 +311,3 @@ moduleStatus: preview
    ```
 
    Если StorageClass с именем `replicated-storage-class` появился, настройка модуля завершена. Пользователи могут создавать PV, указывая этот StorageClass. При указанных настройках создаётся том с тремя репликами на разных узлах.
-
