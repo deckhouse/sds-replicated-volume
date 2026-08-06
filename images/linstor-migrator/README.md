@@ -106,6 +106,12 @@ Optional flags (defaults match prior hard-coded behavior):
 | `--stage4-max-iterations` | `500` | Maximum number of stage 4 polling iterations while waiting for ReplicatedStorageClasses to become Ready; exceeding it fails the migration with a clear error |
 | `--stage4-poll-interval` | `2s` | Interval between stage 4 polling iterations |
  
+## Labeling PersistentVolumes Without a LINSTOR Resource
+
+Before classifying and migrating LINSTOR resources, stage 1 walks every PersistentVolume with the replicated CSI driver (`replicated.csi.storage.deckhouse.io`) and labels the ones that have no corresponding per-node LINSTOR Resource with `sds-replicated-volume.deckhouse.io/no-linstor-resource=true`. These PVs are left without a backing `ReplicatedVolume` after migration (LINSTOR is removed in stage 3 and cannot be recreated); the label lets operators alert on them via `D8PersistentVolumeNoLinstorResource`.
+
+The step is idempotent: a PV that already carries the label is left untouched, and a PV that gained a LINSTOR resource on a later run has the label removed. PVs without the replicated CSI driver are ignored.
+
 ## How a LINSTOR Resource Is Migrated
 
 For each LINSTOR resource selected for migration, the migrator creates the corresponding new control-plane CRs: `ReplicatedVolumeReplica` per replica, `LVMLogicalVolume` and `DRBDResource` per diskful replica, a single `ReplicatedVolume` in Manual mode, and `ReplicatedVolumeAttachment` objects from matching `VolumeAttachment` resources. The migrator computes FTT/GMDR heuristics from legacy replica counts and wires owner references so `LVMLogicalVolume` and `DRBDResource` are owned by their `ReplicatedVolumeReplica`.
@@ -148,7 +154,7 @@ During stage 4, the switch-to-auto label is replaced as follows:
 - Manual topology and volume access are still hard-coded (`Ignored` and `PreferablyLocal`).
 ## Idempotency and Restart
 
-The migrator is designed to be idempotent: all `Create` calls use create-if-not-exists semantics, patch helpers skip no-op patches, and stage 4 tracks conversion RSPs by label (not in-memory), so a restart recovers from cluster state. Partial restarts at any stage are expected and safe.
+The migrator is designed to be idempotent: all `Create` calls use create-if-not-exists semantics, patch helpers skip no-op patches, the PersistentVolume `no-linstor-resource` labeling step adds or removes the label to match the current LINSTOR state, and stage 4 tracks conversion RSPs by label (not in-memory), so a restart recovers from cluster state. Partial restarts at any stage are expected and safe.
 
 ## Recovery Notes
 

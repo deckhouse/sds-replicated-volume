@@ -43,6 +43,15 @@ const (
 	// NoPersistentVolumeLabelValue is the value for NoPersistentVolumeLabelKey (boolean-style marker).
 	NoPersistentVolumeLabelValue = "true"
 
+	// NoLinstorResourceLabelKey is set by linstor-migrator on a PersistentVolume with the replicated
+	// CSI driver (replicated.csi.storage.deckhouse.io) when the PV has no corresponding LINSTOR
+	// Resource (per-node) at migration time. The PV is left without a backing ReplicatedVolume after
+	// migration; the label lets operators alert on such PVs.
+	NoLinstorResourceLabelKey = labelPrefix + "no-linstor-resource"
+
+	// NoLinstorResourceLabelValue is the value for NoLinstorResourceLabelKey (boolean-style marker).
+	NoLinstorResourceLabelValue = "true"
+
 	// SwitchToAutoConfigurationLabelKey is set on ReplicatedVolume by linstor-migrator at migration
 	// time when the LINSTOR resource had a matching PersistentVolume. Stage 4 of the migrator uses
 	// this label to find ReplicatedVolumes that must be switched from Manual to Auto configuration
