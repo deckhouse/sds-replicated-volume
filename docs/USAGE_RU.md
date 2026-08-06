@@ -16,7 +16,7 @@ description: "Использование и примеры работы sds-repl
 
 ### Настройка LVM
 
-Примеры конфигурации можно найти в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
+Примеры конфигурации можно найти в документации модуля [sds-node-configurator](/modules/sds-node-configurator/resources.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
 
 ### Работа с ресурсами ReplicatedStoragePool
 

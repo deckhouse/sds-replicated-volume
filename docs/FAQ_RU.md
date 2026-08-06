@@ -126,7 +126,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 
 Для расширения существующего ReplicatedStoragePool используйте новый LVM Volume Group. Выполните следующие шаги:
 
-1. Создайте новую LVMVolumeGroup с помощью модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html#создание-ресурса-lvmvolumegroup)
+1. Создайте новую LVMVolumeGroup с помощью модуля [sds-node-configurator](/modules/sds-node-configurator/resources.html#создание-ресурса-lvmvolumegroup)
 
 1. Добавьте новую Volume Group в существующий ReplicatedStoragePool, отредактировав ресурс:
 
@@ -807,7 +807,7 @@ StorageClass'ы в данном модуле управляются через �
 
 ### Миграция на ReplicatedStoragePool
 
-Ресурс `ReplicatedStoragePool` позволяет создавать `Storage Pool` в бэкенде модуля. Рекомендуется создать этот ресурс даже для уже существующих `Storage Pool` и указать в этом ресурсе существующие `LVMVolumeGroup`. В этом случае контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`. Подробнее про работу с ресурсами `LVMVolumeGroup` можно прочитать в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html), а с ресурсами `ReplicatedStoragePool` [здесь](./usage.html).
+Ресурс `ReplicatedStoragePool` позволяет создавать `Storage Pool` в бэкенде модуля. Рекомендуется создать этот ресурс даже для уже существующих `Storage Pool` и указать в этом ресурсе существующие `LVMVolumeGroup`. В этом случае контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`. Подробнее про работу с ресурсами `LVMVolumeGroup` можно прочитать в документации модуля [sds-node-configurator](/modules/sds-node-configurator/resources.html), а с ресурсами `ReplicatedStoragePool` [здесь](./usage.html).
 
 ## Как выполнить миграцию с модуля sds-drbd на модуль sds-replicated-volume?
 
