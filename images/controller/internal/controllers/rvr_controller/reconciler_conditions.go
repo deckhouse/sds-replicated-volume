@@ -805,7 +805,8 @@ func ensureStatusPhaseAndMessage(
 }
 
 // computeRVRPhaseAndMessage computes the phase and human-readable message for an RVR
-// from its current conditions. Pure function, no I/O, no mutation.
+// from its current conditions, plus status.initialQuorumReachedAt and the previously
+// recorded status.phase (see memberEverHadQuorum). Pure function, no I/O, no mutation.
 //
 // The function splits into two paths based on datamesh membership:
 //   - Pre-member (datameshRevision == 0): lifecycle phases (Pending → Provisioning → Configuring → WaitingForDatamesh).
@@ -976,16 +977,28 @@ func computeDeletionNote(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 // Called when datameshRevision > 0 (replica is or was a datamesh member).
 //
 // Priority: Critical > Synchronizing > Degraded > PartiallyDegraded > Progressing > Healthy.
+//
+// Joining is distinguished from losing: a member that has not reached quorum yet cannot have
+// frozen any I/O, so the quorum branches report Progressing instead of Critical for it
+// (see memberEverHadQuorum).
 func computeMemberPhaseAndMessage(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	ready, bvUpToDate, bvReady, drbdConfigured *metav1.Condition,
 ) (v1alpha1.ReplicatedVolumeReplicaPhase, string) {
 	// 7. Critical — IO frozen.
-	// 7a. Quorum lost (from Ready condition).
+	// 7a. Quorum lost (from Ready condition), or never reached yet (joining member).
 	if ready != nil && ready.Status == metav1.ConditionFalse &&
 		(ready.Reason == v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumLost ||
 			ready.Reason == v1alpha1.ReplicatedVolumeReplicaCondReadyReasonQuorumViaPeers) {
-		return v1alpha1.ReplicatedVolumeReplicaPhaseCritical, ready.Message + computeMemberProblems(rvr, bvReady, drbdConfigured)
+		problems := computeMemberProblems(rvr, bvReady, drbdConfigured)
+		if !memberEverHadQuorum(rvr) {
+			// The replica joined the datamesh but its peer connections are still coming
+			// up, so it has never served I/O. Critical would claim I/O is frozen; report
+			// the bring-up as progress instead.
+			return v1alpha1.ReplicatedVolumeReplicaPhaseProgressing,
+				"Waiting for initial quorum. " + ready.Message + problems
+		}
+		return v1alpha1.ReplicatedVolumeReplicaPhaseCritical, ready.Message + problems
 	}
 	// 7b. IO suspended (from Attached condition, independent of Ready).
 	if att := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondAttachedType); att != nil &&
@@ -1033,6 +1046,42 @@ func computeMemberPhaseAndMessage(
 		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, ready.Message
 	default:
 		return v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded, "Unable to determine health status"
+	}
+}
+
+// memberEverHadQuorum reports whether this datamesh member is known to have held quorum
+// at least once during its current membership epoch.
+//
+// "Quorum was never reached yet" (a joining member whose peer connections are still coming
+// up) and "quorum was lost" (a member whose I/O is frozen) look identical on a single
+// snapshot: both are members with quorum=false and unconnected peers. The distinction needs
+// persistent memory, which is status.initialQuorumReachedAt — the latch maintained by
+// ensureStatusInitialQuorumReachedAt (ensureStatusQuorum only mirrors the observed quorum
+// that the latch is derived from).
+//
+// The recorded status.phase is a migration fallback for objects that predate the latch (and
+// a safety net if an un-upgraded CRD prunes the field): a member already published in an
+// operational phase had progressed past bring-up, so a quorum loss observed right after the
+// upgrade must still be reported as Critical. Note that the phase read here is the one
+// published by the previous reconciliation — computeRVRPhaseAndMessage runs before
+// ensureStatusPhaseAndMessage overwrites it.
+//
+// The joining phase (Progressing) MUST NOT be treated as operational: it is what the quorum
+// branches publish while waiting for the initial quorum, so counting it would let the
+// fallback arm itself on the very next snapshot and defeat the latch.
+func memberEverHadQuorum(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	if rvr.Status.InitialQuorumReachedAt != nil {
+		return true
+	}
+	switch rvr.Status.Phase {
+	case v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
+		v1alpha1.ReplicatedVolumeReplicaPhasePartiallyDegraded,
+		v1alpha1.ReplicatedVolumeReplicaPhaseDegraded,
+		v1alpha1.ReplicatedVolumeReplicaPhaseSynchronizing,
+		v1alpha1.ReplicatedVolumeReplicaPhaseCritical:
+		return true
+	default:
+		return false
 	}
 }
 

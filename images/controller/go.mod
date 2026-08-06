@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/controller
 
 go 1.26.5
-
 require (
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
@@ -12,6 +11,7 @@ require (
 	github.com/onsi/gomega v1.39.1
 	golang.org/x/sync v0.21.0
 	k8s.io/api v0.35.1
+	k8s.io/apiextensions-apiserver v0.35.0
 	k8s.io/apimachinery v0.35.2
 	k8s.io/client-go v0.35.1
 	k8s.io/component-helpers v0.35.1
@@ -224,7 +224,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
-	k8s.io/apiextensions-apiserver v0.35.0 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect

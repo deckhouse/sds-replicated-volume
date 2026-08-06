@@ -64,6 +64,7 @@ type TestRSC struct {
 	buildStoragePool      string // deprecated spec.storagePool
 	buildStorageType      *v1alpha1.ReplicatedStoragePoolType
 	buildStorageLVGs      []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups
+	buildReplication      *v1alpha1.ReplicatedStorageClassReplication
 	buildFTT              *byte
 	buildGMDR             *byte
 	buildTopology         *v1alpha1.ReplicatedStorageClassTopology
@@ -93,6 +94,13 @@ func (t *TestRSC) StorageType(st v1alpha1.ReplicatedStoragePoolType) *TestRSC {
 
 func (t *TestRSC) StorageLVMVolumeGroups(lvgs ...v1alpha1.ReplicatedStoragePoolLVMVolumeGroups) *TestRSC {
 	t.buildStorageLVGs = lvgs
+	return t
+}
+
+// Replication sets the deprecated spec.replication field (mutually exclusive
+// with FTT/GMDR). Editing it on an existing RSC is the r3->r2 migration trigger.
+func (t *TestRSC) Replication(r v1alpha1.ReplicatedStorageClassReplication) *TestRSC {
+	t.buildReplication = &r
 	return t
 }
 
@@ -196,6 +204,9 @@ func (t *TestRSC) buildObject() *v1alpha1.ReplicatedStorageClass {
 		if len(t.buildStorageLVGs) > 0 {
 			rsc.Spec.Storage.LVMVolumeGroups = t.buildStorageLVGs
 		}
+	}
+	if t.buildReplication != nil {
+		rsc.Spec.Replication = *t.buildReplication //nolint:staticcheck // testing deprecated field; replication edit is the r3->r2 migration trigger
 	}
 	if t.buildFTT != nil {
 		rsc.Spec.FailuresToTolerate = t.buildFTT

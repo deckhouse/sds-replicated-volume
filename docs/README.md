@@ -40,7 +40,7 @@ Direct configuration of the LINSTOR backend by the user is prohibited.
 {{< /alert >}}
 
 {{< alert level="info" >}}
-The [snapshot-controller](/modules/snapshot-controller/) module must be connected for this module to operate.
+Volume snapshots require a module that provides the `snapshot.storage.k8s.io` CRDs, for example [snapshot-controller](/modules/snapshot-controller/). Without it, the rest of the module keeps working and no VolumeSnapshotClass is created.
 {{< /alert >}}
 
 - Configure LVMVolumeGroup.

@@ -34,7 +34,7 @@ The controller fills optional spec fields with defaults (if not set by the user)
 ```
 readiness = storagePoolReady AND eligibleNodesValid
 configuration = resolved(spec) if readiness else previous
-volumeStats = aggregate(RVs) if allObserved else partial
+volumeStats = classify(trackedRVs) into pending | stale | aligned (mutually exclusive)
 ```
 
 ## Reconciliation Structure
@@ -147,14 +147,28 @@ Indicates whether the associated storage pool exists and is ready.
 
 ### ConfigurationRolledOut
 
-Indicates whether all volumes' configuration matches the storage class.
+Indicates whether all tracked volumes are aligned with the storage class (current configuration
+applied and layout converged). It is derived from the mutually exclusive volume categories
+described in [Volume Statistics](#volume-statistics), evaluated in this precedence order:
 
-| Status | Reason | When |
-|--------|--------|------|
-| True | RolledOutToAllVolumes | All RVs have `ConfigurationReady=True` |
-| False | ConfigurationRolloutInProgress | Rolling update in progress |
-| False | ConfigurationRolloutDisabled | `ConfigurationRolloutStrategy.type=NewVolumesOnly` AND `staleConfiguration > 0` |
-| Unknown | NewConfigurationNotYetObserved | Some volumes haven't observed the new configuration yet |
+| # | Status | Reason | When | Message |
+|---|--------|--------|------|---------|
+| 1 | Unknown | NewConfigurationNotYetObserved | `pendingObservation > 0` — at least one volume owes a verdict | `N volume(s) pending observation` |
+| 2 | False | ConfigurationRolloutInProgress | `staleConfiguration > 0` AND `ConfigurationRolloutStrategy.type=RollingUpdate` (a nil strategy counts as RollingUpdate) | `N volume(s) not yet aligned with the storage class configuration` |
+| 2 | False | ConfigurationRolloutDisabled | `staleConfiguration > 0` AND `ConfigurationRolloutStrategy.type=NewVolumesOnly` | `N volume(s) not yet aligned with the storage class configuration; automatic rollout is disabled` |
+| 3 | True | RolledOutToAllVolumes | no pending and no stale volumes, i.e. `aligned == tracked volumes` | All volumes have configuration matching the storage class |
+
+> **Note:** the reason is chosen by the strategy **type** alone, and the messages report the honest
+> stale count. `rollingUpdate.maxParallel` throttling is enforced by `rv_controller` (each volume
+> either rolls out or reports `ConfigurationReady=False/ConfigurationRolloutInProgress` while it
+> waits for a slot), and both kinds of volume are stale for this class-level aggregate — the budget
+> changes how fast the count drops, not what it counts.
+
+Under `NewVolumesOnly` a volume that already has a configuration keeps it and reports
+`ConfigurationReady=False/NewerConfigurationHeld` (see `rv_controller`). Such a held volume is
+stale on both axes at once — it runs an older configuration generation *and* reports
+`ConfigurationReady=False` — and is still counted exactly once, because the classification is
+mutually exclusive.
 
 ### VolumesSatisfyEligibleNodes
 
@@ -162,9 +176,13 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | AllVolumesSatisfy | All RVs have `SatisfyEligibleNodes=True` |
-| False | ConflictResolutionInProgress | Resolution in progress |
-| False | ManualConflictResolution | `EligibleNodesConflictResolutionStrategy.type=Manual` AND `inConflictWithEligibleNodes > 0` |
+| True | AllVolumesSatisfy | No RV is known to be in conflict |
+| False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) |
+| False | ManualConflictResolution | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=Manual` |
+
+> **Note:** conflict resolution is read by strategy **type** only, and unlike the configuration
+> rollout its `maxParallel` throttling is **not implemented** anywhere: the parameter is accepted
+> and ignored.
 
 ## Phase
 
@@ -221,16 +239,43 @@ If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNod
 
 ## Volume Statistics
 
-The controller aggregates statistics from all `ReplicatedVolume` resources referencing this RSC:
+The controller aggregates statistics from all `ReplicatedVolume` resources referencing this RSC.
 
-- **Total** — count of all volumes
-- **Aligned** — volumes where both `ConfigurationReady` and `SatisfyEligibleNodes` conditions are `True`
-- **StaleConfiguration** — volumes where `ConfigurationReady` condition is present and `False` (missing condition is not counted)
-- **InConflictWithEligibleNodes** — volumes where `SatisfyEligibleNodes` condition is present and `False` (missing condition is not counted)
-- **PendingObservation** — volumes with non-zero `ConfigurationObservedGeneration` that doesn't match RSC's `ConfigurationGeneration`. Volumes with unset (0) `ConfigurationObservedGeneration` are treated as acknowledged to avoid status churn on newly created volumes.
+**Tracked volumes.** Only Auto-mode volumes take part in the rollout: a Manual-mode volume carries
+its configuration in its own spec, so the class neither rolls anything out to it nor waits for it.
+Manual volumes are excluded explicitly by `spec.configurationMode` (they are still counted in
+`Total` and in `InConflictWithEligibleNodes`).
+
+**Rollout categories.** Every tracked volume is classified into exactly one category by a
+short-circuit ladder — **pending → stale → aligned**, first match wins. The order is normative:
+there are two tracked conditions, so a volume with one `Unknown` and one `False` would otherwise
+match two categories, and "we do not know yet" is weaker than any verdict. Hence the invariant:
+
+```text
+pendingObservation + staleConfiguration + aligned == tracked volumes
+```
+
+The tracked conditions form the *configuration axis* only: `ConfigurationReady` and
+`MembershipLayoutConverged`. `SatisfyEligibleNodes` is deliberately not part of it — a volume can run the
+current configuration perfectly while sitting on a node that is no longer eligible.
+
+| Category | Counter | Rule |
+|----------|---------|------|
+| pending | `PendingObservation` | `ConfigurationObservedGeneration != RSC.ConfigurationGeneration` (an unset `0` is **not** acknowledgment), **or** a tracked condition carries no verdict: absent, `Unknown` (e.g. `MembershipLayoutConverged=Unknown/VolumeDeleting`), or written for an older `metadata.generation` of the volume |
+| stale | `StaleConfiguration` | otherwise: `ConfigurationGeneration != RSC.ConfigurationGeneration` (an older configuration is applied — for example held by `NewVolumesOnly`), **or** a tracked condition is `False` |
+| aligned | `Aligned` | otherwise: the current configuration generation is applied and both tracked conditions are `True` for the volume's current generation |
+
+Adding a category (for example a maintenance "suspended" one) means adding a rung at its
+precedence position; the counters and the invariant follow automatically.
+
+Other counters:
+
+- **Total** — count of all volumes (tracked or not)
+- **InConflictWithEligibleNodes** — volumes where the `SatisfyEligibleNodes` condition is present and not `True` (a missing condition is not counted — the volume has not been evaluated yet)
 - **UsedStoragePoolNames** — sorted list of storage pool names referenced by volumes
 
-> **Note:** `Aligned` and `StaleConfiguration` are nil when any volumes have pending observations. `Total`, `PendingObservation`, `InConflictWithEligibleNodes`, and `UsedStoragePoolNames` are always computed.
+> **Note:** all counters are always computed. The rollout counters are never nil: the categories
+> are exhaustive, so "we do not know" is expressed as `pendingObservation`, not as a missing value.
 
 ## Managed Metadata
 
@@ -249,7 +294,7 @@ The controller aggregates statistics from all `ReplicatedVolume` resources refer
 |----------|--------|---------|
 | RSC | For() (primary) | — |
 | RSP | Generation change, EligibleNodesRevision change, Ready condition change | mapRSPToRSC (includes usedBy names for orphan cleanup) |
-| RV | spec.replicatedStorageClassName change, status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes condition changes | rvEventHandler |
+| RV | metadata.generation change (condition freshness is generation-relative), spec.replicatedStorageClassName change, status.ConfigurationGeneration / status.ConfigurationObservedGeneration change, ConfigurationReady/SatisfyEligibleNodes/MembershipLayoutConverged condition changes | rvEventHandler |
 
 ## Indexes
 
@@ -453,8 +498,8 @@ flowchart TD
 | Input | Output |
 |-------|--------|
 | RV list | `status.volumes.total` |
-| RV conditions | `status.volumes.aligned`, `staleConfiguration`, `inConflictWithEligibleNodes` |
-| RV acknowledgment state | `status.volumes.pendingObservation` |
+| RV configuration generations + tracked conditions | `status.volumes.aligned`, `staleConfiguration`, `pendingObservation` (mutually exclusive) |
+| RV `SatisfyEligibleNodes` condition | `status.volumes.inConflictWithEligibleNodes` |
 | RV storage pool names | `status.volumes.usedStoragePoolNames` |
 | Volume counters + strategy | `ConfigurationRolledOut` condition |
 | Conflict counters + strategy | `VolumesSatisfyEligibleNodes` condition |

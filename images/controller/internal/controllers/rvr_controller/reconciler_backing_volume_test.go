@@ -262,6 +262,71 @@ var _ = Describe("computeIntendedBackingVolume", func() {
 		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
 	})
 
+	It("returns nil for a TieBreaker member whose spec is also TieBreaker (retype complete)", func() {
+		// After an r3→r2 retype completes, both the datamesh member and the RVR spec are
+		// TieBreaker → no backing volume, so the generic backing-volume reconcile deletes the LLV.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "node-1"},
+		}
+
+		intended, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(intended).To(BeNil())
+		Expect(reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonNotApplicable))
+	})
+
+	It("keeps the backing volume for a Diskful member whose spec is TieBreaker (retype in progress)", func() {
+		// During the retype the member is still Diskful (holds data / quorum) while the spec
+		// already targets TieBreaker → the LLV must be kept until the member actually leaves.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", LVMVolumeGroupName: "lvg-1"},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+	})
+
+	It("keeps the backing volume when the retype cleared both storage fields on the spec", func() {
+		// The r3→r2 retype patch clears spec.lvmVolumeGroupName and
+		// spec.lvmVolumeGroupThinPoolName together with the type flip (the API rejects them on a
+		// non-Diskful replica). A member that still holds data takes its backing volume from the
+		// datamesh member record, so the LLV — including its name, i.e. no delete+recreate — must
+		// survive the clearing until the member actually leaves.
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:     v1alpha1.ReplicaTypeTieBreaker,
+				NodeName: "node-1",
+			},
+		}
+		rv.Status.Datamesh.Members = []v1alpha1.DatameshMember{
+			{
+				Name:                       "rvr-1",
+				Type:                       v1alpha1.DatameshMemberTypeLiminalDiskful,
+				NodeName:                   "node-1",
+				LVMVolumeGroupName:         "lvg-1",
+				LVMVolumeGroupThinPoolName: "thindata",
+			},
+		}
+
+		bv, reason, _ := computeIntendedBackingVolume(rvr, rv, nil, nil)
+
+		Expect(bv).NotTo(BeNil())
+		Expect(reason).To(BeEmpty())
+		Expect(bv.LVMVolumeGroupName).To(Equal("lvg-1"))
+		Expect(bv.ThinPoolName).To(Equal("thindata"))
+		Expect(bv.LLVName).To(Equal(rvrllvname.ComputeLLVName("rvr-1", "lvg-1", "thindata")))
+	})
+
 	It("returns backing volume for Access member with Diskful spec (vestibule)", func() {
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
@@ -1660,3 +1725,76 @@ var _ = Describe("applyBackingVolumeReadyCondAbsent", func() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Other helper functions tests
 //
+
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcileBackingVolume tests
+//
+
+var _ = Describe("reconcileBackingVolume when the LLV create is rejected as invalid", func() {
+	var (
+		ctx  context.Context
+		rec  *Reconciler
+		rvr  *v1alpha1.ReplicatedVolumeReplica
+		rv   *v1alpha1.ReplicatedVolume
+		llvs []snc.LVMLogicalVolume
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+
+		scheme := runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				Type:               v1alpha1.ReplicaTypeDiskful,
+				NodeName:           "node-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		rv = &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Size: resource.MustParse("10Gi"),
+					Members: []v1alpha1.DatameshMember{{
+						Name:               "rvr-1",
+						Type:               v1alpha1.DatameshMemberTypeDiskful,
+						NodeName:           "node-1",
+						LVMVolumeGroupName: "lvg-1",
+					}},
+				},
+			},
+		}
+		llvs = nil
+
+		// sds-node-configurator rejects the LLV as invalid (e.g. a schema mismatch).
+		// The controller treats it as recoverable and keeps requeueing.
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
+					return &apierrors.StatusError{ErrStatus: metav1.Status{
+						Reason: metav1.StatusReasonInvalid,
+					}}
+				},
+			}).
+			Build()
+		rec = NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+	})
+
+	It("reports no change on the retry that leaves the condition untouched", func() {
+		// The stuck state persists across the 5-minute requeues, so an unconditional
+		// "changed" here turns every retry into a content-free RVR status patch.
+		_, _, outcome1 := rec.reconcileBackingVolume(ctx, rvr, &llvs, rv, nil, nil)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		_, _, outcome2 := rec.reconcileBackingVolume(ctx, rvr, &llvs, rv, nil, nil)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})

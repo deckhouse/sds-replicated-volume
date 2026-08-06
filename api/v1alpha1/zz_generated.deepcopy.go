@@ -1599,6 +1599,10 @@ func (in *ReplicatedVolumeReplicaStatus) DeepCopyInto(out *ReplicatedVolumeRepli
 		*out = new(ReplicatedVolumeReplicaStatusQuorumSummary)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.InitialQuorumReachedAt != nil {
+		in, out := &in.InitialQuorumReachedAt, &out.InitialQuorumReachedAt
+		*out = (*in).DeepCopy()
+	}
 	if in.Peers != nil {
 		in, out := &in.Peers, &out.Peers
 		*out = make([]ReplicatedVolumeReplicaStatusPeerStatus, len(*in))
@@ -1771,6 +1775,11 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		copy(*out, *in)
 	}
 	in.Datamesh.DeepCopyInto(&out.Datamesh)
+	if in.MembershipLayout != nil {
+		in, out := &in.MembershipLayout, &out.MembershipLayout
+		*out = new(string)
+		**out = **in
+	}
 	in.EffectiveLayout.DeepCopyInto(&out.EffectiveLayout)
 	if in.DatameshTransitions != nil {
 		in, out := &in.DatameshTransitions, &out.DatameshTransitions

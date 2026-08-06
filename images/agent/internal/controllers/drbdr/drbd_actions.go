@@ -452,8 +452,11 @@ func (a DownAction) String() string {
 }
 
 // DetachAction detaches the backing device from a volume.
+// IntentionalDiskless marks the detach as a conversion to an intentionally diskless client,
+// so that the kernel does not report the device as unintentionally diskless afterwards.
 type DetachAction struct {
-	Minor *uint
+	Minor               *uint
+	IntentionalDiskless bool
 }
 
 func (a DetachAction) Execute(ctx context.Context) error {
@@ -463,7 +466,7 @@ func (a DetachAction) Execute(ctx context.Context) error {
 			v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed,
 		)
 	}
-	err := drbdutils.ExecuteDetach(ctx, *a.Minor)
+	err := drbdutils.ExecuteDetach(ctx, *a.Minor, a.IntentionalDiskless)
 	return ConfiguredReasonError(err, v1alpha1.DRBDResourceCondConfiguredReasonDetachFailed)
 }
 
@@ -472,7 +475,7 @@ func (a DetachAction) String() string {
 	if a.Minor != nil {
 		minor = fmt.Sprintf("%d", *a.Minor)
 	}
-	return fmt.Sprintf("Detach(minor=%s)", minor)
+	return fmt.Sprintf("Detach(minor=%s, intentionalDiskless=%t)", minor, a.IntentionalDiskless)
 }
 
 // RenameAction renames a DRBD resource locally.

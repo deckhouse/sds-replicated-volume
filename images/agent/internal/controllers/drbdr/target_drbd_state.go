@@ -256,7 +256,13 @@ func computeDiskActions(minor *uint, iState IntendedDRBDState, aState ActualDRBD
 	intendedDisk := iState.BackingDisk()
 
 	if actualDisk != "" && actualDisk != intendedDisk {
-		res = append(res, DetachAction{Minor: minor})
+		// The detach is intentional only when the intended state is diskless (a retype to
+		// TieBreaker/Access). A Diskful resource switching its backing device also detaches,
+		// but it re-attaches right away and must not be marked as a diskless client.
+		res = append(res, DetachAction{
+			Minor:               minor,
+			IntentionalDiskless: iState.Type() == v1alpha1.DRBDResourceTypeDiskless,
+		})
 		return
 	}
 
@@ -438,7 +444,13 @@ func computeDiskOptionsActionReconcile(iState IntendedDRBDState, aState ActualDR
 // options diverge from intended defaults:
 //   - Dynamic resync controller settings (c-plan-ahead, c-delay-target, c-fill-target,
 //     c-max-rate, c-min-rate) are enforced for all peers.
-//   - Bitmap is turned off for Diskless peers only.
+//   - Bitmap is turned off for Diskless peers and kept on for Diskful ones. Both
+//     directions are enforced: a peer typed Diskless during an intermediate Access
+//     stage gets bitmap=no, and once the same peer becomes Diskful (including the
+//     liminal and shadow datamesh variants, which reach the agent as Diskful) the
+//     bitmap is turned back on. Without re-enabling it the DRBD kernel refuses the
+//     peer's disk attach ("peer is configured to be diskless but presents
+//     Inconsistent" / "already has a bitmap").
 func computePeerDeviceOptionsAction(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {
 	var changed bool
 	action := PeerDeviceOptionsAction{
@@ -474,14 +486,14 @@ func computePeerDeviceOptionsAction(resourceName string, iPeer IntendedPeer, aPe
 		changed = true
 	}
 
-	// Bitmap off for diskless peers only.
-	if iPeer.Type() == v1alpha1.DRBDResourceTypeDiskless {
-		actualBitmap := aPeer.Bitmap()
-		if actualBitmap == nil || *actualBitmap {
-			bitmapOff := false
-			action.Bitmap = &bitmapOff
-			changed = true
-		}
+	// Bitmap off for diskless peers, on for every other peer type.
+	// An unknown actual value (nil — no peer-device data observed) is treated as
+	// divergent, so the intended setting is always asserted explicitly.
+	intendedBitmap := iPeer.Type() != v1alpha1.DRBDResourceTypeDiskless
+	actualBitmap := aPeer.Bitmap()
+	if actualBitmap == nil || *actualBitmap != intendedBitmap {
+		action.Bitmap = &intendedBitmap
+		changed = true
 	}
 
 	if changed {

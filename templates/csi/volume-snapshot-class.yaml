@@ -1,5 +1,5 @@
 {{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if (.Values.global.enabledModules | has "snapshot-controller") }}
+{{- if .Capabilities.APIVersions.Has "snapshot.storage.k8s.io/v1/VolumeSnapshotClass" }}
 ---
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
@@ -13,7 +13,7 @@ deletionPolicy: Delete
 
 
 {{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
-{{- if (.Values.global.enabledModules | has "snapshot-controller") }}
+{{- if .Capabilities.APIVersions.Has "snapshot.storage.k8s.io/v1/VolumeSnapshotClass" }}
 ---
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass

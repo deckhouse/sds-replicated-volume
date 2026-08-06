@@ -193,10 +193,10 @@ func (r *Reconciler) reconcileBackingVolume(
 			// for safety reasons (e.g., schema changes in sds-node-configurator).
 			if apierrors.IsInvalid(err) {
 				rf.Log().Error(err, "Failed to create backing volume", "llvName", intended.LLVName)
-				applyBackingVolumeReadyCondFalse(rvr,
+				changed := applyBackingVolumeReadyCondFalse(rvr,
 					v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed,
 					fmt.Sprintf("Failed to create backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-				return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
+				return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChangedIf(changed)
 			}
 			return nil, nil, rf.Failf(err, "creating LLV %s", intended.LLVName)
 		}
@@ -267,10 +267,10 @@ func (r *Reconciler) reconcileBackingVolume(
 				// for safety reasons (e.g., schema changes in sds-node-configurator).
 				if apierrors.IsInvalid(err) {
 					rf.Log().Error(err, "Failed to resize backing volume", "llvName", intended.LLVName)
-					applyBackingVolumeReadyCondFalse(rvr,
+					changed := applyBackingVolumeReadyCondFalse(rvr,
 						v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonResizeFailed,
 						fmt.Sprintf("Failed to resize backing volume %s: %s", intended.LLVName, computeAPIValidationErrorCauses(err)))
-					return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChanged()
+					return actual, intended, rf.ContinueAndRequeueAfter(5 * time.Minute).ReportChangedIf(changed)
 				}
 				return nil, nil, rf.Failf(err, "patching LLV %s size", intendedLLV.Name)
 			}

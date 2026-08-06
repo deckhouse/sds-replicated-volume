@@ -1568,8 +1568,9 @@ var _ = Describe("RemoveReplica(D) additional", func() {
 	})
 
 	It("guard: GMDR blocks when UpToDate D too low", func() {
-		// 2D with config.GMDR=1 (qmr=2). One D is NOT UpToDate.
-		// ADR = UpToDate_D - 1 = 1 - 1 = 0. 0 > 1 is false → blocked.
+		// 2D with config.GMDR=1 (qmr=2). The leaving D is the one that is NOT UpToDate, so it is
+		// not subtracted from the UpToDate count: ADR = 1. 1 > 1 is false → blocked (the single
+		// remaining copy is exactly the guarantee, not more than it).
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
 				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),

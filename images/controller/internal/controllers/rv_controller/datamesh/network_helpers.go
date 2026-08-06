@@ -636,10 +636,18 @@ func connectionVerified(a, b *ReplicaContext, minRevision int64, check peerCheck
 	if b == nil {
 		return false
 	}
-	if a.rvr != nil && isAgentReady(a.rvr) && a.rvr.Status.DatameshRevision >= minRevision && check(a.rvr, b.id) {
+	return peerConnectionVerified(a.rvr, b.rvr, a.id, b.id, minRevision, check)
+}
+
+// peerConnectionVerified is the replica-level core of connectionVerified, working on RVRs instead
+// of replica contexts so that callers outside the engine (IsTieBreakerOperational) share the very
+// same rule. Either side may be nil — a side without a replica object simply cannot confirm
+// anything.
+func peerConnectionVerified(a, b *v1alpha1.ReplicatedVolumeReplica, aID, bID uint8, minRevision int64, check peerCheck) bool {
+	if a != nil && isAgentReady(a) && a.Status.DatameshRevision >= minRevision && check(a, bID) {
 		return true
 	}
-	if b.rvr != nil && isAgentReady(b.rvr) && b.rvr.Status.DatameshRevision >= minRevision && check(b.rvr, a.id) {
+	if b != nil && isAgentReady(b) && b.Status.DatameshRevision >= minRevision && check(b, aID) {
 		return true
 	}
 	return false

@@ -55,7 +55,7 @@ graph TD
 | File | Purpose |
 |------|---------|
 | `datamesh.go` | Entry point (`ProcessTransitions`, `BuildRegistry`) |
-| `context.go` | Data model (`globalContext`, `ReplicaContext`, `buildContexts`, writeback) |
+| `context.go` | Data model (`globalContext` incl. the `datameshRevision` snapshot, `ReplicaContext`, `buildContexts`, writeback) |
 | `slots.go` | Slot constants and accessors |
 | `concurrency_tracker.go` | `CanAdmit` rules, transition tracking state |
 | `helpers_confirm.go` | Shared confirm callbacks |
@@ -532,7 +532,9 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 |-------|---------|--------|
 | `commonAddGuards` | All AddReplica plans | RVNotDeleting, RSPAvailable, NodeEligible, NodeHasAllSystemNetworks, NoMemberOnSameNode, AddressesPopulated |
 | `commonRemoveGuards` | All RemoveReplica plans | NotAttached |
-| `loseVoterGuards` | RemoveReplica(D), ChangeType(D→...) | VolumeAccessLocalForDemotion, GMDRPreserved, FTTPreserved, ZoneGMDRPreserved, ZoneFTTPreserved |
+| `loseVoterGuardsCommon` | (shared base, not used directly) | VolumeAccessLocalForDemotion, GMDRPreserved, FTTPreserved, ZoneGMDRPreserved |
+| `loseVoterGuards` | RemoveReplica(D), ChangeType(D→A), ChangeType(D→sD) | `loseVoterGuardsCommon` + ZoneFTTPreserved |
+| `loseVoterToTieBreakerGuards` | ChangeType(D→TB) | `loseVoterGuardsCommon` + ZoneFTTPreservedForRetypeToTieBreaker |
 | `loseTBGuards` | RemoveReplica(TB), ChangeType(TB→...) | TBSufficient, ZoneTBSufficient |
 | `gainVoterGuards` | AddReplica(D), ChangeType(→D) | ZonalSameZone, TransZonalVoterPlacement |
 | `gainTBGuards` | AddReplica(TB), ChangeType(→TB) | ZonalSameZone, TransZonalTBPlacement |
@@ -551,7 +553,38 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 - `guardTransZonalVoterPlacement` — blocks if adding a voter would make any zone loss violate quorum or GMDR.
 - `guardTransZonalTBPlacement` — blocks if TB zone has > 1 D voter.
 - `guardZoneGMDRPreserved`/`guardZoneFTTPreserved` — blocks if removing a voter would violate zone-level guarantees.
+  `guardZoneGMDRPreserved` (like the non-zone `guardGMDRPreserved`) subtracts the subject from the
+  UpToDate counts — the total and its own zone — **only when the subject is itself UpToDate**
+  (`isUpToDateDiskful`, the single spelling of the criterion behind `upToDateDiskfulCount` and
+  `upToDateDiskfulCountPerZone`): a replica that carries no UpToDate copy takes none away when it
+  leaves, and pretending otherwise blocked exactly the transitions that risk nothing.
+- `guardZoneFTTPreservedForRetypeToTieBreaker` — the D→TB variant of `guardZoneFTTPreserved`
+  (shared arithmetic in `evaluateZoneFTT`). The subject does not disappear: it stays a quorum
+  participant as a TieBreaker in **its own** zone, so it counts as a surviving TB for every zone
+  except its own (that future TB dies together with its zone). Modelling the retype as a plain D
+  removal blocks legitimate TransZonal r3→r2 migrations — 3D in three zones becomes 2D+1TB, which
+  survives the loss of any zone (`1D+1TB`), yet the generic guard sees `1D+0TB` and blocks, leaving
+  the volume `Converging` forever. `guardZoneGMDRPreserved` deliberately has **no** retype-aware
+  variant: GMDR is about data redundancy, and the subject really does stop carrying data.
+  `rv_controller`'s `selectRetypeCandidate` mirrors this guard
+  (`isRetypeToTieBreakerZoneQuorumSafe`) so preselection never picks a candidate whose dispatch
+  would stay blocked.
 - `guardZoneTBSufficient` — blocks if removing the last TB when TB coverage required.
+
+**Leaving-TB guard:**
+
+- `guardTBSufficient` — blocks if releasing this TB would leave fewer **operational** TBs than
+  required (`operationalTieBreakerCount` excluding the subject, strict `<` against TB_min). This
+  is what makes tie-breaker replacement strictly create-first: the old TB is released only once
+  its replacement actually provides tiebreak protection (`isTieBreakerOperational` in
+  `membership_helpers.go`: not terminating, current `DatameshRevision`, `DRBDConfigured=True` at a
+  current `ObservedGeneration`, and every FM connection confirmed by a fresh side). Completing
+  `AddReplica(TB)` only proves that the agents applied the revision — see
+  [TRANSITIONS.md](TRANSITIONS.md) § "TieBreaker replacement".
+  The criteria themselves live in `tiebreaker_readiness.go` (`IsTieBreakerOperational`, exported):
+  `rv_controller` formation gates on the same question before declaring a volume formed, and the
+  two must not answer it differently. `isTieBreakerOperational` is only the engine-side adapter
+  that resolves the expected peers from the replica contexts.
 
 **Attachment-specific guards:**
 

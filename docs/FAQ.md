@@ -44,7 +44,6 @@ For performance-oriented workloads and snapshots — LVMThin + SSD/NVMe (always 
 
 There are no architectural limitations for all-flash configurations.
 
-
 ## Which Replication Modes to Use and When?
 
 There are three replication modes in total:
@@ -75,7 +74,6 @@ spec:
 - **Availability** – A compromise mode that ensures availability but, in case of network connectivity issues (one of the quorum replicas is diskless, and accessing data through it happens over the network), may lead to desynchronization and, optionally, data loss.  
   Best suited for non-critical data and applications that require some level of high availability (e.g., when nodes periodically go into maintenance) but do not have strict reliability or data integrity requirements.  
 - **ConsistencyAndAvailability** – The most reliable replication mode, recommended for mission-critical applications, vital data, and deploying virtual machines in a DVP environment.  
-
 
 ## How do I get info about the space used?
 
@@ -164,7 +162,7 @@ To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow the
 
    Information about the new Volume Group should be displayed in the status.
 
-## How to increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other?
+## How to increase the DRBD device limit or change the ports used by DRBD clusters to communicate?
 
 To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
 
@@ -231,7 +229,8 @@ For greater stability of the module, it is not recommended to reboot multiple no
    ```
 
 ### Can I automate the management of replicas and monitoring of LINSTOR state?
-Replica management and state monitoring are automated in the `replicas_manager.sh` script. 
+
+Replica management and state monitoring are automated in the `replicas_manager.sh` script.
 It checks the availability of the LINSTOR controller, identifies faulty or corrupted resources, creates database backups, and manages disk replicas, including configuring TieBreaker for quorum.
 
 To check the existence of the `replicas_manager.sh` script, run the following command on any master node:
@@ -285,13 +284,13 @@ Before proceeding with the eviction, the following steps must be performed:
    kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor resource list --faulty
    ```
 
-1. Check that all the pods in the `d8-sds-replicated-volume` namespace are in the Running state:
+3. Check that all the pods in the `d8-sds-replicated-volume` namespace are in the Running state:
 
    ```shell
    kubectl -n d8-sds-replicated-volume get pods | grep -v Running
    ```
 
-### Example of removing a node from LINSTOR and Kubernetes.
+### Example of removing a node from LINSTOR and Kubernetes
 
 Run the `evict.sh` script on any master node in interactive mode by specifying the delete mode `--delete-node`:
 
@@ -307,7 +306,7 @@ Example invocation:
 /opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
-### Example of removing resources from a node without removing the node itself.
+### Example of removing resources from a node without removing the node itself
 
 1. Run the `evict.sh` script on any master node in interactive mode (`--delete-resources-only`):
 
@@ -315,15 +314,15 @@ Example invocation:
    /opt/deckhouse/sbin/evict.sh --delete-resources-only
    ```
 
-To run the `evict.sh` script in non-interactive mode, add the `--non-interactive` flag followed by the name of the node to evict the resources from. In this mode, the script will perform all the necessary actions automatically (no user confirmation is required).
+   To run the `evict.sh` script in non-interactive mode, add the `--non-interactive` flag followed by the name of the node to evict the resources from. In this mode, the script will perform all the necessary actions automatically (no user confirmation is required).
 
-Example:
+   Example:
 
-```shell
-/opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
-```
+   ```shell
+   /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
+   ```
 
-> **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
+   > **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
 
 2. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
@@ -349,7 +348,6 @@ Example:
 - `--skip-db-backup` — Skips creating a backup of the LINSTOR database before executing the operations.
 - `--ignore-advise` — Proceeds with the operations despite warnings from the `linstor advise resource` command. Use if the script was interrupted and the number of replicas for some resources does not match the value specified in the `ReplicatedStorageClass`.
 - `--exclude-resources-from-check` — Excludes from checks the resources listed using the `|` (vertical bar) as a separator.
-
 
 ## Troubleshooting
 
@@ -481,23 +479,23 @@ If a small residual persists:
 
 **Phantom counter.** If, after a full re-mirror, a Primary still reports a tiny `out-of-sync` toward a peer whose data was just re-read bit-for-bit, this is a stale accounting artifact on the Primary side, not a real divergence — the data on all replicas is identical. Reconnect, verify and re-mirror will not clear it, it resets only on a disruptive action (a failover or a reboot of the Primary node). For a live volume it is safe to leave it until the next maintenance window.
 
-## I have deleted the ReplicatedStoragePool resource, yet its associated Storage Pool in the backend is still there. Is it supposed to be like this?
+## I deleted a ReplicatedStoragePool resource, but its Storage Pool in the backend is still there. Is that expected?
 
 Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the ReplicatedStoragePool resource.
 
 ## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
-Yes, this is the expected behavior. All `spec` fields of the resource made immutable.
+Partly. Most `spec` fields are immutable after creation, and updates to them are rejected with an error that names the field. The replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), the `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy` fields and `reclaimPolicy` (the StorageClass is recreated with the new policy) **can** be changed on an existing resource. Editing `replication` is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); see the "Updating the ReplicatedStorageClass resource" section of the usage guide. All other fields (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, and so on) remain immutable — to change them, recreate the resource.
 
-## When you delete a ReplicatedStorageClass resource, its child StorageClass in Kubernetes is not deleted. What can I do in this case?
+## Deleting a ReplicatedStorageClass resource does not delete its child StorageClass in Kubernetes. What can I do?
 
 The child StorageClass is only deleted if the status of the ReplicatedStorageClass resource is `Created`. Otherwise, you will need to either restore the ReplicatedStorageClass resource to a working state or delete the StorageClass yourself.
 
-## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?
+## An error occurred while creating a Storage Pool or StorageClass, but the entity was created anyway. Is that acceptable?
 
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
-## When running commands in the CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
+## CLI commands fail with "You're not allowed to change state of linstor cluster manually. Please contact tech support"
 
 In the `sds-replicated-volume` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when it doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
 
@@ -664,14 +662,12 @@ Note that the `LINSTOR` control-plane and its CSI will be unavailable during the
 
 1. Make sure there are no faulty resources in the module's backend. The command below should return an empty list:
 
-```shell
-alias linstor='kubectl -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
-linstor resource list --faulty
-```
+   ```shell
+   alias linstor='kubectl -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
+   linstor resource list --faulty
+   ```
 
-> **Caution!** You should fix all resources before migrating.
-
-   > **Caution.** You should fix all LINSTOR resources before migrating.
+   > **Caution!** You should fix all resources before migrating.
 
 2. Disable the `linstor` module:
 
@@ -776,7 +772,7 @@ You can read more about working with ReplicatedStorageClass resources [in the do
 
 ### Migrating to ReplicatedStoragePool
 
-The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
+The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, refer to the [module usage documentation](./usage.html).
 
 ## Migrating from sds-drbd module to sds-replicated-volume
 
@@ -864,7 +860,6 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 ## Why do you recommend using local disks (and not NAS)?
 
 DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
-
 
 ## How to manually trigger the certificate renewal process?
 

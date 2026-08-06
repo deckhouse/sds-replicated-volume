@@ -59,4 +59,8 @@ var _ = DescribeTable("computeCorrectQuorum",
 	Entry("qmr partial raise: 2 UpToDate < target 3, raise to 2", 3, byte(2), byte(1), 2, byte(2), byte(2)),
 	Entry("qmr raise blocked: 0 UpToDate", 1, byte(1), byte(1), 0, byte(1), byte(1)),
 	Entry("qmr already correct", 3, byte(1), byte(2), 3, byte(2), byte(2)),
+	// Unconstrained lowering pins targetQMR = GMDR+1 (via QuorumMinimumRedundancy) for every valid
+	// GMDR: current qmr is above target and enough UpToDate exist, so qmr settles exactly at GMDR+1.
+	Entry("lowering to target: GMDR=1 → qmr=2", 3, byte(1), byte(3), 3, byte(2), byte(2)),
+	Entry("lowering to target: GMDR=2 → qmr=3", 5, byte(2), byte(5), 5, byte(3), byte(3)),
 )

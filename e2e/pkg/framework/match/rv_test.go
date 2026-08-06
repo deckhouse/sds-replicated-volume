@@ -162,7 +162,7 @@ var _ = Describe("RV.FormationComplete", func() {
 	})
 })
 
-var _ = Describe("RV.QuorumCorrect", func() {
+var _ = Describe("RV.QuorumThresholdCorrect", func() {
 	It("passes with correct quorum (3 voters, q=2)", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
 		rv.Status.Datamesh.Quorum = 2
@@ -171,7 +171,7 @@ var _ = Describe("RV.QuorumCorrect", func() {
 			{Name: "rv-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "n2", Addresses: minAddr()},
 			{Name: "rv-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "n3", Addresses: minAddr()},
 		}
-		Expect(rv).To(RV.QuorumCorrect())
+		Expect(rv).To(RV.QuorumThresholdCorrect())
 	})
 
 	It("fails with wrong quorum", func() {
@@ -181,12 +181,12 @@ var _ = Describe("RV.QuorumCorrect", func() {
 			{Name: "rv-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "n1", Addresses: minAddr()},
 			{Name: "rv-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "n2", Addresses: minAddr()},
 		}
-		Expect(rv).ToNot(RV.QuorumCorrect())
+		Expect(rv).ToNot(RV.QuorumThresholdCorrect())
 	})
 
 	It("passes with no members", func() {
 		rv := &v1alpha1.ReplicatedVolume{}
-		Expect(rv).To(RV.QuorumCorrect())
+		Expect(rv).To(RV.QuorumThresholdCorrect())
 	})
 
 	It("passes with only non-voter members", func() {
@@ -195,7 +195,7 @@ var _ = Describe("RV.QuorumCorrect", func() {
 			{Name: "rv-0", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "n1", Addresses: minAddr()},
 			{Name: "rv-1", Type: v1alpha1.DatameshMemberTypeAccess, NodeName: "n2", Addresses: minAddr()},
 		}
-		Expect(rv).To(RV.QuorumCorrect())
+		Expect(rv).To(RV.QuorumThresholdCorrect())
 	})
 
 	It("counts LiminalDiskful as voter", func() {
@@ -206,7 +206,7 @@ var _ = Describe("RV.QuorumCorrect", func() {
 			{Name: "rv-1", Type: v1alpha1.DatameshMemberTypeLiminalDiskful, NodeName: "n2", Addresses: minAddr()},
 			{Name: "rv-2", Type: v1alpha1.DatameshMemberTypeTieBreaker, NodeName: "n3", Addresses: minAddr()},
 		}
-		Expect(rv).To(RV.QuorumCorrect())
+		Expect(rv).To(RV.QuorumThresholdCorrect())
 	})
 
 	It("ignores ShadowDiskful in voter count", func() {
@@ -218,7 +218,7 @@ var _ = Describe("RV.QuorumCorrect", func() {
 			{Name: "rv-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "n3", Addresses: minAddr()},
 			{Name: "rv-3", Type: v1alpha1.DatameshMemberTypeShadowDiskful, NodeName: "n4", Addresses: minAddr()},
 		}
-		Expect(rv).To(RV.QuorumCorrect())
+		Expect(rv).To(RV.QuorumThresholdCorrect())
 	})
 })
 

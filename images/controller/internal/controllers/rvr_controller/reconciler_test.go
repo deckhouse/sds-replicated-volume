@@ -19,6 +19,7 @@ package rvrcontroller
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -3806,6 +3808,339 @@ var _ = Describe("Reconciler", func() {
 			Expect(senCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonSatisfied))
 		})
 	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile-level tests: upgrade to a controller that knows initialQuorumReachedAt
+//
+
+var _ = Describe("Reconcile with objects predating status.initialQuorumReachedAt", func() {
+	// These tests exercise the whole reconciler (latch write + phase publication) against
+	// RVRs that look exactly like objects written by a controller build without the latch:
+	// a full member status, but no status.initialQuorumReachedAt.
+	//
+	// The "old" fixture is produced by letting the current reconciler settle a member and
+	// then stripping the latch from the settled object. That keeps the fixture honest —
+	// it cannot silently acquire the new field, and it cannot drift from what the
+	// controller actually writes.
+
+	const (
+		rvName  = "rv-1"
+		rvrName = "rv-1-0"
+		nodeA   = "node-1"
+		nodeB   = "node-2"
+		nodeC   = "node-3"
+	)
+
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+		cl     client.Client
+		rec    *Reconciler
+
+		// rvrStatusPatches counts status-subresource patches issued for the RVR,
+		// including content-free ones the settle loop cannot see.
+		rvrStatusPatches int
+	)
+
+	// reconcileOnce runs a single reconciliation and returns the resulting RVR.
+	reconcileOnce := func() *v1alpha1.ReplicatedVolumeReplica {
+		GinkgoHelper()
+		_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: rvrName}})
+		Expect(err).NotTo(HaveOccurred())
+		var got v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &got)).To(Succeed())
+		return &got
+	}
+
+	// settle reconciles until the RVR stops changing and returns the settled object.
+	settle := func() *v1alpha1.ReplicatedVolumeReplica {
+		GinkgoHelper()
+		var last *v1alpha1.ReplicatedVolumeReplica
+		for range 10 {
+			got := reconcileOnce()
+			if last != nil && reflect.DeepEqual(got.Status, last.Status) {
+				return got
+			}
+			last = got
+		}
+		Fail("RVR status did not settle within 10 reconciliations")
+		return nil
+	}
+
+	// setQuorum flips the quorum reported by the agent on the DRBDResource.
+	setQuorum := func(quorum bool) {
+		GinkgoHelper()
+		var drbdr v1alpha1.DRBDResource
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &drbdr)).To(Succeed())
+		drbdr.Status.Quorum = ptr.To(quorum)
+		Expect(cl.Status().Update(ctx, &drbdr)).To(Succeed())
+	}
+
+	// makeOldObject rewrites the RVR status to look like a pre-upgrade object: the latch is
+	// removed and the recorded phase is forced to the one the old controller would have
+	// published. Returns the status as persisted.
+	makeOldObject := func(recordedPhase v1alpha1.ReplicatedVolumeReplicaPhase) v1alpha1.ReplicatedVolumeReplicaStatus {
+		GinkgoHelper()
+		var rvr v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &rvr)).To(Succeed())
+		rvr.Status.InitialQuorumReachedAt = nil
+		rvr.Status.Phase = recordedPhase
+		Expect(cl.Status().Update(ctx, &rvr)).To(Succeed())
+
+		var persisted v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &persisted)).To(Succeed())
+		Expect(persisted.Status.InitialQuorumReachedAt).To(BeNil())
+		return persisted.Status
+	}
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+
+		// A three-member datamesh: our Access replica, one Diskful peer and one TieBreaker
+		// peer, so the quorum message is the realistic "quorum via connected peers" one and
+		// the peer list carries both diskful and diskless (tie-breaker) peers.
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: rvName},
+			Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "rsc-1"},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 7,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					ReplicatedStoragePoolName: "rsp-1",
+				},
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Size:               resource.MustParse("1Gi"),
+					SystemNetworkNames: []string{"Internal"},
+					Members: []v1alpha1.DatameshMember{
+						{
+							Name:      rvrName,
+							Type:      v1alpha1.DatameshMemberTypeAccess,
+							NodeName:  nodeA,
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+						{
+							Name:      "rv-1-1",
+							Type:      v1alpha1.DatameshMemberTypeDiskful,
+							NodeName:  nodeB,
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+						{
+							Name:      "rv-1-2",
+							Type:      v1alpha1.DatameshMemberTypeTieBreaker,
+							NodeName:  nodeC,
+							Addresses: []v1alpha1.DRBDResourceAddressStatus{{SystemNetworkName: "Internal"}},
+						},
+					},
+				},
+			},
+		}
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+			Spec:       v1alpha1.ReplicatedStoragePoolSpec{Type: v1alpha1.ReplicatedStoragePoolTypeLVM},
+			Status: v1alpha1.ReplicatedStoragePoolStatus{
+				EligibleNodes: []v1alpha1.ReplicatedStoragePoolEligibleNode{
+					{NodeName: nodeA, NodeReady: true, AgentReady: true},
+				},
+			},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       rvrName,
+				UID:        "uid-1",
+				Finalizers: []string{v1alpha1.RVRControllerFinalizer},
+			},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeAccess,
+				NodeName:             nodeA,
+			},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+				DatameshRevision: 7,
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: rvrName},
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum:    ptr.To(true),
+				DiskState: v1alpha1.DiskStateDiskless,
+				Addresses: []v1alpha1.DRBDResourceAddressStatus{
+					{SystemNetworkName: "Internal", Address: v1alpha1.DRBDAddress{IPv4: "10.0.0.1", Port: 7000}},
+				},
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Role:                    v1alpha1.DRBDRoleSecondary,
+					Type:                    v1alpha1.DRBDResourceTypeDiskless,
+					Quorum:                  ptr.To(byte(2)),
+					QuorumMinimumRedundancy: ptr.To(byte(1)),
+				},
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{
+						Name:             "rv-1-1",
+						Type:             v1alpha1.DRBDResourceTypeDiskful,
+						NodeID:           1,
+						ConnectionState:  v1alpha1.ConnectionStateConnected,
+						DiskState:        v1alpha1.DiskStateUpToDate,
+						ReplicationState: v1alpha1.ReplicationStateEstablished,
+						Paths: []v1alpha1.DRBDResourcePathStatus{
+							{
+								SystemNetworkName: "Internal",
+								Address:           v1alpha1.DRBDAddress{IPv4: "10.0.0.2", Port: 7000},
+								Established:       true,
+							},
+						},
+					},
+					{
+						// The tie-breaker peer: DRBD reports it as plain diskless, so it can
+						// only be told apart from an Access peer via its datamesh member type.
+						Name:             "rv-1-2",
+						Type:             v1alpha1.DRBDResourceTypeDiskless,
+						NodeID:           2,
+						ConnectionState:  v1alpha1.ConnectionStateConnected,
+						DiskState:        v1alpha1.DiskStateDiskless,
+						ReplicationState: v1alpha1.ReplicationStateEstablished,
+						Paths: []v1alpha1.DRBDResourcePathStatus{
+							{
+								SystemNetworkName: "Internal",
+								Address:           v1alpha1.DRBDAddress{IPv4: "10.0.0.3", Port: 7000},
+								Established:       true,
+							},
+						},
+					},
+				},
+				Conditions: []metav1.Condition{
+					{
+						Type:               v1alpha1.DRBDResourceCondConfiguredType,
+						Status:             metav1.ConditionTrue,
+						Reason:             v1alpha1.DRBDResourceCondConfiguredReasonConfigured,
+						ObservedGeneration: 0,
+					},
+				},
+			},
+		}
+		agentPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-1",
+				Namespace: "d8-sds-replicated-volume",
+				Labels:    map[string]string{"app": "agent"},
+			},
+			Spec:   corev1.PodSpec{NodeName: nodeA},
+			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		}
+
+		withPodIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+			return b.WithIndex(&corev1.Pod{}, indexes.IndexFieldPodByNodeName, func(obj client.Object) []string {
+				pod := obj.(*corev1.Pod)
+				if pod.Spec.NodeName == "" {
+					return nil
+				}
+				return []string{pod.Spec.NodeName}
+			})
+		}
+
+		rvrStatusPatches = 0
+		cl = withPodIndex(testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rv, rsp, rvr, drbdr, agentPod).
+				WithStatusSubresource(rvr, rv, rsp, drbdr).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && subResourceName == "status" {
+							rvrStatusPatches++
+						}
+						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+					},
+				}),
+		)).Build()
+		rec = NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+	})
+
+	It("settles a member with quorum into Healthy with the latch set", func() {
+		settled := settle()
+
+		Expect(settled.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+		Expect(settled.Status.InitialQuorumReachedAt).NotTo(BeNil())
+	})
+
+	It("does not patch the status of a settled member at all", func() {
+		// The settle loop only proves the content stops changing; this guards the
+		// write level too — an ensure that mis-reports "changed" on identical data
+		// (e.g. a by-pointer comparison) produces a content-free patch every
+		// reconcile, invisible to content checks but a constant apiserver load.
+		settle()
+
+		before := rvrStatusPatches
+		reconcileOnce()
+		Expect(rvrStatusPatches).To(Equal(before))
+	})
+
+	It("types a tie-breaker peer from the datamesh and counts it in the quorum summary", func() {
+		// DRBD reports both diskless peer roles identically, so the tie-breaker can only be
+		// recognised by its datamesh member type. Getting this wrong types every diskless
+		// peer as Access and pins quorumSummary.connectedTieBreakerPeers to 0.
+		settled := settle()
+
+		peer := findPeerByName(settled.Status.Peers, "rv-1-2")
+		Expect(peer).NotTo(BeNil())
+		Expect(peer.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+
+		Expect(settled.Status.QuorumSummary).NotTo(BeNil())
+		Expect(settled.Status.QuorumSummary.ConnectedTieBreakerPeers).To(Equal(1))
+	})
+
+	It("records the latch for an old healthy member without other status churn", func() {
+		settled := settle()
+		Expect(settled.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+
+		oldStatus := makeOldObject(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy)
+
+		got := reconcileOnce()
+
+		Expect(got.Status.InitialQuorumReachedAt).NotTo(BeNil())
+		Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+
+		// Nothing but the latch was written: strip it and the status must be identical.
+		gotStatus := *got.Status.DeepCopy()
+		gotStatus.InitialQuorumReachedAt = nil
+		Expect(gotStatus).To(Equal(oldStatus))
+	})
+
+	DescribeTable("keeps Critical for an old member upgraded during a real quorum loss",
+		func(recordedPhase v1alpha1.ReplicatedVolumeReplicaPhase) {
+			Expect(settle().Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+
+			setQuorum(false)
+			makeOldObject(recordedPhase)
+
+			got := reconcileOnce()
+
+			Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseCritical))
+			// Quorum is false, so the latch must stay unset.
+			Expect(got.Status.InitialQuorumReachedAt).To(BeNil())
+		},
+		Entry("recorded Healthy", v1alpha1.ReplicatedVolumeReplicaPhaseHealthy),
+		Entry("recorded Critical", v1alpha1.ReplicatedVolumeReplicaPhaseCritical),
+	)
+
+	DescribeTable("reports the joining phase for an old member upgraded during bring-up",
+		func(recordedPhase v1alpha1.ReplicatedVolumeReplicaPhase) {
+			Expect(settle().Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy))
+
+			setQuorum(false)
+			makeOldObject(recordedPhase)
+
+			got := reconcileOnce()
+
+			Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeReplicaPhaseProgressing))
+			Expect(got.Status.Message).To(HavePrefix("Waiting for initial quorum. "))
+			Expect(got.Status.InitialQuorumReachedAt).To(BeNil())
+		},
+		Entry("recorded Configuring", v1alpha1.ReplicatedVolumeReplicaPhaseConfiguring),
+		Entry("recorded WaitingForDatamesh", v1alpha1.ReplicatedVolumeReplicaPhaseWaitingForDatamesh),
+	)
 })
 
 var _ = Describe("deleteLLV", func() {

@@ -18,6 +18,7 @@ package rvrcontroller
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -1369,7 +1370,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{Name: "peer-1"}}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, nil),
+			ensureStatusPeers(ctx, rvr, nil, nil),
 			ensureConditionFullyConnected(ctx, rvr, nil, nil, true),
 		)
 
@@ -1392,7 +1393,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1419,7 +1420,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, false), // agent not ready
 		)
 
@@ -1448,7 +1449,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1476,7 +1477,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1509,7 +1510,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1549,7 +1550,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1589,7 +1590,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1633,7 +1634,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1672,7 +1673,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1709,7 +1710,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 
 		// First call
 		outcome1 := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
@@ -1717,7 +1718,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 
 		// Second call should report no change
 		outcome2 := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
@@ -1738,9 +1739,8 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 						},
 					},
 					{
-						Name:            "peer-2",
-						Type:            v1alpha1.DRBDResourceTypeDiskless,
-						AllowRemoteRead: true, // TieBreaker
+						Name: "peer-2",
+						Type: v1alpha1.DRBDResourceTypeDiskless,
 					},
 				},
 			},
@@ -1755,7 +1755,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		}
 
 		outcome := flow.MergeEnsures(
-			ensureStatusPeers(ctx, rvr, drbdr),
+			ensureStatusPeers(ctx, rvr, drbdr, datamesh),
 			ensureConditionFullyConnected(ctx, rvr, drbdr, datamesh, true),
 		)
 
@@ -1769,7 +1769,7 @@ var _ = Describe("ensureStatusPeers + ensureConditionFullyConnected", func() {
 		Expect(peer1.ConnectionState).To(Equal(v1alpha1.ConnectionStateConnected))
 		Expect(peer1.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
 
-		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
+		// peer-2: TieBreaker (Diskless + datamesh member peer-2 is TieBreaker)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
@@ -1899,13 +1899,20 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			Status: v1alpha1.DRBDResourceStatus{
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{Name: "peer-1", Type: v1alpha1.DRBDResourceTypeDiskful, ConnectionState: v1alpha1.ConnectionStateConnected, DiskState: v1alpha1.DiskStateUpToDate, ReplicationState: v1alpha1.ReplicationStateEstablished},
-					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},  // TieBreaker
-					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: false}, // Access
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless}, // TieBreaker via its datamesh member
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless}, // Access: no datamesh member
 				},
 			},
 		}
+		// The diskless peer role is only known to the datamesh: DRBD reports TieBreaker
+		// and Access peers identically.
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-2", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(3))
@@ -1918,15 +1925,92 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 		Expect(peer1.BackingVolumeState).To(Equal(v1alpha1.DiskStateUpToDate))
 		Expect(peer1.ReplicationState).To(Equal(v1alpha1.ReplicationStateEstablished))
 
-		// peer-2: TieBreaker (Diskless + AllowRemoteRead=true)
+		// peer-2: TieBreaker (Diskless + datamesh member peer-2 is TieBreaker)
 		peer2 := findPeerByName(rvr.Status.Peers, "peer-2")
 		Expect(peer2).NotTo(BeNil())
 		Expect(peer2.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
 
-		// peer-3: Access (Diskless + AllowRemoteRead=false)
+		// peer-3: Access (Diskless + no datamesh member peer-3)
 		peer3 := findPeerByName(rvr.Status.Peers, "peer-3")
 		Expect(peer3).NotTo(BeNil())
 		Expect(peer3.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
+	})
+
+	// The Diskful/diskless boundary always follows DRBD; only the diskless role
+	// (TieBreaker vs Access) is resolved through the datamesh member of the same name.
+	DescribeTable("computes the peer type from the drbdr peer type and the datamesh",
+		func(srcType v1alpha1.DRBDResourceType, datamesh *v1alpha1.ReplicatedVolumeDatamesh, expectedType v1alpha1.ReplicaType) {
+			drbdr := &v1alpha1.DRBDResource{
+				Status: v1alpha1.DRBDResourceStatus{
+					Peers: []v1alpha1.DRBDResourcePeerStatus{
+						{Name: "peer-1", Type: srcType},
+					},
+				},
+			}
+
+			outcome := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
+			Expect(outcome.Error()).NotTo(HaveOccurred())
+			Expect(rvr.Status.Peers).To(HaveLen(1))
+			Expect(rvr.Status.Peers[0].Type).To(Equal(expectedType))
+		},
+		Entry("diskless peer whose datamesh member is a TieBreaker → TieBreaker",
+			v1alpha1.DRBDResourceTypeDiskless,
+			&v1alpha1.ReplicatedVolumeDatamesh{Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			}},
+			v1alpha1.ReplicaTypeTieBreaker),
+		Entry("diskless peer whose datamesh member is an Access → Access",
+			v1alpha1.DRBDResourceTypeDiskless,
+			&v1alpha1.ReplicatedVolumeDatamesh{Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeAccess},
+			}},
+			v1alpha1.ReplicaTypeAccess),
+		Entry("diskless peer with no datamesh member of that name → Access",
+			v1alpha1.DRBDResourceTypeDiskless,
+			&v1alpha1.ReplicatedVolumeDatamesh{Members: []v1alpha1.DatameshMember{
+				{Name: "peer-2", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			}},
+			v1alpha1.ReplicaTypeAccess),
+		Entry("diskless peer without a datamesh → Access",
+			v1alpha1.DRBDResourceTypeDiskless,
+			nil,
+			v1alpha1.ReplicaTypeAccess),
+		Entry("diskful peer → Diskful even when its datamesh member is a TieBreaker",
+			v1alpha1.DRBDResourceTypeDiskful,
+			&v1alpha1.ReplicatedVolumeDatamesh{Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			}},
+			v1alpha1.ReplicaTypeDiskful),
+		Entry("peer with no type reported by the agent → no type, datamesh ignored",
+			v1alpha1.DRBDResourceType(""),
+			&v1alpha1.ReplicatedVolumeDatamesh{Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			}},
+			v1alpha1.ReplicaType("")),
+	)
+
+	It("clears a persisted peer type when the agent reports no peer type", func() {
+		rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			{Name: "peer-1", Type: v1alpha1.ReplicaTypeTieBreaker},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "peer-1"},
+				},
+			},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "peer-1", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
+
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+		Expect(rvr.Status.Peers[0].Type).To(BeEmpty())
 	})
 
 	It("mirrors drbdr.Status.Peers order", func() {
@@ -1940,7 +2024,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(3))
@@ -1959,10 +2043,10 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome1.DidChange()).To(BeTrue())
 
-		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
@@ -1983,7 +2067,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(1))
@@ -1997,7 +2081,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(BeEmpty())
@@ -2010,12 +2094,18 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{Name: "peer-0", Type: v1alpha1.DRBDResourceTypeDiskful},
 					{Name: "peer-5", Type: v1alpha1.DRBDResourceTypeDiskful},
-					{Name: "peer-31", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},
+					{Name: "peer-31", Type: v1alpha1.DRBDResourceTypeDiskless}, // TieBreaker via its datamesh member
 				},
 			},
 		}
+		// The datamesh member carries the already-normalized peer name.
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "my-rv-31", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(3))
@@ -2038,7 +2128,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.Peers).To(BeEmpty())
 	})
@@ -2054,7 +2144,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.Peers).To(BeEmpty())
 	})
@@ -2072,7 +2162,7 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rvr.Status.Peers).To(HaveLen(1))
 		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-5"))
@@ -2085,13 +2175,19 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 				Peers: []v1alpha1.DRBDResourcePeerStatus{
 					{Name: "my-rv-1", Type: v1alpha1.DRBDResourceTypeDiskful},
 					{Name: "unknown", Type: v1alpha1.DRBDResourceTypeDiskful},
-					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless, AllowRemoteRead: true},
+					{Name: "peer-2", Type: v1alpha1.DRBDResourceTypeDiskless}, // TieBreaker via its datamesh member
 					{Name: "peer-99", Type: v1alpha1.DRBDResourceTypeDiskful},
 				},
 			},
 		}
+		// The datamesh member carries the already-normalized peer name.
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "my-rv-2", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
 
-		outcome := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(2))
@@ -2111,13 +2207,68 @@ var _ = Describe("ensureStatusPeers (logic)", func() {
 			},
 		}
 
-		outcome1 := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr, nil)
 		Expect(outcome1.Error()).NotTo(HaveOccurred())
 		Expect(outcome1.DidChange()).To(BeTrue())
 		Expect(rvr.Status.Peers).To(HaveLen(1))
 		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-0"))
 
-		outcome2 := ensureStatusPeers(ctx, rvr, drbdr)
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr, nil)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+
+	It("is idempotent when a foreign peer is skipped", func() {
+		// A skipped peer makes the working slice longer than the written prefix, so
+		// the final trim runs on every call. It must not be mistaken for a change:
+		// the persisted content is identical and the report drives a status PATCH.
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "my-rv-0", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "unknown", Type: v1alpha1.DRBDResourceTypeDiskful},
+				},
+			},
+		}
+
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr, nil)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr, nil)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+
+	It("types a datamesh tie-breaker that follows a skipped foreign peer", func() {
+		// The write index runs ahead of the source index once a peer is skipped: the
+		// member lookup must use the normalized name of the peer being written, and the
+		// result must stay stable so the trim does not report a change on every call.
+		rvr.Spec.ReplicatedVolumeName = "my-rv"
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Peers: []v1alpha1.DRBDResourcePeerStatus{
+					{Name: "unknown", Type: v1alpha1.DRBDResourceTypeDiskful},
+					{Name: "peer-3", Type: v1alpha1.DRBDResourceTypeDiskless},
+				},
+			},
+		}
+		datamesh := &v1alpha1.ReplicatedVolumeDatamesh{
+			Members: []v1alpha1.DatameshMember{
+				{Name: "my-rv-3", Type: v1alpha1.DatameshMemberTypeTieBreaker},
+			},
+		}
+
+		outcome1 := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+		Expect(rvr.Status.Peers).To(HaveLen(1))
+		Expect(rvr.Status.Peers[0].Name).To(Equal("my-rv-3"))
+		Expect(rvr.Status.Peers[0].Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+
+		outcome2 := ensureStatusPeers(ctx, rvr, drbdr, datamesh)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
 	})
@@ -2261,6 +2412,130 @@ var _ = Describe("ensureStatusQuorum", func() {
 		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
 		Expect(outcome2.Error()).NotTo(HaveOccurred())
 		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+
+	It("returns no change when already in sync and quorum thresholds are set", func() {
+		// Thresholds make the summary carry *int fields; each call allocates
+		// them anew, so only a by-value comparison keeps the second call a no-op.
+		drbdr := &v1alpha1.DRBDResource{
+			Status: v1alpha1.DRBDResourceStatus{
+				Quorum: boolPtr(true),
+				ActiveConfiguration: &v1alpha1.DRBDResourceActiveConfiguration{
+					Quorum:                  bytePtr(2),
+					QuorumMinimumRedundancy: bytePtr(1),
+				},
+			},
+		}
+
+		// First call
+		outcome1 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome1.Error()).NotTo(HaveOccurred())
+		Expect(outcome1.DidChange()).To(BeTrue())
+
+		// Second call should report no change
+		outcome2 := ensureStatusQuorum(ctx, rvr, drbdr)
+		Expect(outcome2.Error()).NotTo(HaveOccurred())
+		Expect(outcome2.DidChange()).To(BeFalse())
+	})
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ensureStatusInitialQuorumReachedAt tests
+//
+
+var _ = Describe("ensureStatusInitialQuorumReachedAt", func() {
+	var (
+		ctx context.Context
+		rvr *v1alpha1.ReplicatedVolumeReplica
+	)
+
+	// first is a fixed timestamp for a latch that was already recorded.
+	first := metav1.NewTime(time.Unix(1700000000, 0))
+
+	BeforeEach(func() {
+		ctx = logr.NewContext(context.Background(), logr.Discard())
+		rvr = &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		}
+	})
+
+	It("sets the latch when a member is first seen with quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(true)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.InitialQuorumReachedAt).NotTo(BeNil())
+	})
+
+	It("does not overwrite the latch on subsequent observations", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt.Time).To(Equal(first.Time))
+	})
+
+	It("keeps the latch when a member loses quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(false)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt.Time).To(Equal(first.Time))
+	})
+
+	It("does not set the latch for a member without quorum", func() {
+		rvr.Status.DatameshRevision = 5
+		rvr.Status.Quorum = boolPtr(false)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("does not set the latch for a member with unknown quorum", func() {
+		rvr.Status.DatameshRevision = 5
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("does not set the latch for a non-member reporting quorum", func() {
+		// datameshRevision == 0: not a member, so there is no membership epoch to latch.
+		rvr.Status.Quorum = boolPtr(true)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeFalse())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
+	})
+
+	It("clears the latch when the replica leaves the datamesh", func() {
+		rvr.Status.DatameshRevision = 0
+		rvr.Status.Quorum = boolPtr(true)
+		rvr.Status.InitialQuorumReachedAt = ptr.To(first)
+
+		outcome := ensureStatusInitialQuorumReachedAt(ctx, rvr)
+
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(rvr.Status.InitialQuorumReachedAt).To(BeNil())
 	})
 })
 

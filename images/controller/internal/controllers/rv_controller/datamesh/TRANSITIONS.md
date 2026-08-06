@@ -815,17 +815,21 @@ is additionally blocked until **all** of the following pass:
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
 | 1 | **VolumeAccessLocalForDemotion** | Member is not attached with volumeAccess=Local | "volumeAccess=Local requires Diskful on attached node" |
-| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = UpToDate D count − 1) | "would violate GMDR (ADR=N, need > M)" |
+| 2 | **GMDRPreserved** | ADR > target GMDR (ADR = the UpToDate D count that survives the removal — the subject is subtracted only if it is itself UpToDate) | "would violate GMDR (ADR=N, need > M)" |
 | 3 | **FTTPreserved** | D count > D_min (D_min = target FTT + target GMDR + 1) | "would violate FTT (Diskful=N, need > M)" |
 | 4 | **ZoneGMDRPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough UpToDate D for GMDR | "would violate zone GMDR" |
 | 5 | **ZoneFTTPreserved** | Topology is not TransZonal, OR losing any zone after removal still leaves enough D for quorum | "would violate zone FTT" |
 
-**ZoneGMDRPreserved pseudocode:**
+**ZoneGMDRPreserved pseudocode** (the subject is excluded exactly once, and only when it is itself
+UpToDate: a subject that carries no UpToDate copy is in neither the total nor its zone count, so
+removing it changes nothing):
 
 ```
+subject_utd = 1 if the removed D is UpToDate else 0
+
 for each zone z:
-    UpToDate_in_zone = UpToDate_D_in_zone(z) − (1 if z == removed_D_zone)
-    UpToDate_surviving = (UpToDate_D_count − 1) − UpToDate_in_zone
+    UpToDate_in_zone = UpToDate_D_in_zone(z) − (subject_utd if z == removed_D_zone)
+    UpToDate_surviving = (UpToDate_D_count − subject_utd) − UpToDate_in_zone
     if UpToDate_surviving <= target_GMDR → blocked
 ```
 
@@ -853,8 +857,55 @@ for each zone z:
 
 | # | Guard | Condition | Blocked message |
 |---|-------|-----------|-----------------|
-| 1 | **TBSufficient** | TB count > TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TieBreaker required for quorum (Diskful=N even, FTT=M)" |
+| 1 | **TBSufficient** | Operational TB count excluding the subject >= TB_min (TB_min = 1 when D is even and target FTT = D/2, else 0) | "TieBreaker required for quorum (Diskful=N even, FTT=M): X operational TieBreaker(s) would remain, need Y; \<per-TB diagnostics\>" |
 | 2 | **ZoneTBSufficient** | Topology is not TransZonal, OR after removal, each zone that needs TB coverage still has it | "would violate zone TB coverage" |
+
+**TBSufficient detail**: the count is restricted to **operational** tie-breakers — membership
+alone is not protection, see [§ TieBreaker replacement](#tiebreaker-replacement-strict-create-first)
+below. The comparison is strict (`>=` TB_min after excluding the subject, i.e. blocked only when
+`operational < TB_min`): the subject is already out of the count, so equality is exactly enough.
+
+### TieBreaker replacement (strict create-first)
+
+Replacing a live tie-breaker (its RVR is deleted while a finalizer holds it) is **strictly
+create-first**: the replacement joins the datamesh and becomes operational *before* the old
+tie-breaker is released. A tie-breaker is **operational** when
+
+1. its RVR exists and is not itself terminating,
+2. it has applied the current `rv.Status.DatameshRevision`,
+3. `DRBDConfigured=True` with a current `ObservedGeneration`,
+4. every connection to a full-mesh (data-bearing) member is confirmed `Connected` by at least
+   one side whose report is fresh — agent ready and at the current revision.
+
+Criterion 4 is the reason membership is not enough: `AddReplica(TB)` completes on
+`confirmFMPlusSubject`, which proves that the agents applied the configuration revision, not that
+DRBD connections were established.
+
+The same four criteria (2-4 plus "the replica exists and is not terminating") are exported as
+`datamesh.IsTieBreakerOperational` (`tiebreaker_readiness.go`) and are what `rv_controller`
+formation gates on before declaring a volume formed — a volume must not leave formation with a
+tie-breaker that this guard would consider useless (see the rv_controller README, "Tie-breaker
+readiness in create/v1 formation").
+
+Consequences, by design:
+
+- The window holds **two** tie-breakers (`2D+2TB`). DRBD has no dedicated "the tiebreaker" — all
+  diskless peers are generic, two intentional diskless are legal, and neither is counted as a
+  voter. Note that with two diskless peers a tiebreak requires connectivity with **both**, which
+  is exactly why the old one must keep working and the new one must be operational before the
+  switch (verified in the DRBD sources, `drbd_state.c`, `calc_quorum`).
+- If no free eligible node exists, the replacement cannot be placed (the terminating tie-breaker
+  still occupies its own node — `OccupiedNodes` plus `guardNoMemberOnSameNode`). The volume then
+  reports `MembershipLayoutConverged=False/CannotConverge` with the scheduler's message and the old
+  tie-breaker keeps working, terminating but alive. Nothing else is blocked: only the deletion
+  waits. The manual escape is to remove the finalizer from the terminating RVR, which turns it
+  into an orphan (force-removed without tie-breaker guards) and lets a replacement be scheduled
+  on the freed node — see the recipe in `debug_and_problem_solving.md`.
+- Two tie-breakers terminating at once never release each other: a terminating replica is not
+  operational.
+
+The replacement itself is created by `rv_controller`'s layout convergence (see its README,
+"Layout convergence"), which computes the replacement deficit over non-deleting tie-breakers.
 
 ### Preconditions for ForceRemoveReplica
 

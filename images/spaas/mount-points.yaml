@@ -1,0 +1,3 @@
+dirs:
+  - /etc/spaas/certs
+  - /var/cache/spaas/patches

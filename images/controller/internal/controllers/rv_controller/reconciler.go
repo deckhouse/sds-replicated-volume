@@ -170,6 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
 				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp),
+				r.reconcileLayoutStatus(rf.Ctx(), rv, rvrs, rvas),
 			)
 		}
 		if outcome.ShouldReturn() {
@@ -275,8 +276,14 @@ func (r *Reconciler) reconcileNormalOperation(
 		// Delete unnecessary Access RVRs (redundant or unused).
 		r.reconcileDeleteAccessReplicas(rf.Ctx(), rv, rvrs, rvas),
 	)
+	if outcome.ShouldReturn() {
+		return outcome
+	}
 
-	return outcome
+	// Converge the datamesh layout toward the intended layout (at most one whitelisted
+	// action per pass). Runs last so it sees any transition just created by ProcessTransitions
+	// and no-ops while a membership transition is in flight.
+	return outcome.Merge(r.reconcileLayoutConvergence(rf.Ctx(), rv, rvrs, rvas))
 }
 
 // applyDatameshTransitionStepMessage sets the Message field on a datamesh transition step.
@@ -317,6 +324,743 @@ func makeDatameshSingleStepTransition(
 			},
 		},
 	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: layout convergence
+//
+
+// reconcileLayoutConvergence performs at most one whitelisted layout-convergence action per
+// reconcile pass to move the actual datamesh layout toward the intended layout:
+//
+//   - P1 retype (r3→r2 migration): convert one Diskful replica into a TieBreaker by patching
+//     its spec.type together with its (now invalid) backing-volume fields; the existing
+//     ChangeRole → DMTE machinery then drives the membership transition (no resync, no data
+//     movement).
+//   - P2 heal: create a missing TieBreaker replica when the diskful count is already correct
+//     (e.g. a freshly formed r2 volume still at 2D, or a manually deleted TB). The scheduler
+//     places it and it joins the datamesh via the standard tiebreaker/v1 plan. The same action
+//     replaces a TieBreaker whose RVR is being deleted: it is still a member and still counted
+//     by the raw layout, so the replacement deficit is computed separately
+//     (computeTargetTieBreakerReplacement) — strict create-first, the datamesh releases the old
+//     one only once the replacement is operational.
+//
+// Safety invariant: convergence NEVER creates a Diskful replica and NEVER deletes a replica or
+// its data. The decision is a pure compute helper (computeTargetLayoutAction), reused by the
+// MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and the action stay
+// in agreement; convergence itself never writes the condition (single-writer invariant) and
+// therefore discards the report half of that decision.
+//
+// After performing an action it returns ContinueAndRequeue: the split-client cache may be stale
+// relative to our own write, so we requeue rather than rely on the watch (see
+// controller-reconciliation.mdc). The outcome is deliberately NON-terminal — the root Reconcile
+// must still reach its status patch, otherwise every status change computed in the acting pass
+// (including the MembershipLayoutConverged report for exactly this action) is dropped (see
+// controller-reconciliation-flow.mdc, Continue* vs Done* with requeue). Mismatches outside the
+// whitelist are left untouched and reported honestly by the condition writer.
+//
+// The target itself encodes the drift check: computeTargetLayoutAction yields layoutActionNone
+// exactly when there is nothing to enforce this pass, so no separate is*InSync* step is needed —
+// an action kind other than layoutActionNone IS "not in sync".
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileLayoutConvergence(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "layout-convergence")
+	defer rf.OnEnd(&outcome)
+
+	// Preconditions: configuration acknowledged (computeTargetLayoutAction dereferences it) and
+	// RV not being deleted. The deletion check is also made inside computeTargetLayoutAction,
+	// which reports Unknown/VolumeDeleting and never yields an action; it is repeated here so this
+	// step provably performs no I/O for a deleting volume. Formation completion is guaranteed by
+	// the caller (normal-operation branch); active layout-changing transitions are handled inside
+	// computeTargetLayoutAction (it returns no action then).
+	if rv.Status.Configuration == nil || rv.DeletionTimestamp != nil {
+		return rf.Continue()
+	}
+
+	// The report half of the decision belongs to reconcileLayoutStatus (single writer of the
+	// MembershipLayoutConverged condition); convergence acts on the target only.
+	targetAction, _ := computeTargetLayoutAction(rv, *rvrs, rvas)
+	switch targetAction.kind {
+	case layoutActionRetypeToTieBreaker:
+		rvr := findRVRByName(*rvrs, targetAction.retypeRVRName)
+		if rvr == nil {
+			// Candidate vanished (stale cache); recompute next pass.
+			return rf.Continue()
+		}
+		// Apply the target in the Reconcile method (not in the patch helper); take base
+		// immediately before the mutation and patch with the existing optimistic-lock merge.
+		base := rvr.DeepCopy()
+		applyRVRRetypeToTieBreaker(rvr)
+		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+			return rf.Failf(err, "retyping Diskful RVR %s to TieBreaker", rvr.Name)
+		}
+		rf.Log().Info("Converging layout: retyped Diskful replica to TieBreaker", "rvr", rvr.Name)
+		return rf.ContinueAndRequeue()
+
+	case layoutActionCreateTieBreaker:
+		// The name is chosen deterministically by newRVR (ChooseNewName), so a repeated Create
+		// after a stale-cache retry converges via AlreadyExists.
+		rvr, err := newRVR(rv, *rvrs, v1alpha1.ReplicaTypeTieBreaker, "")
+		if err != nil {
+			return rf.Failf(err, "creating tie-breaker RVR")
+		}
+		if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
+			return rf.Failf(err, "creating tie-breaker RVR")
+		}
+		if err := r.createRVR(rf.Ctx(), rvr); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Expected race: a concurrent reconcile already created the TB under the same
+				// deterministic name. Do not Get immediately (the cache may not yet contain it);
+				// requeue and let the next pass observe it.
+				rf.Log().Info("Converging layout: tie-breaker replica already exists, requeuing")
+				return rf.ContinueAndRequeue()
+			}
+			return rf.Failf(err, "creating tie-breaker RVR")
+		}
+		*rvrs = insertRVRSorted(*rvrs, rvr)
+		rf.Log().Info("Converging layout: created tie-breaker replica")
+		return rf.ContinueAndRequeue()
+
+	default: // layoutActionNone
+		return rf.Continue()
+	}
+}
+
+// membershipLayoutConvergedVolumeDeletingMessage is the MembershipLayoutConverged message published on both deletion
+// paths (the normal-operation writer via computeTargetLayoutAction, and the early
+// reconcileDeletion branch that an unattached RV reaches directly).
+const membershipLayoutConvergedVolumeDeletingMessage = "volume is being deleted; layout convergence suspended"
+
+// layoutActionKind enumerates the whitelisted layout-convergence actions.
+type layoutActionKind int
+
+const (
+	// layoutActionNone means no convergence action is taken this pass. The report explains why:
+	// already converged, a transition/action is already in flight, no admissible candidate, or
+	// the mismatch is outside the convergence whitelist.
+	layoutActionNone layoutActionKind = iota
+	// layoutActionRetypeToTieBreaker converts one Diskful replica into a TieBreaker (P1).
+	layoutActionRetypeToTieBreaker
+	// layoutActionCreateTieBreaker creates a missing TieBreaker replica (P2).
+	layoutActionCreateTieBreaker
+)
+
+// targetLayoutAction is the pure decision of what (if anything) layout convergence should do this
+// pass. Computed by computeTargetLayoutAction and consumed by reconcileLayoutConvergence (to act).
+//
+// It carries the target only: the MembershipLayoutConverged report describing the same decision is a
+// separate output (membershipLayoutConvergedReport), so status-shaped report data is never mixed into the
+// target artifact (see controller-reconcile-helper-compute.mdc, "Patch-domain separation").
+type targetLayoutAction struct {
+	kind layoutActionKind
+	// retypeRVRName is the RVR chosen for a P1 retype (set only for layoutActionRetypeToTieBreaker).
+	retypeRVRName string
+}
+
+// membershipLayoutConvergedReport is the published MembershipLayoutConverged report describing the convergence
+// decision. Computed by computeTargetLayoutAction alongside the target and consumed by the
+// MembershipLayoutConverged condition writer (reconcileLayoutStatus), so the action and the condition never
+// disagree.
+type membershipLayoutConvergedReport struct {
+	status  metav1.ConditionStatus
+	reason  string
+	message string
+}
+
+// computeTargetLayoutAction decides the single whitelisted convergence action (if any) that moves
+// the actual datamesh layout toward the intended layout, and produces the MembershipLayoutConverged report
+// as a SEPARATE output (target and report are never mixed into one artifact).
+// It is pure (non-I/O, no mutation of inputs) and deterministic.
+//
+// Decision order (fixed — each earlier step wins over the later ones):
+//  1. RV deletion → Unknown/VolumeDeleting, no action.
+//  2. An active layout-changing transition → Converging, no action. This precedes the
+//     actual/intended comparison on purpose: mid-flight D→TB makes the counted layout equal the
+//     intended one for one step (the member is already a TieBreaker while the transition is still
+//     running), and reporting Converged there would flip the condition True and back.
+//  3. ANY retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
+//     Converging. The step does not look at the tie-breaker deficit: a flipped spec is a layout
+//     change in flight even when the intended layout no longer asks for it (the configuration was
+//     switched back inside the dispatch window), and Converged there would be a false "nothing is
+//     moving". Because the step also precedes the replacement domain, a terminating tie-breaker
+//     waits for the pending retype to resolve before a replacement is created — a combination
+//     convergence itself never produces (it issues at most one action per pass).
+//  4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted has no
+//     replacement yet) → create the replacement (strict create-first). This also precedes the
+//     actual/intended comparison: the raw layout still counts the terminating tie-breaker, so the
+//     comparison alone would report Converged while the only tie-breaker is leaving.
+//  5. Comparison of actual against intended: equal → Converged; otherwise the whitelist below.
+//
+// Whitelist (only these two mismatches ever trigger an action; everything else is reported but
+// never acted upon):
+//   - P1 retype (r3→r2): actualD > intendedD && actualTB < intendedTB — convert one Diskful voter
+//     into the missing tie-breaker. It never removes the extra diskful voters, so a 4D volume at
+//     an r2 config becomes 3D+1TB after one retype and is then reported TransitionUnsupported.
+//   - P2 heal: actualD == intendedD && actualTB < intendedTB — create the missing tie-breaker.
+//
+// Idempotency across the split-client cache is handled by counting in-flight work: a retype whose
+// spec was already flipped (pendingRetypeToTieBreakerMemberNames, step 3) or a tie-breaker RVR
+// already created but not yet a member (countPendingTieBreakerCreations) is reported without
+// issuing a second action.
+func computeTargetLayoutAction(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (targetLayoutAction, membershipLayoutConvergedReport) {
+	// 1. Deletion: convergence is not evaluated, and no action is ever taken.
+	if rv.DeletionTimestamp != nil {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionUnknown,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+			message: membershipLayoutConvergedVolumeDeletingMessage,
+		}
+	}
+
+	intendedD, intendedTB := rv.Status.Configuration.IntendedLayout()
+	actualD, actualTB := computeActualLayout(rv)
+	actualLayout := formatLayout(actualD, actualTB)
+	intendedLayout := formatLayout(intendedD, intendedTB)
+
+	// 2. A layout-changing transition is already moving the composition → Converging, no new action.
+	if hasLayoutChangingTransition(rv) {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("layout transition in progress: have %s, want %s", actualLayout, intendedLayout),
+		}
+	}
+
+	// 3. A retype already requested in a previous pass (spec flipped, DMTE not started yet).
+	// ANY pending retype blocks Converged, whether or not the intended layout still shows a
+	// tie-breaker deficit: the spec of a member is already flipped and the datamesh may act on
+	// it at any moment, so "actual matches intended and nothing is moving" would be a lie.
+	if pending := pendingRetypeToTieBreakerMemberNames(rv, rvrs); len(pending) > 0 {
+		var message string
+		switch {
+		case actualTB < intendedTB:
+			// The retype fills a genuine tie-breaker deficit — the layouts tell the whole story.
+			message = fmt.Sprintf("retype to tie-breaker requested: have %s, want %s",
+				actualLayout, intendedLayout)
+		case actualD == intendedD && actualTB == intendedTB:
+			// The deficit the retype was requested for is gone (typically the configuration was
+			// switched back before the datamesh dispatched the transition). "have 3D, want 3D"
+			// would say nothing here, so the message names the replica whose spec is flipped;
+			// see the rv_controller README for the recovery recipes.
+			message = fmt.Sprintf(
+				"retype to tie-breaker pending on %s: the layout already matches the intended one (%s); "+
+					"likely a reverted configuration change, and the retype is not rolled back automatically",
+				strings.Join(pending, ", "), actualLayout)
+		default:
+			// A mismatch that needs no additional tie-breaker: the layouts are meaningful, but
+			// the pending replica still has to be named.
+			message = fmt.Sprintf("retype to tie-breaker pending on %s: have %s, want %s",
+				strings.Join(pending, ", "), actualLayout, intendedLayout)
+		}
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: message,
+		}
+	}
+
+	// 4. Tie-breaker replacement (strict create-first): a tie-breaker whose RVR is being deleted
+	// still counts in the raw layout, but it is on its way out and must be replaced BEFORE the
+	// datamesh releases it.
+	if action, report, ok := computeTargetTieBreakerReplacement(
+		rv, rvrs, actualD, actualTB, intendedD, intendedTB, actualLayout, intendedLayout,
+	); ok {
+		return action, report
+	}
+
+	// 5. Converged: actual matches intended.
+	if actualD == intendedD && actualTB == intendedTB {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionTrue,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
+			message: fmt.Sprintf("layout converged: %s", actualLayout),
+		}
+	}
+
+	switch {
+	// P1 retype: too many diskful voters and a tie-breaker deficit.
+	case actualD > intendedD && actualTB < intendedTB:
+		name, noCandidateReason := selectRetypeCandidate(rv, rvrs, rvas)
+		if name == "" {
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+				status: metav1.ConditionFalse,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+				message: fmt.Sprintf("cannot retype Diskful replica to tie-breaker (have %s, want %s): %s",
+					actualLayout, intendedLayout, noCandidateReason),
+			}
+		}
+		return targetLayoutAction{
+				kind:          layoutActionRetypeToTieBreaker,
+				retypeRVRName: name,
+			}, membershipLayoutConvergedReport{
+				status: metav1.ConditionFalse,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+				message: fmt.Sprintf("retyping Diskful replica %s to tie-breaker: have %s, want %s",
+					name, actualLayout, intendedLayout),
+			}
+
+	// P2 heal: correct diskful count but a tie-breaker deficit.
+	case actualD == intendedD && actualTB < intendedTB:
+		if countPendingTieBreakerCreations(rv, rvrs) >= intendedTB-actualTB {
+			// The replica exists but cannot be placed: that is the scheduler's final word for
+			// the current spec, not progress. Only a CURRENT Scheduled=False counts (see
+			// computeActualPendingTieBreakerSchedulingFailure).
+			if failure := computeActualPendingTieBreakerSchedulingFailure(rv, rvrs); failure != "" {
+				return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+					status: metav1.ConditionFalse,
+					reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+					message: fmt.Sprintf("cannot place tie-breaker replica (have %s, want %s): %s",
+						actualLayout, intendedLayout, failure),
+				}
+			}
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+				status:  metav1.ConditionFalse,
+				reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+				message: fmt.Sprintf("tie-breaker creation pending: have %s, want %s", actualLayout, intendedLayout),
+			}
+		}
+		return targetLayoutAction{kind: layoutActionCreateTieBreaker}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("creating tie-breaker replica: have %s, want %s", actualLayout, intendedLayout),
+		}
+
+	// Outside the whitelist: report honestly, take no action.
+	default:
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
+			message: fmt.Sprintf(
+				"layout mismatch: have %s, want %s; automatic transition is not supported, manual intervention required",
+				actualLayout, intendedLayout),
+		}
+	}
+}
+
+// computeTargetTieBreakerReplacement decides what convergence does about tie-breaker members
+// that are leaving (their RVR is being deleted), and returns (action, report, true) when the
+// tie-breaker replacement domain owns this pass. It returns (_, _, false) when nothing is leaving
+// or when the situation is outside its scope, letting the caller fall through to the plain
+// actual/intended comparison. Like its caller it keeps the target and the MembershipLayoutConverged report
+// as separate outputs.
+//
+// Strict create-first: the datamesh only releases the old tie-breaker once its replacement is
+// operational (see the datamesh guard guardTBSufficient), so the replacement must be created
+// while the old one is still a member. The raw layout counts the terminating tie-breaker, so the
+// deficit is computed SEPARATELY here, over non-deleting tie-breakers only; computeActualLayout
+// stays raw and status.membershipLayout keeps reporting the honest composition (2D+2TB in the replacement
+// window).
+//
+// State table:
+//
+//	old leaving, no replacement                  → create it (Converging)
+//	old leaving, replacement pending             → Converging (or CannotConverge on a current
+//	                                               Scheduled=False: the old tie-breaker keeps
+//	                                               working, the replacement RVR keeps waiting
+//	                                               for a free eligible node)
+//	old leaving, replacement joined the datamesh → Converging (the DMTE guard releases the old
+//	                                               one once the replacement is operational)
+//	old gone                                     → not our business (the caller compares layouts)
+//
+// Scope: only the tie-breaker deficit created by the departure is handled. A wrong diskful count
+// (actualD != intendedD) or a genuine tie-breaker surplus is left to the caller, which reports it
+// honestly instead of piling a replacement on top of an unsupported layout.
+func computeTargetTieBreakerReplacement(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	actualD, actualTB, intendedD, intendedTB int,
+	actualLayout, intendedLayout string,
+) (targetLayoutAction, membershipLayoutConvergedReport, bool) {
+	leaving := deletingTieBreakerMemberNames(rv, rvrs)
+	if len(leaving) == 0 || actualD != intendedD {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+
+	// Tie-breakers that stay: the supply the intended layout can rely on.
+	availableTB := actualTB - len(leaving)
+	if availableTB > intendedTB {
+		// A surplus beyond the departure — outside this domain, report it honestly.
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+
+	subject := fmt.Sprintf("tie-breaker %s is terminating", strings.Join(leaving, ", "))
+	if len(leaving) > 1 {
+		subject = fmt.Sprintf("tie-breakers %s are terminating", strings.Join(leaving, ", "))
+	}
+	layouts := fmt.Sprintf("have %s, want %s", actualLayout, intendedLayout)
+
+	if availableTB == intendedTB {
+		// The remaining tie-breakers already cover the intended layout — either a replacement
+		// joined the datamesh, or none is needed at all. Releasing the leaving member is the
+		// DMTE's decision (it waits until a replacement is operational), so there is nothing to
+		// do here but report progress.
+		waiting := "waiting for it to leave the datamesh"
+		switch {
+		case len(leaving) > 1:
+			waiting = "waiting for them to leave the datamesh"
+		case intendedTB > 0:
+			waiting = "its replacement joined the datamesh, waiting for it to leave"
+		}
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("%s: %s (%s)", subject, waiting, layouts),
+		}, true
+	}
+
+	deficit := intendedTB - availableTB
+	if countPendingTieBreakerCreations(rv, rvrs) >= deficit {
+		// The replacement RVR exists but has not joined yet. Only a CURRENT Scheduled=False is
+		// the scheduler's verdict for this spec (see computeActualPendingTieBreakerSchedulingFailure):
+		// with every eligible node occupied the replacement cannot be placed, and strict
+		// create-first keeps the terminating tie-breaker working instead of releasing it.
+		if failure := computeActualPendingTieBreakerSchedulingFailure(rv, rvrs); failure != "" {
+			return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+				status: metav1.ConditionFalse,
+				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+				message: fmt.Sprintf("%s: cannot place a replacement (%s): %s",
+					subject, layouts, failure),
+			}, true
+		}
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("%s: replacement tie-breaker creation pending (%s)", subject, layouts),
+		}, true
+	}
+
+	return targetLayoutAction{kind: layoutActionCreateTieBreaker}, membershipLayoutConvergedReport{
+		status:  metav1.ConditionFalse,
+		reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		message: fmt.Sprintf("%s: creating a replacement (%s)", subject, layouts),
+	}, true
+}
+
+// deletingTieBreakerMemberNames returns the sorted names of TieBreaker members whose RVR is being
+// deleted — the tie-breakers that need a replacement before the datamesh may release them.
+//
+// A member whose RVR is gone entirely is NOT one of them: that is an orphan, force-removed by the
+// datamesh without any tie-breaker guard, and the plain deficit path then heals the layout. Adding
+// it here would start a replacement in parallel with the force-removal.
+func deletingTieBreakerMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var names []string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.DeletionTimestamp != nil {
+			names = append(names, m.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// selectRetypeCandidate deterministically chooses the Diskful replica to retype into a
+// tie-breaker for a P1 convergence, or returns ("", reason) when none is admissible (the reason
+// feeds the CannotConverge message).
+//
+// A Diskful member is an admissible candidate when:
+//   - its RVR spec.type is still Diskful (not already requested to change),
+//   - it is not attached — neither member.Attached nor an active RVA on its node (retyping an
+//     attached replica would disrupt live I/O),
+//   - its node passes the tie-breaker placement precondition mirroring the DMTE gain-TB guards
+//     (a mismatch would flip the spec to TieBreaker but leave the DMTE unable to run the
+//     ChangeRole transition, wedging the volume in a misleading Converging state):
+//   - TransZonal (guardTransZonalTBPlacement): the member's zone must hold at most one diskful
+//     voter.
+//   - Zonal (guardZonalSameZone): the member's zone must be a primary zone — one with the
+//     maximum diskful-voter count (ties are all acceptable).
+//   - for TransZonal, the retype also passes the DMTE lose-side zone quorum precondition
+//     (mirrors guardZoneFTTPreservedForRetypeToTieBreaker — see
+//     isRetypeToTieBreakerZoneQuorumSafe). Without this mirror a legitimately
+//     non-convergible layout (e.g. two zones holding 2D and 1D) would pick a candidate whose
+//     dispatch stays blocked forever, reporting Converging instead of CannotConverge.
+//
+// Among admissible candidates the lexicographically last RVR name is chosen (arbitrary but stable
+// and deterministic).
+func selectRetypeCandidate(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (name, reason string) {
+	topology := rv.Status.Configuration.Topology
+	transZonal := topology == v1alpha1.TopologyTransZonal
+	zonal := topology == v1alpha1.TopologyZonal
+
+	// Diskful voters and tie-breakers per zone (mirrors voterCountPerZone / tbCountPerZone used
+	// by the DMTE zone guards).
+	var (
+		votersPerZone = map[string]int{}
+		tbPerZone     = map[string]int{}
+		voters        int
+		totalTB       int
+	)
+	if transZonal || zonal {
+		for i := range rv.Status.Datamesh.Members {
+			m := &rv.Status.Datamesh.Members[i]
+			switch {
+			case m.Type.IsVoter():
+				votersPerZone[m.Zone]++
+				voters++
+			case m.Type == v1alpha1.DatameshMemberTypeTieBreaker:
+				tbPerZone[m.Zone]++
+				totalTB++
+			}
+		}
+	}
+	// For Zonal, a voter gain (including a tie-breaker) must land in a primary zone — one with the
+	// maximum voter count (mirrors guardZonalSameZone). Precompute that maximum once.
+	maxZoneVoters := 0
+	if zonal {
+		for _, c := range votersPerZone {
+			if c > maxZoneVoters {
+				maxZoneVoters = c
+			}
+		}
+	}
+
+	var (
+		chosen              string
+		sawDiskful          bool
+		sawSpecDiskful      bool
+		sawUnattachedSpecDF bool
+		sawZonePlacementOK  bool
+	)
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeDiskful {
+			continue
+		}
+		sawDiskful = true
+
+		rvr := findRVRByName(rvrs, m.Name)
+		if rvr == nil || rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			continue
+		}
+		sawSpecDiskful = true
+
+		if isMemberAttached(m, rvas) {
+			continue
+		}
+		sawUnattachedSpecDF = true
+
+		// Gain side: zone placement precondition (mirrors the DMTE gain-TB guards).
+		if transZonal && votersPerZone[m.Zone] > 1 {
+			continue
+		}
+		if zonal && maxZoneVoters > 0 && votersPerZone[m.Zone] != maxZoneVoters {
+			continue
+		}
+		sawZonePlacementOK = true
+
+		// Lose side: zone quorum precondition (mirrors the DMTE retype-aware zone FTT guard).
+		if transZonal && !isRetypeToTieBreakerZoneQuorumSafe(m.Zone, votersPerZone, tbPerZone, voters, totalTB) {
+			continue
+		}
+
+		if m.Name > chosen {
+			chosen = m.Name
+		}
+	}
+
+	if chosen != "" {
+		return chosen, ""
+	}
+
+	// Classify why no candidate is admissible (for the CannotConverge message).
+	switch {
+	case !sawDiskful:
+		return "", "no diskful replicas found"
+	case !sawSpecDiskful:
+		return "", "all diskful replicas are already being retyped"
+	case !sawUnattachedSpecDF:
+		return "", "all diskful replicas are attached"
+	case !sawZonePlacementOK:
+		return "", "no diskful replica can become a tie-breaker without violating zone placement"
+	default:
+		return "", "no diskful replica can become a tie-breaker: after the retype, losing a zone would lose quorum"
+	}
+}
+
+// isRetypeToTieBreakerZoneQuorumSafe reports whether retyping the diskful voter in subjectZone
+// into a tie-breaker keeps quorum survivable for the loss of any zone. It mirrors the DMTE
+// guard guardZoneFTTPreservedForRetypeToTieBreaker so that preselection never hands the
+// convergence loop a candidate whose transition the guard would block forever.
+//
+// The subject does not disappear: it stays a quorum participant as a tie-breaker in its own zone,
+// so it counts as a surviving tie-breaker for every zone except its own (that future tie-breaker
+// dies together with its zone).
+//
+// Only meaningful for TransZonal; callers gate on the topology.
+func isRetypeToTieBreakerZoneQuorumSafe(
+	subjectZone string,
+	votersPerZone, tbPerZone map[string]int,
+	voters, totalTB int,
+) bool {
+	if voters == 0 {
+		return true
+	}
+	votersAfter := voters - 1
+	qAfter := votersAfter/2 + 1
+
+	for zone, zoneVoters := range votersPerZone {
+		adjustedZoneVoters := zoneVoters
+		if zone == subjectZone && adjustedZoneVoters > 0 {
+			adjustedZoneVoters--
+		}
+		dSurviving := votersAfter - adjustedZoneVoters
+		tbSurviving := totalTB - tbPerZone[zone]
+		if zone != subjectZone {
+			tbSurviving++
+		}
+
+		if dSurviving >= qAfter {
+			continue
+		}
+		if dSurviving == qAfter-1 && tbSurviving > 0 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// computeActualPendingTieBreakerSchedulingFailure reports the scheduler's CURRENT verdict for
+// tie-breaker RVRs that exist but have not joined the datamesh yet. It returns a non-empty,
+// human-readable summary only when at least one of them carries a Scheduled=False condition whose
+// ObservedGeneration matches the RVR generation.
+//
+// A missing, Unknown or stale Scheduled condition is not a verdict — the scheduler simply has not
+// (re-)evaluated this replica yet, so convergence is still in progress. A tie-breaker RVR that is
+// being deleted is not a pending creation at all and is skipped (mirrors
+// countPendingTieBreakerCreations).
+func computeActualPendingTieBreakerSchedulingFailure(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) string {
+	var msgs []string
+	for _, rvr := range rvrs {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
+			continue
+		}
+		if rv.Status.Datamesh.FindMemberByName(rvr.Name) != nil {
+			continue
+		}
+		if !obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+			IsFalse().ObservedGenerationCurrent().Eval() {
+			continue
+		}
+		cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+		detail := cond.Message
+		if detail == "" {
+			detail = cond.Reason
+		}
+		msg := fmt.Sprintf("%s: %s", rvr.Name, detail)
+		if !slices.Contains(msgs, msg) {
+			msgs = append(msgs, msg)
+		}
+	}
+	slices.Sort(msgs)
+	return strings.Join(msgs, " | ")
+}
+
+// applyRVRRetypeToTieBreaker applies the P1 retype target to the RVR main patch domain: it flips
+// spec.type to TieBreaker and clears the backing-volume fields that only a Diskful replica may
+// carry.
+//
+// Both writes belong to the SAME patch: the API rejects backing-volume fields on a non-Diskful
+// replica ("lvmVolumeGroupName can only be set for Diskful type", see
+// ReplicatedVolumeReplicaSpec), so a patch that only flips the type never lands and the migration
+// retries forever. This matches the datamesh plan, which clears the backing volume on the D∅ → TB
+// step. The LLV survives the clearing: for a datamesh member the intended backing volume is
+// derived from the member record, not from the RVR spec, so it is kept until the member actually
+// leaves (see computeIntendedBackingVolume).
+func applyRVRRetypeToTieBreaker(rvr *v1alpha1.ReplicatedVolumeReplica) {
+	rvr.Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+	rvr.Spec.LVMVolumeGroupName = ""
+	rvr.Spec.LVMVolumeGroupThinPoolName = ""
+}
+
+// isMemberAttached reports whether the given diskful member is currently attached: either the
+// datamesh member is marked Attached (published / DRBD Primary) or an active (non-deleting) RVA
+// targets its node. Attached replicas are excluded as retype candidates to avoid disrupting
+// live I/O.
+func isMemberAttached(m *v1alpha1.DatameshMember, rvas []*v1alpha1.ReplicatedVolumeAttachment) bool {
+	if m.Attached {
+		return true
+	}
+	for _, rva := range rvas {
+		if rva.DeletionTimestamp == nil && rva.Spec.NodeName == m.NodeName {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingRetypeToTieBreakerMemberNames returns the sorted names of diskful members whose RVR
+// spec.type has already been flipped to TieBreaker (a retype requested in a previous pass, not
+// yet reflected in the member type). Used to avoid issuing a second retype while the first is in
+// flight, and to name the replica in the Converging message.
+func pendingRetypeToTieBreakerMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var names []string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeDiskful && m.Type != v1alpha1.DatameshMemberTypeLiminalDiskful {
+			continue
+		}
+		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+			names = append(names, m.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// countPendingTieBreakerCreations counts TieBreaker RVRs that are not yet datamesh members
+// (created in a previous pass, still being scheduled / joining). Used to avoid creating a second
+// tie-breaker while the first is in flight.
+//
+// A tie-breaker RVR that is itself being deleted is not in flight towards membership — it is on
+// its way out and will never satisfy the deficit, so it does not hold back a new creation.
+func countPendingTieBreakerCreations(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) int {
+	count := 0
+	for _, rvr := range rvrs {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
+			continue
+		}
+		if rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil {
+			count++
+		}
+	}
+	return count
+}
+
+// findRVRByName returns the RVR with the given name, or nil if absent.
+func findRVRByName(rvrs []*v1alpha1.ReplicatedVolumeReplica, name string) *v1alpha1.ReplicatedVolumeReplica {
+	for _, rvr := range rvrs {
+		if rvr.Name == name {
+			return rvr
+		}
+	}
+	return nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -530,7 +1274,7 @@ func applyDatameshReplicaRequestMessages(rv *v1alpha1.ReplicatedVolume, repIDs i
 // (pending scheduling, scheduling failed with inline error details, preconfiguring).
 func computeFormationPreconfigureWaitMessage(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-	targetDiskfulCount byte,
+	targetReplicaCount byte,
 	pendingScheduling, schedulingFailed, waitingPreconfiguration idset.IDSet,
 ) string {
 	var waitReasons []string
@@ -549,7 +1293,7 @@ func computeFormationPreconfigureWaitMessage(
 	}
 	waitingCount := pendingScheduling.Len() + schedulingFailed.Len() + waitingPreconfiguration.Len()
 	return fmt.Sprintf("Waiting for %d/%d replicas: %s",
-		waitingCount, targetDiskfulCount, strings.Join(waitReasons, ", "))
+		waitingCount, targetReplicaCount, strings.Join(waitReasons, ", "))
 }
 
 // computeActualSchedulingFailureMessages collects deduplicated, sorted messages from RVRs
@@ -573,22 +1317,18 @@ func computeActualSchedulingFailureMessages(rvrs []*v1alpha1.ReplicatedVolumeRep
 	return msgs
 }
 
-// computeIntendedDiskfulReplicaCount returns the intended number of diskful replicas.
-// D = FTT + GMDR + 1
-func computeIntendedDiskfulReplicaCount(rv *v1alpha1.ReplicatedVolume) byte {
-	cfg := rv.Status.Configuration
-	return cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
-}
-
 // computeTargetQuorum computes Quorum and QuorumMinimumRedundancy from the
 // configuration. Used during formation to set initial q/qmr values.
 //
 //	qmr = config.GMDR + 1
 //	q   = floor(voters / 2) + 1, but at least floor(minD / 2) + 1
-//	minD = config.FTT + config.GMDR + 1
+//	minD = intended diskful count (v1alpha1.ReplicatedVolumeConfiguration.IntendedLayout)
 func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	cfg := rv.Status.Configuration
-	minD := cfg.FailuresToTolerate + cfg.GuaranteedMinimumDataRedundancy + 1
+	// minD is the intended diskful count. Derived from the single source of truth
+	// (IntendedLayout) rather than re-deriving D = FTT+GMDR+1 here.
+	intendedD, _ := cfg.IntendedLayout()
+	minD := byte(intendedD)
 
 	minQ := minD/2 + 1
 	voters := idset.FromWhere(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool {
@@ -597,7 +1337,7 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	quorum := byte(voters.Len()/2 + 1)
 	q = max(quorum, minQ)
 
-	qmr = cfg.GuaranteedMinimumDataRedundancy + 1
+	qmr = cfg.QuorumMinimumRedundancy()
 
 	return q, qmr
 }
@@ -682,8 +1422,17 @@ func applyRVMetadata(rv *v1alpha1.ReplicatedVolume, targetFinalizerPresent bool)
 //
 // Generation semantics by mode:
 //   - Auto mode: ConfigurationGeneration = RSC's Status.ConfigurationGeneration
-//   - Manual mode: ConfigurationGeneration = rv.Generation (any spec field bumps it;
-//     deep-compare prevents false-positive config updates)
+//   - Manual mode: both generations stay 0 — the configuration comes from the volume spec, so
+//     there is no storage class rollout to track. Content equality (not generations) decides
+//     whether the stored configuration needs an update.
+//
+// In Auto mode the RSC configuration is read only when the class has published it for its
+// current spec generation, and it is applied only when the class rollout strategy allows it:
+// NewVolumesOnly holds it back from every existing volume (see that branch), RollingUpdate lets
+// it through in batches of maxParallel (see the rollout budget below and reconciler_rollout.go).
+// ConfigurationGeneration always names the generation the stored content came from;
+// ConfigurationObservedGeneration names the newest generation the volume has seen. The two differ
+// exactly while a newer configuration is held back or waiting for a rollout slot.
 //
 // Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileRVConfiguration(
@@ -700,6 +1449,14 @@ func (r *Reconciler) reconcileRVConfiguration(
 	// intended is a read-only pointer (no DeepCopy); clone only when writing to status.
 	var intended *v1alpha1.ReplicatedVolumeConfiguration
 	var intendedGeneration int64
+	// holdNewerConfiguration reports that the storage class rolls its configuration out to new
+	// volumes only, so a volume that already has one must keep it. It is set in the Auto branch
+	// only, and therefore implies rsc != nil.
+	holdNewerConfiguration := false
+	// throttleRollout reports that the intended configuration comes from a storage class, so the
+	// class-wide rollout budget applies to it. It is set in the Auto branch only, and therefore
+	// implies rsc != nil.
+	throttleRollout := false
 
 	switch rv.Spec.ConfigurationMode {
 	case v1alpha1.ReplicatedVolumeConfigurationModeManual:
@@ -719,11 +1476,28 @@ func (r *Reconciler) reconcileRVConfiguration(
 				fmt.Sprintf("ReplicatedStorageClass %q configuration not ready", rsc.Name))
 			return rf.Continue().ReportChangedIf(changed)
 		}
+		// The published configuration must describe the storage class as it is now. Until the
+		// class controller accepts the latest spec edit, status still carries the previous
+		// generation: applying it would hand a volume a configuration the user has already
+		// replaced — and under NewVolumesOnly the volume would then hold that superseded
+		// configuration forever, because it stops being "new" the moment it gets one.
+		// Waiting is safe: the RV watches RSC status changes, so the next publish wakes us up.
+		if rsc.Status.ConfigurationGeneration != rsc.Generation {
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonWaitingForStorageClass,
+				fmt.Sprintf("ReplicatedStorageClass %q has not published a configuration for generation %d yet (published generation: %d)",
+					rsc.Name, rsc.Generation, rsc.Status.ConfigurationGeneration))
+			return rf.Continue().ReportChangedIf(changed)
+		}
 		intended = rsc.Status.Configuration
 		intendedGeneration = rsc.Status.ConfigurationGeneration
+		holdNewerConfiguration = rsc.Spec.ConfigurationRolloutStrategy.GetType() == v1alpha1.ConfigurationRolloutNewVolumesOnly
+		throttleRollout = true
 	}
 
 	// Fast-path: config content matches intended → update generation tracking, skip the rest.
+	// This runs before the NewVolumesOnly hold on purpose: equal content means the volume is
+	// already aligned with the new generation, so there is nothing to hold back.
 	if rv.Status.Configuration != nil && *rv.Status.Configuration == *intended {
 		if rv.Status.ConfigurationGeneration != intendedGeneration {
 			rv.Status.ConfigurationGeneration = intendedGeneration
@@ -738,6 +1512,33 @@ func (r *Reconciler) reconcileRVConfiguration(
 		changed = applyConfigurationReadyCondTrue(rv,
 			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady,
 			"Configuration is ready") || changed
+		return rf.Continue().ReportChangedIf(changed)
+	}
+
+	// NewVolumesOnly: observe the new configuration but do not apply it.
+	//
+	// The volume keeps both its configuration content and the generation that content came
+	// from (they are always consistent), while ConfigurationObservedGeneration advances so the
+	// storage class aggregate does not hang in "pending observation" forever. The held state is
+	// reported honestly as ConfigurationReady=False: the condition means "configuration matches
+	// the storage class", and here it deliberately does not. Nothing gates on this condition —
+	// the volume keeps operating on its own configuration.
+	//
+	// The hold is deliberate and applies even when the held configuration later becomes
+	// unsatisfiable: the escape is to switch the strategy to RollingUpdate or recreate the
+	// volume, never a silent replacement.
+	if holdNewerConfiguration && rv.Status.Configuration != nil {
+		if rv.Status.ConfigurationObservedGeneration != intendedGeneration {
+			rv.Status.ConfigurationObservedGeneration = intendedGeneration
+			changed = true
+		}
+
+		changed = applyConfigurationReadyCondFalse(rv,
+			v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonNewerConfigurationHeld,
+			fmt.Sprintf("ReplicatedStorageClass %q has a newer configuration (generation %d); "+
+				"the volume keeps its configuration (generation %d) because the rollout strategy is %s",
+				rsc.Name, intendedGeneration, rv.Status.ConfigurationGeneration,
+				v1alpha1.ConfigurationRolloutNewVolumesOnly)) || changed
 		return rf.Continue().ReportChangedIf(changed)
 	}
 
@@ -760,6 +1561,44 @@ func (r *Reconciler) reconcileRVConfiguration(
 				fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d requires a valid zone count, RSP has %d zones",
 					intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount))
 			return rf.Continue().ReportChangedIf(changed)
+		}
+	}
+
+	// Throttle the rollout across the class: RollingUpdate.maxParallel caps how many volumes may
+	// be migrating to the new configuration at once, so an unsatisfiable configuration damages a
+	// bounded number of them (see reconciler_rollout.go). Only a volume that already carries a
+	// configuration is throttled: a new one is not migrating anything.
+	//
+	// The gate sits behind the validation on purpose — an invalid configuration must be reported
+	// as such rather than queued, and a volume waiting for a slot must not be told the queue is
+	// what stops it when the configuration would be rejected anyway.
+	if throttleRollout && rv.Status.Configuration != nil {
+		classRVs, err := r.getRVsByRSC(rf.Ctx(), rsc.Name)
+		if err != nil {
+			return rf.Failf(err, "listing ReplicatedVolumes of ReplicatedStorageClass %s", rsc.Name)
+		}
+
+		maxParallel := computeIntendedRolloutMaxParallel(rsc)
+		cohort := computeActualRolloutCohort(rv, classRVs, intended, intendedGeneration)
+		if !computeTargetRolloutAdmission(rv, cohort, maxParallel) {
+			// Keep the applied content and the generation it came from (they are always
+			// consistent), and only record that the newer generation has been observed, so the
+			// class aggregate does not hang in "pending observation" while the volume queues.
+			if rv.Status.ConfigurationObservedGeneration != intendedGeneration {
+				rv.Status.ConfigurationObservedGeneration = intendedGeneration
+				changed = true
+			}
+
+			// The message deliberately carries no live counters: it is rewritten into the object
+			// on every change, and a class-wide progress number would repatch every waiting
+			// volume each time any other volume converges.
+			changed = applyConfigurationReadyCondFalse(rv,
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonConfigurationRolloutInProgress,
+				fmt.Sprintf("ReplicatedStorageClass %q rolls its configuration (generation %d) out to at most %d volume(s) at a time; "+
+					"the volume keeps its configuration (generation %d) until a slot is free",
+					rsc.Name, intendedGeneration, maxParallel, rv.Status.ConfigurationGeneration)) || changed
+
+			return rf.ContinueAndRequeueAfter(configurationRolloutRequeueInterval).ReportChangedIf(changed)
 		}
 	}
 
@@ -794,6 +1633,205 @@ func applyConfigurationReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, mes
 	return obju.SetStatusCondition(rv, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
 		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: layout status
+//
+
+// reconcileLayoutStatus is the SINGLE writer of the MembershipLayoutConverged condition and
+// status.membershipLayout. It compares the actual datamesh layout (diskful voters + tie-breakers)
+// against the layout intended by the volume's configuration and reports whether they
+// have converged.
+//
+// It is called only post-formation (the root Reconcile invokes it in the normal-operation
+// branch, never during formation) and after the configuration has been acknowledged
+// (status.configuration is set). It only reports: the convergence actions live in the
+// separate reconcileLayoutConvergence step, whose decision (computeTargetLayoutAction) is
+// reused here so the reported Converging/CannotConverge/TransitionUnsupported reason always
+// agrees with what convergence did — keeping this the only writer of the condition.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileLayoutStatus(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "layout-status")
+	defer rf.OnEnd(&outcome)
+
+	// Precondition: configuration must be acknowledged (guaranteed by the caller, which
+	// invokes this only inside the "configuration exists" normal-operation branch).
+	if rv.Status.Configuration == nil {
+		return rf.Continue()
+	}
+
+	report := computeLayoutReport(rv, rvrs, rvas)
+
+	changed := applyMembershipLayout(rv, report.membershipLayout)
+	switch report.converged.status {
+	case metav1.ConditionTrue:
+		changed = applyMembershipLayoutConvergedCondTrue(rv, report.converged.reason, report.converged.message) || changed
+	case metav1.ConditionUnknown:
+		// Deletion: we no longer evaluate convergence (see computeTargetLayoutAction).
+		changed = applyMembershipLayoutConvergedCondUnknown(rv, report.converged.reason, report.converged.message) || changed
+	default:
+		changed = applyMembershipLayoutConvergedCondFalse(rv, report.converged.reason, report.converged.message) || changed
+	}
+
+	return rf.Continue().ReportChangedIf(changed)
+}
+
+// computeActualLayout counts the actual datamesh layout from members:
+//   - diskful     = Diskful + LiminalDiskful members (quorum voters holding data)
+//   - tiebreakers = TieBreaker members
+//
+// Access and ShadowDiskful (and their liminal variant) members are not part of the layout.
+func computeActualLayout(rv *v1alpha1.ReplicatedVolume) (diskful, tiebreakers int) {
+	for i := range rv.Status.Datamesh.Members {
+		switch rv.Status.Datamesh.Members[i].Type {
+		case v1alpha1.DatameshMemberTypeDiskful, v1alpha1.DatameshMemberTypeLiminalDiskful:
+			diskful++
+		case v1alpha1.DatameshMemberTypeTieBreaker:
+			tiebreakers++
+		}
+	}
+	return diskful, tiebreakers
+}
+
+// hasLayoutChangingTransition reports whether an active datamesh transition changes the layout
+// composition (diskful voters / tie-breakers).
+//
+// Only membership transitions can do so; other types (Attach/Detach/ForceDetach, ResizeVolume,
+// ChangeQuorum, ChangeSystemNetworks, Enable/DisableMultiattach, RepairNetworkAddresses) leave
+// the layout unchanged. Membership types mirror the dispatch in
+// datamesh/membership_dispatch.go.
+//
+// A membership transition is not enough by itself: Access and ShadowDiskful members are outside
+// the layout, so Add/Remove/ChangeReplicaType involving only those types must not be treated as
+// convergence progress (otherwise the MembershipLayoutConverged condition would flap on unrelated
+// membership activity). The classification therefore goes by the REPLICA TYPES recorded in the
+// transition, which are always populated (see ReplicatedVolumeDatameshTransition).
+//
+// It deliberately does NOT filter by Group: ForceRemoveReplica lives in the Emergency group, so
+// a Group == VotingMembership filter would silently drop it.
+func hasLayoutChangingTransition(rv *v1alpha1.ReplicatedVolume) bool {
+	for i := range rv.Status.DatameshTransitions {
+		t := &rv.Status.DatameshTransitions[i]
+		switch t.Type {
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+			v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica:
+			if isLayoutReplicaType(t.ReplicaType) {
+				return true
+			}
+		case v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType:
+			if isLayoutReplicaType(t.FromReplicaType) || isLayoutReplicaType(t.ToReplicaType) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isLayoutReplicaType reports whether a replica of this type is counted by the layout
+// (see computeActualLayout: diskful voters and tie-breakers).
+func isLayoutReplicaType(t v1alpha1.ReplicaType) bool {
+	return t == v1alpha1.ReplicaTypeDiskful || t == v1alpha1.ReplicaTypeTieBreaker
+}
+
+// layoutReport is the computed report driving status.membershipLayout and the MembershipLayoutConverged condition.
+type layoutReport struct {
+	// membershipLayout mirrors the optional status.membershipLayout field: nil means "unset" (no layout to
+	// publish), never the empty string. computeLayoutReport always fills it, because it only
+	// runs post-formation, where the member composition is known; the pointer keeps the
+	// "unset" state representable end-to-end so it is never conflated with "".
+	membershipLayout *string
+	// converged is the MembershipLayoutConverged report produced by the convergence decision.
+	converged membershipLayoutConvergedReport
+}
+
+// computeLayoutReport produces the status.membershipLayout string and the MembershipLayoutConverged report by
+// reusing the convergence decision (computeTargetLayoutAction), so the reported reason always
+// matches what reconcileLayoutConvergence does this pass:
+//   - actual == intended                                   → True / Converged
+//   - a membership transition or a queued action is moving  → False / Converging
+//     the layout (retype requested / TB creation pending)
+//   - a whitelist pattern applies but no admissible candidate → False / CannotConverge
+//   - mismatch outside the whitelist                        → False / TransitionUnsupported
+//
+// A matching layout is reported Converged regardless of unrelated active transitions
+// (e.g. attach/resize), so the condition does not flap while the layout is already correct.
+func computeLayoutReport(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) layoutReport {
+	actualD, actualTB := computeActualLayout(rv)
+	_, convergedReport := computeTargetLayoutAction(rv, rvrs, rvas)
+	return layoutReport{
+		membershipLayout: ptr.To(formatLayout(actualD, actualTB)),
+		converged:        convergedReport,
+	}
+}
+
+// formatLayout renders a datamesh layout as a short, deterministic string:
+// "3D" for 3 diskful and no tie-breaker, "2D+1TB" for 2 diskful and 1 tie-breaker.
+// The "+NTB" suffix is omitted when there are no tie-breakers.
+func formatLayout(diskful, tiebreakers int) string {
+	if tiebreakers == 0 {
+		return fmt.Sprintf("%dD", diskful)
+	}
+	return fmt.Sprintf("%dD+%dTB", diskful, tiebreakers)
+}
+
+// applyMembershipLayout sets status.membershipLayout (the actual datamesh layout string).
+//
+// status.membershipLayout is an optional scalar: nil (absent) means "not computed yet" and is NOT the
+// same as the empty string, which is never a valid layout value. A nil layout therefore
+// clears the field instead of publishing "".
+func applyMembershipLayout(rv *v1alpha1.ReplicatedVolume, layout *string) bool {
+	if ptr.Equal(rv.Status.MembershipLayout, layout) {
+		return false
+	}
+	if layout == nil {
+		rv.Status.MembershipLayout = nil
+	} else {
+		// Copy the value instead of sharing the report's pointer (read-only input contract).
+		rv.Status.MembershipLayout = ptr.To(*layout)
+	}
+	return true
+}
+
+// applyMembershipLayoutConvergedCondTrue sets the MembershipLayoutConverged condition to True.
+func applyMembershipLayoutConvergedCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyMembershipLayoutConvergedCondFalse sets the MembershipLayoutConverged condition to False.
+func applyMembershipLayoutConvergedCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyMembershipLayoutConvergedCondUnknown sets the MembershipLayoutConverged condition to Unknown.
+func applyMembershipLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,
 	})
@@ -1015,12 +2053,24 @@ func (r *Reconciler) reconcileDeletion(
 		}
 	}
 
-	// Step 3: Clear datamesh members.
+	// Step 3: Publish the layout report for a deleting volume and clear datamesh members,
+	// atomically in one status patch.
+	//
+	// An unattached RV reaches this branch directly, never going through normal operation, so
+	// reconcileLayoutStatus never runs for it. Without this write the condition would keep the
+	// last Converging/CannotConverge message — promising an action the deletion path will never
+	// perform. Unknown/VolumeDeleting states honestly that convergence is no longer evaluated.
+	base := rv.DeepCopy()
+	changed := applyMembershipLayoutConvergedCondUnknown(rv,
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+		membershipLayoutConvergedVolumeDeletingMessage)
 	if len(rv.Status.Datamesh.Members) > 0 {
-		base := rv.DeepCopy()
 		rv.Status.Datamesh.Members = nil
+		changed = true
+	}
+	if changed {
 		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
-			return rf.Failf(err, "clearing datamesh members")
+			return rf.Failf(err, "publishing deletion layout status")
 		}
 	}
 
@@ -1063,6 +2113,51 @@ func (v *rspView) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStorageP
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Shared non-I/O helpers
+//
+
+// newRVR constructs a new in-memory ReplicatedVolumeReplica for rv: it picks the first free ID
+// name (deterministic, so a repeated Create after a stale-cache retry converges via
+// AlreadyExists) and adds the RV controller finalizer.
+//
+// It is a pure constructor: no receiver, no I/O, no mutation of its inputs. The controller owner
+// reference (which needs the runtime scheme) and the Create call belong to the Reconcile method
+// that owns the creation policy; the caller also inserts the created object into its local sorted
+// slice (see insertRVRSorted).
+func newRVR(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	typ v1alpha1.ReplicaType,
+	nodeName string,
+) (*v1alpha1.ReplicatedVolumeReplica, error) {
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+			ReplicatedVolumeName: rv.Name,
+			Type:                 typ,
+			NodeName:             nodeName,
+		},
+	}
+	if !rvr.ChooseNewName(rvrs) {
+		return nil, fmt.Errorf("no available ID for new RVR")
+	}
+	obju.AddFinalizer(rvr, v1alpha1.RVControllerFinalizer)
+	return rvr, nil
+}
+
+// insertRVRSorted inserts rvr into rvrs keeping the slice ordered by ID, and returns the
+// resulting slice. Reconcile methods use it to keep their local RVR slice consistent with the
+// API after a create (see controller-reconciliation.mdc, "Local slices after Create/Patch").
+func insertRVRSorted(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) []*v1alpha1.ReplicatedVolumeReplica {
+	idx, _ := slices.BinarySearchFunc(rvrs, rvr.ID(), func(r *v1alpha1.ReplicatedVolumeReplica, id uint8) int {
+		return cmp.Compare(r.ID(), id)
+	})
+	return slices.Insert(rvrs, idx, rvr)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Single-call I/O helpers
 //
 
@@ -1078,6 +2173,30 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 		return nil, nil
 	}
 	return &rv, nil
+}
+
+// getRVsByRSC lists the ReplicatedVolumes that reference the given storage class, through the
+// spec.replicatedStorageClassName index. The returned slice is unordered — callers that need a
+// deterministic order must sort it themselves.
+//
+// The volumes come straight from the informer cache without a deep copy, because a rollout
+// decision reads a handful of fields from every volume of the class and copying them all would
+// be wasteful. Callers MUST treat them as strictly read-only: mutating one corrupts the cache
+// for every other reader.
+func (r *Reconciler) getRVsByRSC(ctx context.Context, rscName string) ([]*v1alpha1.ReplicatedVolume, error) {
+	var list v1alpha1.ReplicatedVolumeList
+	if err := r.cl.List(ctx, &list,
+		client.MatchingFields{indexes.IndexFieldRVByReplicatedStorageClassName: rscName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+
+	rvs := make([]*v1alpha1.ReplicatedVolume, len(list.Items))
+	for i := range list.Items {
+		rvs[i] = &list.Items[i]
+	}
+	return rvs, nil
 }
 
 func (r *Reconciler) patchRV(ctx context.Context, obj, base *v1alpha1.ReplicatedVolume) error {
@@ -1288,66 +2407,14 @@ func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alp
 	return result, nil
 }
 
-// createDiskfulRVR creates a Diskful RVR (nodeName is left empty for the scheduler to assign).
-func (r *Reconciler) createDiskfulRVR(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
-) (*v1alpha1.ReplicatedVolumeReplica, error) {
-	return r.createRVR(ctx, rv, rvrs, v1alpha1.ReplicaTypeDiskful, "")
-}
-
-// createAccessRVR creates an Access RVR on the specified node.
-func (r *Reconciler) createAccessRVR(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
-	nodeName string,
-) (*v1alpha1.ReplicatedVolumeReplica, error) {
-	return r.createRVR(ctx, rv, rvrs, v1alpha1.ReplicaTypeAccess, nodeName)
-}
-
-// createRVR constructs a new ReplicatedVolumeReplica (choosing a free ID name,
-// adding the RV controller finalizer, setting controller owner ref), creates it via the API,
-// and inserts it into rvrs in sorted order.
+// createRVR creates the given ReplicatedVolumeReplica via the API. On success obj carries the
+// server-assigned fields (uid, resourceVersion, defaults).
 //
-// Exception: this is a composite create helper — it performs object construction, finalizer
-// setup, and caller-slice mutation beyond a simple single-call Create. This is intentional
-// to keep the formation loop readable; all policy decisions (when to create, how many)
-// remain in the calling Reconcile method.
-//
-// Prefer using typed wrappers: createDiskfulRVR, createAccessRVR.
-func (r *Reconciler) createRVR(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
-	typ v1alpha1.ReplicaType,
-	nodeName string,
-) (*v1alpha1.ReplicatedVolumeReplica, error) {
-	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: rv.Name,
-			Type:                 typ,
-			NodeName:             nodeName,
-		},
-	}
-	if !rvr.ChooseNewName(*rvrs) {
-		return nil, fmt.Errorf("no available ID for new RVR")
-	}
-	obju.AddFinalizer(rvr, v1alpha1.RVControllerFinalizer)
-	if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
-		return nil, err
-	}
-	if err := r.cl.Create(ctx, rvr); err != nil {
-		return nil, err
-	}
-	// Insert in sorted order by ID.
-	rvrID := rvr.ID()
-	idx, _ := slices.BinarySearchFunc(*rvrs, rvrID, func(r *v1alpha1.ReplicatedVolumeReplica, id uint8) int {
-		return cmp.Compare(r.ID(), id)
-	})
-	*rvrs = slices.Insert(*rvrs, idx, rvr)
-	return rvr, nil
+// The object is built by newRVR and its controller owner reference is set by the calling
+// Reconcile method, which also decides what to do with the result (including inserting it into
+// its local sorted slice via insertRVRSorted).
+func (r *Reconciler) createRVR(ctx context.Context, obj *v1alpha1.ReplicatedVolumeReplica) error {
+	return r.cl.Create(ctx, obj)
 }
 
 func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {

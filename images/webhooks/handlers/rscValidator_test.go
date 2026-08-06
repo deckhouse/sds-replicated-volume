@@ -17,12 +17,15 @@ limitations under the License.
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
+
+func bytePtr(v byte) *byte { return &v }
 
 func Test_validateLegacySpecFields(t *testing.T) {
 	tests := []struct {
@@ -269,4 +272,190 @@ func Test_validateLegacyControlPlaneTopology(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_validateImmutableSpecFields covers the webhook-guarded half of the update matrix:
+// the unbounded structured spec fields (storage, nodeLabelSelector). The scalar/bounded
+// fields are guarded by CEL transition rules and are covered by Test_RSCSpecImmutabilityCEL.
+func Test_validateImmutableSpecFields(t *testing.T) {
+	storageA := &srv.ReplicatedStorageClassStorage{
+		Type:            srv.ReplicatedStoragePoolType("LVM"),
+		LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-a"}},
+	}
+	storageAcopy := &srv.ReplicatedStorageClassStorage{
+		Type:            srv.ReplicatedStoragePoolType("LVM"),
+		LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-a"}},
+	}
+	storageB := &srv.ReplicatedStorageClassStorage{
+		Type:            srv.ReplicatedStoragePoolType("LVM"),
+		LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-b"}},
+	}
+	selectorA := &metav1.LabelSelector{MatchLabels: map[string]string{"role": "storage"}}
+	selectorAcopy := &metav1.LabelSelector{MatchLabels: map[string]string{"role": "storage"}}
+	selectorB := &metav1.LabelSelector{MatchLabels: map[string]string{"role": "compute"}}
+
+	tests := []struct {
+		name        string
+		oldSpec     srv.ReplicatedStorageClassSpec
+		newSpec     srv.ReplicatedStorageClassSpec
+		wantValid   bool
+		wantMessage string
+	}{
+		{
+			name:      "identical empty specs are valid",
+			oldSpec:   srv.ReplicatedStorageClassSpec{},
+			newSpec:   srv.ReplicatedStorageClassSpec{},
+			wantValid: true,
+		},
+		{
+			name:      "identical storage (distinct pointers, equal value) is valid",
+			oldSpec:   srv.ReplicatedStorageClassSpec{Storage: storageA},
+			newSpec:   srv.ReplicatedStorageClassSpec{Storage: storageAcopy},
+			wantValid: true,
+		},
+		{
+			// storage is immutable once set, so filling it from nil (the controller's
+			// storagePool->storage migration) must be allowed.
+			name:      "storage added from nil (controller migration) is allowed",
+			oldSpec:   srv.ReplicatedStorageClassSpec{},
+			newSpec:   srv.ReplicatedStorageClassSpec{Storage: storageA},
+			wantValid: true,
+		},
+		{
+			name:        "storage removed is rejected",
+			oldSpec:     srv.ReplicatedStorageClassSpec{Storage: storageA},
+			newSpec:     srv.ReplicatedStorageClassSpec{},
+			wantValid:   false,
+			wantMessage: "spec.storage is immutable once set",
+		},
+		{
+			name:        "storage volume group changed is rejected",
+			oldSpec:     srv.ReplicatedStorageClassSpec{Storage: storageA},
+			newSpec:     srv.ReplicatedStorageClassSpec{Storage: storageB},
+			wantValid:   false,
+			wantMessage: "spec.storage is immutable once set",
+		},
+		{
+			// Regression guard for the controller's reconcileStorageMigration: it sets
+			// storage from nil and clears the deprecated storagePool in one patch.
+			name:      "storagePool->storage migration (nil->value) is allowed",
+			oldSpec:   srv.ReplicatedStorageClassSpec{StoragePool: "legacy-pool"},
+			newSpec:   srv.ReplicatedStorageClassSpec{Storage: storageA},
+			wantValid: true,
+		},
+		{
+			name:      "identical nodeLabelSelector (distinct pointers) is valid",
+			oldSpec:   srv.ReplicatedStorageClassSpec{NodeLabelSelector: selectorA},
+			newSpec:   srv.ReplicatedStorageClassSpec{NodeLabelSelector: selectorAcopy},
+			wantValid: true,
+		},
+		{
+			name:        "nodeLabelSelector added is rejected",
+			oldSpec:     srv.ReplicatedStorageClassSpec{},
+			newSpec:     srv.ReplicatedStorageClassSpec{NodeLabelSelector: selectorA},
+			wantValid:   false,
+			wantMessage: "spec.nodeLabelSelector is immutable",
+		},
+		{
+			name:        "nodeLabelSelector changed is rejected",
+			oldSpec:     srv.ReplicatedStorageClassSpec{NodeLabelSelector: selectorA},
+			newSpec:     srv.ReplicatedStorageClassSpec{NodeLabelSelector: selectorB},
+			wantValid:   false,
+			wantMessage: "spec.nodeLabelSelector is immutable",
+		},
+		{
+			name: "changing replication only is valid (mutable field, webhook does not guard it)",
+			oldSpec: srv.ReplicatedStorageClassSpec{
+				Storage:     storageA,
+				Replication: srv.ReplicationConsistencyAndAvailability,
+			},
+			newSpec: srv.ReplicatedStorageClassSpec{
+				Storage:     storageAcopy,
+				Replication: srv.ReplicationAvailability,
+			},
+			wantValid: true,
+		},
+		{
+			name: "changing FTT/GMDR only is valid (mutable fields, webhook does not guard them)",
+			oldSpec: srv.ReplicatedStorageClassSpec{
+				Storage:                         storageA,
+				FailuresToTolerate:              bytePtr(1),
+				GuaranteedMinimumDataRedundancy: bytePtr(1),
+			},
+			newSpec: srv.ReplicatedStorageClassSpec{
+				Storage:                         storageAcopy,
+				FailuresToTolerate:              bytePtr(1),
+				GuaranteedMinimumDataRedundancy: bytePtr(0),
+			},
+			wantValid: true,
+		},
+		{
+			name: "changing reclaimPolicy is not guarded here (CEL guards it), storage unchanged is valid",
+			oldSpec: srv.ReplicatedStorageClassSpec{
+				Storage:       storageA,
+				ReclaimPolicy: srv.RSCReclaimPolicyDelete,
+			},
+			newSpec: srv.ReplicatedStorageClassSpec{
+				Storage:       storageAcopy,
+				ReclaimPolicy: srv.RSCReclaimPolicyRetain,
+			},
+			wantValid: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldRSC := &srv.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
+				Spec:       tt.oldSpec,
+			}
+			newRSC := &srv.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
+				Spec:       tt.newSpec,
+			}
+			result := validateImmutableSpecFields(oldRSC, newRSC)
+			if result.Valid != tt.wantValid {
+				t.Errorf("Valid = %v, want %v", result.Valid, tt.wantValid)
+			}
+			if tt.wantMessage != "" && result.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", result.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func Test_decodeReplicatedStorageClass(t *testing.T) {
+	t.Run("valid JSON round-trips", func(t *testing.T) {
+		src := &srv.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
+			Spec: srv.ReplicatedStorageClassSpec{
+				ReclaimPolicy: srv.RSCReclaimPolicyDelete,
+				Topology:      srv.TopologyIgnored,
+				Storage: &srv.ReplicatedStorageClassStorage{
+					Type:            srv.ReplicatedStoragePoolType("LVM"),
+					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-a"}},
+				},
+			},
+		}
+		raw, err := json.Marshal(src)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		got, err := decodeReplicatedStorageClass(raw)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Spec.ReclaimPolicy != srv.RSCReclaimPolicyDelete || got.Spec.Topology != srv.TopologyIgnored {
+			t.Errorf("decoded spec mismatch: %+v", got.Spec)
+		}
+		if got.Spec.Storage == nil || len(got.Spec.Storage.LVMVolumeGroups) != 1 || got.Spec.Storage.LVMVolumeGroups[0].Name != "vg-a" {
+			t.Errorf("decoded storage mismatch: %+v", got.Spec.Storage)
+		}
+	})
+
+	t.Run("invalid JSON returns an error", func(t *testing.T) {
+		if _, err := decodeReplicatedStorageClass([]byte("{not-json")); err == nil {
+			t.Error("expected error decoding invalid JSON, got nil")
+		}
+	})
 }

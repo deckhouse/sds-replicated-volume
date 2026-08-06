@@ -97,7 +97,7 @@ func (f *Framework) SharedRSC() *TestRSC {
 //
 // An optional suffix is appended to the generated name and included
 // in the cache key (e.g. CreateShared(ctx, "custom") produces
-// "e2e-{runID}-f0g0-ign-any-thn-custom").
+// "e2e-{runID}-f0g0-ign-any-<pool>-custom", where <pool> is the pool abbreviation).
 //
 // The TrackedObject uses NewLiteTrackedObject (keepOnlyLast) to avoid
 // history accumulation for long-lived run-scoped objects.

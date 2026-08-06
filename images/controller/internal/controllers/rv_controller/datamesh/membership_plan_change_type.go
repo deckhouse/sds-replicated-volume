@@ -173,7 +173,15 @@ func registerChangeTypePlans(
 	// Step 1 (sD → sD∅): disk detach. Must happen before peers disable bitmaps.
 	// Step 2 (sD∅ → TB): peers disable bitmaps.
 	//
-	// Guarded: VolumeAccess=Local blocks TB (TB cannot serve IO locally).
+	// Guarded: guardVolumeAccessNotLocal.
+	//
+	// Deliberately kept here even though D→TB does not carry it (a TieBreaker
+	// serves no IO, so the guard is wrong for a pure role change): a
+	// ShadowDiskful HAS a backing volume and can serve a Local attachment,
+	// while the demotion-safety protocol (intent/gate/extender) is designed
+	// for Diskful only. Dropping the guard here would open an unprotected path
+	// to losing local IO. Extending the protocol to ShadowDiskful is out of scope.
+	//
 	// Also handles sD∅ → TB (liminal state, step 1 is no-op).
 	changeReplicaType.Plan("sd-to-tb/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupNonVotingMembership).
@@ -610,12 +618,22 @@ func registerChangeTypePlans(
 		Build()
 
 	// ChangeReplicaType(D → TB): D → D∅ → TB (odd→even, no q change)
+	//
+	// NOT guarded by guardVolumeAccessNotLocal: that guard exists for Access
+	// replicas, which serve IO. A TieBreaker serves no IO in any volumeAccess
+	// mode, so demoting an unattached Diskful is legitimate under Local too
+	// (this is the r3→r2 migration path). The Local invariant is enforced by
+	// guardVolumeAccessLocalForDemotion (loseVoterGuardsCommon), which blocks
+	// the demotion of the ATTACHED member.
+	//
+	// Zone FTT uses the retype-aware variant: the subject stays a quorum
+	// participant as a TieBreaker in its own zone.
 	changeReplicaType.Plan("d-to-tb/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
-		Guards(loseVoterGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersOdd).
+		Guards(loseVoterToTieBreakerGuards...).
+		Guards(guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),
@@ -633,12 +651,14 @@ func registerChangeTypePlans(
 		Build()
 
 	// ChangeReplicaType(D → TB) + q↓: D → D∅ → TB + q↓ (even→odd)
+	//
+	// Same guard rationale as d-to-tb/v1 above.
 	changeReplicaType.Plan("d-to-tb-q-down/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaFromToType(v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeTieBreaker)).
 		DisplayName("Changing replica type").
-		Guards(loseVoterGuards...).
-		Guards(guardVolumeAccessNotLocal, guardVotersEven).
+		Guards(loseVoterToTieBreakerGuards...).
+		Guards(guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
 				setType(v1alpha1.DatameshMemberTypeLiminalDiskful),

@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -139,18 +140,20 @@ func ensureStatusSize(
 
 // ensureStatusPeers ensures the RVR status.peers field reflects the current DRBDR state.
 //
-// This function updates rvr.Status.Peers in-place based solely on drbdr.Status.Peers:
+// This function updates rvr.Status.Peers in-place from drbdr.Status.Peers. The datamesh is
+// used only to disambiguate diskless peer roles; it never overrides what DRBD reports:
 //   - Each drbdr peer becomes a peer entry (connection state, disk state, etc.)
-//   - Type is computed from drbdr peer:
-//   - Diskful → Diskful
-//   - Diskless + AllowRemoteRead=false → Access
-//   - Diskless + AllowRemoteRead=true → TieBreaker
+//   - A Diskful drbdr peer is reported as Diskful.
+//   - A Diskless drbdr peer is reported as TieBreaker when the datamesh member of the same
+//     name is a TieBreaker, and as Access otherwise (any other member type, a member missing
+//     from the datamesh, or no datamesh at all).
 //
 // The order of rvr.Status.Peers mirrors drbdr.Status.Peers.
 func ensureStatusPeers(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	drbdr *v1alpha1.DRBDResource,
+	datamesh *v1alpha1.ReplicatedVolumeDatamesh,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "status-peers")
 	defer ef.OnEnd(&outcome)
@@ -169,6 +172,11 @@ func ensureStatusPeers(
 	drbdrPeers := drbdr.Status.Peers
 	rvNamePrefix := rvr.Spec.ReplicatedVolumeName + "-"
 	n := len(drbdrPeers)
+
+	// Length of the persisted list, captured before the working slice is resized:
+	// the resizing below is scratch space for the write loop, so only the final
+	// written count compared against this value tells whether the list changed.
+	persistedLen := len(rvr.Status.Peers)
 
 	// Ensure rvr.Status.Peers has enough capacity (may shrink after skipping foreign peers).
 	if cap(rvr.Status.Peers) < n {
@@ -212,17 +220,23 @@ func ensureStatusPeers(
 
 		dst := &rvr.Status.Peers[writeIdx]
 
-		// Compute target Type from drbdr peer.
+		// Compute target Type from the drbdr peer, disambiguating diskless peers by
+		// datamesh member type: DRBD reports TieBreaker and Access peers identically
+		// (both are plain diskless), so the intended role is only known to the datamesh.
+		// Everything but an explicit TieBreaker member — an Access member, a member the
+		// datamesh does not carry, or no datamesh at all — stays Access.
 		// TODO: ShadowDiskful
 		var targetType v1alpha1.ReplicaType
 		switch src.Type {
 		case v1alpha1.DRBDResourceTypeDiskful:
 			targetType = v1alpha1.ReplicaTypeDiskful
 		case v1alpha1.DRBDResourceTypeDiskless:
-			if src.AllowRemoteRead {
-				targetType = v1alpha1.ReplicaTypeTieBreaker
-			} else {
-				targetType = v1alpha1.ReplicaTypeAccess
+			targetType = v1alpha1.ReplicaTypeAccess
+			if datamesh != nil {
+				if member := datamesh.FindMemberByName(peerName); member != nil &&
+					member.Type == v1alpha1.DatameshMemberTypeTieBreaker {
+					targetType = v1alpha1.ReplicaTypeTieBreaker
+				}
 			}
 		}
 
@@ -285,9 +299,14 @@ func ensureStatusPeers(
 		writeIdx++
 	}
 
-	// Trim to actual written count (foreign peers were skipped).
+	// Trim to actual written count (foreign peers were skipped). Only a difference
+	// against the persisted length is a change: skipping a foreign peer leaves the
+	// working slice longer than the written prefix on every call, and reporting that
+	// trim as a change would issue a content-free status patch each reconcile.
 	if len(rvr.Status.Peers) != writeIdx {
 		rvr.Status.Peers = rvr.Status.Peers[:writeIdx]
+	}
+	if persistedLen != writeIdx {
 		changed = true
 	}
 
@@ -443,8 +462,10 @@ func ensureStatusQuorum(
 		}
 	}
 
-	// Update QuorumSummary if it has changed.
-	if rvr.Status.QuorumSummary == nil || *rvr.Status.QuorumSummary != *summary {
+	// Update QuorumSummary if it has changed. Compared semantically: the struct
+	// carries pointer fields, and summary is rebuilt with fresh allocations on
+	// every call, so a plain struct comparison would always report a change.
+	if !equality.Semantic.DeepEqual(rvr.Status.QuorumSummary, summary) {
 		rvr.Status.QuorumSummary = summary
 		changed = true
 	}
@@ -452,6 +473,47 @@ func ensureStatusQuorum(
 	// Update Quorum if it has changed.
 	if !ptr.Equal(rvr.Status.Quorum, drbdr.Status.Quorum) {
 		rvr.Status.Quorum = drbdr.Status.Quorum
+		changed = true
+	}
+
+	return ef.Ok().ReportChangedIf(changed)
+}
+
+// ensureStatusInitialQuorumReachedAt maintains status.initialQuorumReachedAt — the
+// controller-owned latch recording the first time this controller saw the replica hold
+// quorum as a datamesh member.
+//
+// The latch is what lets the phase classifier tell a member that has not reached quorum yet
+// (still joining, so it cannot have frozen any I/O) apart from a member that lost quorum; the
+// two are indistinguishable on a single snapshot. See memberEverHadQuorum.
+//
+// It is scoped to one membership epoch: leaving the datamesh (datameshRevision back to 0)
+// clears it, so a replica that re-joins (e.g. a retype cycle) goes through joining again.
+//
+// Ordering: must run after ensureStatusQuorum, which mirrors drbdr.Status.Quorum into
+// rvr.Status.Quorum — the value this helper latches on.
+//
+// Exception: uses metav1.Now(). This is controller-owned state (persisted decision timestamp),
+// acceptable here because the value is set once per membership epoch and stabilized across
+// subsequent reconciliations.
+func ensureStatusInitialQuorumReachedAt(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-initial-quorum-reached-at")
+	defer ef.OnEnd(&outcome)
+
+	changed := false
+
+	switch {
+	case rvr.Status.DatameshRevision == 0:
+		// Not a datamesh member — no membership epoch to remember.
+		if rvr.Status.InitialQuorumReachedAt != nil {
+			rvr.Status.InitialQuorumReachedAt = nil
+			changed = true
+		}
+	case rvr.Status.InitialQuorumReachedAt == nil && ptr.Deref(rvr.Status.Quorum, false):
+		rvr.Status.InitialQuorumReachedAt = ptr.To(metav1.Now())
 		changed = true
 	}
 

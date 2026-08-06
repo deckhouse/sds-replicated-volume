@@ -1,8 +1,18 @@
-# Use default gitleaks rules + module allowlist
+# Extend the centralized Deckhouse gitleaks config + module allowlist
 [extend]
-useDefault = true
+useDefault = false
+path = "gitleaks.base.toml"
 
 [allowlist]
 paths = [
   '''(?:^|/)images/.*\.patch$''',
+]
+stopwords = [
+  # The module's own namespace, read as an API key by the generic entropy rule
+  # (SecretNamespace in the rv and rvr reconcile configs).
+  "d8-sds-replicated-volume",
+  # Mock tokens in the JSON fixtures of the vendored LINSTOR CSI client tests,
+  # images/linstor-csi/src/pkg/client/linstor_test.go.
+  "6uwedER7tGEifV9WzGMf",
+  "0iTx8wUc7WfRFZ9f5clx",
 ]

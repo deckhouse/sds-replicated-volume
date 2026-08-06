@@ -17,12 +17,15 @@ limitations under the License.
 package metrics
 
 import (
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -352,6 +355,284 @@ func TestCollectRVMigratorLabelsEmitsOnlyLabeledRVs(t *testing.T) {
 	assertMetric(t, metrics[1], 1, map[string]string{
 		LabelName: "rv-blocked",
 	})
+}
+
+func TestCollectRVLayoutConvergedEmitsOneSeriesPerRV(t *testing.T) {
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc(
+		"test_rv_membership_layout_converged",
+		"test",
+		[]string{LabelName, LabelReason},
+		nil,
+	)
+
+	layoutCond := func(status metav1.ConditionStatus, reason string) metav1.Condition {
+		return metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+			Status: status,
+			Reason: reason,
+		}
+	}
+
+	go func() {
+		defer close(ch)
+		collectRVLayoutConverged(ch, desc, []v1alpha1.ReplicatedVolume{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-converged"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						// An unrelated condition with its own reason: the reason label must come
+						// from MembershipLayoutConverged, not from whatever comes first.
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+							Status: metav1.ConditionFalse,
+							Reason: "SomeUnrelatedReason",
+						},
+						layoutCond(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged),
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-2-converging"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging),
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-3-cannot-converge"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge),
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-4-unsupported"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported),
+					},
+				},
+			},
+			// A deleting RV keeps its series: value 0 with the reason recorded in the status,
+			// never the synthetic absent-condition reason.
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-5-deleting"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting),
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-6-no-condition"},
+			},
+			// Reason Converged without status True (never written by the controller) must not be
+			// reported as converged: the value follows status AND reason together.
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-7-converged-not-true"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged),
+					},
+				},
+			},
+			// The mirror case of rv-7: status True with a reason other than Converged (also never
+			// written by the controller) must not be reported as converged either. Both directions
+			// are needed to pin the convention "value 1 iff status True AND reason Converged".
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-8-true-not-converged"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						layoutCond(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging),
+					},
+				},
+			},
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 8 {
+		t.Fatalf("expected one series per RV, got %d: %#v", len(metrics), metrics)
+	}
+	// Series are emitted sorted by RV name.
+	assertMetric(t, metrics[0], 1, map[string]string{
+		LabelName:   "rv-1-converged",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
+	})
+	assertMetric(t, metrics[1], 0, map[string]string{
+		LabelName:   "rv-2-converging",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	})
+	assertMetric(t, metrics[2], 0, map[string]string{
+		LabelName:   "rv-3-cannot-converge",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+	})
+	assertMetric(t, metrics[3], 0, map[string]string{
+		LabelName:   "rv-4-unsupported",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
+	})
+	assertMetric(t, metrics[4], 0, map[string]string{
+		LabelName:   "rv-5-deleting",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+	})
+	assertMetric(t, metrics[5], 0, map[string]string{
+		LabelName:   "rv-6-no-condition",
+		LabelReason: currentMetricsReasonAbsent,
+	})
+	assertMetric(t, metrics[6], 0, map[string]string{
+		LabelName:   "rv-7-converged-not-true",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
+	})
+	assertMetric(t, metrics[7], 0, map[string]string{
+		LabelName:   "rv-8-true-not-converged",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	})
+}
+
+func TestCollectRVLayoutConvergedFollowsTheCacheSnapshot(t *testing.T) {
+	desc := prometheus.NewDesc(
+		"test_rv_membership_layout_converged",
+		"test",
+		[]string{LabelName, LabelReason},
+		nil,
+	)
+
+	collect := func(rvs []v1alpha1.ReplicatedVolume) []testMetric {
+		t.Helper()
+
+		ch := make(chan prometheus.Metric, 100)
+		go func() {
+			defer close(ch)
+			collectRVLayoutConverged(ch, desc, rvs)
+		}()
+		return collectTestMetrics(t, ch)
+	}
+
+	rvWithReason := func(status metav1.ConditionStatus, reason string) []v1alpha1.ReplicatedVolume {
+		return []v1alpha1.ReplicatedVolume{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+							Status: status,
+							Reason: reason,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	metrics := collect(rvWithReason(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+	if len(metrics) != 1 {
+		t.Fatalf("expected one series, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 1, map[string]string{
+		LabelName:   "rv-a",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
+	})
+
+	// A reason change replaces the series instead of adding a second one: the collector rebuilds
+	// every series from the cache on each scrape.
+	metrics = collect(rvWithReason(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
+	if len(metrics) != 1 {
+		t.Fatalf("expected the series to be replaced, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 0, map[string]string{
+		LabelName:   "rv-a",
+		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
+	})
+
+	// A deleted RV is simply absent from the reader, so its series disappears without any
+	// explicit metric removal.
+	if metrics = collect(nil); len(metrics) != 0 {
+		t.Fatalf("expected no series for a deleted RV, got %d: %#v", len(metrics), metrics)
+	}
+}
+
+// replicatedVolumeLayoutRulePath points at the static Prometheus rule file shipped with the module.
+// It lives at the repository root, outside every Go module, so it cannot be embedded with go:embed;
+// the test reads it at runtime (the sanctioned exception in go-tests.mdc).
+const replicatedVolumeLayoutRulePath = "../../../../monitoring/prometheus-rules/replicated-volume-layout.yaml"
+
+type prometheusRuleGroup struct {
+	Rules []prometheusAlertRule `json:"rules"`
+}
+
+type prometheusAlertRule struct {
+	Alert  string            `json:"alert"`
+	Expr   string            `json:"expr"`
+	For    string            `json:"for"`
+	Labels map[string]string `json:"labels"`
+}
+
+func TestReplicatedVolumeLayoutRuleMatchesTheExportedMetric(t *testing.T) {
+	data, err := os.ReadFile(replicatedVolumeLayoutRulePath)
+	if err != nil {
+		t.Fatalf("reading rule file %q: %v", replicatedVolumeLayoutRulePath, err)
+	}
+
+	// The file is deliberately a static .yaml (no newControlPlane gate, not rendered by Helm), so
+	// Prometheus templates are written plainly and must not be Helm-escaped or Helm-gated.
+	for _, helmMarker := range []string{`{{ "`, "{{-", "{{ if", "{{ end"} {
+		if strings.Contains(string(data), helmMarker) {
+			t.Fatalf("rule file %q must contain no Helm templating, found %q", replicatedVolumeLayoutRulePath, helmMarker)
+		}
+	}
+
+	var groups []prometheusRuleGroup
+	if err := yaml.Unmarshal(data, &groups); err != nil {
+		t.Fatalf("unmarshalling rule file %q: %v", replicatedVolumeLayoutRulePath, err)
+	}
+
+	var alert *prometheusAlertRule
+	for i := range groups {
+		for j := range groups[i].Rules {
+			if groups[i].Rules[j].Alert == "D8ReplicatedVolumeLayoutDegraded" {
+				alert = &groups[i].Rules[j]
+			}
+		}
+	}
+	if alert == nil {
+		t.Fatalf("alert D8ReplicatedVolumeLayoutDegraded not found in %q", replicatedVolumeLayoutRulePath)
+	}
+
+	if alert.For != "15m" {
+		t.Fatalf("expected for: 15m, got %q", alert.For)
+	}
+	if alert.Labels["severity_level"] != "6" {
+		t.Fatalf("expected severity_level 6, got %q", alert.Labels["severity_level"])
+	}
+	if alert.Labels["tier"] != "cluster" {
+		t.Fatalf("expected tier cluster, got %q", alert.Labels["tier"])
+	}
+
+	if !strings.Contains(alert.Expr, metricNameRVLayoutConverged) {
+		t.Fatalf("expected expr to select %q, got %q", metricNameRVLayoutConverged, alert.Expr)
+	}
+	// Only the two verdict reasons are alerted on: transient and deletion states must not fire.
+	for _, reason := range []string{
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+	} {
+		if !strings.Contains(alert.Expr, reason) {
+			t.Fatalf("expected expr to alert on reason %q, got %q", reason, alert.Expr)
+		}
+	}
+	for _, reason := range []string{
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
+		currentMetricsReasonAbsent,
+	} {
+		if strings.Contains(alert.Expr, reason) {
+			t.Fatalf("expr must not alert on reason %q, got %q", reason, alert.Expr)
+		}
+	}
 }
 
 type testMetric struct {
