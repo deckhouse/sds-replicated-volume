@@ -17,39 +17,87 @@ limitations under the License.
 package upgrade
 
 import (
+	"errors"
+	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
-
-	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
-// TargetDRBDVersion is the DRBD kernel module version that this agent expects.
-// TODO: In production, the module loading mechanism needs to handle .ko file
-// provisioning (currently DRBD is loaded by an init container, and the .ko
-// files are not persisted on the host filesystem).
-const TargetDRBDVersion = "9.2.19-flant.12"
+// TargetDRBDVersion is the DRBD version this agent is built against. Every managed
+// module must report exactly this version, on disk and once loaded.
+const TargetDRBDVersion = "9.2.19-flant.10"
 
-// FakeUpgrade makes the agent run the upgrade sequence on every start,
-// regardless of the running module version. Kernel module unload/load is
-// skipped; only suspend + DRBD down + controller re-configure + resume
-// is exercised. For testing only.
-var FakeUpgrade = true
+// Overridden by tests.
+var sysModuleDir = "/sys/module"
 
-// Trigger is the global upgrade trigger. Armed by CheckAndArm at startup,
-// fired by the first DRBDR reconcile via DoIfEnabled.
-var Trigger commonsync.Trigger
+// upgradeNeeded compares exactly in both directions: any difference means the node
+// is not running this agent's own modules.
+func upgradeNeeded(log *slog.Logger) (bool, error) {
+	needed := false
+	for _, name := range moduleLoadOrder {
+		running, err := readRunningModuleVersion(name)
+		if err != nil {
+			return false, fmt.Errorf("reading running version of module %q: %w", name, err)
+		}
 
-const drbdVersionPath = "/sys/module/drbd/version"
+		switch {
+		case running == "":
+			log.Info("Kernel module not loaded, upgrade needed", "module", name)
+			needed = true
+		case running != TargetDRBDVersion:
+			log.Info("Kernel module version differs from target, upgrade needed",
+				"module", name,
+				"running", running,
+				"target", TargetDRBDVersion)
+			needed = true
+		default:
+			log.Info("Kernel module version matches target",
+				"module", name,
+				"version", running)
+		}
+	}
+	return needed, nil
+}
 
-// ReadRunningDRBDVersion reads the currently loaded DRBD kernel module version.
-// Returns empty string if the module is not loaded.
-func ReadRunningDRBDVersion() (string, error) {
-	data, err := os.ReadFile(drbdVersionPath)
-	if os.IsNotExist(err) {
+// readRunningModuleVersion returns an empty string when the module is not loaded or
+// declares no version — either way it is not the module this agent expects.
+func readRunningModuleVersion(name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(sysModuleDir, name, "version"))
+	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+type runningModule struct {
+	loaded bool
+	// empty when not loaded, or when the module declares no version
+	version string
+}
+
+func runningModules() (map[string]runningModule, error) {
+	running := make(map[string]runningModule, len(moduleLoadOrder))
+	for _, name := range moduleLoadOrder {
+		path := filepath.Join(sysModuleDir, name)
+		switch _, err := os.Stat(path); {
+		case err == nil:
+		case errors.Is(err, os.ErrNotExist):
+			running[name] = runningModule{}
+			continue
+		default:
+			return nil, fmt.Errorf("stat %q: %w", path, err)
+		}
+
+		version, err := readRunningModuleVersion(name)
+		if err != nil {
+			return nil, fmt.Errorf("reading running version of module %q: %w", name, err)
+		}
+		running[name] = runningModule{loaded: true, version: version}
+	}
+	return running, nil
 }

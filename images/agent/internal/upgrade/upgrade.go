@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"syscall"
-	"unsafe"
 
 	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,70 +29,174 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
-// CheckAndArm reads the running DRBD module version and arms the trigger
-// if an upgrade is needed. This is lightweight (no K8s API, no dmsetup)
-// and should be called at agent startup before mgr.Start().
-func CheckAndArm(log *slog.Logger) {
+// Upgrader gates reconciliation on the node running the DRBD kernel modules this
+// agent was built against. Every node-level reconciler must call EnsureUpgraded
+// before touching DRBD or device-mapper state, and must requeue rather than
+// proceed on error.
+//
+// Valid only after InitializeUpgrader.
+var Upgrader *commonsync.OnceUpgrader
+
+// InitializeUpgrader prepares Upgrader and must run before any reconcile.
+//
+// It fails when an upgrade is needed but its module files are not usable, because
+// an agent that can never complete its upgrade would block reconciliation
+// silently.
+func InitializeUpgrader(log *slog.Logger, cl client.Reader, nodeName string) error {
 	log = log.With("component", "drbd-upgrade")
 
-	runningVersion, err := ReadRunningDRBDVersion()
+	needed, err := upgradeNeeded(log)
 	if err != nil {
-		log.Warn("Failed to read DRBD module version, skipping upgrade check", "err", err)
-		return
+		return err
 	}
 
-	if runningVersion == "" {
-		log.Info("DRBD module not loaded, skipping upgrade")
-		return
+	if needed {
+		if _, err := preflight(log); err != nil {
+			return err
+		}
 	}
 
-	if !FakeUpgrade && runningVersion == TargetDRBDVersion {
-		log.Info("DRBD module version matches target, no upgrade needed",
-			"version", runningVersion)
-		return
-	}
-
-	log.Info("DRBD module upgrade needed, arming trigger",
-		"running", runningVersion,
-		"target", TargetDRBDVersion,
-		"fakeUpgrade", FakeUpgrade)
-	Trigger.EnableOnce()
+	Upgrader = commonsync.NewOnceUpgrader(needed, func(ctx context.Context) error {
+		return execute(ctx, log, cl, nodeName)
+	})
+	return nil
 }
 
-// Execute performs the actual DRBD module upgrade sequence:
-// suspend DRBDMapper upper devices, wipe internal tables, down all DRBD
-// resources, and reload the kernel module. Called from inside the DRBDR
-// reconciler via the trigger.
-func Execute(ctx context.Context, log *slog.Logger, cl client.Reader, nodeName string) error {
+// A failure we could have detected up front must never cost a suspend.
+func execute(ctx context.Context, log *slog.Logger, cl client.Reader, nodeName string) error {
 	log = log.With("component", "drbd-upgrade")
-	log.Info("DRBD module upgrade executing")
+	log.Info("DRBD module upgrade executing", "target", TargetDRBDVersion)
+
+	plan, err := prepare(ctx, log, cl, nodeName)
+	if err != nil {
+		log.Error("DRBD module upgrade failed before suspending anything; "+
+			"resources on this node keep running, cluster changes are not applied until an attempt succeeds",
+			"target", TargetDRBDVersion,
+			"err", err)
+		return err
+	}
+
+	if err := apply(ctx, log, plan); err != nil {
+		// No rollback and no bring-up against the old modules: running on
+		// potentially incompatible modules is worse than the downtime, and
+		// rollback belongs to a larger orchestration layer.
+		log.Error("DRBD module upgrade FAILED in its destructive phase; "+
+			"node stays in the upgrade retry loop, resources are NOT brought up against the old modules and the modules are NOT rolled back",
+			"target", TargetDRBDVersion,
+			"suspendedDevices", len(plan.paired),
+			"err", err)
+		return err
+	}
+
+	log.Info("DRBD module upgrade complete, controllers will reconfigure resources and resume devices",
+		"target", TargetDRBDVersion)
+	return nil
+}
+
+type upgradePlan struct {
+	unload []string
+	load   []plannedModule
+	// resources whose device is held open by a DRBDMapper
+	paired   []drbdrMapperPair
+	unpaired []v1alpha1.DRBDResource
+}
+
+// Must stay read-only: that is what makes a failed attempt free of consequences.
+func prepare(ctx context.Context, log *slog.Logger, cl client.Reader, nodeName string) (*upgradePlan, error) {
+	verified, err := preflight(log)
+	if err != nil {
+		return nil, err
+	}
+
+	running, err := runningModules()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrPreflight, err)
+	}
+
+	plan := planModules(log, verified, running)
+
+	// Nothing loses its device if no module is taken away.
+	if len(plan.unload) == 0 {
+		return plan, nil
+	}
 
 	drbdResources, err := listDRBDResourcesOnNode(ctx, cl, nodeName)
 	if err != nil {
-		return fmt.Errorf("listing DRBDResource on node: %w", err)
+		return nil, fmt.Errorf("listing DRBDResource on node: %w", err)
 	}
 
 	drbdMappers, err := listDRBDMappersOnNode(ctx, cl, nodeName)
 	if err != nil {
-		return fmt.Errorf("listing DRBDMapper on node: %w", err)
+		return nil, fmt.Errorf("listing DRBDMapper on node: %w", err)
 	}
 
-	mapping, err := buildMapping(log, drbdResources, drbdMappers)
+	paired, err := buildMapping(drbdResources, drbdMappers)
 	if err != nil {
-		return fmt.Errorf("building drbdr-to-drbdm mapping: %w", err)
+		return nil, fmt.Errorf("building drbdr-to-drbdm mapping: %w", err)
 	}
 
-	mappedResources := make(map[string]struct{})
-	for _, m := range mapping {
-		mappedResources[m.resource.Name] = struct{}{}
+	pairedResources := make(map[string]struct{}, len(paired))
+	for _, m := range paired {
+		pairedResources[m.resource.Name] = struct{}{}
+	}
+	var unpaired []v1alpha1.DRBDResource
+	for i := range drbdResources {
+		if _, ok := pairedResources[drbdResources[i].Name]; !ok {
+			unpaired = append(unpaired, drbdResources[i])
+		}
 	}
 
+	plan.paired = paired
+	plan.unpaired = unpaired
+	return plan, nil
+}
+
+// Only taking a wrongly-versioned module out of the kernel justifies freezing I/O.
+// An absent one is inserted alongside what runs — as the kernel does itself when it
+// demand-loads a transport — so a current core is never disturbed for it.
+func planModules(log *slog.Logger, verified []plannedModule, running map[string]runningModule) *upgradePlan {
+	stale := false
+	for _, name := range moduleLoadOrder {
+		if r := running[name]; r.loaded && r.version != TargetDRBDVersion {
+			log.Info("Loaded kernel module has to be replaced",
+				"module", name,
+				"running", r.version,
+				"target", TargetDRBDVersion)
+			stale = true
+		}
+	}
+
+	plan := &upgradePlan{}
+
+	if !stale {
+		for _, m := range verified {
+			if !running[m.name].loaded {
+				log.Info("Kernel module is absent and will be loaded", "module", m.name)
+				plan.load = append(plan.load, m)
+			}
+		}
+		return plan
+	}
+
+	// The core cannot be removed while its transport references it. Current
+	// modules go too, because the core underneath them is being replaced.
+	for i := len(moduleLoadOrder) - 1; i >= 0; i-- {
+		if running[moduleLoadOrder[i]].loaded {
+			plan.unload = append(plan.unload, moduleLoadOrder[i])
+		}
+	}
+	plan.load = verified
+	return plan
+}
+
+// Everything here is destructive: consumer I/O stays frozen until it returns.
+func apply(ctx context.Context, log *slog.Logger, plan *upgradePlan) error {
 	eg, egCtx := errgroup.WithContext(ctx)
 
-	for _, m := range mapping {
-		m := m
+	for _, m := range plan.paired {
 		eg.Go(func() error {
 			internalName := drbdm.InternalDeviceName(m.mapper.Name)
 
@@ -122,11 +224,8 @@ func Execute(ctx context.Context, log *slog.Logger, cl client.Reader, nodeName s
 		})
 	}
 
-	for i := range drbdResources {
-		if _, mapped := mappedResources[drbdResources[i].Name]; mapped {
-			continue
-		}
-		res := drbdResources[i]
+	for i := range plan.unpaired {
+		res := plan.unpaired[i]
 		eg.Go(func() error {
 			drbdName := drbdResourceNameOnTheNode(&res)
 			log.Info("Bringing down DRBD resource", "drbdResource", res.Name, "drbdName", drbdName)
@@ -141,29 +240,34 @@ func Execute(ctx context.Context, log *slog.Logger, cl client.Reader, nodeName s
 		return err
 	}
 
-	if FakeUpgrade {
-		log.Info("FakeUpgrade: skipping kernel module unload/load")
-	} else {
-		modulesToUnload := []string{"drbd_transport_tcp", "drbd"}
-		for _, mod := range modulesToUnload {
-			log.Info("Unloading kernel module", "module", mod)
-			if err := deleteModule(mod); err != nil {
-				return fmt.Errorf("unloading module %q: %w", mod, err)
-			}
+	for _, name := range plan.unload {
+		log.Info("Unloading kernel module", "module", name)
+		if err := deleteModule(name); err != nil {
+			return fmt.Errorf("unloading module %q: %w", name, err)
 		}
-
-		modulesToLoad := []string{"drbd", "drbd_transport_tcp"}
-		for _, mod := range modulesToLoad {
-			log.Info("Loading kernel module", "module", mod)
-			if err := loadModule(mod); err != nil {
-				return fmt.Errorf("loading module %q: %w", mod, err)
-			}
-		}
-
-		disableDRBDUsermodeHelper(log)
 	}
 
-	log.Info("DRBD module upgrade complete, controllers will reconfigure resources and resume devices")
+	reloadedCore := false
+	for _, mod := range plan.load {
+		log.Info("Loading kernel module", "module", mod.name, "path", mod.path, "version", TargetDRBDVersion)
+		if err := loadModule(mod); err != nil {
+			return fmt.Errorf("loading module %q from %q: %w", mod.name, mod.path, err)
+		}
+		reloadedCore = reloadedCore || mod.name == drbdModuleName
+	}
+
+	if reloadedCore {
+		disableDRBDUsermodeHelper(log)
+
+		// Capabilities are process-global and were sampled from the module this
+		// one just replaced.
+		if err := drbdutils.DetectCapabilities(ctx); err != nil {
+			log.Warn("DRBD capability detection after module reload failed", "err", err)
+		}
+		log.Info("DRBD capabilities re-detected after module reload",
+			"flantExtensions", drbdutils.FlantExtensionsSupported)
+	}
+
 	return nil
 }
 
@@ -214,71 +318,8 @@ func listDRBDMappersOnNode(ctx context.Context, r client.Reader, nodeName string
 	return result, nil
 }
 
-func deleteModule(name string) error {
-	nameBytes, err := syscall.BytePtrFromString(name)
-	if err != nil {
-		return fmt.Errorf("preparing module name: %w", err)
-	}
-	_, _, errno := syscall.Syscall(syscall.SYS_DELETE_MODULE,
-		uintptr(unsafe.Pointer(nameBytes)),
-		0, 0)
-	if errno != 0 {
-		return fmt.Errorf("delete_module(%q): %w", name, errno)
-	}
-	return nil
-}
-
-func loadModule(name string) error {
-	var utsname syscall.Utsname
-	if err := syscall.Uname(&utsname); err != nil {
-		return fmt.Errorf("uname: %w", err)
-	}
-	var releaseBuf []byte
-	for _, b := range utsname.Release {
-		if b == 0 {
-			break
-		}
-		releaseBuf = append(releaseBuf, byte(b))
-	}
-	release := string(releaseBuf)
-
-	// Try container path first, then host filesystem via /proc/1/root
-	// (agent runs as a privileged container with host PID access).
-	paths := []string{
-		fmt.Sprintf("/lib/modules/%s/updates/%s.ko", release, name),
-		fmt.Sprintf("/proc/1/root/lib/modules/%s/updates/%s.ko", release, name),
-	}
-
-	var f *os.File
-	var koPath string
-	var err error
-	for _, p := range paths {
-		f, err = os.Open(p)
-		if err == nil {
-			koPath = p
-			break
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("opening module file (tried %v): %w", paths, err)
-	}
-	defer f.Close()
-
-	params, err := syscall.BytePtrFromString("")
-	if err != nil {
-		return fmt.Errorf("preparing params: %w", err)
-	}
-	const sysFinitModule = 313
-	_, _, errno := syscall.Syscall(sysFinitModule,
-		f.Fd(),
-		uintptr(unsafe.Pointer(params)),
-		0)
-	if errno != 0 {
-		return fmt.Errorf("finit_module(%q): %w", koPath, errno)
-	}
-	return nil
-}
-
+// Copied because drbdr imports this package. Keep in sync with
+// drbdr.DRBDResourceNameOnTheNode.
 const drbdNamePrefix = "sdsrv-"
 
 func drbdResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
@@ -288,7 +329,7 @@ func drbdResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
 	return drbdNamePrefix + drbdr.Name
 }
 
-func buildMapping(log *slog.Logger, resources []v1alpha1.DRBDResource, mappers []v1alpha1.DRBDMapper) ([]drbdrMapperPair, error) {
+func buildMapping(resources []v1alpha1.DRBDResource, mappers []v1alpha1.DRBDMapper) ([]drbdrMapperPair, error) {
 	mapperByLower := make(map[string][]v1alpha1.DRBDMapper)
 	for i := range mappers {
 		lower := mappers[i].Spec.LowerDevicePath

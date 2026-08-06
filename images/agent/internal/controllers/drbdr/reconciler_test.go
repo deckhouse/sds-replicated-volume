@@ -17,6 +17,7 @@ limitations under the License.
 package drbdr_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,9 +36,19 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	fakedrbdutils "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils/fake"
+	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
+
+// These tests do not exercise the upgrade path; an upgrade reaching them is a bug.
+func TestMain(m *testing.M) {
+	upgrade.Upgrader = commonsync.NewOnceUpgrader(false, func(context.Context) error {
+		panic("unexpected DRBD kernel module upgrade")
+	})
+	os.Exit(m.Run())
+}
 
 const (
 	testNodeName       = "test-node"

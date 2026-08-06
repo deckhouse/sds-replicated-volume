@@ -99,14 +99,14 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	}
 	log = log.With("nodeName", envConfig.NodeName())
 
-	// DRBD MODULE UPGRADE CHECK (lightweight, no API calls). Arms a one-shot
-	// trigger that the first DRBDR reconcile fires before touching DRBD.
-	upgrade.CheckAndArm(log)
-
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
+	}
+
+	if err := upgrade.InitializeUpgrader(log, mgr.GetClient(), envConfig.NodeName()); err != nil {
+		return u.LogError(log, fmt.Errorf("initializing DRBD module upgrader: %w", err))
 	}
 
 	eg.Go(func() error {

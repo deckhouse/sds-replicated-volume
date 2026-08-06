@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -82,13 +81,8 @@ func (r *Reconciler) Reconcile(
 ) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
 
-	// If a DRBD module upgrade was armed at startup, run it exactly once before
-	// any DRBD reconciliation. Execute suspends DRBDMapper devices, downs all
-	// DRBD resources and reloads the kernel module; the reconciles that follow
-	// reconfigure resources and resume the devices.
-	if err := upgrade.Trigger.DoIfEnabled(func() error {
-		return upgrade.Execute(rf.Ctx(), slog.Default(), r.cl, r.nodeName)
-	}); err != nil {
+	// Nothing below may run against a DRBD module this agent was not built against.
+	if err := upgrade.Upgrader.EnsureUpgraded(rf.Ctx()); err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
 
