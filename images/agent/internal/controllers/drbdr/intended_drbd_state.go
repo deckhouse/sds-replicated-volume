@@ -320,7 +320,7 @@ func computeIntendedDRBDState(
 
 	return &intendedDRBDState{
 		isUpAndNotInCleanup:     isUpAndNotInCleanup,
-		resourceName:            DRBDResourceNameOnTheNode(drbdr),
+		resourceName:            drbdr.NameOnTheNode(),
 		symlinkName:             drbdr.Name,
 		nodeID:                  drbdr.Spec.NodeID,
 		resourceType:            drbdr.Spec.Type,

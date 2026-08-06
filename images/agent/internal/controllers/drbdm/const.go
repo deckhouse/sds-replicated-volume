@@ -22,25 +22,4 @@ const (
 
 	// ScannerName is the name of the DRBD mapper scanner component.
 	ScannerName = "drbdm-scanner"
-
-	// deviceMapperPrefix is the path prefix for device-mapper devices.
-	deviceMapperPrefix = "/dev/mapper/"
-
-	// internalDeviceSuffix is appended to the CR name to form the internal dm-linear device name.
-	internalDeviceSuffix = "-internal"
 )
-
-// UpperDevicePath returns the user-facing upper device path for a DRBDMapper resource.
-func UpperDevicePath(name string) string {
-	return deviceMapperPrefix + name
-}
-
-// InternalDeviceName returns the internal dm-linear device name.
-func InternalDeviceName(name string) string {
-	return name + internalDeviceSuffix
-}
-
-// InternalDevicePath returns the full path of the internal dm-linear device.
-func InternalDevicePath(name string) string {
-	return deviceMapperPrefix + InternalDeviceName(name)
-}

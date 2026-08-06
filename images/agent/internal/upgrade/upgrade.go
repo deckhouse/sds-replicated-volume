@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
@@ -198,7 +197,7 @@ func apply(ctx context.Context, log *slog.Logger, plan *upgradePlan) error {
 
 	for _, m := range plan.paired {
 		eg.Go(func() error {
-			internalName := drbdm.InternalDeviceName(m.mapper.Name)
+			internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(m.mapper.Name)
 
 			log.Info("Suspending upper device", "drbdMapper", m.mapper.Name)
 			if err := dmsetup.Suspend(egCtx, m.mapper.Name); err != nil {
@@ -215,7 +214,7 @@ func apply(ctx context.Context, log *slog.Logger, plan *upgradePlan) error {
 				return fmt.Errorf("wiping table on %q: %w", internalName, err)
 			}
 
-			drbdName := drbdResourceNameOnTheNode(&m.resource)
+			drbdName := m.resource.NameOnTheNode()
 			log.Info("Bringing down DRBD resource", "drbdResource", m.resource.Name, "drbdName", drbdName)
 			if err := drbdutils.ExecuteDown(egCtx, drbdName); err != nil {
 				return fmt.Errorf("bringing down DRBD resource %q: %w", drbdName, err)
@@ -227,7 +226,7 @@ func apply(ctx context.Context, log *slog.Logger, plan *upgradePlan) error {
 	for i := range plan.unpaired {
 		res := plan.unpaired[i]
 		eg.Go(func() error {
-			drbdName := drbdResourceNameOnTheNode(&res)
+			drbdName := res.NameOnTheNode()
 			log.Info("Bringing down DRBD resource", "drbdResource", res.Name, "drbdName", drbdName)
 			if err := drbdutils.ExecuteDown(egCtx, drbdName); err != nil {
 				return fmt.Errorf("bringing down DRBD resource %q: %w", drbdName, err)
@@ -318,17 +317,6 @@ func listDRBDMappersOnNode(ctx context.Context, r client.Reader, nodeName string
 	return result, nil
 }
 
-// Copied because drbdr imports this package. Keep in sync with
-// drbdr.DRBDResourceNameOnTheNode.
-const drbdNamePrefix = "sdsrv-"
-
-func drbdResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
-	if drbdr.Spec.ActualNameOnTheNode != "" {
-		return drbdr.Spec.ActualNameOnTheNode
-	}
-	return drbdNamePrefix + drbdr.Name
-}
-
 func buildMapping(resources []v1alpha1.DRBDResource, mappers []v1alpha1.DRBDMapper) ([]drbdrMapperPair, error) {
 	mapperByLower := make(map[string][]v1alpha1.DRBDMapper)
 	for i := range mappers {
@@ -338,10 +326,9 @@ func buildMapping(resources []v1alpha1.DRBDResource, mappers []v1alpha1.DRBDMapp
 
 	var result []drbdrMapperPair
 	for i := range resources {
-		device := resources[i].Status.Device
-		if device == "" {
-			continue
-		}
+		// The symlink path comes from the resource name, so the pairing also holds
+		// while the resource is out of the kernel and status.device is empty.
+		device := v1alpha1.FormatDRBDResourceDeviceSymlinkPath(resources[i].Name)
 		matches := mapperByLower[device]
 		switch len(matches) {
 		case 0:

@@ -52,3 +52,30 @@ func RegisterDRBDMByNodeName(mgr manager.Manager) error {
 	}
 	return nil
 }
+
+// IndexFieldDRBDMByLowerDevicePath is used to find the DRBDMapper layered on top
+// of a specific lower device.
+const IndexFieldDRBDMByLowerDevicePath = "spec.lowerDevicePath"
+
+// RegisterDRBDMByLowerDevicePath registers the index for listing
+// DRBDMapper objects by spec.lowerDevicePath.
+func RegisterDRBDMByLowerDevicePath(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.DRBDMapper{},
+		IndexFieldDRBDMByLowerDevicePath,
+		func(obj client.Object) []string {
+			drbdm, ok := obj.(*v1alpha1.DRBDMapper)
+			if !ok {
+				return nil
+			}
+			if drbdm.Spec.LowerDevicePath == "" {
+				return nil
+			}
+			return []string{drbdm.Spec.LowerDevicePath}
+		},
+	); err != nil {
+		return fmt.Errorf("index DRBDMapper by spec.lowerDevicePath: %w", err)
+	}
+	return nil
+}

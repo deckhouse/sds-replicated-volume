@@ -52,7 +52,7 @@ func TestReconcileBlocksOnPendingModuleUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	drbdr.OverrideDeviceSymlinkDir(t.TempDir() + "/")
+	overrideDeviceSymlinkDir(t, t.TempDir()+"/")
 
 	drbdrObj := drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp)
 	cl := fake.NewClientBuilder().

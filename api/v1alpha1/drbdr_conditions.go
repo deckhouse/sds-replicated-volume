@@ -34,6 +34,7 @@ const (
 	DRBDResourceCondConfiguredReasonDelPeerFailed            = "DelPeerFailed"
 	DRBDResourceCondConfiguredReasonDetachFailed             = "DetachFailed"
 	DRBDResourceCondConfiguredReasonDisconnectFailed         = "DisconnectFailed"
+	DRBDResourceCondConfiguredReasonDRBDMapperApplyFailed    = "DRBDMapperApplyFailed"
 	DRBDResourceCondConfiguredReasonDiskOptionsFailed        = "DiskOptionsFailed"
 	DRBDResourceCondConfiguredReasonDownFailed               = "DownFailed"
 	DRBDResourceCondConfiguredReasonFailed                   = "Failed"

@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
@@ -41,19 +41,16 @@ const (
 // drops the whole collection (arbitrary state may have changed while the
 // scanner was disconnected).
 type Scanner struct {
-	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest]
 	portCache *DRBDPortCache
 	caches    *Caches
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(
-	requestCh chan<- event.TypedGenericEvent[DRBDReconcileRequest],
 	portCache *DRBDPortCache,
 	caches *Caches,
 ) *Scanner {
 	return &Scanner{
-		requestCh: requestCh,
 		portCache: portCache,
 		caches:    caches,
 	}
@@ -213,22 +210,17 @@ func (s *Scanner) updatePortCache(ev *drbdutils.Event, drbdName string) {
 // If the DRBD name does not have the prefix, it sends an ActualNameOnTheNode-based request for orphan/rename handling.
 func (s *Scanner) triggerReconciliation(ctx context.Context, drbdName string) {
 	logger := log.FromContext(ctx)
-	var req DRBDReconcileRequest
 
 	// If DRBD name has standard prefix, we can derive K8S name
-	if k8sName, hasPrefix := ParseDRBDResourceNameOnTheNode(drbdName); hasPrefix {
-		req.Name = k8sName
+	if k8sName, hasPrefix := v1alpha1.ParseDRBDResourceNameOnTheNode(drbdName); hasPrefix {
 		logger.V(1).Info("Triggered reconciliation (by k8s name)", "name", k8sName)
-	} else {
-		// No prefix - use ActualNameOnTheNode for orphan/rename handling
-		req.ActualNameOnTheNode = drbdName
-		logger.V(1).Info("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
+		EnqueueReconcile(ctx, k8sName)
+		return
 	}
 
-	select {
-	case s.requestCh <- event.TypedGenericEvent[DRBDReconcileRequest]{Object: req}:
-	case <-ctx.Done():
-	}
+	// No prefix - use ActualNameOnTheNode for orphan/rename handling
+	logger.V(1).Info("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
+	EnqueueReconcileByActualName(ctx, drbdName)
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.

@@ -50,6 +50,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// overrideDeviceSymlinkDir keeps the symlinks this test writes inside dir.
+func overrideDeviceSymlinkDir(t *testing.T, dir string) {
+	t.Helper()
+
+	original := v1alpha1.FormatDRBDResourceDeviceSymlinkPath
+	t.Cleanup(func() { v1alpha1.FormatDRBDResourceDeviceSymlinkPath = original })
+	v1alpha1.FormatDRBDResourceDeviceSymlinkPath = func(name string) string { return dir + name }
+}
+
 const (
 	testNodeName       = "test-node"
 	testOtherNode      = "other-node"
@@ -182,8 +191,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}
 				expectFinalizers(t, dr.Finalizers, v1alpha1.AgentFinalizer)
 				expectDeviceSymlink(t, testDRBDRName, 0)
-				if dr.Status.Device != drbdr.DeviceSymlinkPath(testDRBDRName) {
-					t.Errorf("status.device = %q, want %q", dr.Status.Device, drbdr.DeviceSymlinkPath(testDRBDRName))
+				if dr.Status.Device != v1alpha1.FormatDRBDResourceDeviceSymlinkPath(testDRBDRName) {
+					t.Errorf("status.device = %q, want %q", dr.Status.Device, v1alpha1.FormatDRBDResourceDeviceSymlinkPath(testDRBDRName))
 				}
 
 				// status.size = DRBD usable size (Device.Size KiB * 1024)
@@ -458,7 +467,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			drbdutils.FlantExtensionsSupported = false
 
 			symlinkDir := t.TempDir() + "/"
-			drbdr.OverrideDeviceSymlinkDir(symlinkDir)
+			overrideDeviceSymlinkDir(t, symlinkDir)
 
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().
@@ -784,7 +793,7 @@ func testNode(name string) *corev1.Node {
 
 func expectDeviceSymlink(t *testing.T, k8sName string, expectedMinor uint) {
 	t.Helper()
-	symlinkPath := drbdr.DeviceSymlinkPath(k8sName)
+	symlinkPath := v1alpha1.FormatDRBDResourceDeviceSymlinkPath(k8sName)
 	target, err := os.Readlink(symlinkPath)
 	if err != nil {
 		t.Fatalf("expected symlink at %s: %v", symlinkPath, err)

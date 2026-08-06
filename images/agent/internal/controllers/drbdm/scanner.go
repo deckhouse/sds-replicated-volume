@@ -26,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/udev"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -107,7 +109,7 @@ func (s *Scanner) runEventsLoop(ctx context.Context) error {
 			if dmName == "" {
 				continue
 			}
-			crName := strings.TrimSuffix(dmName, internalDeviceSuffix)
+			crName := strings.TrimSuffix(dmName, v1alpha1.DRBDMapperInternalDeviceSuffix)
 			logger.V(1).Info("Udev block event for DM device", "dmName", dmName, "crName", crName, "action", ev.Action)
 			s.triggerReconciliation(ctx, crName)
 		}

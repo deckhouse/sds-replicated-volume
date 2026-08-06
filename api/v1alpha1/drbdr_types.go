@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -61,6 +63,53 @@ func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
 // It sets the root object's `.status.conditions`.
 func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
 	d.Status.Conditions = conditions
+}
+
+const (
+	// DRBDResourceDeviceSymlinkDir is the directory holding the stable device
+	// symlink of each DRBDResource.
+	DRBDResourceDeviceSymlinkDir = "/dev/sdsrv/"
+
+	// DRBDResourceNameOnTheNodePrefix is the prefix of the DRBD resource name a
+	// DRBDResource carries on its node.
+	DRBDResourceNameOnTheNodePrefix = "sdsrv-"
+)
+
+// FormatDRBDResourceDeviceSymlinkPath returns the stable device symlink path of the
+// DRBDResource with the given name. The symlink target is /dev/drbd<minor>.
+// Overridden by tests that keep the symlinks inside a temporary directory.
+var FormatDRBDResourceDeviceSymlinkPath = func(name string) string {
+	return DRBDResourceDeviceSymlinkDir + name
+}
+
+// ParseDRBDResourceDeviceSymlinkPath extracts the DRBDResource name from a device
+// symlink path. Returns the name and true when the path is one of ours, or the input
+// and false otherwise.
+var ParseDRBDResourceDeviceSymlinkPath = func(path string) (string, bool) {
+	return strings.CutPrefix(path, DRBDResourceDeviceSymlinkDir)
+}
+
+// FormatDRBDResourceNameOnTheNode returns the DRBD resource name that the
+// DRBDResource with the given name carries on its node, for resources that do not
+// override it through spec.actualNameOnTheNode.
+var FormatDRBDResourceNameOnTheNode = func(name string) string {
+	return DRBDResourceNameOnTheNodePrefix + name
+}
+
+// ParseDRBDResourceNameOnTheNode extracts the DRBDResource name from a DRBD resource
+// name on the node. Returns the name and true when it carries the standard prefix,
+// or the input and false otherwise.
+var ParseDRBDResourceNameOnTheNode = func(nameOnTheNode string) (string, bool) {
+	return strings.CutPrefix(nameOnTheNode, DRBDResourceNameOnTheNodePrefix)
+}
+
+// NameOnTheNode returns the DRBD resource name this DRBDResource carries on its
+// node, honouring spec.actualNameOnTheNode when it is set.
+func (d *DRBDResource) NameOnTheNode() string {
+	if d.Spec.ActualNameOnTheNode != "" {
+		return d.Spec.ActualNameOnTheNode
+	}
+	return FormatDRBDResourceNameOnTheNode(d.Name)
 }
 
 // +kubebuilder:object:generate=true

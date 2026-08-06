@@ -565,7 +565,7 @@ func (a EnsureDeviceSymlinkAction) Execute(_ context.Context) error {
 		)
 	}
 
-	symlinkPath := DeviceSymlinkPath(a.Name)
+	symlinkPath := v1alpha1.FormatDRBDResourceDeviceSymlinkPath(a.Name)
 	target := fmt.Sprintf("/dev/drbd%d", *a.Minor)
 
 	current, err := os.Readlink(symlinkPath)
@@ -599,7 +599,7 @@ type RemoveDeviceSymlinkAction struct {
 }
 
 func (a RemoveDeviceSymlinkAction) Execute(_ context.Context) error {
-	err := os.Remove(DeviceSymlinkPath(a.Name))
+	err := os.Remove(v1alpha1.FormatDRBDResourceDeviceSymlinkPath(a.Name))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return ConfiguredReasonError(
 			fmt.Errorf("removing device symlink: %w", err),
@@ -611,4 +611,40 @@ func (a RemoveDeviceSymlinkAction) Execute(_ context.Context) error {
 
 func (a RemoveDeviceSymlinkAction) String() string {
 	return fmt.Sprintf("RemoveDeviceSymlink(name=%s)", a.Name)
+}
+
+// CreateDRBDMapperAction creates the DRBDMapper that drbdm builds the consumer's dm
+// layers from. It runs after the symlink it maps exists.
+type CreateDRBDMapperAction struct {
+	DRBDMapper *drbdMapperClient
+}
+
+func (a CreateDRBDMapperAction) Execute(ctx context.Context) error {
+	return ConfiguredReasonError(
+		a.DRBDMapper.Create(ctx),
+		v1alpha1.DRBDResourceCondConfiguredReasonDRBDMapperApplyFailed,
+	)
+}
+
+func (a CreateDRBDMapperAction) String() string {
+	return fmt.Sprintf("CreateDRBDMapper(name=%s, lowerDevicePath=%s)",
+		a.DRBDMapper.name, a.DRBDMapper.lowerDevicePath)
+}
+
+// DeleteDRBDMapperAction deletes the DRBDMapper so drbdm removes the dm layers
+// holding the DRBD device open. drbdm drops its finalizer once the upper device has
+// no openers, which is what the teardown then waits for.
+type DeleteDRBDMapperAction struct {
+	DRBDMapper *drbdMapperClient
+}
+
+func (a DeleteDRBDMapperAction) Execute(ctx context.Context) error {
+	return ConfiguredReasonError(
+		a.DRBDMapper.Delete(ctx),
+		v1alpha1.DRBDResourceCondConfiguredReasonDRBDMapperApplyFailed,
+	)
+}
+
+func (a DeleteDRBDMapperAction) String() string {
+	return fmt.Sprintf("DeleteDRBDMapper(name=%s)", a.DRBDMapper.name)
 }
