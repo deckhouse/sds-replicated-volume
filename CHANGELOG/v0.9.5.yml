@@ -8,8 +8,8 @@ Changes:
     the database version
 - Correction: LINSTOR ignores unknown object properties when working with Kubernetes
     API
-- Correction: installing DRBD on nodes reinstalls the package if the sources are
-    outdated and more strictly checks the version of the loaded module
+- Correction: installing DRBD on nodes reinstalls the package if the sources are outdated
+    and more strictly checks the version of the loaded module
 - Re-issuance of certificates has been switched to a manual procedure described in
   the FAQ; manualcertrenewal-trigger trigger hook removed
 - Updating base images, container-base and lib-helm to 1.72.12
