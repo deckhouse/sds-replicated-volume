@@ -6,7 +6,7 @@
   license: GPL-2.0
 
 - id: DRBD
-  version: "9.2.18-flant.10"
+  version: "9.2.19-flant.11"
   name: DRBD
   link: https://github.com/LINBIT/drbd
   description: DRBD, developed by LINBIT, provides networked RAID 1 functionality for GNU/Linux. It is designed for high availability clusters and software defined storage.
