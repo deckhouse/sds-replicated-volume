@@ -398,7 +398,7 @@ spec:
               initialQuorumReachedAt:
                 description: |-
                   InitialQuorumReachedAt is the first time the controller observed this replica
-                  holding quorum as a datamesh member. It is a latch: it is set once per membership
+                  holding quorum as a datamesh member. It is set once per membership
                   epoch and cleared when the replica leaves the datamesh (datameshRevision back to 0),
                   so a replica that re-joins goes through joining again.
 
