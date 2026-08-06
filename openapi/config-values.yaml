@@ -99,3 +99,5 @@ properties:
       Switches the module to the new control-plane backend.
 
       After you set this parameter to `true`, reverting it back to `false` is prohibited.
+
+      Enabling it is only allowed on Deckhouse development builds; on any release channel the setting is rejected and ignored.
