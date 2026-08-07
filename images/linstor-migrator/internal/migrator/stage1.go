@@ -180,6 +180,12 @@ func (m *Migrator) runStage1(ctx context.Context) error {
 		}
 	}
 
+	// 4b. Label PersistentVolumes that have no corresponding LINSTOR resource so an alert can
+	// surface PVs left without a backing ReplicatedVolume after migration.
+	if err := m.ensurePVNoLinstorResourceLabels(ctx, db, pvMap); err != nil {
+		return fmt.Errorf("label PersistentVolumes without LINSTOR resource: %w", err)
+	}
+
 	// 5. Classify resources
 	var (
 		// resourcesWithPV holds resource names (PV names) that exist in both LINSTOR and the cluster.
@@ -970,6 +976,85 @@ func (m *Migrator) setDRBDResourceOwnerRef(ctx context.Context, log *slog.Logger
 		}
 
 		log.Debug("set ownerRef on DRBDResource", "drbdr", drbdrName, "owner", rvrName)
+		return nil
+	})
+}
+
+// ensurePVNoLinstorResourceLabels labels PersistentVolumes with the replicated CSI driver that
+// have no corresponding per-node LINSTOR Resource (db.Resources entry) with
+// sds-replicated-volume.deckhouse.io/no-linstor-resource=true. PVs that DO have a LINSTOR
+// resource have the label removed (cleans up on re-runs). Idempotent: skips no-op patches.
+// A PV is considered to have a LINSTOR resource when len(db.Resources[strings.ToLower(pv.Name)]) > 0.
+func (m *Migrator) ensurePVNoLinstorResourceLabels(
+	ctx context.Context,
+	db *linstordb.LinstorDB,
+	pvMap map[string]corev1.PersistentVolume,
+) error {
+	m.log.Debug("labeling PersistentVolumes without LINSTOR resource", "replicatedPVs", len(pvMap))
+
+	for resName, pv := range pvMap {
+		resources, ok := db.Resources[resName]
+		hasResource := ok && len(resources) > 0
+
+		if err := m.patchPVNoLinstorResource(ctx, pv, hasResource); err != nil {
+			return fmt.Errorf("failed to label PersistentVolume %q: %w", pv.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// patchPVNoLinstorResource adds or removes the NoLinstorResource label on a PersistentVolume
+// depending on whether the PV has a corresponding LINSTOR resource. The Get-Patch cycle is
+// wrapped in retryTransient for optimistic concurrency safety.
+func (m *Migrator) patchPVNoLinstorResource(ctx context.Context, pv corev1.PersistentVolume, hasResource bool) error {
+	return m.retryTransient(ctx, "patch PersistentVolume no-linstor-resource", func() error {
+		fresh := &corev1.PersistentVolume{}
+		if err := m.client.Get(ctx, types.NamespacedName{Name: pv.Name}, fresh); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		cur := fresh.Labels[srvv1alpha1.NoLinstorResourceLabelKey]
+
+		// Idempotency: skip if already in the desired state.
+		if !hasResource && cur == srvv1alpha1.NoLinstorResourceLabelValue {
+			return nil
+		}
+		if hasResource && cur == "" {
+			return nil
+		}
+
+		old := fresh.DeepCopy()
+
+		switch {
+		case !hasResource:
+			if fresh.Labels == nil {
+				fresh.Labels = make(map[string]string)
+			}
+			fresh.Labels[srvv1alpha1.NoLinstorResourceLabelKey] = srvv1alpha1.NoLinstorResourceLabelValue
+		case hasResource:
+			delete(fresh.Labels, srvv1alpha1.NoLinstorResourceLabelKey)
+			if len(fresh.Labels) == 0 {
+				fresh.Labels = nil
+			}
+		}
+
+		if err := m.client.Patch(ctx, fresh, kubecl.MergeFrom(old)); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		if !hasResource {
+			m.log.Info("labeled PersistentVolume with no LINSTOR resource", "persistentVolume", pv.Name)
+		} else {
+			m.log.Info("removed no-LINSTOR-resource label from PersistentVolume", "persistentVolume", pv.Name)
+		}
+
 		return nil
 	})
 }

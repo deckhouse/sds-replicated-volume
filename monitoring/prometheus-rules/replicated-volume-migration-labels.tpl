@@ -21,6 +21,24 @@
 
           `kubectl delete replicatedvolume {{ "{{" }} $labels.name {{ "}}" }}`
 
+    - alert: D8PersistentVolumeNoLinstorResource
+      expr: count by (persistentvolume) (kube_persistentvolume_labels{label_sds_replicated_volume_deckhouse_io_no_linstor_resource="true"}) > 0
+      for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "persistentvolume"
+        plk_create_group_if_not_exists__d8_replicated_volume_migration_labels: "D8ReplicatedVolumeMigrationLabels,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_volume_migration_labels: "D8ReplicatedVolumeMigrationLabels,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: PersistentVolume has no LINSTOR resource
+        description: |
+          The PersistentVolume `{{ "{{" }} $labels.persistentvolume {{ "}}" }}` is marked with the `sds-replicated-volume.deckhouse.io/no-linstor-resource` label, which means it has the replicated CSI driver but no corresponding LINSTOR resource. After migration to the new control plane LINSTOR is removed and cannot be recreated, so this PersistentVolume is left without a backing ReplicatedVolume.
+
+          Contact support for assistance.
+
     - alert: D8ReplicatedVolumeAutoConfigurationBlocked
       expr: sds_rv_auto_configuration_blocked == 1
       for: 5m
