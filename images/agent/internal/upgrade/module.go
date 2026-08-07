@@ -88,8 +88,9 @@ func preflightModule(release, name string) (plannedModule, error) {
 	return plannedModule{name: name, path: path}, nil
 }
 
-// The host filesystem is reachable via /proc/1/root because the agent is a
-// privileged container with host PID access. Overridden by tests.
+// /lib/modules is the host's, bind-mounted read-only into the container by
+// templates/agent/daemonset.yaml. The /proc/1/root form is a fallback for a pod
+// that has host PID access but not that mount. Overridden by tests.
 var moduleDirs = []string{"/lib/modules", "/proc/1/root/lib/modules"}
 
 func modulePathCandidates(release, name string) []string {
