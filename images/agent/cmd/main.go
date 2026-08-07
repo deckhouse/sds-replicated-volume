@@ -32,6 +32,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
@@ -102,6 +103,10 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
+	}
+
+	if err := upgrade.InitializeUpgrader(log, mgr.GetClient(), envConfig.NodeName()); err != nil {
+		return u.LogError(log, fmt.Errorf("initializing DRBD module upgrader: %w", err))
 	}
 
 	eg.Go(func() error {

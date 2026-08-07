@@ -14,12 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdm
+package dmsetup
 
-const (
-	// ControllerName is the stable name for the DRBD mapper controller.
-	ControllerName = "drbdm-controller"
-
-	// ScannerName is the name of the DRBD mapper scanner component.
-	ScannerName = "drbdm-scanner"
+import (
+	"context"
+	"fmt"
 )
+
+// Load loads a new table into a suspended or active device-mapper device.
+// The new table takes effect on the next resume.
+func Load(ctx context.Context, name, table string) error {
+	out, err := ExecCommandContext(ctx, dmsetupCommand, "load", name, "--table", table).CombinedOutput()
+	if err != nil {
+		return withOutput(fmt.Errorf("dmsetup load %q: %w", name, err), out)
+	}
+	return nil
+}

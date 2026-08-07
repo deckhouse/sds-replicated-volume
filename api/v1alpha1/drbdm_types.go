@@ -60,6 +60,33 @@ type DRBDMapperList struct {
 	Items []DRBDMapper `json:"items"`
 }
 
+const (
+	// DeviceMapperDir is the path prefix of device-mapper devices.
+	DeviceMapperDir = "/dev/mapper/"
+
+	// DRBDMapperInternalDeviceSuffix distinguishes the internal dm-linear device of a
+	// DRBDMapper from its upper device.
+	DRBDMapperInternalDeviceSuffix = "-internal"
+)
+
+// FormatDRBDMapperUpperDevicePath returns the path of the upper device of the
+// DRBDMapper with the given name. This is the device consumers use.
+var FormatDRBDMapperUpperDevicePath = func(name string) string {
+	return DeviceMapperDir + name
+}
+
+// FormatDRBDMapperInternalDeviceName returns the device-mapper name of the internal
+// dm-linear device of the DRBDMapper with the given name.
+var FormatDRBDMapperInternalDeviceName = func(name string) string {
+	return name + DRBDMapperInternalDeviceSuffix
+}
+
+// FormatDRBDMapperInternalDevicePath returns the path of the internal dm-linear
+// device of the DRBDMapper with the given name.
+var FormatDRBDMapperInternalDevicePath = func(name string) string {
+	return DeviceMapperDir + FormatDRBDMapperInternalDeviceName(name)
+}
+
 // +kubebuilder:object:generate=true
 type DRBDMapperSpec struct {
 	// +kubebuilder:validation:Required

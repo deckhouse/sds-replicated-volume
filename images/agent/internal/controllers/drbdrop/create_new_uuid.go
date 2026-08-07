@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
@@ -32,7 +31,7 @@ func (r *OperationReconciler) executeCreateNewUUID(
 	dr *v1alpha1.DRBDResource,
 ) error {
 	// Get minor number from DRBD status
-	drbdResName := drbdr.DRBDResourceNameOnTheNode(dr)
+	drbdResName := dr.NameOnTheNode()
 	statusResult, err := drbdutils.ExecuteStatus(ctx, drbdResName)
 	if err != nil {
 		return fmt.Errorf("querying DRBD status: %w", err)

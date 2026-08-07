@@ -28,4 +28,17 @@ const (
 	DRBDMapperCondConfiguredReasonDeviceInfoFailed = "DeviceInfoFailed"
 	DRBDMapperCondConfiguredReasonDeviceInUse      = "DeviceInUse"
 	DRBDMapperCondConfiguredReasonRemoveFailed     = "RemoveFailed"
+
+	// DRBDMapperCondIOSuspendedType indicates whether the upper device is
+	// suspended, which freezes consumer I/O.
+	//
+	// Status=True means the upper device is suspended.
+	// Status=False means the upper device is active.
+	DRBDMapperCondIOSuspendedType = "IOSuspended"
+
+	DRBDMapperCondIOSuspendedReasonSuspended = "Suspended"
+	DRBDMapperCondIOSuspendedReasonActive    = "Active"
+	// DRBDMapperCondIOSuspendedReasonDeviceAbsent is used when the upper device
+	// does not exist, so its suspend state is unknown.
+	DRBDMapperCondIOSuspendedReasonDeviceAbsent = "DeviceAbsent"
 )

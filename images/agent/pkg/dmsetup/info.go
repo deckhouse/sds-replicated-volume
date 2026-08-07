@@ -23,6 +23,12 @@ import (
 	"strings"
 )
 
+// State values reported by dmsetup info.
+const (
+	StateActive    = "ACTIVE"
+	StateSuspended = "SUSPENDED"
+)
+
 // DeviceInfo holds parsed output from dmsetup info.
 type DeviceInfo struct {
 	Name      string

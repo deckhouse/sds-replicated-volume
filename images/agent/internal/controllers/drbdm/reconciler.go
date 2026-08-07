@@ -28,6 +28,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
@@ -144,7 +145,7 @@ func (r *Reconciler) reconcileDelete(
 		}
 	}
 
-	internalName := InternalDeviceName(obj.Name)
+	internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(obj.Name)
 	internalInfo, err := dmsetup.Info(rf.Ctx(), internalName)
 	if err != nil {
 		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
@@ -164,6 +165,10 @@ func (r *Reconciler) reconcileDelete(
 		}
 	}
 
+	// The DRBDResource controller holds DRBD up while this object exists, so tell it
+	// the dm layers are gone before the finalizer lets the object disappear.
+	r.wakeDRBDResource(rf.Ctx(), obj)
+
 	base := obj.DeepCopy()
 	obju.RemoveFinalizer(obj, v1alpha1.AgentFinalizer)
 	if err := r.patchMain(rf.Ctx(), obj, base); err != nil {
@@ -171,6 +176,16 @@ func (r *Reconciler) reconcileDelete(
 	}
 
 	return rf.Done()
+}
+
+// wakeDRBDResource asks the DRBDResource controller to reconcile the resource this
+// DRBDMapper is layered on. The name comes from the lower device path.
+func (r *Reconciler) wakeDRBDResource(ctx context.Context, obj *v1alpha1.DRBDMapper) {
+	name, ok := v1alpha1.ParseDRBDResourceDeviceSymlinkPath(obj.Spec.LowerDevicePath)
+	if !ok {
+		return
+	}
+	drbdr.EnqueueReconcile(ctx, name)
 }
 
 // reconcileEnsureFinalizer adds the agent finalizer if not present.
@@ -206,7 +221,7 @@ func (r *Reconciler) reconcileDevice(
 	rf := flow.BeginReconcile(ctx, "device")
 	defer rf.OnEnd(&outcome)
 
-	internalName := InternalDeviceName(obj.Name)
+	internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(obj.Name)
 
 	internalInfo, err := dmsetup.Info(rf.Ctx(), internalName)
 	if err != nil {
@@ -238,7 +253,7 @@ func (r *Reconciler) reconcileDevice(
 	}
 
 	if upperInfo == nil {
-		if err := dmsetup.Create(rf.Ctx(), obj.Name, InternalDevicePath(obj.Name)); err != nil {
+		if err := dmsetup.Create(rf.Ctx(), obj.Name, v1alpha1.FormatDRBDMapperInternalDevicePath(obj.Name)); err != nil {
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 				fmt.Sprintf("creating upper device: %v", err))
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
@@ -273,12 +288,22 @@ func (r *Reconciler) reconcileStatus(
 	base := obj.DeepCopy()
 
 	if upperInfo != nil {
-		obj.Status.UpperDevicePath = UpperDevicePath(obj.Name)
+		obj.Status.UpperDevicePath = v1alpha1.FormatDRBDMapperUpperDevicePath(obj.Name)
 		obj.Status.OpenCount = int32(upperInfo.OpenCount)
 		obju.SetStatusCondition(obj, metav1.Condition{
 			Type:   v1alpha1.DRBDMapperCondConfiguredType,
 			Status: metav1.ConditionTrue,
 			Reason: v1alpha1.DRBDMapperCondConfiguredReasonConfigured,
+		})
+
+		suspendedStatus, suspendedReason := metav1.ConditionFalse, v1alpha1.DRBDMapperCondIOSuspendedReasonActive
+		if upperInfo.State == dmsetup.StateSuspended {
+			suspendedStatus, suspendedReason = metav1.ConditionTrue, v1alpha1.DRBDMapperCondIOSuspendedReasonSuspended
+		}
+		obju.SetStatusCondition(obj, metav1.Condition{
+			Type:   v1alpha1.DRBDMapperCondIOSuspendedType,
+			Status: suspendedStatus,
+			Reason: suspendedReason,
 		})
 	} else {
 		obj.Status.UpperDevicePath = ""
@@ -289,12 +314,21 @@ func (r *Reconciler) reconcileStatus(
 			Reason:  v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 			Message: "upper device does not exist after creation attempt",
 		})
+		obju.SetStatusCondition(obj, metav1.Condition{
+			Type:    v1alpha1.DRBDMapperCondIOSuspendedType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.DRBDMapperCondIOSuspendedReasonDeviceAbsent,
+			Message: "upper device does not exist",
+		})
 	}
 
 	if !equality.Semantic.DeepEqual(obj.Status, base.Status) {
 		if err := r.patchStatus(rf.Ctx(), obj); err != nil {
 			return rf.Fail(err)
 		}
+		// The DRBDResource publishes this object's upper device to consumers, so it
+		// has to see the change.
+		r.wakeDRBDResource(rf.Ctx(), obj)
 	}
 
 	return rf.Done()

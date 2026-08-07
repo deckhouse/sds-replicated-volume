@@ -31,7 +31,11 @@ import (
 // computeTargetDRBDActions computes the DRBD actions needed to converge
 // from actual state to intended state. It returns only DRBD-specific actions,
 // not K8S object modifications (finalizers, status).
-func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+func computeTargetDRBDActions(
+	iState IntendedDRBDState,
+	aState ActualDRBDState,
+	drbdMapper *drbdMapperClient,
+) (res DRBDActions) {
 	if iState.IsZero() {
 		return
 	}
@@ -45,6 +49,14 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 	}
 
 	if !iState.IsUpAndNotInCleanup() {
+		// The dm layers hold the DRBD device open and the internal one maps the
+		// symlink, so drbdm has to remove them before any of this can run.
+		if drbdm := aState.DRBDMapper(); drbdm != nil {
+			if drbdm.DeletionTimestamp == nil {
+				res = append(res, DeleteDRBDMapperAction{DRBDMapper: drbdMapper})
+			}
+			return res
+		}
 		// Teardown: remove symlink before down to prevent dangling references
 		res = append(res, RemoveDeviceSymlinkAction{Name: iState.SymlinkName()})
 		if aState.ResourceExists() {
@@ -55,6 +67,10 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 
 	// Bring-up sequence
 	res = append(res, computeBringUpActions(iState, aState)...)
+
+	if aState.DRBDMapper() == nil {
+		res = append(res, CreateDRBDMapperAction{DRBDMapper: drbdMapper})
+	}
 
 	return res
 }

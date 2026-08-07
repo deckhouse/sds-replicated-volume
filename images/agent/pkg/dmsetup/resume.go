@@ -14,12 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdm
+package dmsetup
 
-const (
-	// ControllerName is the stable name for the DRBD mapper controller.
-	ControllerName = "drbdm-controller"
-
-	// ScannerName is the name of the DRBD mapper scanner component.
-	ScannerName = "drbdm-scanner"
+import (
+	"context"
+	"fmt"
 )
+
+// Resume resumes a suspended device-mapper device, allowing IO to flow.
+func Resume(ctx context.Context, name string) error {
+	out, err := ExecCommandContext(ctx, dmsetupCommand, "resume", name).CombinedOutput()
+	if err != nil {
+		return withOutput(fmt.Errorf("dmsetup resume %q: %w", name, err), out)
+	}
+	return nil
+}
