@@ -16,7 +16,7 @@ The configuration is performed by the `sds-replicated-volume-controller` using t
 
 ### Setting up LVM
 
-Configuration examples can be found in the [sds-node-configurator](/modules/sds-node-configurator/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
+Configuration examples can be found in the [sds-node-configurator](/modules/sds-node-configurator/resources.html) module documentation. The configuration will result in [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
 
 ### Using ReplicatedStoragePool resources
 
