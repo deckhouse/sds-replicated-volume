@@ -132,13 +132,12 @@ properties:
           ca:
             type: string
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
-      webhookCert:
+      linstorCA:
         type: object
         default: {}
-        x-required-for-helm:
-        - crt
-        - key
-        - ca
+        description: |
+          CA signing the LINSTOR certificates. Kept in the linstor-ca secret, which lets those
+          certificates be renewed without re-issuing all of them at once.
         properties:
           crt:
             type: string
@@ -146,7 +145,41 @@ properties:
           key:
             type: string
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
-          ca:
+      webhooksCA:
+        type: object
+        default: {}
+        description: |
+          CA signing the webhook certificates. Kept in the webhooks-ca secret.
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      spaasCA:
+        type: object
+        default: {}
+        description: |
+          CA signing the SPAAS certificate. Kept in the spaas-ca secret.
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      schedulerExtenderCA:
+        type: object
+        default: {}
+        description: |
+          CA signing the scheduler extender certificate. Kept in the
+          linstor-scheduler-extender-ca secret.
+        properties:
+          crt:
+            type: string
+            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+          key:
             type: string
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
       customWebhookCert:

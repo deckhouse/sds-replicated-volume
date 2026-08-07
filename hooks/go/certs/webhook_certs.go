@@ -38,16 +38,6 @@ func WebhookCertConfigs() tlscertificate.GenSelfSignedTLSGroupHookConf {
 			webhookCertConfigsFromArgs(
 				[]webhookHookArgs{
 					{
-						cn:             "linstor-scheduler-admission",
-						secretName:     "linstor-scheduler-admission-certs",
-						valuesPropName: "webhookCert",
-						additionalSANs: []string{
-							"linstor-scheduler-admission",
-							fmt.Sprintf("linstor-scheduler-admission.%s", ModuleNamespace),
-							fmt.Sprintf("linstor-scheduler-admission.%s.svc", ModuleNamespace),
-						},
-					},
-					{
 						cn:             "webhooks",
 						secretName:     "webhooks-https-certs",
 						valuesPropName: "customWebhookCert",
@@ -86,14 +76,16 @@ func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertific
 					ModuleName,
 					args.valuesPropName,
 				),
-				CommonCACanonicalName: "linstor-scheduler-admission",
+				CommonCACanonicalName: "webhooks-ca",
+				CASecretName:          "webhooks-ca",
+				CAValuesPath:          fmt.Sprintf("%s.internal.webhooksCA", ModuleName),
 				Usages: []kcertificates.KeyUsage{
 					kcertificates.UsageKeyEncipherment,
 					kcertificates.UsageCertSign,
 					// ExtKeyUsage
 					kcertificates.UsageServerAuth,
 				},
-				CAExpiryDuration:     DefaultCertExpiredDuration,
+				CAExpiryDuration:     DefaultCAExpiredDuration,
 				CertExpiryDuration:   DefaultCertExpiredDuration,
 				CertOutdatedDuration: DefaultCertOutdatedDuration,
 			}

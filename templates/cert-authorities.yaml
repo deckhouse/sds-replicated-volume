@@ -1,0 +1,30 @@
+{{- /*
+  CAs signing the module certificate groups. Storing the CA private key is what makes a rolling
+  renewal possible: a certificate about to expire is re-signed by the same CA, so its consumers
+  keep trusting both the old and the new one and can be restarted one by one.
+
+  A CA is absent from the values until the group it signs is issued by a module version which
+  keeps it, hence the guards below.
+*/ -}}
+{{- range $name, $values := dict
+  "linstor-ca" .Values.sdsReplicatedVolume.internal.linstorCA
+  "webhooks-ca" .Values.sdsReplicatedVolume.internal.webhooksCA
+  "spaas-ca" .Values.sdsReplicatedVolume.internal.spaasCA
+  "linstor-scheduler-extender-ca" .Values.sdsReplicatedVolume.internal.schedulerExtenderCA
+}}
+  {{- with $values }}
+    {{- if and .crt .key }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: d8-{{ $.Chart.Name }}
+  {{- include "helm_lib_module_labels" (list $) | nindent 2 }}
+type: Opaque
+data:
+  ca.crt: {{ .crt | b64enc }}
+  ca.key: {{ .key | b64enc }}
+    {{- end }}
+  {{- end }}
+{{- end }}
