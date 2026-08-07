@@ -95,6 +95,22 @@ func Test_PVCValidate(t *testing.T) {
 			wantValid: true,
 		},
 		{
+			name: "RWX PVC with replicated provisioner and csi service account",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+					StorageClassName: stringPtr("sc"),
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "sc"}, Provisioner: replicatedProvisioner},
+			},
+			username:  "system:serviceaccount:d8-sds-replicated-volume:csi",
+			groups:    []string{},
+			wantValid: true,
+		},
+		{
 			name: "RWX PVC with replicated provisioner and disallowed user",
 			obj: &v1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
