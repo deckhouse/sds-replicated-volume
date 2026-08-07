@@ -65,6 +65,7 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -73,6 +74,7 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
@@ -273,8 +275,8 @@ spec:
               reclaimPolicy:
                 description: |-
                   The storage class's reclaim policy. Might be:
-                  - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
-                  - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
+                  - `Delete`: If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well.
+                  - `Retain`: If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage.
                 enum:
                 - Delete
                 - Retain
@@ -285,10 +287,10 @@ spec:
                   Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
 
                   The Storage class's replication mode. Might be:
-                  - None — single replica, no replication. Requires topology to be 'Ignored'.
-                  - Availability — 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
-                  - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO.
-                  - ConsistencyAndAvailability — 3 replicas; can lose 1 node and keeps consistency.
+                  - `None`: Single replica, no replication. Requires topology to be 'Ignored'.
+                  - `Availability`: 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
+                  - `Consistency`: 2 replicas with consistency guarantees; requires both replicas for IO.
+                  - `ConsistencyAndAvailability`: 3 replicas; can lose 1 node and keeps consistency.
 
                   Mapping to failuresToTolerate/guaranteedMinimumDataRedundancy:
                     None                       → failuresToTolerate=0, guaranteedMinimumDataRedundancy=0
@@ -340,8 +342,8 @@ spec:
                   type:
                     description: |-
                       Type defines the volumes type. Might be:
-                      - LVM (for Thick)
-                      - LVMThin (for Thin)
+                      - `LVM`: For Thick.
+                      - `LVMThin`: For Thin.
                     enum:
                     - LVM
                     - LVMThin
@@ -387,10 +389,10 @@ spec:
               topology:
                 description: |-
                   The topology settings for the volumes in the created Storage class. Might be:
-                  - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
+                  - `TransZonal`: Replicas of the volumes will be created in different zones (one replica per zone).
                     To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
-                  - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
-                  - Ignored — the topology information will not be used to place replicas of the volumes.
+                  - `Zonal`: All replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+                  - `Ignored`: The topology information will not be used to place replicas of the volumes.
                     The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
                     Required when replication is 'None'.
 
@@ -406,12 +408,12 @@ spec:
                 default: PreferablyLocal
                 description: |-
                   The Storage class's volume access mode. Defines how pods access the volume. Might be:
-                  - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
-                  - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
+                  - `Local`: Volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
+                  - `EventuallyLocal`: Volume can be accessed remotely, but a local replica will be created on the accessing node.
                     after some time. Pod scheduling waits for consumer.
-                  - PreferablyLocal — volume prefers local access but allows remote access if no local replica is available.
+                  - `PreferablyLocal`: Volume prefers local access but allows remote access if no local replica is available.
                     Scheduler tries to place pods on nodes with replicas. Pod scheduling waits for consumer.
-                  - Any — volume can be accessed from any node. Most flexible mode with immediate volume binding.
+                  - `Any`: Volume can be accessed from any node. Most flexible mode with immediate volume binding.
 
                   > Note that the default Volume Access mode is 'PreferablyLocal'.
                 enum:
@@ -525,6 +527,8 @@ spec:
             description: Displays current information about the Storage Class.
             properties:
               conditions:
+                description: |
+                  List of conditions that reflect the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

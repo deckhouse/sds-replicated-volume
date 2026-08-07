@@ -56,22 +56,28 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |
+          ReplicatedVolume describes a replicated volume: its size, configuration method (from a ReplicatedStorageClass or specified manually), and observed replication state (datamesh, replicas, quorum, and attachments).
         properties:
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
+
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
+
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
@@ -83,8 +89,10 @@ spec:
                 default: Auto
                 description: |-
                   ConfigurationMode selects how the volume configuration is determined.
-                  Auto (default): configuration is derived from the referenced ReplicatedStorageClass.
-                  Manual: configuration is specified directly in the manualConfiguration field.
+
+                  Might be:
+                  - `Auto`: Configuration is derived from the referenced ReplicatedStorageClass.
+                  - `Manual`: Configuration is specified directly in the manualConfiguration field.
                 enum:
                 - Auto
                 - Manual
@@ -92,6 +100,7 @@ spec:
               manualConfiguration:
                 description: |-
                   ManualConfiguration specifies the volume configuration directly.
+
                   Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
                 properties:
                   failuresToTolerate:
@@ -147,7 +156,7 @@ spec:
                 description: |-
                   MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
 
-                  WARNING: Values greater than 1 enable multi-attach mode. In this mode the block device
+                  > **Caution.** Values greater than 1 enable multi-attach mode. In this mode the block device
                   is writable from multiple nodes concurrently. The consuming application MUST guarantee
                   that it never writes to the same disk regions from different nodes simultaneously.
                   In particular:
@@ -163,10 +172,13 @@ spec:
               replicatedStorageClassName:
                 description: |-
                   ReplicatedStorageClassName references the RSC that provides configuration.
+
                   Required when configurationMode is Auto. Must not be set when configurationMode is Manual.
                 minLength: 1
                 type: string
               size:
+                description: |
+                  Requested volume size.
                 anyOf:
                 - type: integer
                 - type: string
@@ -191,6 +203,8 @@ spec:
           status:
             properties:
               actuallyAttachedTo:
+                description: |
+                  List of nodes to which the volume is currently actually attached.
                 items:
                   type: string
                 maxItems: 2
@@ -203,7 +217,9 @@ spec:
                 default: 0
                 description: |-
                   BaselineGuaranteedMinimumDataRedundancy is the GMDR level that the datamesh
-                  has reached and committed to maintain. Computed as min(qmr-1, config.GMDR).
+                  has reached and committed to maintain.
+
+                  Computed as min(qmr-1, config.GMDR).
                     - Rises toward Configuration as members are added and qmr confirmed.
                     - Never exceeds Configuration (capped at the target level).
                     - Decreases when Configuration GMDR is lowered.
@@ -211,6 +227,8 @@ spec:
                 minimum: 0
                 type: integer
               conditions:
+                description: |
+                  List of conditions that reflect the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -218,18 +236,21 @@ spec:
                     lastTransitionTime:
                       description: |-
                         lastTransitionTime is the last time the condition transitioned from one status to another.
+
                         This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
                       description: |-
                         message is a human readable message indicating details about the transition.
+
                         This may be an empty string.
                       maxLength: 32768
                       type: string
                     observedGeneration:
                       description: |-
                         observedGeneration represents the .metadata.generation that the condition was set based upon.
+
                         For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
                         with respect to the current state of the instance.
                       format: int64
@@ -238,6 +259,7 @@ spec:
                     reason:
                       description: |-
                         reason contains a programmatic identifier indicating the reason for the condition's last transition.
+
                         Producers of specific condition types may define expected values and meanings for this field,
                         and whether the values are considered a guaranteed API.
                         The value should be a CamelCase string.
@@ -247,7 +269,7 @@ spec:
                       pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
-                      description: status of the condition, one of True, False, Unknown.
+                      description: Status of the condition.
                       enum:
                       - "True"
                       - "False"
@@ -395,6 +417,7 @@ spec:
                         name:
                           description: |-
                             Name is the member name (used as list map key).
+
                             Must have format "prefix-N" where N is 0-31.
                           maxLength: 140
                           minLength: 1
@@ -521,6 +544,7 @@ spec:
                     name:
                       description: |-
                         Name is the replica name.
+
                         Must have format "prefix-N" where N is 0-31.
                       maxLength: 123
                       minLength: 1
@@ -552,8 +576,10 @@ spec:
                             for LVMThin storage pools).
                           type: string
                         type:
-                          description: Type is the intended replica type. Required
-                            for Join and ChangeRole operations.
+                          description: |-
+                            Type is the intended replica type.
+
+                            Required for Join and ChangeRole operations.
                           enum:
                           - Diskful
                           - Access
@@ -602,12 +628,14 @@ spec:
                 items:
                   description: |-
                     ReplicatedVolumeDatameshTransition represents an active datamesh transition.
+
                     Each transition has an ordered list of steps that are pre-declared on creation
                     and executed sequentially. The transition's start time is steps[0].startedAt.
                   properties:
                     fromReplicaType:
                       description: |-
                         FromReplicaType is the source replica type for ChangeReplicaType transitions.
+
                         Required for ChangeReplicaType. Must not be set for other types.
                       enum:
                       - Diskful
@@ -618,7 +646,9 @@ spec:
                     fromSystemNetworkNames:
                       description: |-
                         FromSystemNetworkNames is the source set of system network names for
-                        ChangeSystemNetworks transitions. Captured from datamesh.systemNetworkNames
+                        ChangeSystemNetworks transitions.
+
+                        Captured from datamesh.systemNetworkNames
                         at dispatch time. Required for ChangeSystemNetworks. Must not be set for
                         other types.
                       items:
@@ -630,6 +660,7 @@ spec:
                     group:
                       description: |-
                         Group is the concurrency group for this transition.
+
                         Set by the controller at transition creation time. Read-only for users.
                         Provides observability: explains why a transition may be waiting.
                       enum:
@@ -646,12 +677,14 @@ spec:
                     planID:
                       description: |-
                         PlanID identifies the transition plan used to create this transition.
+
                         Used by the engine to look up step callbacks from the plan registry.
                       minLength: 1
                       type: string
                     replicaName:
                       description: |-
                         ReplicaName is the name of the replica this transition applies to.
+
                         Required for AddReplica, RemoveReplica, ChangeReplicaType, Attach, Detach, ForceRemoveReplica, ForceDetach.
                         Must not be set for Formation, EnableMultiattach, DisableMultiattach, ChangeQuorum.
                       maxLength: 123
@@ -661,9 +694,9 @@ spec:
                     replicaType:
                       description: |-
                         ReplicaType is the target replica type for AddReplica/RemoveReplica/ForceRemoveReplica.
-                        Uses ReplicaType (Diskful, Access, TieBreaker, ShadowDiskful) — liminal states
-                        (LiminalDiskful, LiminalShadowDiskful) are internal mechanics visible in step names,
-                        not in transition parameters.
+
+                        Liminal states (LiminalDiskful, LiminalShadowDiskful) are internal mechanics
+                        visible in step names, not in transition parameters.
                         Required for AddReplica, RemoveReplica, ForceRemoveReplica. Must not be set for other types.
                       enum:
                       - Diskful
@@ -674,6 +707,7 @@ spec:
                     steps:
                       description: |-
                         Steps is the ordered list of steps for this transition.
+
                         All steps are written when the transition is created (with status=Pending,
                         and the first step immediately set to Active with startedAt).
                         Steps are executed sequentially — only one step is Active at a time.
@@ -690,12 +724,14 @@ spec:
                           datameshRevision:
                             description: |-
                               DatameshRevision is the revision assigned when this step was activated.
+
                               0 if the step has not been activated yet or does not bump the revision.
                             format: int64
                             type: integer
                           message:
                             description: |-
                               Message is a per-step progress or error message.
+
                               Updated every reconciliation while the step is Active.
                             maxLength: 512
                             type: string
@@ -729,6 +765,7 @@ spec:
                     toReplicaType:
                       description: |-
                         ToReplicaType is the target replica type for ChangeReplicaType transitions.
+
                         Required for ChangeReplicaType. Must not be set for other types.
                       enum:
                       - Diskful
@@ -739,7 +776,9 @@ spec:
                     toSystemNetworkNames:
                       description: |-
                         ToSystemNetworkNames is the target set of system network names for
-                        ChangeSystemNetworks transitions. Captured from RSP configuration at
+                        ChangeSystemNetworks transitions.
+
+                        Captured from RSP configuration at
                         dispatch time. Required for ChangeSystemNetworks. Must not be set for
                         other types.
                       items:
@@ -831,6 +870,7 @@ spec:
                   failuresToTolerate:
                     description: |-
                       FailuresToTolerate is the effective FTT level.
+
                       Positive: can tolerate this many node failures.
                       Zero: quorum is met but any failure causes quorum loss.
                       Negative: quorum is lost, need this many more voters.
@@ -839,6 +879,7 @@ spec:
                   guaranteedMinimumDataRedundancy:
                     description: |-
                       GuaranteedMinimumDataRedundancy is the effective GMDR level.
+
                       Positive: can lose this many disks without data loss.
                       Zero: IO works but any disk loss risks data.
                       Negative: IO blocked, need this many more UpToDate replicas.
@@ -864,7 +905,9 @@ spec:
                     default: 0
                     description: |-
                       StaleAgents is the number of members whose agent data is stale
-                      (AgentNotReady or Quorum not yet reported). These members are
+                      (AgentNotReady or Quorum not yet reported).
+
+                      These members are
                       reconstructed from peer observations when possible.
                     type: integer
                   totalTieBreakers:
@@ -935,6 +978,7 @@ spec:
                 - type: string
                 description: |-
                   Size is the actual usable capacity of the volume in bytes.
+
                   Nil when the volume has no ready replicas.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true

@@ -54,18 +54,22 @@ spec:
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
+
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
+
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
@@ -81,6 +85,10 @@ spec:
                   LVMThin storage pools).
                 type: string
               nodeName:
+                description: |
+                  Name of the node on which the replica is placed.
+
+                  > **Caution.** This field is immutable and cannot be changed after it is first set.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -88,6 +96,10 @@ spec:
                 - message: nodeName is immutable once set
                   rule: size(oldSelf) == 0 || self == oldSelf
               replicatedVolumeName:
+                description: |
+                  Name of the ReplicatedVolume to which this replica belongs.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 120
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
@@ -96,8 +108,7 @@ spec:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
               type:
-                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
-                  spec.type and status.effectiveType fields.
+                description: Type of the ReplicatedVolumeReplica (spec.type / status.effectiveType).
                 enum:
                 - Diskful
                 - ShadowDiskful
@@ -121,6 +132,8 @@ spec:
           status:
             properties:
               addresses:
+                description: |
+                  Network addresses of the replica used for DRBD connections.
                 items:
                   properties:
                     address:
@@ -150,11 +163,13 @@ spec:
               attachment:
                 description: |-
                   Attachment contains information about the device attachment state.
+
                   Only set when the replica is attached on the node.
                 properties:
                   devicePath:
                     description: |-
                       DevicePath is the block device path when the replica is attached.
+
                       Example: /dev/drbd10012.
                     maxLength: 256
                     minLength: 1
@@ -175,6 +190,7 @@ spec:
               backingVolume:
                 description: |-
                   BackingVolume contains information about the backing LVM logical volume.
+
                   Only set for Diskful replicas.
                 properties:
                   lvmVolumeGroupName:
@@ -185,6 +201,7 @@ spec:
                   lvmVolumeGroupThinPoolName:
                     description: |-
                       LVMVolumeGroupThinPoolName is the name of the thin pool within the LVM volume group.
+
                       Empty if the backing volume is not on a thin pool.
                     maxLength: 253
                     type: string
@@ -200,6 +217,8 @@ spec:
                     type: string
                 type: object
               conditions:
+                description: |
+                  List of conditions that reflect the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -207,18 +226,21 @@ spec:
                     lastTransitionTime:
                       description: |-
                         lastTransitionTime is the last time the condition transitioned from one status to another.
+
                         This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
                       description: |-
                         message is a human readable message indicating details about the transition.
+
                         This may be an empty string.
                       maxLength: 32768
                       type: string
                     observedGeneration:
                       description: |-
                         observedGeneration represents the .metadata.generation that the condition was set based upon.
+
                         For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
                         with respect to the current state of the instance.
                       format: int64
@@ -227,6 +249,7 @@ spec:
                     reason:
                       description: |-
                         reason contains a programmatic identifier indicating the reason for the condition's last transition.
+
                         Producers of specific condition types may define expected values and meanings for this field,
                         and whether the values are considered a guaranteed API.
                         The value should be a CamelCase string.
@@ -236,7 +259,7 @@ spec:
                       pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
-                      description: status of the condition, one of True, False, Unknown.
+                      description: Status of the condition.
                       enum:
                       - "True"
                       - "False"
@@ -291,8 +314,10 @@ spec:
                       LVMThin storage pools).
                     type: string
                   type:
-                    description: Type is the intended replica type. Required for Join
-                      and ChangeRole operations.
+                    description: |-
+                      Type is the intended replica type.
+
+                      Required for Join and ChangeRole operations.
                     enum:
                     - Diskful
                     - Access
@@ -373,7 +398,7 @@ spec:
               initialQuorumReachedAt:
                 description: |-
                   InitialQuorumReachedAt is the first time the controller observed this replica
-                  holding quorum as a datamesh member. It is a latch: it is set once per membership
+                  holding quorum as a datamesh member. It is set once per membership
                   epoch and cleared when the replica leaves the datamesh (datameshRevision back to 0),
                   so a replica that re-joins goes through joining again.
 
@@ -426,6 +451,7 @@ spec:
                     name:
                       description: |-
                         Name is the name of the peer ReplicatedVolumeReplica.
+
                         Must have format "prefix-N" where N is 0-31.
                       maxLength: 253
                       minLength: 1
@@ -436,7 +462,7 @@ spec:
                         with this peer.
                       type: string
                     type:
-                      description: Type is the replica type (Diskful/TieBreaker/Access).
+                      description: Type is the replica type.
                       enum:
                       - Diskful
                       - Access
@@ -482,6 +508,7 @@ spec:
                     default: 0
                     description: |-
                       ConnectedTieBreakerPeers is the number of TieBreaker peers with established connection.
+
                       TieBreakers only contribute to quorum under specific edge conditions.
                     type: integer
                   connectedUpToDatePeers:
@@ -507,6 +534,7 @@ spec:
                 - type: string
                 description: |-
                   Size is the usable capacity of the DRBD device in bytes.
+
                   Nil when the replica is diskless or down.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
@@ -515,8 +543,7 @@ spec:
                   Type reflects the currently observed DRBD configuration type
                   from drbdr.Status.ActiveConfiguration.Type.
 
-                  This is the observed DRBD type (Diskful or Diskless), not the intended spec.type
-                  which can be Diskful/Diskless/Access/TieBreaker.
+                  This is the observed DRBD type, not the intended spec.type.
 
                   Note: Access and TieBreaker both appear as Diskless here because they cannot be
                   distinguished from the replica's own status. The difference is only visible

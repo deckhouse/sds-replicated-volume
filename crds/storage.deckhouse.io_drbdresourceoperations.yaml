@@ -37,34 +37,50 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |
+          Interface for managing operations on a DRBD resource on a specific node in the cluster.
+
+          The resource is created to perform a maintenance operation on a DRBD resource; the agent on the specified node performs the operation and reports the result in the status.
         properties:
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
+
               Servers should convert recognized schemas to the latest internal value, and
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+            x-doc-skip: true
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
+
               Servers may infer this from the endpoint the client submits requests to.
               Cannot be updated.
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+            x-doc-skip: true
           metadata:
             type: object
           spec:
             properties:
               createNewUUID:
-                description: Parameters for CreateNewUUID operation. Immutable once
-                  set.
+                description: |-
+                  Parameters for CreateNewUUID operation.
+
+                  Immutable once set.
                 properties:
                   clearBitmap:
+                    description: |
+                      Clear the bitmap when creating a new UUID (the volume is considered fully synchronized).
                     default: false
                     type: boolean
                   forceResync:
+                    description: |
+                      Force resynchronization after creating a new UUID.
+
+                      > **Caution.** The `clearBitmap` and `forceResync` fields are mutually exclusive.
                     default: false
                     type: boolean
                 type: object
@@ -74,6 +90,10 @@ spec:
                 - message: clearBitmap and forceResync are mutually exclusive
                   rule: '!(self.clearBitmap && self.forceResync)'
               drbdResourceName:
+                description: |
+                  Name of the DRBD resource on which the operation is performed.
+
+                  > **Caution.** This field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
@@ -113,15 +133,21 @@ spec:
           status:
             properties:
               completedAt:
+                description: |
+                  Time when the operation completed.
                 format: date-time
                 type: string
               message:
+                description: |
+                  Additional human-readable message about the current operation state.
                 maxLength: 1024
                 type: string
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
                 type: string
               startedAt:
+                description: |
+                  Time when the operation started.
                 format: date-time
                 type: string
             type: object
