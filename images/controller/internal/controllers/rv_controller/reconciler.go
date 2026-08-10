@@ -170,6 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
 				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp),
+				r.reconcileQuorumIOReadyConditions(rf.Ctx(), rv),
 				r.reconcileLayoutStatus(rf.Ctx(), rv, rvrs, rvas),
 			)
 		}
@@ -1831,6 +1832,204 @@ func applyMembershipLayoutConvergedCondFalse(rv *v1alpha1.ReplicatedVolume, reas
 func applyMembershipLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
 	return obju.SetStatusCondition(rv, metav1.Condition{
 		Type:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+		Status:  metav1.ConditionUnknown,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: Quorum and IOReady conditions
+//
+
+// conditionReport is the published report for a single condition: the status, reason and
+// message to write. Shared by the Quorum and IOReady reports produced by
+// computeQuorumIOReadyReport and consumed by apply* helpers in reconcileQuorumIOReadyConditions.
+type conditionReport struct {
+	status  metav1.ConditionStatus
+	reason  string
+	message string
+}
+
+// quorumIOReadyReport is the published Quorum and IOReady report describing whether the volume
+// has quorum and is ready for IO at full redundancy, derived from the effective layout computed
+// by the datamesh transition engine.
+type quorumIOReadyReport struct {
+	quorum  conditionReport
+	ioReady conditionReport
+}
+
+// computeQuorumIOReadyReport computes the Quorum and IOReady reports from the effective layout
+// and datamesh quorum thresholds.
+//
+// It is pure (non-I/O, no mutation of inputs) and deterministic: it reads rv.Status.EffectiveLayout
+// and rv.Status.Datamesh.Quorum / QuorumMinimumRedundancy, which are kept fresh by
+// reconcileNormalOperation (ProcessTransitions → updateEffectiveLayout).
+//
+// Semantics:
+//   - Quorum:   ReachableVoters >= Datamesh.Quorum — a majority of voters is reachable.
+//   - IOReady:  UpToDateVoters  >= Datamesh.QuorumMinimumRedundancy — IO is possible at full
+//     redundancy (qmr = GMDR + 1).
+//
+// When the datamesh quorum threshold is not established yet (Datamesh.Quorum == 0), both conditions
+// are reported Unknown with WaitingForDatamesh, since neither presence nor loss can be determined.
+func computeQuorumIOReadyReport(rv *v1alpha1.ReplicatedVolume) quorumIOReadyReport {
+	layout := rv.Status.EffectiveLayout
+	quorum := rv.Status.Datamesh.Quorum
+	qmr := rv.Status.Datamesh.QuorumMinimumRedundancy
+
+	if quorum == 0 {
+		return quorumIOReadyReport{
+			quorum: conditionReport{
+				status:  metav1.ConditionUnknown,
+				reason:  v1alpha1.ReplicatedVolumeCondQuorumReasonWaitingForDatamesh,
+				message: "datamesh quorum threshold is not established yet",
+			},
+			ioReady: conditionReport{
+				status:  metav1.ConditionUnknown,
+				reason:  v1alpha1.ReplicatedVolumeCondIOReadyReasonWaitingForDatamesh,
+				message: "datamesh quorum threshold is not established yet",
+			},
+		}
+	}
+
+	reachable := int(layout.ReachableVoters)
+	upToDate := int(layout.UpToDateVoters)
+	q := int(quorum)
+	qmrInt := int(qmr)
+
+	quorumReport := conditionReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost,
+		message: fmt.Sprintf("quorum lost: %d of %d required voters reachable",
+			reachable, q),
+	}
+	if reachable >= q {
+		quorumReport.status = metav1.ConditionTrue
+		quorumReport.reason = v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumPresent
+		quorumReport.message = fmt.Sprintf("quorum present: %d of %d required voters reachable",
+			reachable, q)
+	}
+
+	ioReadyReport := conditionReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondIOReadyReasonInsufficientRedundancy,
+		message: fmt.Sprintf("IO not ready: %d of %d required up-to-date voters",
+			upToDate, qmrInt),
+	}
+	if upToDate >= qmrInt {
+		ioReadyReport.status = metav1.ConditionTrue
+		ioReadyReport.reason = v1alpha1.ReplicatedVolumeCondIOReadyReasonIOReady
+		ioReadyReport.message = fmt.Sprintf("IO ready: %d of %d required up-to-date voters",
+			upToDate, qmrInt)
+	}
+
+	return quorumIOReadyReport{
+		quorum:  quorumReport,
+		ioReady: ioReadyReport,
+	}
+}
+
+// reconcileQuorumIOReadyConditions is the SINGLE writer of the Quorum and IOReady conditions.
+// It derives both reports from the effective layout (kept fresh by reconcileNormalOperation)
+// and publishes them as status conditions.
+//
+// It is called only post-formation (the root Reconcile invokes it in the normal-operation
+// branch, never during formation) and after the configuration has been acknowledged
+// (status.configuration is set), so the effective layout is meaningful.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileQuorumIOReadyConditions(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "quorum-io-ready-conditions")
+	defer rf.OnEnd(&outcome)
+
+	// Precondition: configuration must be acknowledged (guaranteed by the caller, which
+	// invokes this only inside the "configuration exists" normal-operation branch).
+	if rv.Status.Configuration == nil {
+		return rf.Continue()
+	}
+
+	report := computeQuorumIOReadyReport(rv)
+
+	changed := false
+	switch report.quorum.status {
+	case metav1.ConditionTrue:
+		changed = applyQuorumCondTrue(rv, report.quorum.reason, report.quorum.message) || changed
+	case metav1.ConditionUnknown:
+		changed = applyQuorumCondUnknown(rv, report.quorum.reason, report.quorum.message) || changed
+	default:
+		changed = applyQuorumCondFalse(rv, report.quorum.reason, report.quorum.message) || changed
+	}
+
+	switch report.ioReady.status {
+	case metav1.ConditionTrue:
+		changed = applyIOReadyCondTrue(rv, report.ioReady.reason, report.ioReady.message) || changed
+	case metav1.ConditionUnknown:
+		changed = applyIOReadyCondUnknown(rv, report.ioReady.reason, report.ioReady.message) || changed
+	default:
+		changed = applyIOReadyCondFalse(rv, report.ioReady.reason, report.ioReady.message) || changed
+	}
+
+	return rf.Continue().ReportChangedIf(changed)
+}
+
+// applyQuorumCondTrue sets the Quorum condition to True.
+func applyQuorumCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyQuorumCondFalse sets the Quorum condition to False.
+func applyQuorumCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyQuorumCondUnknown sets the Quorum condition to Unknown.
+func applyQuorumCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondQuorumType,
+		Status:  metav1.ConditionUnknown,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyIOReadyCondTrue sets the IOReady condition to True.
+func applyIOReadyCondTrue(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyIOReadyCondFalse sets the IOReady condition to False.
+func applyIOReadyCondFalse(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: message,
+	})
+}
+
+// applyIOReadyCondUnknown sets the IOReady condition to Unknown.
+func applyIOReadyCondUnknown(rv *v1alpha1.ReplicatedVolume, reason, message string) bool {
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:    v1alpha1.ReplicatedVolumeCondIOReadyType,
 		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,

@@ -42,8 +42,14 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations.
-	ReplicatedVolumeCondIOReadyType = "IOReady"
+	// ReplicatedVolumeCondIOReadyType indicates whether the volume is ready for I/O operations
+	// at full redundancy (UpToDate voters meet the datamesh quorum minimum redundancy).
+	//
+	// Reasons describe IO readiness state.
+	ReplicatedVolumeCondIOReadyType                         = "IOReady"
+	ReplicatedVolumeCondIOReadyReasonIOReady                = "IOReady"                // Up-to-date voters meet quorum minimum redundancy.
+	ReplicatedVolumeCondIOReadyReasonInsufficientRedundancy = "InsufficientRedundancy" // Up-to-date voters below quorum minimum redundancy.
+	ReplicatedVolumeCondIOReadyReasonWaitingForDatamesh     = "WaitingForDatamesh"     // Datamesh quorum threshold is not established yet.
 )
 
 const (
@@ -60,8 +66,14 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum.
-	ReplicatedVolumeCondQuorumType = "Quorum"
+	// ReplicatedVolumeCondQuorumType indicates whether the volume has quorum
+	// (reachable voters meet the datamesh quorum threshold).
+	//
+	// Reasons describe quorum presence.
+	ReplicatedVolumeCondQuorumType                     = "Quorum"
+	ReplicatedVolumeCondQuorumReasonQuorumLost         = "QuorumLost"         // Reachable voters below quorum.
+	ReplicatedVolumeCondQuorumReasonQuorumPresent      = "QuorumPresent"      // Reachable voters meet quorum.
+	ReplicatedVolumeCondQuorumReasonWaitingForDatamesh = "WaitingForDatamesh" // Datamesh quorum threshold is not established yet.
 )
 
 const (

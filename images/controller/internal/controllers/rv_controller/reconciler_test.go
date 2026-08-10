@@ -3798,6 +3798,78 @@ var _ = Describe("computeLayoutReport", func() {
 	})
 })
 
+var _ = Describe("computeQuorumIOReadyReport", func() {
+	// quorumRV builds an RV with the given effective layout counts and datamesh quorum/qmr.
+	quorumRV := func(reachableVoters, upToDateVoters int8, quorum, qmr byte) *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{},
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Quorum:                  quorum,
+					QuorumMinimumRedundancy: qmr,
+				},
+				EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+					ReachableVoters: reachableVoters,
+					UpToDateVoters:  upToDateVoters,
+				},
+			},
+		}
+	}
+
+	It("reports Quorum=True and IOReady=True when reachable and up-to-date voters meet thresholds", func() {
+		report := computeQuorumIOReadyReport(quorumRV(3, 2, 2, 2))
+		Expect(report.quorum.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.quorum.reason).To(Equal(v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumPresent))
+		Expect(report.quorum.message).To(Equal("quorum present: 3 of 2 required voters reachable"))
+		Expect(report.ioReady.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.ioReady.reason).To(Equal(v1alpha1.ReplicatedVolumeCondIOReadyReasonIOReady))
+		Expect(report.ioReady.message).To(Equal("IO ready: 2 of 2 required up-to-date voters"))
+	})
+
+	It("reports Quorum=True when reachable voters exactly equal the quorum threshold", func() {
+		report := computeQuorumIOReadyReport(quorumRV(2, 2, 2, 2))
+		Expect(report.quorum.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.quorum.reason).To(Equal(v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumPresent))
+	})
+
+	It("reports Quorum=False when reachable voters fall below the quorum threshold", func() {
+		report := computeQuorumIOReadyReport(quorumRV(1, 2, 2, 2))
+		Expect(report.quorum.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.quorum.reason).To(Equal(v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost))
+		Expect(report.quorum.message).To(Equal("quorum lost: 1 of 2 required voters reachable"))
+	})
+
+	It("reports IOReady=False when up-to-date voters fall below qmr", func() {
+		report := computeQuorumIOReadyReport(quorumRV(3, 1, 2, 2))
+		Expect(report.ioReady.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.ioReady.reason).To(Equal(v1alpha1.ReplicatedVolumeCondIOReadyReasonInsufficientRedundancy))
+		Expect(report.ioReady.message).To(Equal("IO not ready: 1 of 2 required up-to-date voters"))
+	})
+
+	It("reports IOReady=True when up-to-date voters exactly equal qmr", func() {
+		report := computeQuorumIOReadyReport(quorumRV(3, 2, 2, 2))
+		Expect(report.ioReady.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.ioReady.reason).To(Equal(v1alpha1.ReplicatedVolumeCondIOReadyReasonIOReady))
+	})
+
+	It("reports IOReady=False when up-to-date voters fall below a higher qmr (qmr=3)", func() {
+		// qmr = GMDR + 1 varies with the configuration; exercise a higher threshold to
+		// keep the qmr parameter meaningful (a fixed qmr would be flagged by unparam).
+		report := computeQuorumIOReadyReport(quorumRV(3, 2, 2, 3))
+		Expect(report.ioReady.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.ioReady.reason).To(Equal(v1alpha1.ReplicatedVolumeCondIOReadyReasonInsufficientRedundancy))
+		Expect(report.ioReady.message).To(Equal("IO not ready: 2 of 3 required up-to-date voters"))
+	})
+
+	It("reports both Unknown with WaitingForDatamesh when the quorum threshold is not established (Quorum==0)", func() {
+		report := computeQuorumIOReadyReport(quorumRV(3, 2, 0, 2))
+		Expect(report.quorum.status).To(Equal(metav1.ConditionUnknown))
+		Expect(report.quorum.reason).To(Equal(v1alpha1.ReplicatedVolumeCondQuorumReasonWaitingForDatamesh))
+		Expect(report.ioReady.status).To(Equal(metav1.ConditionUnknown))
+		Expect(report.ioReady.reason).To(Equal(v1alpha1.ReplicatedVolumeCondIOReadyReasonWaitingForDatamesh))
+	})
+})
+
 var _ = Describe("hasLayoutChangingTransition", func() {
 	mkRV := func(transitions ...v1alpha1.ReplicatedVolumeDatameshTransition) *v1alpha1.ReplicatedVolume {
 		return &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{DatameshTransitions: transitions}}
