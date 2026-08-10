@@ -1,0 +1,5 @@
+Changes:
+- Correction: the CSI module service account is no longer blocked by the validating
+    webhook when creating an RWX PersistentVolumeClaim
+- Fixed links in documentation
+- Updating base images and lib-helm to 1.72.13
