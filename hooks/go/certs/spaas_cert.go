@@ -42,13 +42,15 @@ var SpaasCertConfig = tlscertificate.MustNewGenSelfSignedTLSGroupHookConf(
 		}),
 		FullValuesPathPrefix:  fmt.Sprintf("%s.internal.spaasCert", ModuleName),
 		CommonCACanonicalName: "spaas-ca",
+		CASecretName:          "spaas-ca",
+		CAValuesPath:          fmt.Sprintf("%s.internal.spaasCA", ModuleName),
 		Usages: []kcertificates.KeyUsage{
 			kcertificates.UsageKeyEncipherment,
 			kcertificates.UsageCertSign,
 			// ExtKeyUsage
 			kcertificates.UsageServerAuth,
 		},
-		CAExpiryDuration:     DefaultCertExpiredDuration,
+		CAExpiryDuration:     DefaultCAExpiredDuration,
 		CertExpiryDuration:   DefaultCertExpiredDuration,
 		CertOutdatedDuration: DefaultCertOutdatedDuration,
 	},
