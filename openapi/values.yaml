@@ -18,7 +18,7 @@ properties:
     properties:
       drbdVersion:
         type: string
-        default: "9.2.19-flant.11"
+        default: "9.2.19-flant.12"
       drbdLegacyVersion:
         type: string
         default: "9.2.16"
