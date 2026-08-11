@@ -4,7 +4,7 @@ memory: 50Mi
 {{- end }}
 
 {{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
-{{- if (.Capabilities.APIVersions.Has "autoscaling.k8s.io/v1/VerticalPodAutoscaler") }}
+{{- if (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -103,7 +103,7 @@ spec:
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
-{{- if not (.Capabilities.APIVersions.Has "autoscaling.k8s.io/v1/VerticalPodAutoscaler") }}
+{{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
             {{- include "webhooks_resources" . | nindent 12 }}
 {{- end }}
 
