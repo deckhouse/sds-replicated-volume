@@ -762,6 +762,137 @@ var _ = Describe("Reconciler", func() {
 			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonReady))
 		})
 
+		It("sets Ready=True and Resilient=True on a healthy post-formation RV", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 5},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
+					},
+				},
+			}
+			rsp := newTestRSP("pool-1")
+
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision:        1, // Normal operation.
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+							{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
+							{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-3"},
+						},
+						Quorum:                  2,
+						QuorumMinimumRedundancy: 2,
+						SystemNetworkNames:      []string{"Internal"},
+					},
+					BaselineGuaranteedMinimumDataRedundancy: 1,
+				},
+			}
+
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-0",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					DatameshRevision: 1,
+					Quorum:           ptr.To(true),
+					BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+						State: v1alpha1.DiskStateUpToDate,
+					},
+				},
+			}
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-2",
+					LVMVolumeGroupName:   "lvg-2",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					DatameshRevision: 1,
+					Quorum:           ptr.To(true),
+					BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+						State: v1alpha1.DiskStateUpToDate,
+					},
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1-2",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-3",
+					LVMVolumeGroupName:   "lvg-3",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					DatameshRevision: 1,
+					Quorum:           ptr.To(true),
+					BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+						State: v1alpha1.DiskStateUpToDate,
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc, rsp, rvr0, rvr1, rvr2).
+				WithStatusSubresource(rv, rsc, rvr0, rvr1, rvr2).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			readyCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondReadyReasonReady))
+
+			resilientCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondResilientType)
+			Expect(resilientCond).NotTo(BeNil())
+			Expect(resilientCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(resilientCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondResilientReasonResilient))
+		})
+
 		It("returns error when getRSC fails", func(ctx SpecContext) {
 			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
@@ -1218,6 +1349,86 @@ var _ = Describe("Reconciler", func() {
 			var updated v1alpha1.ReplicatedVolume
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 			Expect(updated.Status.Datamesh.Members).NotTo(BeEmpty())
+		})
+
+		It("sets Ready=False/Terminating and preserves Resilient when RV is being deleted", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1, // Formed volume; no attached members below, so rvShouldNotExist is true.
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rvr-1", Attached: false},
+							{Name: "rvr-2", Attached: false},
+						},
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha1.ReplicatedVolumeCondResilientType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeCondResilientReasonResilient,
+						},
+					},
+				},
+			}
+
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-2",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-2",
+					LVMVolumeGroupName:   "lvg-2",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr1, rvr2).
+				WithStatusSubresource(rv, rvr1, rvr2).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			readyCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondReadyType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondReadyReasonTerminating))
+
+			// Resilient is left untouched on the deletion path (last known value preserved).
+			resilientCond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondResilientType)
+			Expect(resilientCond).NotTo(BeNil())
+			Expect(resilientCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(resilientCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondResilientReasonResilient))
 		})
 	})
 

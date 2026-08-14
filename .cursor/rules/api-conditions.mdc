@@ -22,7 +22,7 @@ alwaysApply: false
   - `<ObjName>Cond<CondTypeName>Type`
   - `CondTypeName` MUST match the string value of `.Type`.
   - Examples:
-    - `ReplicatedVolumeCondIOReadyType = "IOReady"`
+    - `ReplicatedVolumeCondReadyType = "Ready"`
     - `ReplicatedVolumeReplicaCondDataInitializedType = "DataInitialized"`
     - `ReplicatedVolumeAttachmentCondReplicaIOReadyType = "ReplicaIOReady"`
 
@@ -32,7 +32,7 @@ alwaysApply: false
   - `ReasonName` MUST match the string value of `.Reason`.
   - Examples:
     - `ReplicatedVolumeReplicaCondScheduledReasonReplicaScheduled = "ReplicaScheduled"`
-    - `ReplicatedVolumeCondQuorumReasonQuorumLost = "QuorumLost"`
+    - `ReplicatedVolumeCondReadyReasonQuorumLost = "QuorumLost"`
     - `ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary = "SettingPrimary"`
 
 - Conditions grouping (MUST):
