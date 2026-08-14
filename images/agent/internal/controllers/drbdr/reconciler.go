@@ -751,8 +751,15 @@ func (r *Reconciler) patchDRBDRStatus(
 }
 
 // convergeDRBDState executes DRBD actions to converge to the target state.
-// Returns whether DRBD state was changed (requiring a refresh) and any error.
-// When maintenanceMode is true, actions are logged but not executed.
+// Returns whether any action was attempted (requiring a refresh of the
+// observed state) and any error. When maintenanceMode is true, actions are
+// logged but not executed.
+//
+// refreshNeeded is set before each action runs, not after it succeeds: a
+// failed action may still have changed kernel state (a drbdsetup invocation
+// that landed in the kernel but was killed or errored before reporting), and
+// keeping the pre-action snapshot cached in that case makes the next reconcile
+// recompute the very same action from state that is already obsolete.
 func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode bool) (refreshNeeded bool, err error) {
 	log := log.FromContext(ctx)
 	for _, action := range actions {
@@ -764,10 +771,10 @@ func convergeDRBDState(ctx context.Context, actions DRBDActions, maintenanceMode
 			continue
 		}
 		log.Info("DRBD action", "action", action.String(), "maintenanceMode", maintenanceMode)
+		refreshNeeded = true
 		if err := action.Execute(ctx); err != nil {
 			return refreshNeeded, err
 		}
-		refreshNeeded = true
 	}
 	return refreshNeeded, nil
 }
