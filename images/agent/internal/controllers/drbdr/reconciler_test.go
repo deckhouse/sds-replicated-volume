@@ -37,8 +37,10 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	fakedrbdutils "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils/fake"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/ctrlexec"
 	commonsync "github.com/deckhouse/sds-replicated-volume/lib/go/common/sync"
 )
 
@@ -57,6 +59,26 @@ func overrideDeviceSymlinkDir(t *testing.T, dir string) {
 	original := v1alpha1.FormatDRBDResourceDeviceSymlinkPath
 	t.Cleanup(func() { v1alpha1.FormatDRBDResourceDeviceSymlinkPath = original })
 	v1alpha1.FormatDRBDResourceDeviceSymlinkPath = func(name string) string { return dir + name }
+}
+
+// stubDMSetupNoDevices makes every dmsetup call report that the device is absent,
+// which is the truth in a unit test: there is no device-mapper here. Without it the
+// reconciler would shell out to the real binary — the paths that probe dm layers
+// (orphan cleanup, DRBDMapper convergence) would then fail on the environment
+// rather than on the behaviour under test.
+func stubDMSetupNoDevices(t *testing.T) {
+	t.Helper()
+
+	original := dmsetup.ExecCommandContext
+	t.Cleanup(func() { dmsetup.ExecCommandContext = original })
+	dmsetup.ExecCommandContext = func(_ context.Context, name string, args ...string) ctrlexec.Cmd {
+		return &fakedrbdutils.ExpectedCmd{
+			Name:         name,
+			Args:         args,
+			ResultOutput: []byte("Device does not exist.\n"),
+			ResultErr:    fakedrbdutils.ExitErr{},
+		}
+	}
 }
 
 const (
@@ -191,8 +213,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}
 				expectFinalizers(t, dr.Finalizers, v1alpha1.AgentFinalizer)
 				expectDeviceSymlink(t, testDRBDRName, 0)
-				if dr.Status.Device != v1alpha1.FormatDRBDResourceDeviceSymlinkPath(testDRBDRName) {
-					t.Errorf("status.device = %q, want %q", dr.Status.Device, v1alpha1.FormatDRBDResourceDeviceSymlinkPath(testDRBDRName))
+				// status.device is the DRBDMapper's upper device, and a mapper
+				// exists only for a Primary. This resource has no role, so there
+				// is nothing to publish — the bare DRBD symlink is not it.
+				if dr.Status.Device != "" {
+					t.Errorf("status.device = %q, want empty (no DRBDMapper without Primary)", dr.Status.Device)
 				}
 
 				// status.size = DRBD usable size (Device.Size KiB * 1024)
@@ -231,7 +256,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 		{
 			name:       "state up, drbd configured as primary - reports device open and io suspended",
-			drbdr:      drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp),
+			drbdr:      drbdrPrimaryOnNode(testNodeName),
+			objs:       []client.Object{configuredDRBDMapper(testDRBDRName, testNodeName)},
 			storeState: configuredPrimaryStatus(testDRBDResName),
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{
 				// Initial observe: store has primary resource, show cache miss
@@ -249,6 +275,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 				dr := &v1alpha1.DRBDResource{}
 				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, dr); err != nil {
 					t.Fatalf("failed to get DRBDResource: %v", err)
+				}
+				// All three come from the DRBDMapper, not from the DRBD device.
+				if want := v1alpha1.FormatDRBDMapperUpperDevicePath(testDRBDRName); dr.Status.Device != want {
+					t.Errorf("status.device = %q, want %q", dr.Status.Device, want)
 				}
 				if dr.Status.DeviceOpen == nil {
 					t.Fatal("status.deviceOpen is nil, want non-nil (Primary)")
@@ -468,6 +498,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 			symlinkDir := t.TempDir() + "/"
 			overrideDeviceSymlinkDir(t, symlinkDir)
+			stubDMSetupNoDevices(t)
 
 			// Build client with objects
 			clientBuilder := fake.NewClientBuilder().
@@ -493,9 +524,25 @@ func TestReconciler_Reconcile(t *testing.T) {
 						return nil
 					}
 					return []string{llv.Spec.LVMVolumeGroupName}
+				}).
+				// Mirrors indexes.RegisterDRBDMByLowerDevicePath: the reconciler
+				// resolves a DRBDResource's DRBDMapper through it on every pass.
+				WithIndex(&v1alpha1.DRBDMapper{}, indexes.IndexFieldDRBDMByLowerDevicePath, func(obj client.Object) []string {
+					drbdm, ok := obj.(*v1alpha1.DRBDMapper)
+					if !ok || drbdm.Spec.LowerDevicePath == "" {
+						return nil
+					}
+					return []string{drbdm.Spec.LowerDevicePath}
 				})
 
 			objs := tc.objs
+			// The symlink dir is redirected per-subtest, after the table was
+			// built, so any fixture that points at it has to be resolved now.
+			for _, o := range objs {
+				if drbdm, ok := o.(*v1alpha1.DRBDMapper); ok {
+					drbdm.Spec.LowerDevicePath = v1alpha1.FormatDRBDResourceDeviceSymlinkPath(drbdm.Name)
+				}
+			}
 			if tc.drbdr != nil {
 				objs = append([]client.Object{tc.drbdr}, objs...)
 				// Add Node object for the DRBDResource's node
@@ -600,6 +647,40 @@ func drbdrOnNode(nodeName string, state v1alpha1.DRBDResourceState) *v1alpha1.DR
 	dr.Spec.NodeName = nodeName
 	dr.Spec.State = state
 	return dr
+}
+
+func drbdrPrimaryOnNode(nodeName string) *v1alpha1.DRBDResource {
+	dr := drbdrOnNode(nodeName, v1alpha1.DRBDResourceStateUp)
+	dr.Spec.Role = v1alpha1.DRBDRolePrimary
+	return dr
+}
+
+// configuredDRBDMapper is the DRBDMapper drbdm leaves behind once it has built
+// the dm layers: upper device published, one opener, IO suspended.
+func configuredDRBDMapper(drbdrName, nodeName string) *v1alpha1.DRBDMapper {
+	return &v1alpha1.DRBDMapper{
+		ObjectMeta: metav1.ObjectMeta{Name: drbdrName},
+		Spec: v1alpha1.DRBDMapperSpec{
+			NodeName:        nodeName,
+			LowerDevicePath: v1alpha1.FormatDRBDResourceDeviceSymlinkPath(drbdrName),
+		},
+		Status: v1alpha1.DRBDMapperStatus{
+			UpperDevicePath: v1alpha1.FormatDRBDMapperUpperDevicePath(drbdrName),
+			OpenCount:       1,
+			Conditions: []metav1.Condition{
+				{
+					Type:   v1alpha1.DRBDMapperCondConfiguredType,
+					Status: metav1.ConditionTrue,
+					Reason: v1alpha1.DRBDMapperCondConfiguredReasonConfigured,
+				},
+				{
+					Type:   v1alpha1.DRBDMapperCondIOSuspendedType,
+					Status: metav1.ConditionTrue,
+					Reason: v1alpha1.DRBDMapperCondIOSuspendedReasonSuspended,
+				},
+			},
+		},
+	}
 }
 
 func drbdrWithCustomName(nodeName, customName string) *v1alpha1.DRBDResource {

@@ -126,7 +126,27 @@ func BuildController(mgr manager.Manager) error {
 			}),
 			builder.WithPredicates(drbdrPredicates(nodeName)...),
 		).
-		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to DRBDReconcileRequest
+		// This controller mirrors the DRBDMapper layered on a resource's device
+		// symlink: it publishes the mapper's upper device, and holds DRBD up while
+		// the mapper exists. drbdmPredicates keeps this to the events that change
+		// either of those.
+		Watches(
+			&v1alpha1.DRBDMapper{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {
+				drbdm, ok := obj.(*v1alpha1.DRBDMapper)
+				if !ok {
+					return nil
+				}
+				name, ok := v1alpha1.ParseDRBDResourceDeviceSymlinkPath(drbdm.Spec.LowerDevicePath)
+				if !ok {
+					return nil
+				}
+				return []DRBDReconcileRequest{{Name: name}}
+			}),
+			builder.WithPredicates(drbdmPredicates(nodeName)...),
+		).
+		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to
+		// DRBDReconcileRequest
 		WatchesRawSource(
 			source.TypedChannel(requestCh, handler.TypedEnqueueRequestsFromMapFunc(
 				func(_ context.Context, req DRBDReconcileRequest) []DRBDReconcileRequest {

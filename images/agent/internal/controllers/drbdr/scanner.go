@@ -214,13 +214,13 @@ func (s *Scanner) triggerReconciliation(ctx context.Context, drbdName string) {
 	// If DRBD name has standard prefix, we can derive K8S name
 	if k8sName, hasPrefix := v1alpha1.ParseDRBDResourceNameOnTheNode(drbdName); hasPrefix {
 		logger.V(1).Info("Triggered reconciliation (by k8s name)", "name", k8sName)
-		EnqueueReconcile(ctx, k8sName)
+		enqueueReconcile(ctx, k8sName)
 		return
 	}
 
 	// No prefix - use ActualNameOnTheNode for orphan/rename handling
 	logger.V(1).Info("Triggered reconciliation (by actual name)", "actualNameOnTheNode", drbdName)
-	EnqueueReconcileByActualName(ctx, drbdName)
+	enqueueReconcileByActualName(ctx, drbdName)
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable.

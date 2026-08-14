@@ -399,22 +399,29 @@ spec:
                 x-kubernetes-list-type: map
               device:
                 description: |-
-                  Device is the stable symlink path to the DRBD block device,
-                  e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
-                  Only present when the resource is Up and has an allocated minor.
+                  Device is the path a consumer uses, e.g. /dev/mapper/<resourceName>. It is
+                  the upper device of the DRBDMapper layered on this resource, not the DRBD
+                  device itself, so the path survives DRBD going down for a kernel module
+                  upgrade.
+                  Only present while that DRBDMapper reports Configured, which means only
+                  while the resource is Primary: a Secondary has no consumer to publish a
+                  device to and so has no DRBDMapper.
                 maxLength: 256
                 type: string
               deviceIOSuspended:
                 description: |-
-                  DeviceIOSuspended indicates whether I/O is suspended on the device.
-                  Only present on primary
+                  DeviceIOSuspended indicates whether I/O is suspended on the device published
+                  as Device, as it is while a DRBD kernel module upgrade is in progress.
+                  Only present alongside Device, and refreshed when the DRBDMapper's Configured
+                  condition changes, so between those points it may lag reality.
                 type: boolean
               deviceOpen:
                 description: |-
-                  DeviceOpen indicates whether the block device is currently open by a process
-                  (bd_openers > 0). Reflects DRBD's "open: yes/no" from drbdsetup status.
-                  When true, demotion to Secondary will fail.
-                  Only present on primary
+                  DeviceOpen indicates whether the device published as Device has openers.
+                  While true the DRBDMapper cannot be removed, so demotion to Secondary is
+                  deferred until the consumers are gone.
+                  Only present alongside Device, and refreshed when the DRBDMapper's Configured
+                  condition changes, so between those points it may lag reality.
                 type: boolean
               deviceUUID:
                 description: |-

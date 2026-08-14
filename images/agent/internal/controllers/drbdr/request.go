@@ -40,22 +40,21 @@ type DRBDReconcileRequest struct {
 // a resource with nothing else queued would leave it unreconciled.
 const requestChBuffer = 1000
 
-// requestCh carries wake-ups into the DRBDResource controller from the scanner and
-// from the other controllers on this agent.
+// requestCh carries wake-ups into the DRBDResource controller from its scanner.
 var requestCh = make(chan event.TypedGenericEvent[DRBDReconcileRequest], requestChBuffer)
 
-// EnqueueReconcile asks the DRBDResource controller to reconcile the DRBDResource
+// enqueueReconcile asks the DRBDResource controller to reconcile the DRBDResource
 // with the given name. It blocks while the queue is full, and returns early when ctx
 // ends.
-func EnqueueReconcile(ctx context.Context, name string) {
+func enqueueReconcile(ctx context.Context, name string) {
 	enqueue(ctx, DRBDReconcileRequest{Name: name})
 }
 
-// EnqueueReconcileByActualName asks the DRBDResource controller to reconcile the DRBD
+// enqueueReconcileByActualName asks the DRBDResource controller to reconcile the DRBD
 // resource observed on the node under a name that carries no standard prefix, for
 // orphan and rename handling. It blocks while the queue is full, and returns early
 // when ctx ends.
-func EnqueueReconcileByActualName(ctx context.Context, actualNameOnTheNode string) {
+func enqueueReconcileByActualName(ctx context.Context, actualNameOnTheNode string) {
 	enqueue(ctx, DRBDReconcileRequest{ActualNameOnTheNode: actualNameOnTheNode})
 }
 

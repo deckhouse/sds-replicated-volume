@@ -18,8 +18,11 @@ package drbdr
 
 import (
 	"context"
+	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,17 +43,19 @@ type drbdMapperClient struct {
 	name            string
 	nodeName        string
 	lowerDevicePath string
+	ownerUID        types.UID
 
 	drbdm  *v1alpha1.DRBDMapper
 	loaded bool
 }
 
-func newDRBDMapperClient(cl client.Client, nodeName, drbdrName string) *drbdMapperClient {
+func newDRBDMapperClient(cl client.Client, nodeName string, drbdr *v1alpha1.DRBDResource) *drbdMapperClient {
 	return &drbdMapperClient{
 		cl:              cl,
-		name:            drbdrName,
+		name:            drbdr.Name,
 		nodeName:        nodeName,
-		lowerDevicePath: v1alpha1.FormatDRBDResourceDeviceSymlinkPath(drbdrName),
+		lowerDevicePath: v1alpha1.FormatDRBDResourceDeviceSymlinkPath(drbdr.Name),
+		ownerUID:        drbdr.UID,
 	}
 }
 
@@ -78,16 +83,49 @@ func (c *drbdMapperClient) Get(ctx context.Context) (*v1alpha1.DRBDMapper, error
 }
 
 // Create creates the DRBDMapper drbdm builds the consumer's dm layers from.
+// There is one per DRBDResource, named after it, so a create racing the informer
+// cache is a no-op rather than an error.
 func (c *drbdMapperClient) Create(ctx context.Context) error {
 	drbdm := &v1alpha1.DRBDMapper{
-		ObjectMeta: metav1.ObjectMeta{Name: c.name},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: c.name,
+			// Owned by its DRBDResource so garbage collection removes it if the
+			// resource ever goes away without this controller tearing it down —
+			// someone force-removing the finalizer, for instance. drbdm's own
+			// finalizer still runs, so the dm layers are removed rather than
+			// leaked, and nothing else sweeps them.
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: v1alpha1.SchemeGroupVersion.String(),
+				Kind:       "DRBDResource",
+				Name:       c.name,
+				UID:        c.ownerUID,
+			}},
+		},
 		Spec: v1alpha1.DRBDMapperSpec{
 			NodeName:        c.nodeName,
 			LowerDevicePath: c.lowerDevicePath,
 		},
 	}
 	if err := c.cl.Create(ctx, drbdm); err != nil {
-		return flow.Wrapf(err, "creating DRBDMapper %q", c.name)
+		if !apierrors.IsAlreadyExists(err) {
+			return flow.Wrapf(err, "creating DRBDMapper %q", c.name)
+		}
+		existing := &v1alpha1.DRBDMapper{}
+		if err := c.cl.Get(ctx, client.ObjectKeyFromObject(drbdm), existing); err != nil {
+			return flow.Wrapf(err, "getting existing DRBDMapper %q", c.name)
+		}
+		// Adopt only what we would have created. A same-named mapper pointing
+		// somewhere else is not ours to publish as this resource's device, and its
+		// spec is immutable, so there is nothing to reconcile it into.
+		if existing.Spec.NodeName != c.nodeName || existing.Spec.LowerDevicePath != c.lowerDevicePath {
+			return ConfiguredReasonError(
+				fmt.Errorf("DRBDMapper %q exists with nodeName=%q lowerDevicePath=%q, want %q and %q",
+					c.name, existing.Spec.NodeName, existing.Spec.LowerDevicePath,
+					c.nodeName, c.lowerDevicePath),
+				v1alpha1.DRBDResourceCondConfiguredReasonDRBDMapperApplyFailed,
+			)
+		}
+		drbdm = existing
 	}
 
 	c.drbdm, c.loaded = drbdm, true

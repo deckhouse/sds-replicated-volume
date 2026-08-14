@@ -45,3 +45,15 @@ type DRBDROpTimeout struct{ Timeout }
 
 // DiskUpToDateTimeout is the timeout for waiting for DiskState to become UpToDate.
 type DiskUpToDateTimeout struct{ Timeout }
+
+// DRBDMapperConfiguredTimeout is the timeout for waiting for a DRBDMapper to be
+// created and report Configured=True, and for its upper device to surface as the
+// DRBDResource's status.device. It spans two controllers, so it is longer than
+// DRBDRConfiguredTimeout.
+type DRBDMapperConfiguredTimeout struct{ Timeout }
+
+// DRBDMapperDeletedTimeout is the timeout for waiting for a DRBDMapper to be
+// removed and for the DRBDResource to stop publishing a device. The DRBDMapper
+// controller holds the object on its finalizer while any opener remains, retrying
+// as they clear, so this is the slowest of the mapper waits.
+type DRBDMapperDeletedTimeout struct{ Timeout }

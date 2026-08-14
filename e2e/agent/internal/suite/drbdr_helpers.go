@@ -17,10 +17,14 @@ limitations under the License.
 package suite
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/envtesting"
+	"github.com/deckhouse/sds-replicated-volume/e2e/agent/pkg/kubetesting"
 )
 
 // isDRBDRTerminal returns true when the Configured condition has reached a
@@ -143,6 +147,87 @@ func assertDRBDRSizeNil(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
 		e.Fatalf("DRBDResource %q status.size is %s, want nil for diskless/down",
 			drbdr.Name, drbdr.Status.Size.String())
 	}
+}
+
+// assertDRBDRDevicePublished asserts that drbdr publishes the DRBDMapper's upper
+// device — the device a consumer uses — together with the flags that describe it.
+//
+// The value must be the mapper's upper device and not the bare DRBD device: the
+// point of the mapper is that this path survives DRBD going down for a module
+// upgrade.
+func assertDRBDRDevicePublished(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
+	e.Helper()
+	want := v1alpha1.FormatDRBDMapperUpperDevicePath(drbdr.Name)
+	if drbdr.Status.Device != want {
+		e.Fatalf("assert: DRBDResource %q status.device is %q, want %q",
+			drbdr.Name, drbdr.Status.Device, want)
+	}
+	if drbdr.Status.DeviceOpen == nil {
+		e.Fatalf("assert: DRBDResource %q status.deviceOpen is nil, want set alongside a published device", drbdr.Name)
+	}
+	if drbdr.Status.DeviceIOSuspended == nil {
+		e.Fatalf("assert: DRBDResource %q status.deviceIOSuspended is nil, want set alongside a published device", drbdr.Name)
+	}
+	// Only presence is asserted, not the values. Both flags are refreshed on the
+	// DRBDMapper's Configured flip, so between flips they can lag reality —
+	// deviceOpen in particular reads true whenever udev happens to be probing a
+	// freshly created device. Pinning either value here would be a latent flake.
+}
+
+// assertDRBDRDeviceUnpublished asserts that drbdr publishes no device, and none of
+// the flags that only make sense alongside one. Anything else would leave a
+// consumer pointed at a device that is not there.
+func assertDRBDRDeviceUnpublished(e envtesting.E, drbdr *v1alpha1.DRBDResource) {
+	e.Helper()
+	if drbdr.Status.Device != "" {
+		e.Fatalf("assert: DRBDResource %q status.device is %q, want empty (no DRBDMapper)",
+			drbdr.Name, drbdr.Status.Device)
+	}
+	if drbdr.Status.DeviceOpen != nil {
+		e.Fatalf("assert: DRBDResource %q status.deviceOpen is %v, want nil (no DRBDMapper)",
+			drbdr.Name, *drbdr.Status.DeviceOpen)
+	}
+	if drbdr.Status.DeviceIOSuspended != nil {
+		e.Fatalf("assert: DRBDResource %q status.deviceIOSuspended is %v, want nil (no DRBDMapper)",
+			drbdr.Name, *drbdr.Status.DeviceIOSuspended)
+	}
+}
+
+// waitForDRBDRDevice waits until drbdr's published device satisfies predicate and
+// provides the object that matched.
+//
+// Reaching Configured=True is not enough to read status.device: the agent creates
+// the DRBDMapper while converging and only publishes its device once the
+// DRBDMapper controller reports it configured, which is a later reconcile. The
+// same holds in reverse on teardown.
+func waitForDRBDRDevice(
+	e envtesting.E,
+	cl client.WithWatch,
+	drbdr *v1alpha1.DRBDResource,
+	predicate func(*v1alpha1.DRBDResource) bool,
+	timeout time.Duration,
+) *v1alpha1.DRBDResource {
+	if predicate(drbdr) {
+		return drbdr
+	}
+	scope := e.ScopeWithTimeout(timeout)
+	defer scope.Close()
+	watcherScope := e.Scope()
+	defer watcherScope.Close()
+	return kubetesting.SetupResourceWatcher(watcherScope, cl, drbdr)(scope, drbdr, predicate)
+}
+
+// isDRBDRDevicePublished matches once the mapper's upper device is published.
+// Reaching Configured=True is not enough: the agent creates the DRBDMapper and
+// only publishes its device after the DRBDMapper controller reports it
+// configured, which is a later reconcile.
+func isDRBDRDevicePublished(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.Status.Device == v1alpha1.FormatDRBDMapperUpperDevicePath(drbdr.Name)
+}
+
+// isDRBDRDeviceUnpublished matches once no device is published.
+func isDRBDRDeviceUnpublished(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.Status.Device == ""
 }
 
 // assertPeerConnectedUpToDate asserts that drbdr reports the peer identified by

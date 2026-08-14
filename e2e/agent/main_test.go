@@ -40,6 +40,12 @@ func TestDRBDResource(t *testing.T) {
 
 	nodeExec := kubetesting.DiscoverNodeExec(e, cs, podLogOpts)
 
+	// The DRBDMapper waits span two controllers, so they get their own budgets;
+	// read once here and passed to the helpers that need them.
+	var drbdMapperConfiguredTimeout suite.DRBDMapperConfiguredTimeout
+	var drbdMapperDeletedTimeout suite.DRBDMapperDeletedTimeout
+	e.Options(&drbdMapperConfiguredTimeout, &drbdMapperDeletedTimeout)
+
 	e.Run("R1", func(e envtesting.E) {
 		drbdr, _ := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "r1", 0)
 
@@ -57,12 +63,20 @@ func TestDRBDResource(t *testing.T) {
 	})
 
 	e.Run("Resize", func(e envtesting.E) {
-		suite.SetupResize(e, cl, cluster, "rs", 0)
+		suite.SetupResize(e, cl, cluster, "rs", 0, drbdMapperConfiguredTimeout)
 	})
 
 	e.Run("DeleteDiskful", func(e envtesting.E) {
 		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dd", 0)
-		suite.SetupDeleteDiskful(e, cl, drbdr, llv)
+		suite.SetupDeleteDiskful(e, cl, drbdr, llv, drbdMapperDeletedTimeout)
+	})
+
+	e.Run("DeletePrimaryWithMapper", func(e envtesting.E) {
+		// Its own resource: the delete destroys it, so it cannot share DeleteDiskful's.
+		drbdr, llv := suite.SetupDisklessToDiskfulReplica(e, cl, cluster, "dp", 0)
+		suite.SetupInitialSync(e, cl, []*v1alpha1.DRBDResource{drbdr})
+		drbdr = suite.SetupPromotePrimary(e, cl, drbdr, drbdMapperConfiguredTimeout)
+		suite.SetupDeletePrimaryWithMapper(e, cl, drbdr, llv, drbdMapperDeletedTimeout)
 	})
 
 	e.Run("DeleteDiskfulInMaintenance", func(e envtesting.E) {
@@ -187,10 +201,10 @@ func TestDRBDResource(t *testing.T) {
 			}
 
 			e.Run("PromotePrimary", func(e envtesting.E) {
-				suite.SetupPromotePrimary(e, cl, drbdrs[0])
+				suite.SetupPromotePrimary(e, cl, drbdrs[0], drbdMapperConfiguredTimeout)
 
 				e.Run("DemoteToSecondary", func(e envtesting.E) {
-					suite.SetupDemoteToSecondary(e, cl, drbdrs[0])
+					suite.SetupDemoteToSecondary(e, cl, drbdrs[0], drbdMapperDeletedTimeout)
 				})
 			})
 

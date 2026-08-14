@@ -391,9 +391,13 @@ func TestPrepareSplitsPairedAndUnpairedResources(t *testing.T) {
 			newDRBDResource("no-device", nodeName, ""),
 			newDRBDResource("other-node", "another-node", "/dev/drbd1002"),
 		},
+		// buildMapping pairs on the symlink path derived from the resource name,
+		// not on status.device, so that is what a mapper's lower device must be.
 		mappers: []v1alpha1.DRBDMapper{
-			newDRBDMapper("paired-mapper", nodeName, "/dev/drbd1000"),
-			newDRBDMapper("other-node-mapper", "another-node", "/dev/drbd1002"),
+			newDRBDMapper("paired-mapper", nodeName,
+				v1alpha1.FormatDRBDResourceDeviceSymlinkPath("paired")),
+			newDRBDMapper("other-node-mapper", "another-node",
+				v1alpha1.FormatDRBDResourceDeviceSymlinkPath("other-node")),
 		},
 	}
 

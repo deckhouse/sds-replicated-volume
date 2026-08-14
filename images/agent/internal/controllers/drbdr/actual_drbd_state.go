@@ -349,6 +349,9 @@ func (aState *actualState) Peers() []ActualPeer {
 
 func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	if aState == nil {
+		// Nothing is known about the dm layers, so keep no device published: a value
+		// left over from before this feature points at the bare DRBD device.
+		reportDRBDMapperDevice(&drbdr.Status, nil)
 		return errors.New("unable to retrieve actual state")
 	}
 

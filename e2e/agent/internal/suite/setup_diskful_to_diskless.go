@@ -26,6 +26,9 @@ import (
 
 // SetupDiskfulToDiskless patches the DRBDResource from Diskful to Diskless type,
 // waits for configured, and asserts activeConfiguration.type is Diskless.
+//
+// Also asserts no DRBDMapper exists and no device is published: detaching the disk
+// of a Secondary changes neither, and a Secondary never has a mapper.
 func SetupDiskfulToDiskless(
 	e envtesting.E,
 	cl client.WithWatch,
@@ -49,6 +52,8 @@ func SetupDiskfulToDiskless(
 	assertDRBDRType(e, drbdr, v1alpha1.DRBDResourceTypeDiskless)
 	assertDRBDRDiskState(e, drbdr, v1alpha1.DiskStateDiskless)
 	assertDRBDRSizeNil(e, drbdr)
+	assertDRBDMapperAbsent(e, cl, drbdr.Name)
+	assertDRBDRDeviceUnpublished(e, drbdr)
 
 	return drbdr
 }
