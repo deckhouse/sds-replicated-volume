@@ -51,7 +51,11 @@ func (t *TestRVR) RemoveFinalizers(ctx context.Context) {
 	GinkgoHelper()
 	RequireDisruptiveSpec("removing the finalizers of " + t.Name())
 
-	if err := removeRVRFinalizers(ctx, t.Client, t.Name()); err != nil {
+	// SudoClient: the RVR finalizer contains "deckhouse.io", so the
+	// deny-deckhouse-finalizers ValidatingAdmissionPolicy would block a plain
+	// Patch. Impersonation of system:sudouser bypasses it, matching the
+	// `kubectl --as=system:sudouser` recipe.
+	if err := removeRVRFinalizers(ctx, t.f.SudoClient, t.Name()); err != nil {
 		Fail(err.Error())
 	}
 }

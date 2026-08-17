@@ -70,6 +70,15 @@ type Framework struct {
 
 	Discovery *Discovery
 
+	// SudoClient is a controller-runtime client that impersonates
+	// "system:sudouser". Deckhouse installs a ValidatingAdmissionPolicy
+	// (deny-deckhouse-finalizers.deckhouse.io) that forbids removing any
+	// finalizer containing "deckhouse.io" for ordinary users; system:sudouser
+	// is the documented escape hatch (the same identity `kubectl --as=system:
+	// sudouser` uses). Framework helpers that strip such finalizers go through
+	// SudoClient instead of Client so they are not blocked by the policy.
+	SudoClient client.Client
+
 	restConfig   *rest.Config
 	clientset    kubernetes.Interface
 	cacheCancel  context.CancelFunc
@@ -243,6 +252,17 @@ func (f *Framework) init(ctx context.Context) {
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.Client = cl
+
+	// Build a sudo client: a copy of the rest config with impersonation of
+	// system:sudouser, so requests bypass the deny-deckhouse-finalizers
+	// ValidatingAdmissionPolicy. No cache: it is only used for the rare
+	// finalizer-strip writes, and a shared informer cache would just add
+	// memory and sync cost for nothing.
+	sudoCfg := rest.CopyConfig(cfg)
+	sudoCfg.Impersonate = rest.ImpersonationConfig{UserName: "system:sudouser"}
+	sudoCl, err := client.New(sudoCfg, client.Options{Scheme: scheme})
+	Expect(err).NotTo(HaveOccurred())
+	f.SudoClient = sudoCl
 
 	clientset, err := kubernetes.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred())

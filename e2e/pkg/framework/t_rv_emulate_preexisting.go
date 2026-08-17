@@ -292,7 +292,11 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 				return err
 			}
 			latest.SetFinalizers(nil)
-			err := t.f.Client.Update(ctx, latest)
+			// SudoClient: the DRBDResource finalizer contains "deckhouse.io",
+			// so the deny-deckhouse-finalizers ValidatingAdmissionPolicy would
+			// block a plain Update. Impersonation of system:sudouser bypasses
+			// it, matching the `kubectl --as=system:sudouser` recipe.
+			err := t.f.SudoClient.Update(ctx, latest)
 			if apierrors.IsConflict(err) {
 				fmt.Fprintf(GinkgoWriter,
 					"[%s] [emulate] strip finalizers on DRBDR %s: conflict, retrying\n",
@@ -349,7 +353,11 @@ func (t *TestRV) EmulatePreexisting(ctx SpecContext) []PreexistingDRBDReplica {
 		llvName := m.llv.Name()
 		target := &snc.LVMLogicalVolume{}
 		target.SetName(llvName)
-		err := t.f.Client.Patch(ctx, target,
+		// SudoClient: the LLV finalizer contains "deckhouse.io", so the
+		// deny-deckhouse-finalizers ValidatingAdmissionPolicy would block a
+		// plain Patch. Impersonation of system:sudouser bypasses it, matching
+		// the `kubectl --as=system:sudouser` recipe.
+		err := t.f.SudoClient.Patch(ctx, target,
 			client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`)))
 		Expect(client.IgnoreNotFound(err)).To(Succeed(),
 			"stripping finalizers on LLV %s", llvName)
