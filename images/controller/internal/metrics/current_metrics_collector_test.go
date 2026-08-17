@@ -384,7 +384,7 @@ func TestCollectRVLayoutConvergedEmitsOneSeriesPerRV(t *testing.T) {
 						// An unrelated condition with its own reason: the reason label must come
 						// from MembershipLayoutConverged, not from whatever comes first.
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondReadyType,
 							Status: metav1.ConditionFalse,
 							Reason: "SomeUnrelatedReason",
 						},

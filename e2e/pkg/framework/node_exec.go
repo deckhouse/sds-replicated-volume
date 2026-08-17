@@ -80,7 +80,14 @@ var nsenterCandidates = []string{
 	"/opt/deckhouse/sds/bin/nsenter.static",
 }
 
-const lvmBin = "/opt/deckhouse/sds/bin/lvm.static"
+// lvmCandidates lists the lvm binary paths sds-node-configurator has shipped
+// inside its pod. Newer builds dropped the ".static" suffix (lvm.static ->
+// lvm); resolveLvmBin probes these in order so the suite works against either
+// node-configurator version. Mirrors nsenterCandidates.
+var lvmCandidates = []string{
+	"/opt/deckhouse/sds/bin/lvm",
+	"/opt/deckhouse/sds/bin/lvm.static",
+}
 
 // nodeRunner is the seam through which framework helpers reach a node. The
 // production implementation execs into pods (podRunner); helper unit tests
@@ -182,11 +189,14 @@ func (f *Framework) Drbdsetup(ctx context.Context, nodeName string, args ...stri
 	return f.execOnNode(ctx, agentTarget, nodeName, cmd, "drbdsetup "+strings.Join(args, " "))
 }
 
-// LVM executes `lvm.static <args>` on the host of nodeName via nsenter
-// inside the sds-node-configurator pod and returns the result.
-// Goroutine-safe.
+// LVM executes `lvm <args>` on the host of nodeName via nsenter inside the
+// sds-node-configurator pod and returns the result. Goroutine-safe.
 func (f *Framework) LVM(ctx context.Context, nodeName string, args ...string) (ExecResult, error) {
-	cmd := append([]string{lvmBin}, args...)
+	lvm, err := f.resolveLvmBin(ctx, nodeName)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	cmd := append([]string{lvm}, args...)
 	return f.runner().HostRun(ctx, nodeName, cmd, "lvm "+strings.Join(args, " "))
 }
 
@@ -217,6 +227,21 @@ func (f *Framework) resolveNsenterBin(ctx context.Context, nodeName string) (str
 
 	var lastErr error
 	for _, cand := range nsenterCandidates {
+		// Re-check the cache before each probe: a concurrent goroutine may
+		// have already resolved and cached a winner while we were waiting on
+		// a prior probe or on a transport retry. Probing further candidates
+		// after one has been published is wasted work at best, and fatal at
+		// worst — a candidate absent on this node's pod returns a non-nil
+		// error that masks the cached success and makes the whole helper fail
+		// with "no nsenter binary found" even though the cache already holds
+		// one. Mirrors resolveLvmBin.
+		f.podCacheMu.Lock()
+		cached := f.nsenterBinResolved
+		f.podCacheMu.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+
 		_, err := f.execOnNode(ctx, sncTarget, nodeName, []string{cand, "--version"}, "probe "+cand)
 		if err == nil {
 			f.podCacheMu.Lock()
@@ -228,6 +253,64 @@ func (f *Framework) resolveNsenterBin(ctx context.Context, nodeName string) (str
 	}
 	return "", fmt.Errorf("no nsenter binary found in %s pod on node %q (tried %v): %w",
 		sncTarget.container, nodeName, nsenterCandidates, lastErr)
+}
+
+// resolveLvmBin returns the lvm binary path present on the HOST filesystem of
+// nodeName, caching the result. Unlike nsenter, lvm is NOT shipped inside the
+// sds-node-configurator pod — only nsenter is. lvm lives on the host at
+// /opt/deckhouse/sds/bin/, so probing must go through nsenter (HostRun) into
+// the host mount namespace, not via a direct exec in the pod (execOnNode).
+//
+// It probes lvmCandidates in order — a binary that runs to a zero exit is
+// treated as present; a non-zero exit (nsenter: no such file or directory)
+// means it is absent — so the suite tolerates node-configurator builds with
+// or without the ".static" suffix. Goroutine-safe (uses podCacheMu).
+func (f *Framework) resolveLvmBin(ctx context.Context, nodeName string) (string, error) {
+	f.podCacheMu.Lock()
+	cached := f.lvmBinResolved
+	f.podCacheMu.Unlock()
+	if cached != "" {
+		return cached, nil
+	}
+
+	var lastErr error
+	for _, cand := range lvmCandidates {
+		// Re-check the cache before each probe: a concurrent goroutine may
+		// have already resolved and cached a winner while we were waiting on
+		// a prior probe. Probing further candidates after one has been
+		// published is wasted work at best, and fatal at worst — a candidate
+		// absent on this node returns an error that masks the cached success
+		// and makes the whole helper fail with "no lvm binary found" even
+		// though the cache already holds one.
+		f.podCacheMu.Lock()
+		cached := f.lvmBinResolved
+		f.podCacheMu.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+
+		// Probe on the HOST through nsenter — lvm lives on the host filesystem,
+		// not in the sds-node-configurator pod (only nsenter is). HostRun
+		// prepends `nsenter -t 1 -m -u -i -n -p --` so the candidate path is
+		// resolved against the host's mount table. A missing binary makes
+		// nsenter exit non-zero (ExitError, err == nil, ExitCode != 0); a
+		// transport error makes err != nil. Both mean "try the next candidate".
+		res, err := f.runner().HostRun(ctx, nodeName, []string{cand, "version"}, "probe "+cand)
+		if err == nil && res.ExitCode == 0 {
+			f.podCacheMu.Lock()
+			f.lvmBinResolved = cand
+			f.podCacheMu.Unlock()
+			return cand, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("probe %s on node %q: exit %d (stderr: %s)",
+				cand, nodeName, res.ExitCode, res.Stderr)
+		}
+	}
+	return "", fmt.Errorf("no lvm binary found on host of node %q (tried %v): %w",
+		nodeName, lvmCandidates, lastErr)
 }
 
 // execOnNode discovers the pod matching target on nodeName, executes cmd
