@@ -21,9 +21,9 @@ import (
 	"iter"
 	"slices"
 
+	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	kcertificates "k8s.io/api/certificates/v1"
 
-	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
 )

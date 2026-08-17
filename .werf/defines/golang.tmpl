@@ -7,3 +7,62 @@
 - from: tmp_dir
   to: /root/.cache/go-build
 {{- end }}
+
+{{- /* Credentials for the private fox Go modules.
+
+       `images/{controller,agent,webhooks,oldcontroller,csi-driver,linstor-migrator}`
+       require github.com/deckhouse/sds-node-configurator/api.
+
+       The public module proxy cannot serve a private fox project, so the fetch
+       goes straight to GitLab over git and needs a token. Without one the
+       ?go-get=1 discovery yields nothing and the Go tool falls back to probing
+       path prefixes -- it ends up asking for the GROUP repository
+       (github.com/deckhouse.git) and fails with a confusing
+       "could not read Username".
+
+       The token is FOX_GO_TOKEN when the group provides one, otherwise the
+       pipeline's CI_JOB_TOKEN (which needs this project on the provider's
+       job-token allowlist). The job token is fine for the git fetch, but the
+       ?go-get=1 endpoint answers 404 to it, and Go treats an explicit 404 as "no
+       such module" -- so a module living in a SUBDIRECTORY of its repository needs
+       the group token. netrc covers the discovery request,
+       url.insteadOf covers the git fetch, and GOPRIVATE keeps proxy.golang.org
+       and sum.golang.org out of the path for the prefix (go.sum still pins it).
+
+       An empty token is not an error here: builds that do not reach a private
+       module keep working, and one that does fails with the message above. */}}
+{{- define "secret for private go modules" }}
+- id: GO_PRIVATE_TOKEN
+  value: {{ .GO_PRIVATE_TOKEN }}
+{{- end }}
+
+{{- define "auth for private go modules" -}}
+- |
+  # A proxy-less module fetch is a git fetch, and the builder images do not agree on
+  # whether git is present or which package manager installs it: builder/golang has
+  # neither pm nor apk in some base-images releases, builder/golang-alpine has apk,
+  # the alt-based ones have pm. Install only when git is actually missing.
+  if ! command -v git >/dev/null 2>&1; then
+    if command -v pm >/dev/null 2>&1; then
+      pm install git
+    elif command -v apk >/dev/null 2>&1; then
+      apk add --no-cache git
+    elif command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq && apt-get install -y --no-install-recommends git
+    else
+      echo "git is missing and no known package manager is available in this image"
+      exit 1
+    fi
+  fi
+- |
+  GO_PRIVATE_TOKEN="$(cat /run/secrets/GO_PRIVATE_TOKEN)"
+  export GOPRIVATE=github.com
+  export GIT_TERMINAL_PROMPT=0
+  if [ -n "${GO_PRIVATE_TOKEN}" ]; then
+    umask 077
+    printf 'machine github.com login oauth2 password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc"
+    git config --global url."https://oauth2:${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+  else
+    echo "GO_PRIVATE_TOKEN is empty: modules under ${GOPRIVATE} cannot be fetched"
+  fi
+{{- end -}}

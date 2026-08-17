@@ -21,6 +21,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/sds-common-lib/kubeclient"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,9 +34,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/sds-common-lib/kubeclient"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 )
 

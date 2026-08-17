@@ -21,15 +21,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/deckhouse/module-sdk/pkg"
+	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
+	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/module-sdk/pkg"
-	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
-	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 )
 

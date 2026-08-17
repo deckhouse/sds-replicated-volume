@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -32,7 +33,6 @@ import (
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"

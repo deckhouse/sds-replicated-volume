@@ -24,11 +24,10 @@ import (
 	"time"
 
 	"github.com/cloudflare/cfssl/csr"
-	certificatesv1 "k8s.io/api/certificates/v1"
-
 	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
+	certificatesv1 "k8s.io/api/certificates/v1"
 )
 
 const year = (24 * time.Hour) * 365

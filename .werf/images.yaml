@@ -8,6 +8,8 @@
   {{- $_ := set $ctx "Root" $Root }}
   {{- $_ := set $ctx "SOURCE_REPO" $Root.SOURCE_REPO }}
   {{- $_ := set $ctx "GOPROXY" $Root.GOPROXY }}
+  {{- /* Token for the private fox Go modules; see "auth for private go modules". */}}
+  {{- $_ := set $ctx "GO_PRIVATE_TOKEN" (env "FOX_GO_TOKEN" (env "CI_JOB_TOKEN" "")) }}
   {{- $_ := set $ctx "DistroPackagesProxy" $Root.DistroPackagesProxy }}
   {{- $_ := set $ctx "Versions" $Root.VERSIONS }}
   {{- $_ := set $ctx "Files" $Root.Files }}

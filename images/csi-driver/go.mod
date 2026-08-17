@@ -1,12 +1,13 @@
 module github.com/deckhouse/sds-replicated-volume/images/csi-driver
 
-go 1.26.5
+go 1.26.6
+
 require (
-	github.com/container-storage-interface/spec v1.12.0
-	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817175335-6cbd94c30050
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
+	github.com/container-storage-interface/spec v1.12.0
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.28.1

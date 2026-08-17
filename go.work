@@ -1,13 +1,7 @@
-go 1.26.5
+go 1.26.6
 
 use (
 	./api
-	./e2e/agent
-	./e2e/full
-	./e2e/linstor-migrator
-	./e2e/pkg/debug
-	./e2e/pkg/framework
-	./e2e/upgrade
 	./hooks/go
 	./images/agent
 	./images/controller

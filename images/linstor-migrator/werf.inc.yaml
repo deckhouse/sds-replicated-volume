@@ -35,8 +35,12 @@ mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 
+secrets:
+{{ include "secret for private go modules" . }}
+
 shell:
   setup:
+    {{- include "auth for private go modules" . | nindent 4 }}
     - cd /src/images/{{ $.ImageName }}
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/linstor-viewer ./cmd/linstor-viewer
     - install -Dm 0755 /tmp/linstor-viewer ./internal/linstorbackup/embedded/linstor-viewer

@@ -11,8 +11,6 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/sds-common-lib v0.6.3 h1:k0OotLuQaKuZt8iyph9IusDixjAE0MQRKyuTe2wZP3I=
 github.com/deckhouse/sds-common-lib v0.6.3/go.mod h1:UHZMKkqEh6RAO+vtA7dFTwn/2m5lzfPn0kfULBmDf2o=
-github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807 h1:BvRShtHHhIe4COyYVCF4349whhQAV6tlzPF72lPbaOU=
-github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807/go.mod h1:FQGg6o8m9dmvnsiAN9dZg8CWo/jbuDhE6g6L83aCqxo=
 github.com/emicklei/go-restful/v3 v3.13.0 h1:C4Bl2xDndpU6nJ4bc1jXd+uTmYPVUwkD6bFY/oTyCes=
 github.com/emicklei/go-restful/v3 v3.13.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/evanphx/json-patch/v5 v5.9.11 h1:/8HVnzMq13/3x9TPvjG08wUGqBTmZBsCWzjTM0wiaDU=
@@ -40,6 +38,7 @@ github.com/go-openapi/swag/jsonname v0.25.1/go.mod h1:71Tekow6UOLBD3wS7XhdT98g5J
 github.com/go-openapi/swag/jsonutils v0.25.1 h1:AihLHaD0brrkJoMqEZOBNzTLnk81Kg9cWr+SPtxtgl8=
 github.com/go-openapi/swag/jsonutils v0.25.1/go.mod h1:JpEkAjxQXpiaHmRO04N1zE4qbUEg3b7Udll7AMGTNOo=
 github.com/go-openapi/swag/jsonutils/fixtures_test v0.25.1 h1:DSQGcdB6G0N9c/KhtpYc71PzzGEIc/fZ1no35x4/XBY=
+github.com/go-openapi/swag/jsonutils/fixtures_test v0.25.1/go.mod h1:kjmweouyPwRUEYMSrbAidoLMGeJ5p6zdHi9BgZiqmsg=
 github.com/go-openapi/swag/loading v0.25.1 h1:6OruqzjWoJyanZOim58iG2vj934TysYVptyaoXS24kw=
 github.com/go-openapi/swag/loading v0.25.1/go.mod h1:xoIe2EG32NOYYbqxvXgPzne989bWvSNoWoyQVWEZicc=
 github.com/go-openapi/swag/mangling v0.25.1 h1:XzILnLzhZPZNtmxKaz/2xIGPQsBsvmCjrJOWGNz/ync=

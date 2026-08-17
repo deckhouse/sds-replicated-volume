@@ -1,12 +1,13 @@
 module github.com/deckhouse/sds-replicated-volume/images/agent
 
-go 1.26.5
+go 1.26.6
+
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
-	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817175335-6cbd94c30050
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/go-logr/logr v1.4.3
 	golang.org/x/sync v0.21.0
 	k8s.io/api v0.35.1
@@ -58,6 +59,7 @@ require (
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
+	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/4meepo/tagalign v1.4.3 // indirect
 	github.com/Abirdcfly/dupword v0.1.7 // indirect
 	github.com/Antonboom/errname v1.1.1 // indirect
@@ -88,7 +90,6 @@ require (
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.7 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect

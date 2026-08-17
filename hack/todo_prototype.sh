@@ -27,6 +27,7 @@ while IFS=: read -r file line text; do
   echo "$trimmed_text"
   # Normalize path (remove leading ./ if present)
   rel="${file#./}"
-  echo "${BASE_URL}/blob/${BRANCH}/${rel}#L${line}"
+  # GitLab puts /-/ between the project and the resource, unlike GitHub.
+  echo "${BASE_URL}/-/blob/${BRANCH}/${rel}#L${line}"
   echo
 done

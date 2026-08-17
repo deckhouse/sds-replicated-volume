@@ -22,9 +22,8 @@ import (
 	"iter"
 	"maps"
 
-	"golang.org/x/exp/constraints"
-
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
+	"golang.org/x/exp/constraints"
 )
 
 func SetUnique[K comparable, V any](m map[K]V, key K, value V) (map[K]V, bool) {

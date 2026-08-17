@@ -3,6 +3,7 @@ config:
   goTemplateRendering: # The rules for the Go-template functions to be able to pass build context to the release
     allowEnvVariables:
       - /CI_.+/
+      - FOX_GO_TOKEN
       - MODULES_MODULE_TAG
       - MODULE_EDITION
       - WERF_DISABLE_META_TAGS
@@ -31,6 +32,7 @@ config:
       - GOPROXY
       - SOURCE_REPO
       - DISTRO_PACKAGES_PROXY
+      - GO_PRIVATE_TOKEN
   stapel:
     mount:
       allowBuildDir: true

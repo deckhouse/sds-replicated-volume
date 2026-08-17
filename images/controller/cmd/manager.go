@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -31,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheme"
 )

@@ -1,12 +1,13 @@
 module github.com/deckhouse/sds-replicated-volume/images/linstor-migrator
 
-go 1.26.5
+go 1.26.6
+
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
-	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260218165228-44f333dae807
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817175335-6cbd94c30050
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.35.1
 	k8s.io/apiextensions-apiserver v0.35.0
