@@ -91,6 +91,7 @@ type Framework struct {
 	podCacheMu         sync.Mutex
 	podNameCache       map[podCacheKey]string
 	nsenterBinResolved string // protected by podCacheMu; resolved lazily by resolveNsenterBin
+	lvmBinResolved     string // protected by podCacheMu; resolved lazily by resolveLvmBin
 	specCounters       map[any]int
 
 	// nodeRun overrides how node commands are executed. It stays nil against a
