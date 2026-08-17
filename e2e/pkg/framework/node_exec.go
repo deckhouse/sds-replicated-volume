@@ -227,6 +227,21 @@ func (f *Framework) resolveNsenterBin(ctx context.Context, nodeName string) (str
 
 	var lastErr error
 	for _, cand := range nsenterCandidates {
+		// Re-check the cache before each probe: a concurrent goroutine may
+		// have already resolved and cached a winner while we were waiting on
+		// a prior probe or on a transport retry. Probing further candidates
+		// after one has been published is wasted work at best, and fatal at
+		// worst — a candidate absent on this node's pod returns a non-nil
+		// error that masks the cached success and makes the whole helper fail
+		// with "no nsenter binary found" even though the cache already holds
+		// one. Mirrors resolveLvmBin.
+		f.podCacheMu.Lock()
+		cached := f.nsenterBinResolved
+		f.podCacheMu.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+
 		_, err := f.execOnNode(ctx, sncTarget, nodeName, []string{cand, "--version"}, "probe "+cand)
 		if err == nil {
 			f.podCacheMu.Lock()
