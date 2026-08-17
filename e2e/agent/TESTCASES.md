@@ -11,6 +11,8 @@ TestDRBDResource
 │   │   the DRBDResource to Diskful, waits for Configured=True. Asserts
 │   │   status.size is populated and less than spec.size (DRBD metadata
 │   │   overhead). Asserts the agent added its finalizer to the LLV.
+│   │   Asserts no DRBDMapper exists and status.device is empty: a
+│   │   Secondary has no consumer to publish a device to.
 │   │
 │   ├── MaintenanceMode
 │   │   Patches spec.maintenance=NoResourceReconciliation. Asserts
@@ -21,11 +23,15 @@ TestDRBDResource
 │   │   Patches spec.state=Down. Waits for agent to tear down DRBD and
 │   │   remove its own finalizer from the DRBDResource. The LLV finalizer
 │   │   is also released. Cleanup reverts to state=Up; agent brings DRBD
-│   │   back up and re-adds both finalizers.
+│   │   back up and re-adds both finalizers. Asserts no DRBDMapper
+│   │   survives: the dm layers must go before DRBD can be taken down,
+│   │   and the finalizer removal is itself gated on the mapper.
 │   │
 │   └── DiskfulToDiskless
 │       Patches spec.type from Diskful to Diskless. Waits for
 │       Configured=True. Asserts activeConfiguration.type=Diskless.
+│       Asserts no DRBDMapper exists and no device is published —
+│       detaching a Secondary's disk changes neither.
 │       Cleanup reverts to Diskful; agent re-attaches the disk.
 │
 ├── Resize — online resize of a single-node diskful replica
@@ -33,7 +39,9 @@ TestDRBDResource
 │       (required by drbdsetup resize). Records initial status.size.
 │       Grows the LLV to 2x AllocateSize, waits for sds-node-configurator
 │       to resize. Patches DRBDR spec.size to the new size, waits for
-│       Configured=True. Asserts status.size has grown.
+│       Configured=True. Asserts status.size has grown, and that the
+│       published device is unchanged — a resize must not move the
+│       consumer's device out from under it.
 │
 ├── DeleteDiskful — delete diskful replica with attached LLV
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -41,7 +49,19 @@ TestDRBDResource
 │       Waits for full deletion. Asserts the agent released its finalizer
 │       from the LLV. Catches the bug where the agent fails to release the
 │       LLV finalizer on the deletion path (intendedLLVName == attachedLLVName
-│       because spec doesn't change on delete).
+│       because spec doesn't change on delete). Also asserts no DRBDMapper
+│       survives, which holds whether or not the resource had one.
+│
+├── DeletePrimaryWithMapper — delete a Primary whose DRBDMapper is live
+│       Creates a diskful DRBDResource with an LLV, syncs and promotes it to
+│       Primary so a DRBDMapper exists and its upper device is published.
+│       Requires that published device, so the case cannot silently degrade
+│       into the Secondary delete path above. Deletes the DRBDResource and
+│       asserts the teardown is ordered rather than abandoned: the object
+│       disappears only once the mapper is gone, and the LLV finalizer is
+│       released. This is the only case that exercises the agent's refusal to
+│       drop its own finalizer while dm layers still hold the DRBD device
+│       open — a Secondary never has a mapper to hold it.
 │
 ├── DeleteDiskfulInMaintenance — deletion is safely deferred in maintenance
 │       Creates a diskful DRBDResource with an LLV (same setup as R1).
@@ -189,11 +209,23 @@ TestDRBDResource
 │   │
 │   ├── PromotePrimary
 │   │   │   Patches replica 0 to role=Primary. Asserts Configured=True
-│   │   │   and activeConfiguration.role=Primary.
+│   │   │   and activeConfiguration.role=Primary. Promotion is what
+│   │   │   creates the DRBDMapper, so it also waits for the mapper to
+│   │   │   report Configured=True and asserts its spec is pinned to
+│   │   │   this node and this resource's device symlink. Then waits for
+│   │   │   status.device to become /dev/mapper/<name> — the mapper's
+│   │   │   upper device, not the DRBD device — with deviceOpen and
+│   │   │   deviceIOSuspended set. Their values are not pinned: both
+│   │   │   refresh only on the mapper's Configured flip.
 │   │   │
 │   │   └── DemoteToSecondary
 │   │       Patches replica 0 back to role=Secondary. Asserts
 │   │       Configured=True and activeConfiguration.role=Secondary.
+│   │       A demote destroys the DRBDMapper, because its dm layers pin
+│   │       the DRBD device open and drbdsetup secondary cannot run
+│   │       until they are gone — so this waits for the mapper to
+│   │       disappear and for status.device, deviceOpen and
+│   │       deviceIOSuspended to be cleared together.
 │   │       Cleanup reverts to Primary; agent promotes again.
 │   │
 │   ├── CachedStatusReport
@@ -210,10 +242,19 @@ TestDRBDResource
 │   │   Cleanup reverts maintenance; the agent resumes and returns to
 │   │   Configured=True.
 │   │
-│   └── RemovePeer
-│       Patches replica 0 to spec.peers=[]. Asserts Configured=True
-│       and status.peers is empty (agent disconnected and forgot the
-│       peer). Cleanup restores the peer; agent reconnects.
+│   ├── RemovePeer
+│   │   Patches replica 0 to spec.peers=[]. Asserts Configured=True
+│   │   and status.peers is empty (agent disconnected and forgot the
+│   │   peer). Cleanup restores the peer; agent reconnects.
+│   │
+│   └── DiskfulToDisklessPeerCheck
+│       Exploratory probe, not a pass/fail case. Patches replica 0 from
+│       Diskful to Diskless while replica 1 stays Diskful, waits for both
+│       sides to settle, then runs non-fatal field-by-field checks to
+│       discover which status fields are NOT updated correctly across the
+│       transition. Every finding is reported via e.Errorf so one run
+│       surfaces all stale fields on both sides. Cleanup reverts the patch,
+│       restoring a peered diskful pair for later subtests.
 │
 ├── R3 — three peered, synced replicas (parallel with R2, R4)
 │   │   Same as R2 but with 3 nodes. Tests full-mesh peering at scale.
@@ -253,7 +294,9 @@ Every subtest's cleanup exercises a teardown path:
   Verifies the agent handles peer disconnect gracefully.
 
 - **PromotePrimary cleanup**: reverts role back to Secondary.
-  Verifies the agent handles demotion.
+  Verifies the agent handles demotion, including tearing the DRBDMapper
+  down: its dm layers pin the DRBD device open, so the demote cannot
+  complete until they are gone.
 
 - **MaintenanceMode cleanup**: clears maintenance field. Verifies the
   agent resumes reconciliation.
@@ -277,6 +320,11 @@ Every subtest's cleanup exercises a teardown path:
 - **DeleteDiskful**: deletes the DRBDResource directly while still diskful
   with an attached LLV. Verifies the agent releases the LLV finalizer on
   the deletion path. Parent cleanup deletes the orphaned LLV.
+
+- **DeletePrimaryWithMapper**: deletes a Primary DRBDResource whose DRBDMapper
+  is live. Verifies the agent tears the mapper down before dropping its own
+  finalizer, so the object cannot disappear while dm layers still hold the
+  DRBD device open. Parent cleanup deletes the orphaned LLV.
 
 - **DeleteDiskfulInMaintenance**: deletes a diskful DRBDResource while it is
   in maintenance mode. Maintenance pauses DRBD operations only, so the

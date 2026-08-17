@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -80,4 +81,48 @@ func drbdrPredicates(nodeName string) []predicate.Predicate {
 			},
 		},
 	}
+}
+
+// drbdmPredicates selects the DRBDMapper events that change something this
+// controller acts on, for this node only. Everything else is dropped, so drbdm's
+// own reconcile traffic costs no DRBDResource reconciles.
+//
+//   - Delete: the teardown and demote paths hold DRBD up while a DRBDMapper
+//     exists, so its disappearance is what releases them — and the delete event is
+//     the first moment it is certainly gone.
+//   - Update where Configured flips: that is what changes the device this
+//     controller publishes to consumers.
+//
+// Creates are dropped: a mapper starts out with no configured device, so there is
+// nothing to publish and nothing waiting on it.
+func drbdmPredicates(nodeName string) []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.Funcs{
+			CreateFunc: func(_ event.TypedCreateEvent[client.Object]) bool {
+				return false
+			},
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				updated, ok := e.ObjectNew.(*v1alpha1.DRBDMapper)
+				if !ok || updated.Spec.NodeName != nodeName {
+					return false
+				}
+				old, ok := e.ObjectOld.(*v1alpha1.DRBDMapper)
+				return ok && configuredChanged(old, updated)
+			},
+			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
+				drbdm, ok := e.Object.(*v1alpha1.DRBDMapper)
+				return ok && drbdm.Spec.NodeName == nodeName
+			},
+			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool {
+				return false
+			},
+		},
+	}
+}
+
+// configuredChanged reports whether the Configured condition flipped between two
+// versions of a DRBDMapper.
+func configuredChanged(old, updated *v1alpha1.DRBDMapper) bool {
+	return obju.IsStatusConditionPresentAndTrue(old, v1alpha1.DRBDMapperCondConfiguredType) !=
+		obju.IsStatusConditionPresentAndTrue(updated, v1alpha1.DRBDMapperCondConfiguredType)
 }

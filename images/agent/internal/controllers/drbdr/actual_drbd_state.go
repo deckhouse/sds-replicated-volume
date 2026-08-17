@@ -46,6 +46,10 @@ type ActualNonAttachedDiskMetadata interface {
 type ActualDRBDState interface {
 	ActualNonAttachedDiskMetadata
 
+	// DRBDMapper returns the DRBDMapper layered on this resource's device symlink,
+	// or nil when there is none.
+	DRBDMapper() *v1alpha1.DRBDMapper
+
 	IsZero() bool
 
 	// ResourceName returns the DRBD resource name.
@@ -190,9 +194,20 @@ type actualState struct {
 	show           *drbdutils.ShowResource
 	hasMetadata    bool
 	diskDeviceUUID string
+
+	// drbdMapper is the DRBDMapper layered on this resource's device symlink.
+	drbdMapper *v1alpha1.DRBDMapper
 }
 
-func (aState *actualState) IsZero() bool           { return aState == nil }
+func (aState *actualState) IsZero() bool { return aState == nil }
+
+func (aState *actualState) DRBDMapper() *v1alpha1.DRBDMapper {
+	if aState == nil {
+		return nil
+	}
+	return aState.drbdMapper
+}
+
 func (aState *actualState) HasMetadata() bool      { return aState.hasMetadata }
 func (aState *actualState) DiskDeviceUUID() string { return aState.diskDeviceUUID }
 
@@ -334,6 +349,9 @@ func (aState *actualState) Peers() []ActualPeer {
 
 func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	if aState == nil {
+		// Nothing is known about the dm layers, so keep no device published: a value
+		// left over from before this feature points at the bare DRBD device.
+		reportDRBDMapperDevice(&drbdr.Status, nil)
 		return errors.New("unable to retrieve actual state")
 	}
 
@@ -342,13 +360,11 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	if aState.status == nil && aState.show == nil {
 		// Resource doesn't exist in DRBD - this is valid when resource is Down
 		// Reset all fields except activeConfiguration.state
-		status.Device = ""
 		status.Size = nil
 		status.DiskState = ""
 		status.Quorum = nil
 		status.Peers = nil
-		status.DeviceOpen = nil
-		status.DeviceIOSuspended = nil
+		reportDRBDMapperDevice(status, aState.drbdMapper)
 
 		// Keep activeConfiguration but set state to Down
 		if status.ActiveConfiguration == nil {
@@ -369,7 +385,6 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 	if len(volumes) == 0 {
 		err = errors.Join(err, errors.New("expected 1 volume, got 0"))
 		// Clear volume-related fields to avoid obsolete state
-		status.Device = ""
 		status.Size = nil
 		status.DiskState = ""
 		status.Quorum = nil
@@ -379,7 +394,6 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		}
 
 		vol := &volumes[0]
-		status.Device = DeviceSymlinkPath(drbdr.Name)
 		status.DiskState = v1alpha1.DiskState(vol.DiskState)
 		status.Quorum = &vol.Quorum
 
@@ -401,16 +415,7 @@ func (aState *actualState) Report(drbdr *v1alpha1.DRBDResource) error {
 		}
 	}
 
-	// DeviceOpen and DeviceIOSuspended are only meaningful on Primary.
-	if aState.status != nil && aState.status.Role == "Primary" && len(volumes) > 0 {
-		open := volumes[0].Open
-		status.DeviceOpen = &open
-		suspended := aState.status.Suspended
-		status.DeviceIOSuspended = &suspended
-	} else {
-		status.DeviceOpen = nil
-		status.DeviceIOSuspended = nil
-	}
+	reportDRBDMapperDevice(status, aState.drbdMapper)
 
 	// Report ActiveConfiguration
 	aState.reportActiveConfiguration(status, volumes)
@@ -825,13 +830,23 @@ func (p *actualPath) Established() bool {
 
 var _ ActualPath = &actualPath{}
 
-// observeActualDRBDState reads the on-node DRBD resource state from the cached
+// observeActualState reads the on-node DRBD resource state from the cached
 // drbdsetup status and show outputs. It does not probe disk metadata; call
 // observeActualDiskState separately.
-func observeActualDRBDState(ctx context.Context, drbdResName string, caches *Caches) (*actualState, error) {
+func (r *Reconciler) observeActualState(
+	ctx context.Context,
+	drbdMapper *drbdMapperClient,
+	drbdResName string,
+) (*actualState, error) {
 	state := &actualState{}
 
-	status, err := caches.Status(ctx, drbdResName)
+	drbdm, err := drbdMapper.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting DRBDMapper: %w", err)
+	}
+	state.drbdMapper = drbdm
+
+	status, err := r.caches.Status(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("getting status data: %w", err)
 	}
@@ -840,7 +855,7 @@ func observeActualDRBDState(ctx context.Context, drbdResName string, caches *Cac
 	}
 	state.status = status
 
-	show, err := caches.Show(ctx, drbdResName)
+	show, err := r.caches.Show(ctx, drbdResName)
 	if err != nil {
 		return nil, fmt.Errorf("getting show data: %w", err)
 	}

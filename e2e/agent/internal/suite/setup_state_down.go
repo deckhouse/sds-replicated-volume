@@ -28,6 +28,11 @@ import (
 // SetupStateDown patches the DRBDResource to state=Down, waits for the agent
 // to tear down DRBD and remove its finalizer from the DRBDResource.
 // The LLV finalizer is also released; it is re-acquired when state=Up.
+//
+// Also asserts no DRBDMapper survives. Teardown is ordered — the dm layers holding
+// the DRBD device open must go before the agent may remove the symlink and take
+// DRBD down, and the finalizer removal waited on above is itself gated on the
+// mapper being gone — so this is an invariant rather than a race.
 func SetupStateDown(
 	e envtesting.E,
 	cl client.WithWatch,
@@ -46,6 +51,7 @@ func SetupStateDown(
 		isDRBDRFinalizerGone,
 	)
 	assertDRBDRHasNoAgentFinalizer(e, cl, drbdr.Name)
+	assertDRBDMapperAbsent(e, cl, drbdr.Name)
 
 	return drbdr
 }

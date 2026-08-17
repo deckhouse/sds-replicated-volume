@@ -19,6 +19,8 @@ package drbdm
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +33,17 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
+
+// openerRetryInterval paces the wait for a dm device's openers to go away.
+// Short, because the common case is udev probing a device that was just created.
+const openerRetryInterval = 200 * time.Millisecond
+
+// isDeviceBusyErr reports whether a dmsetup failure is the device still being
+// held open. Every dmsetup failure exits 1, so EBUSY is only distinguishable
+// from the message the ioctl produced.
+func isDeviceBusyErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Device or resource busy")
+}
 
 // Reconciler reconciles DRBDMapper objects for the current node.
 type Reconciler struct {
@@ -102,7 +115,7 @@ func (r *Reconciler) reconcileNormal(
 }
 
 // reconcileDelete handles the deletion path: remove devices, remove finalizer.
-// Refuses to remove devices when the upper device has openers.
+// Waits, by requeueing, while a device is still held open.
 //
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) reconcileDelete(
@@ -126,16 +139,32 @@ func (r *Reconciler) reconcileDelete(
 	}
 
 	if upperInfo != nil && upperInfo.OpenCount > 0 {
+		// Waiting for the openers to go, not a failure: consumers hold the device
+		// until they are done with it, and udev briefly probes a freshly created
+		// one. Requeue quietly rather than reporting an error the operator would
+		// have to interpret.
 		msg := fmt.Sprintf("upper device has %d opener(s), cannot remove", upperInfo.OpenCount)
 		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInUse, msg)
 		if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
 			return rf.Fail(patchErr)
 		}
-		return rf.Fail(fmt.Errorf("%s", msg))
+		rf.Log().Info("Waiting for upper device openers before removal",
+			"openCount", upperInfo.OpenCount)
+		return rf.DoneAndRequeueAfter(openerRetryInterval)
 	}
 
 	if upperInfo != nil {
 		if err := dmsetup.Remove(rf.Ctx(), obj.Name); err != nil {
+			// An opener can arrive between the count above and this ioctl, so
+			// busy here means the same thing it does there: wait.
+			if isDeviceBusyErr(err) {
+				r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInUse, err.Error())
+				if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
+					return rf.Fail(patchErr)
+				}
+				rf.Log().Info("Upper device busy on removal, retrying", "device", obj.Name)
+				return rf.DoneAndRequeueAfter(openerRetryInterval)
+			}
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonRemoveFailed, err.Error())
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
 				return rf.Fail(patchErr)
@@ -144,7 +173,7 @@ func (r *Reconciler) reconcileDelete(
 		}
 	}
 
-	internalName := InternalDeviceName(obj.Name)
+	internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(obj.Name)
 	internalInfo, err := dmsetup.Info(rf.Ctx(), internalName)
 	if err != nil {
 		r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInfoFailed, err.Error())
@@ -156,6 +185,14 @@ func (r *Reconciler) reconcileDelete(
 
 	if internalInfo != nil {
 		if err := dmsetup.Remove(rf.Ctx(), internalName); err != nil {
+			if isDeviceBusyErr(err) {
+				r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonDeviceInUse, err.Error())
+				if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
+					return rf.Fail(patchErr)
+				}
+				rf.Log().Info("Internal device busy on removal, retrying", "device", internalName)
+				return rf.DoneAndRequeueAfter(openerRetryInterval)
+			}
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonRemoveFailed, err.Error())
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
 				return rf.Fail(patchErr)
@@ -164,6 +201,9 @@ func (r *Reconciler) reconcileDelete(
 		}
 	}
 
+	// The DRBDResource controller gates on this object, not on the dm layers, so
+	// nothing may wake it until the finalizer below actually lets the object go.
+	// The delete event does that, from this controller's own handler.
 	base := obj.DeepCopy()
 	obju.RemoveFinalizer(obj, v1alpha1.AgentFinalizer)
 	if err := r.patchMain(rf.Ctx(), obj, base); err != nil {
@@ -206,7 +246,7 @@ func (r *Reconciler) reconcileDevice(
 	rf := flow.BeginReconcile(ctx, "device")
 	defer rf.OnEnd(&outcome)
 
-	internalName := InternalDeviceName(obj.Name)
+	internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(obj.Name)
 
 	internalInfo, err := dmsetup.Info(rf.Ctx(), internalName)
 	if err != nil {
@@ -238,7 +278,7 @@ func (r *Reconciler) reconcileDevice(
 	}
 
 	if upperInfo == nil {
-		if err := dmsetup.Create(rf.Ctx(), obj.Name, InternalDevicePath(obj.Name)); err != nil {
+		if err := dmsetup.Create(rf.Ctx(), obj.Name, v1alpha1.FormatDRBDMapperInternalDevicePath(obj.Name)); err != nil {
 			r.setConditionFalse(obj, v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 				fmt.Sprintf("creating upper device: %v", err))
 			if patchErr := r.patchStatus(rf.Ctx(), obj); patchErr != nil {
@@ -273,12 +313,22 @@ func (r *Reconciler) reconcileStatus(
 	base := obj.DeepCopy()
 
 	if upperInfo != nil {
-		obj.Status.UpperDevicePath = UpperDevicePath(obj.Name)
+		obj.Status.UpperDevicePath = v1alpha1.FormatDRBDMapperUpperDevicePath(obj.Name)
 		obj.Status.OpenCount = int32(upperInfo.OpenCount)
 		obju.SetStatusCondition(obj, metav1.Condition{
 			Type:   v1alpha1.DRBDMapperCondConfiguredType,
 			Status: metav1.ConditionTrue,
 			Reason: v1alpha1.DRBDMapperCondConfiguredReasonConfigured,
+		})
+
+		suspendedStatus, suspendedReason := metav1.ConditionFalse, v1alpha1.DRBDMapperCondIOSuspendedReasonActive
+		if upperInfo.State == dmsetup.StateSuspended {
+			suspendedStatus, suspendedReason = metav1.ConditionTrue, v1alpha1.DRBDMapperCondIOSuspendedReasonSuspended
+		}
+		obju.SetStatusCondition(obj, metav1.Condition{
+			Type:   v1alpha1.DRBDMapperCondIOSuspendedType,
+			Status: suspendedStatus,
+			Reason: suspendedReason,
 		})
 	} else {
 		obj.Status.UpperDevicePath = ""
@@ -289,12 +339,20 @@ func (r *Reconciler) reconcileStatus(
 			Reason:  v1alpha1.DRBDMapperCondConfiguredReasonCreateFailed,
 			Message: "upper device does not exist after creation attempt",
 		})
+		obju.SetStatusCondition(obj, metav1.Condition{
+			Type:    v1alpha1.DRBDMapperCondIOSuspendedType,
+			Status:  metav1.ConditionUnknown,
+			Reason:  v1alpha1.DRBDMapperCondIOSuspendedReasonDeviceAbsent,
+			Message: "upper device does not exist",
+		})
 	}
 
 	if !equality.Semantic.DeepEqual(obj.Status, base.Status) {
 		if err := r.patchStatus(rf.Ctx(), obj); err != nil {
 			return rf.Fail(err)
 		}
+		// The DRBDResource publishes this object's upper device to consumers. It
+		// watches DRBDMapper, so the status write above is the notification.
 	}
 
 	return rf.Done()
@@ -321,17 +379,22 @@ func (r *Reconciler) getDRBDMapper(ctx context.Context, name string) (*v1alpha1.
 	return obj, nil
 }
 
+// patchMain writes the main resource. As with patchStatus, an object that is
+// already gone needs neither its finalizer added nor removed, so NotFound is
+// success.
 func (r *Reconciler) patchMain(
 	ctx context.Context,
 	obj, base *v1alpha1.DRBDMapper,
 ) error {
 	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
-	return r.cl.Patch(ctx, obj, patch)
+	return client.IgnoreNotFound(r.cl.Patch(ctx, obj, patch))
 }
 
+// patchStatus writes the status subresource. A object deleted underneath us has
+// no status left to report, so NotFound is success: the next event settles it.
 func (r *Reconciler) patchStatus(
 	ctx context.Context,
 	obj *v1alpha1.DRBDMapper,
 ) error {
-	return r.cl.Status().Update(ctx, obj)
+	return client.IgnoreNotFound(r.cl.Status().Update(ctx, obj))
 }

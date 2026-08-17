@@ -32,21 +32,24 @@ import (
 
 // SetupDeleteDiskful deletes a diskful DRBDResource directly (without reverting
 // to diskless first) and asserts the agent releases its finalizer from the LLV.
+//
+// Also asserts no DRBDMapper survives the deletion, which holds whether or not the
+// resource had one: the agent may not drop its own finalizer — and so the object
+// cannot disappear — while a mapper exists.
 func SetupDeleteDiskful(
 	e envtesting.E,
 	cl client.Client,
 	drbdr *v1alpha1.DRBDResource,
 	llv *snc.LVMLogicalVolume,
+	drbdMapperDeletedTimeout DRBDMapperDeletedTimeout,
 ) {
-	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
-	e.Options(&drbdrConfiguredTimeout)
-
 	if err := cl.Delete(e.Context(), drbdr); err != nil {
 		e.Fatalf("deleting DRBDResource %q: %v", drbdr.Name, err)
 	}
 
-	waitForDeletion(e, cl, drbdr, drbdrConfiguredTimeout.Duration)
+	waitForDeletion(e, cl, drbdr, drbdMapperDeletedTimeout.Duration)
 	assertLLVHasNoAgentFinalizer(e, cl, llv.Name)
+	assertDRBDMapperAbsent(e, cl, drbdr.Name)
 }
 
 func waitForDeletion(e envtesting.E, cl client.Client, obj client.Object, timeout time.Duration) {

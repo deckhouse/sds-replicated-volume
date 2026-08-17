@@ -36,6 +36,7 @@ func SetupResize(
 	cluster *Cluster,
 	prefix string,
 	nodeIdx int,
+	drbdMapperConfiguredTimeout DRBDMapperConfiguredTimeout,
 ) {
 	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
 	var llvCreatedTimeout LLVCreatedTimeout
@@ -47,7 +48,7 @@ func SetupResize(
 	// whose disk starts as Inconsistent).
 	SetupInitialSync(e, cl, []*v1alpha1.DRBDResource{drbdr})
 
-	drbdr = SetupPromotePrimary(e, cl, drbdr)
+	drbdr = SetupPromotePrimary(e, cl, drbdr, drbdMapperConfiguredTimeout)
 
 	initialSize := drbdr.Status.Size.DeepCopy()
 
@@ -86,6 +87,11 @@ func SetupResize(
 		e.Fatalf("assert: status.size %s did not grow from initial %s",
 			drbdr.Status.Size.String(), initialSize.String())
 	}
+
+	// A resize must not move the consumer's device out from under it: the mapper is
+	// never recreated or re-pathed, so the same upper device stays published. No
+	// wait — it was published before the resize and never withdrawn.
+	assertDRBDRDevicePublished(e, drbdr)
 }
 
 func isLLVResized(targetSize resource.Quantity) func(*snc.LVMLogicalVolume) bool {

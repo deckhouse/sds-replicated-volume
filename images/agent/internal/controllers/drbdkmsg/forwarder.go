@@ -112,9 +112,20 @@ func parseResourceName(line []byte) (string, bool) {
 //     state change is rejected.
 //   - "meta connection shut down by peer": a peer closed its connection, which
 //     is expected when a peer resource is downed/removed during teardown.
+//   - "My current UUID changed during handshake", "My bitmap UUID changed
+//     during", "My uuid_flags changed from": the three warnings DRBD emits
+//     together when the local UUIDs move between sending the initial state and
+//     verifying it (drbd_receiver.c, RULE_INITIAL_HANDSHAKE_CHANGED). They mean
+//     the connection attempt is retried, not that anything failed — DRBD itself
+//     notes "the retry will succeed — no need to demote and kill IO". Common
+//     while a freshly created resource peers, so the initial sync of a brand new
+//     replica prints them routinely.
 var benignKernelMessages = [][]byte{
 	[]byte("Can not disconnect a StandAlone device"),
 	[]byte("meta connection shut down by peer"),
+	[]byte("My current UUID changed during handshake"),
+	[]byte("My bitmap UUID changed during"),
+	[]byte("My uuid_flags changed from"),
 }
 
 // isBenignKernelMessage reports whether line contains any known-benign DRBD

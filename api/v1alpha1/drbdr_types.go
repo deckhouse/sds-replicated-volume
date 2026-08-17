@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -61,6 +63,53 @@ func (d *DRBDResource) GetStatusConditions() []metav1.Condition {
 // It sets the root object's `.status.conditions`.
 func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
 	d.Status.Conditions = conditions
+}
+
+const (
+	// DRBDResourceDeviceSymlinkDir is the directory holding the stable device
+	// symlink of each DRBDResource.
+	DRBDResourceDeviceSymlinkDir = "/dev/sdsrv/"
+
+	// DRBDResourceNameOnTheNodePrefix is the prefix of the DRBD resource name a
+	// DRBDResource carries on its node.
+	DRBDResourceNameOnTheNodePrefix = "sdsrv-"
+)
+
+// FormatDRBDResourceDeviceSymlinkPath returns the stable device symlink path of the
+// DRBDResource with the given name. The symlink target is /dev/drbd<minor>.
+// Overridden by tests that keep the symlinks inside a temporary directory.
+var FormatDRBDResourceDeviceSymlinkPath = func(name string) string {
+	return DRBDResourceDeviceSymlinkDir + name
+}
+
+// ParseDRBDResourceDeviceSymlinkPath extracts the DRBDResource name from a device
+// symlink path. Returns the name and true when the path is one of ours, or the input
+// and false otherwise.
+var ParseDRBDResourceDeviceSymlinkPath = func(path string) (string, bool) {
+	return strings.CutPrefix(path, DRBDResourceDeviceSymlinkDir)
+}
+
+// FormatDRBDResourceNameOnTheNode returns the DRBD resource name that the
+// DRBDResource with the given name carries on its node, for resources that do not
+// override it through spec.actualNameOnTheNode.
+var FormatDRBDResourceNameOnTheNode = func(name string) string {
+	return DRBDResourceNameOnTheNodePrefix + name
+}
+
+// ParseDRBDResourceNameOnTheNode extracts the DRBDResource name from a DRBD resource
+// name on the node. Returns the name and true when it carries the standard prefix,
+// or the input and false otherwise.
+var ParseDRBDResourceNameOnTheNode = func(nameOnTheNode string) (string, bool) {
+	return strings.CutPrefix(nameOnTheNode, DRBDResourceNameOnTheNodePrefix)
+}
+
+// NameOnTheNode returns the DRBD resource name this DRBDResource carries on its
+// node, honouring spec.actualNameOnTheNode when it is set.
+func (d *DRBDResource) NameOnTheNode() string {
+	if d.Spec.ActualNameOnTheNode != "" {
+		return d.Spec.ActualNameOnTheNode
+	}
+	return FormatDRBDResourceNameOnTheNode(d.Name)
 }
 
 // +kubebuilder:object:generate=true
@@ -229,22 +278,29 @@ type DRBDAddress struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceStatus struct {
-	// Device is the stable symlink path to the DRBD block device,
-	// e.g. /dev/sdsrv/<resourceName>. The symlink target is /dev/drbd<minor>.
-	// Only present when the resource is Up and has an allocated minor.
+	// Device is the path a consumer uses, e.g. /dev/mapper/<resourceName>. It is
+	// the upper device of the DRBDMapper layered on this resource, not the DRBD
+	// device itself, so the path survives DRBD going down for a kernel module
+	// upgrade.
+	// Only present while that DRBDMapper reports Configured, which means only
+	// while the resource is Primary: a Secondary has no consumer to publish a
+	// device to and so has no DRBDMapper.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	Device string `json:"device,omitempty"`
 
-	// DeviceIOSuspended indicates whether I/O is suspended on the device.
-	// Only present on primary
+	// DeviceIOSuspended indicates whether I/O is suspended on the device published
+	// as Device, as it is while a DRBD kernel module upgrade is in progress.
+	// Only present alongside Device, and refreshed when the DRBDMapper's Configured
+	// condition changes, so between those points it may lag reality.
 	// +optional
 	DeviceIOSuspended *bool `json:"deviceIOSuspended,omitempty"`
 
-	// DeviceOpen indicates whether the block device is currently open by a process
-	// (bd_openers > 0). Reflects DRBD's "open: yes/no" from drbdsetup status.
-	// When true, demotion to Secondary will fail.
-	// Only present on primary
+	// DeviceOpen indicates whether the device published as Device has openers.
+	// While true the DRBDMapper cannot be removed, so demotion to Secondary is
+	// deferred until the consumers are gone.
+	// Only present alongside Device, and refreshed when the DRBDMapper's Configured
+	// condition changes, so between those points it may lag reality.
 	// +optional
 	DeviceOpen *bool `json:"deviceOpen,omitempty"`
 

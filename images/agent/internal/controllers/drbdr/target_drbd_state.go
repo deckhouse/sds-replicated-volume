@@ -31,7 +31,11 @@ import (
 // computeTargetDRBDActions computes the DRBD actions needed to converge
 // from actual state to intended state. It returns only DRBD-specific actions,
 // not K8S object modifications (finalizers, status).
-func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+func computeTargetDRBDActions(
+	iState IntendedDRBDState,
+	aState ActualDRBDState,
+	drbdMapper *drbdMapperClient,
+) (res DRBDActions) {
 	if iState.IsZero() {
 		return
 	}
@@ -45,6 +49,14 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 	}
 
 	if !iState.IsUpAndNotInCleanup() {
+		// The dm layers hold the DRBD device open and the internal one maps the
+		// symlink, so drbdm has to remove them before any of this can run.
+		if drbdm := aState.DRBDMapper(); drbdm != nil {
+			if drbdm.DeletionTimestamp == nil {
+				res = append(res, DeleteDRBDMapperAction{DRBDMapper: drbdMapper})
+			}
+			return res
+		}
 		// Teardown: remove symlink before down to prevent dangling references
 		res = append(res, RemoveDeviceSymlinkAction{Name: iState.SymlinkName()})
 		if aState.ResourceExists() {
@@ -53,8 +65,29 @@ func computeTargetDRBDActions(iState IntendedDRBDState, aState ActualDRBDState) 
 		return res
 	}
 
+	// A demotion runs into the same constraint as teardown: the dm layers hold the
+	// DRBD device open, so drbdsetup secondary fails with "Device is held open by
+	// someone" until drbdm has removed them. drbdm wakes this controller once it
+	// has, so nothing polls here.
+	if iState.Role() != v1alpha1.DRBDRolePrimary {
+		if drbdm := aState.DRBDMapper(); drbdm != nil {
+			if drbdm.DeletionTimestamp == nil {
+				res = append(res, DeleteDRBDMapperAction{DRBDMapper: drbdMapper})
+			}
+			return res
+		}
+	}
+
 	// Bring-up sequence
 	res = append(res, computeBringUpActions(iState, aState)...)
+
+	// Only a Primary has a consumer to publish a device to, and only a Primary is
+	// guaranteed openable — drbdm sizes the lower device to build the dm layers,
+	// and DRBD fails that with ENOMEDIUM while no data sits behind it. The
+	// bring-up actions above promote the resource, so this runs after.
+	if iState.Role() == v1alpha1.DRBDRolePrimary && aState.DRBDMapper() == nil {
+		res = append(res, CreateDRBDMapperAction{DRBDMapper: drbdMapper})
+	}
 
 	return res
 }

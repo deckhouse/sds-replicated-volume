@@ -83,6 +83,13 @@ func SetupDisklessToDiskfulReplica(
 	assertDRBDRSizePopulated(e, drbdr)
 	assertLLVHasAgentFinalizer(e, cl, name)
 
+	// The replica is Secondary, so there is no consumer to publish a device to and
+	// the agent must not create a DRBDMapper for it — whatever its type or disk
+	// state. Guards the plausible regression of publishing the bare DRBD device as
+	// status.device just because one exists.
+	assertDRBDMapperAbsent(e, cl, name)
+	assertDRBDRDeviceUnpublished(e, drbdr)
+
 	return drbdr, llv
 }
 

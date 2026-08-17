@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -51,6 +50,9 @@ func BuildController(mgr manager.Manager) error {
 	}
 	if err := indexes.RegisterLLVByLVGName(mgr); err != nil {
 		return fmt.Errorf("registering LLV index: %w", err)
+	}
+	if err := indexes.RegisterDRBDMByLowerDevicePath(mgr); err != nil {
+		return fmt.Errorf("registering DRBDM index: %w", err)
 	}
 
 	cfg, err := env.GetConfig()
@@ -80,9 +82,6 @@ func BuildController(mgr manager.Manager) error {
 	drbdutils.Events2ExecCommandContext = withDRBDCommandLogging(
 		ctrlexec.ExecCommandContext(drbdutils.ConfigureCmd))
 
-	// Create internal request channel (scanner sends here)
-	requestCh := make(chan event.TypedGenericEvent[DRBDReconcileRequest], 100)
-
 	// Create DRBD port cache (scanner-maintained, will be used by PortRegistry later)
 	drbdPortCache := NewDRBDPortCache()
 
@@ -90,7 +89,7 @@ func BuildController(mgr manager.Manager) error {
 
 	// Create scanner: it maintains the port cache and uses events2 as an
 	// invalidation signal for the shared status/show caches.
-	scanner := NewScanner(requestCh, drbdPortCache, caches)
+	scanner := NewScanner(drbdPortCache, caches)
 	if err := mgr.Add(scanner); err != nil {
 		return fmt.Errorf("adding scanner runnable: %w", err)
 	}
@@ -127,7 +126,27 @@ func BuildController(mgr manager.Manager) error {
 			}),
 			builder.WithPredicates(drbdrPredicates(nodeName)...),
 		).
-		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to DRBDReconcileRequest
+		// This controller mirrors the DRBDMapper layered on a resource's device
+		// symlink: it publishes the mapper's upper device, and holds DRBD up while
+		// the mapper exists. drbdmPredicates keeps this to the events that change
+		// either of those.
+		Watches(
+			&v1alpha1.DRBDMapper{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []DRBDReconcileRequest {
+				drbdm, ok := obj.(*v1alpha1.DRBDMapper)
+				if !ok {
+					return nil
+				}
+				name, ok := v1alpha1.ParseDRBDResourceDeviceSymlinkPath(drbdm.Spec.LowerDevicePath)
+				if !ok {
+					return nil
+				}
+				return []DRBDReconcileRequest{{Name: name}}
+			}),
+			builder.WithPredicates(drbdmPredicates(nodeName)...),
+		).
+		// Watch internal channel (scanner events) - maps *DRBDReconcileRequest to
+		// DRBDReconcileRequest
 		WatchesRawSource(
 			source.TypedChannel(requestCh, handler.TypedEnqueueRequestsFromMapFunc(
 				func(_ context.Context, req DRBDReconcileRequest) []DRBDReconcileRequest {

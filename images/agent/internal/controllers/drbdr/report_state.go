@@ -30,6 +30,11 @@ import (
 // ensureReportState updates the DRBDResource status based on the actual DRBD state
 // and any errors encountered during reconciliation.
 // statusLLVName is the LLV name reverse-computed from the DRBD backing disk.
+//
+// converging says this generation has actions still outstanding that a later
+// reconcile will run. The Configured condition is left untouched then, keeping
+// its older observedGeneration, because both True and False read as "the agent
+// is done with this generation" and neither is true yet.
 func ensureReportState(
 	ctx context.Context,
 	aState ActualDRBDState,
@@ -37,13 +42,16 @@ func ensureReportState(
 	statusLLVName string,
 	err error,
 	maintenanceMode bool,
+	converging bool,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "ensure-report-state")
 	defer ef.OnEnd(&outcome)
 
 	reportErr := aState.Report(drbdr)
 	err = errors.Join(err, reportErr)
-	applyConfiguredCondition(drbdr, err, maintenanceMode)
+	if err != nil || !converging {
+		applyConfiguredCondition(drbdr, err, maintenanceMode)
+	}
 
 	if drbdr.Status.ActiveConfiguration == nil {
 		drbdr.Status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{}

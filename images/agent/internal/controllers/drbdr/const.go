@@ -16,12 +16,6 @@ limitations under the License.
 
 package drbdr
 
-import (
-	"strings"
-
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-)
-
 const (
 	// ControllerName is the stable name for the DRBD controller.
 	// Used in .Named(...) for controller-runtime builder.
@@ -29,41 +23,4 @@ const (
 
 	// ScannerName is the name of the DRBD scanner component.
 	ScannerName = "drbd-scanner"
-
-	// drbdNamePrefix is the prefix used for standard DRBD resource names.
-	drbdNamePrefix = "sdsrv-"
 )
-
-// deviceSymlinkDir is the directory where stable device symlinks are created.
-// Each DRBDResource gets a symlink at /dev/sdsrv/{k8sName} -> /dev/drbd{minor}.
-var deviceSymlinkDir = "/dev/sdsrv/"
-
-// OverrideDeviceSymlinkDir replaces the symlink directory. For testing only.
-var OverrideDeviceSymlinkDir = func(dir string) {
-	deviceSymlinkDir = dir
-}
-
-// DeviceSymlinkPath returns the stable device symlink path for a DRBDResource.
-func DeviceSymlinkPath(k8sName string) string {
-	return deviceSymlinkDir + k8sName
-}
-
-// DRBDNameFromK8SName returns the standard DRBD resource name for a K8S name.
-func DRBDNameFromK8SName(k8sName string) string {
-	return drbdNamePrefix + k8sName
-}
-
-// DRBDResourceNameOnTheNode returns the DRBD resource name to use on the node.
-// If ActualNameOnTheNode is set, it returns that; otherwise returns the standard name.
-func DRBDResourceNameOnTheNode(drbdr *v1alpha1.DRBDResource) string {
-	if drbdr.Spec.ActualNameOnTheNode != "" {
-		return drbdr.Spec.ActualNameOnTheNode
-	}
-	return DRBDNameFromK8SName(drbdr.Name)
-}
-
-// ParseDRBDResourceNameOnTheNode extracts the K8S name from a standard DRBD resource name.
-// Returns the K8S name and true if the name has the standard prefix, or the original name and false otherwise.
-func ParseDRBDResourceNameOnTheNode(s string) (string, bool) {
-	return strings.CutPrefix(s, drbdNamePrefix)
-}

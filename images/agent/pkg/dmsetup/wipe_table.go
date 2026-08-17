@@ -14,12 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdm
+package dmsetup
 
-const (
-	// ControllerName is the stable name for the DRBD mapper controller.
-	ControllerName = "drbdm-controller"
-
-	// ScannerName is the name of the DRBD mapper scanner component.
-	ScannerName = "drbdm-scanner"
+import (
+	"context"
+	"fmt"
 )
+
+// WipeTable clears the table of a suspended device-mapper device.
+// This releases any references to lower devices while keeping the dm device alive.
+// The device must be suspended before calling this.
+func WipeTable(ctx context.Context, name string) error {
+	out, err := ExecCommandContext(ctx, dmsetupCommand, "wipe_table", name).CombinedOutput()
+	if err != nil {
+		return withOutput(fmt.Errorf("dmsetup wipe_table %q: %w", name, err), out)
+	}
+	return nil
+}

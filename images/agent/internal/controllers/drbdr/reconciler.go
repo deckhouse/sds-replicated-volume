@@ -34,7 +34,10 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/upgrade"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/dmsetup"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/blksize"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -76,6 +79,11 @@ func (r *Reconciler) Reconcile(
 	req DRBDReconcileRequest,
 ) (reconcile.Result, error) {
 	rf := flow.BeginRootReconcile(ctx)
+
+	// Nothing below may run against a DRBD module this agent was not built against.
+	if err := upgrade.Upgrader.EnsureUpgraded(rf.Ctx()); err != nil {
+		return rf.Fail(err).ToCtrl()
+	}
 
 	// Edge case: scanner found non-prefixed DRBD resource
 	if req.ActualNameOnTheNode != "" {
@@ -152,7 +160,7 @@ func (r *Reconciler) reconcileDRBDR(
 
 	// Phase 1: Rename the on-node resource to its canonical name. Maintenance
 	// skips the rename; later phases still resolve the old name via
-	// DRBDResourceNameOnTheNode.
+	// DRBDResource.NameOnTheNode.
 	if drbdr.Spec.ActualNameOnTheNode != "" {
 		if !maintenanceMode {
 			outcome = r.reconcileActualNameOnTheNode(rf.Ctx(), drbdr)
@@ -173,8 +181,9 @@ func (r *Reconciler) reconcileDRBDR(
 	upAndNotInCleanup := isUpAndNotInCleanup(drbdr)
 
 	// Observe the on-node DRBD state; reused by Phases 3 and 6.
-	drbdResName := DRBDResourceNameOnTheNode(drbdr)
-	aState, aErr := observeActualDRBDState(rf.Ctx(), drbdResName, r.caches)
+	drbdResName := drbdr.NameOnTheNode()
+	drbdMapper := newDRBDMapperClient(r.cl, r.nodeName, drbdr)
+	aState, aErr := r.observeActualState(rf.Ctx(), drbdMapper, drbdResName)
 	aErr = ConfiguredReasonError(aErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 
 	// Phase 3: Persist allocated addresses before any destructive DRBD action,
@@ -223,7 +232,7 @@ func (r *Reconciler) reconcileDRBDR(
 		}
 	}
 	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
-	targetActions := computeTargetDRBDActions(iState, aState)
+	targetActions := computeTargetDRBDActions(iState, aState, drbdMapper)
 	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
 	drbdErr = ensureLocalPortConflictResolved(rf.Ctx(), drbdr, drbdErr, r.portRegistry.Allocate)
 
@@ -231,11 +240,21 @@ func (r *Reconciler) reconcileDRBDR(
 	if refreshNeeded {
 		// Convergence changed on-node state; re-observe from fresh output.
 		r.caches.Invalidate(drbdResName)
-		aState, aErr2 = observeActualDRBDState(rf.Ctx(), drbdResName, r.caches)
+		aState, aErr2 = r.observeActualState(rf.Ctx(), drbdMapper, drbdResName)
 		if aErr2 == nil {
 			aErr2 = observeActualDiskState(rf.Ctx(), aState, intendedDisk, drbdr.Status.DeviceUUID)
 		}
 		aErr2 = ConfiguredReasonError(aErr2, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
+	}
+
+	// Phase 6b: Once DRBD is configured, bring the DRBDMapper's dm layers back in
+	// line with it — resume them if an online module upgrade left them suspended,
+	// and reload their tables if the DRBD device has since been resized.
+	// Idempotent: a no-op when there is no matching mapper, or when the layers are
+	// already running at the right size.
+	var resumeErr error
+	if drbdErr == nil && !aState.IsZero() && aState.ResourceExists() {
+		resumeErr = r.convergeDRBDMapperDevice(rf.Ctx(), aState.DRBDMapper())
 	}
 
 	// LLV backing the disk after convergence: empty once detached, non-empty if
@@ -266,8 +285,23 @@ func (r *Reconciler) reconcileDRBDR(
 	// Phase 8: Report status (lvmLogicalVolumeName mirrors the actual disk) and
 	// patch it. The pending-release list is written after ensureReportState,
 	// which may initialize ActiveConfiguration.
-	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
-	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
+	// A demote deferred behind the DRBDMapper is not converged yet: drbdm still
+	// has to drop the dm layers pinning the DRBD device open, and only then can
+	// this controller run drbdsetup secondary. Reporting Configured here would
+	// publish the old role as final.
+	//
+	// Never in maintenance, though: convergeDRBDState skips every action there,
+	// including the mapper delete, so the wait would never end. InMaintenance is
+	// the honest report — reconciliation is paused, not mid-flight — and
+	// withholding it would leave the condition stale forever.
+	converging := upAndNotInCleanup &&
+		!maintenanceMode &&
+		iState.Role() != v1alpha1.DRBDRolePrimary &&
+		!aState.IsZero() &&
+		aState.DRBDMapper() != nil
+
+	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr, resumeErr)
+	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode, converging); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
 	ensureActiveConfiguration(drbdr).LLVFinalizersToRelease = intendedLLVFinalizersToRelease
@@ -298,7 +332,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// status query failed; reconcileErr is set and we requeue rather than assume
 	// teardown.
 	drbdResourceGone := !aState.IsZero() && !aState.ResourceExists()
-	if len(intendedLLVFinalizersToRelease) == 0 && drbdResourceGone {
+	if len(intendedLLVFinalizersToRelease) == 0 && drbdResourceGone && aState.DRBDMapper() == nil {
 		if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
 			if finalizerOutcome.Error() != nil {
 				reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
@@ -311,12 +345,21 @@ func (r *Reconciler) reconcileDRBDR(
 	} else if !upAndNotInCleanup {
 		rf.Log().Info("Deferring DRBDResource finalizer removal until DRBD teardown completes",
 			"pendingLLVFinalizersToRelease", intendedLLVFinalizersToRelease,
-			"drbdResourceGone", drbdResourceGone)
+			"drbdResourceGone", drbdResourceGone,
+			"drbdMapperGone", aState.DRBDMapper() == nil)
 	}
 
 	if reconcileErr != nil {
 		return rf.Fail(reconcileErr)
 	}
+
+	// drbdm removes the dm layers and wakes this controller before dropping its
+	// finalizer, so DRBD stays up until then with no polling here.
+	if drbdm := aState.DRBDMapper(); !upAndNotInCleanup && drbdm != nil {
+		rf.Log().Info("Waiting for DRBDMapper removal before DRBD teardown",
+			"drbdMapper", drbdm.Name)
+	}
+
 	return rf.Done()
 }
 
@@ -329,7 +372,7 @@ func (r *Reconciler) reconcileOrphanDRBD(
 	ctx context.Context,
 	k8sName string,
 ) (outcome flow.ReconcileOutcome) {
-	drbdName := DRBDNameFromK8SName(k8sName)
+	drbdName := v1alpha1.FormatDRBDResourceNameOnTheNode(k8sName)
 	rf := flow.BeginReconcile(ctx, "orphan-drbd", "drbdResourceName", drbdName)
 	defer rf.OnEnd(&outcome)
 
@@ -347,13 +390,48 @@ func (r *Reconciler) reconcileOrphanDRBD(
 
 	rf.Log().Info("Cleaning up orphan DRBD resource")
 
-	_ = os.Remove(DeviceSymlinkPath(k8sName))
+	// Any dm layers left behind still hold the DRBD device open, so down would fail
+	// for as long as they exist. Their DRBDMapper is gone with its owner by now (or
+	// never existed, for a mapper predating owner references), so nothing else will
+	// remove them.
+	if err := r.removeOrphanDRBDMapperDevices(rf.Ctx(), k8sName); err != nil {
+		return rf.Fail(err)
+	}
+
+	_ = os.Remove(v1alpha1.FormatDRBDResourceDeviceSymlinkPath(k8sName))
 
 	downAction := DownAction{ResourceName: drbdName}
 	if err := downAction.Execute(rf.Ctx()); err != nil {
 		return rf.Fail(err)
 	}
 	return rf.Done()
+}
+
+// removeOrphanDRBDMapperDevices removes the dm layers a DRBDMapper for k8sName
+// would have built, upper first so the internal one is free by the time it goes.
+//
+// Only for the orphan path: while a DRBDResource exists, drbdm owns these devices
+// and removes them under its own finalizer.
+func (r *Reconciler) removeOrphanDRBDMapperDevices(ctx context.Context, k8sName string) error {
+	for _, name := range []string{k8sName, v1alpha1.FormatDRBDMapperInternalDeviceName(k8sName)} {
+		info, err := dmsetup.Info(ctx, name)
+		if err != nil {
+			return flow.Wrapf(err, "getting dm device info for %q", name)
+		}
+		if info == nil {
+			continue
+		}
+		if info.OpenCount > 0 {
+			// A consumer still has it open; taking DRBD down under it would be
+			// worse than leaving the orphan for the next pass.
+			return fmt.Errorf("orphan dm device %q has %d opener(s)", name, info.OpenCount)
+		}
+		log.FromContext(ctx).Info("Removing orphan dm device", "device", name)
+		if err := dmsetup.Remove(ctx, name); err != nil {
+			return flow.Wrapf(err, "removing orphan dm device %q", name)
+		}
+	}
+	return nil
 }
 
 // reconcileActualNameOnTheNode handles renaming DRBD resource from ActualNameOnTheNode to standard name.
@@ -367,7 +445,7 @@ func (r *Reconciler) reconcileActualNameOnTheNode(
 	defer rf.OnEnd(&outcome)
 
 	oldName := drbdr.Spec.ActualNameOnTheNode
-	newName := DRBDNameFromK8SName(drbdr.Name)
+	newName := v1alpha1.FormatDRBDResourceNameOnTheNode(drbdr.Name)
 
 	rf.Log().Info("Renaming DRBD resource", "from", oldName, "to", newName)
 
@@ -807,6 +885,95 @@ func ensureLocalPortConflictResolved(
 	}
 
 	return drbdErr
+}
+
+// convergeDRBDMapperDevice brings the DRBDMapper's two dm layers back in line with
+// the DRBD device underneath them. It handles the two ways they drift apart:
+//
+//   - Suspended, as they are left by an online module upgrade: the tables are
+//     reloaded and both layers resumed.
+//   - Outgrown, after the DRBD device was resized: a dm-linear target is sized when
+//     its table is loaded and does not follow its lower device, so without this the
+//     consumer would keep seeing the old capacity while status.size reported the
+//     new one.
+//
+// A no-op when the layers already match and are running, which is the common case.
+func (r *Reconciler) convergeDRBDMapperDevice(ctx context.Context, drbdm *v1alpha1.DRBDMapper) error {
+	if drbdm == nil {
+		return nil
+	}
+
+	upperInfo, err := dmsetup.Info(ctx, drbdm.Name)
+	if err != nil || upperInfo == nil {
+		// drbdm owns building the layers and reports its own failures.
+		return nil
+	}
+
+	lowerDevice := drbdm.Spec.LowerDevicePath
+	wantSectors, err := blksize.GetDeviceSizeInSectors(lowerDevice)
+	if err != nil {
+		// The DRBD device can legitimately be unopenable here — no medium while
+		// diskless, or down mid-upgrade. Nothing to converge towards.
+		return nil
+	}
+
+	suspended := upperInfo.State == dmsetup.StateSuspended
+	if !suspended {
+		haveSectors, err := blksize.GetDeviceSizeInSectors(v1alpha1.FormatDRBDMapperUpperDevicePath(drbdm.Name))
+		if err != nil {
+			return nil
+		}
+		if haveSectors == wantSectors {
+			return nil
+		}
+		// Suspend before reloading a live stack so in-flight I/O is flushed rather
+		// than landing on a table that is about to be replaced.
+		if err := dmsetup.Suspend(ctx, drbdm.Name); err != nil {
+			return flow.Wrapf(err, "suspending upper device %q", drbdm.Name)
+		}
+		internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(drbdm.Name)
+		if err := dmsetup.Suspend(ctx, internalName); err != nil {
+			return flow.Wrapf(err, "suspending internal device %q", internalName)
+		}
+	}
+
+	return r.reloadDRBDMapperLayers(ctx, drbdm, wantSectors, suspended)
+}
+
+// reloadDRBDMapperLayers loads both dm tables at sectors and resumes them, bottom
+// layer first so the upper never maps beyond what is under it.
+func (r *Reconciler) reloadDRBDMapperLayers(
+	ctx context.Context,
+	drbdm *v1alpha1.DRBDMapper,
+	sectors uint64,
+	afterUpgrade bool,
+) error {
+	logger := log.FromContext(ctx)
+	internalName := v1alpha1.FormatDRBDMapperInternalDeviceName(drbdm.Name)
+
+	logger.Info("Reloading DRBDMapper dm layers",
+		"drbdMapper", drbdm.Name, "sectors", sectors, "afterUpgrade", afterUpgrade)
+
+	internalTable := fmt.Sprintf("0 %d linear %s 0", sectors, drbdm.Spec.LowerDevicePath)
+	if err := dmsetup.Load(ctx, internalName, internalTable); err != nil {
+		return flow.Wrapf(err, "reloading table on %q", internalName)
+	}
+	if err := dmsetup.Resume(ctx, internalName); err != nil {
+		return flow.Wrapf(err, "resuming internal device %q", internalName)
+	}
+
+	// The upper device is sized independently of the internal one, so it has to be
+	// reloaded too or a grown lower device stays invisible to the consumer.
+	upperTable := fmt.Sprintf("0 %d linear %s 0",
+		sectors, v1alpha1.FormatDRBDMapperInternalDevicePath(drbdm.Name))
+	if err := dmsetup.Load(ctx, drbdm.Name, upperTable); err != nil {
+		return flow.Wrapf(err, "reloading table on %q", drbdm.Name)
+	}
+	if err := dmsetup.Resume(ctx, drbdm.Name); err != nil {
+		return flow.Wrapf(err, "resuming upper device %q", drbdm.Name)
+	}
+
+	return nil
 }
 
 // formatLVMDevicePath formats the path to an LVM logical volume device.

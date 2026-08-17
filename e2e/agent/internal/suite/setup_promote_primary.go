@@ -26,10 +26,20 @@ import (
 
 // SetupPromotePrimary patches the DRBDResource to Primary role, waits for
 // configured, and asserts the role is reflected in activeConfiguration.
+//
+// Promotion is also what creates the DRBDMapper: only a Primary has a consumer to
+// publish a device to. So this additionally waits until the mapper is Configured
+// and its upper device is published, and asserts both. The returned DRBDResource
+// therefore has status.device set.
+//
+// Requires the resource to be promotable — a disk that is still Inconsistent makes
+// drbdsetup primary fail, which stops convergence before the mapper is created.
+// Callers arrange that with SetupInitialSync.
 func SetupPromotePrimary(
 	e envtesting.E,
 	cl client.WithWatch,
 	drbdr *v1alpha1.DRBDResource,
+	drbdMapperConfiguredTimeout DRBDMapperConfiguredTimeout,
 ) *v1alpha1.DRBDResource {
 	var drbdrConfiguredTimeout DRBDRConfiguredTimeout
 	e.Options(&drbdrConfiguredTimeout)
@@ -45,6 +55,14 @@ func SetupPromotePrimary(
 	)
 	assertDRBDRConfigured(e, drbdr)
 	assertDRBDRRole(e, drbdr, v1alpha1.DRBDRolePrimary)
+
+	// Mapper first, then the device: if the DRBDMapper controller wedges, the
+	// failure then names its condition instead of an opaque empty status.device.
+	drbdm := waitForDRBDMapperConfigured(e, cl, drbdr.Name, drbdMapperConfiguredTimeout.Duration)
+	assertDRBDMapperSpec(e, drbdm, drbdr)
+
+	drbdr = waitForDRBDRDevice(e, cl, drbdr, isDRBDRDevicePublished, drbdMapperConfiguredTimeout.Duration)
+	assertDRBDRDevicePublished(e, drbdr)
 
 	return drbdr
 }

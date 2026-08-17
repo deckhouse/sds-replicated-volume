@@ -21,6 +21,18 @@ Runbook for executing `e2e/agent` against a remote cluster reachable via
 `e2e/agent/.env.json` must exist with cluster-specific node/LVG names. If it
 does not, copy and edit `.env.example.json`.
 
+`.env.json` is gitignored, so a new option added to `.env.example.json` does not
+reach your copy. `e.Options` fatals on a missing section, so after pulling, diff
+the two and add anything new:
+
+```bash
+diff <(jq -S 'keys' e2e/agent/.env.example.json) <(jq -S 'keys' e2e/agent/.env.json)
+```
+
+Most recently added: `DRBDMapperConfiguredTimeout` and `DRBDMapperDeletedTimeout`
+(the DRBDMapper waits span two controllers, so they are budgeted separately from
+`DRBDRConfiguredTimeout`).
+
 ## Run it
 
 These three steps assume `$USER` is unique enough to namespace your dev image

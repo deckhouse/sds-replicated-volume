@@ -119,6 +119,11 @@ spec:
           name: dev-sdsrv
         - mountPath: /sys/
           name: sys-dir
+        # The DRBD kernel modules the agent loads during an online upgrade live
+        # here. Read-only: the agent only ever opens them for finit_module.
+        - mountPath: /lib/modules
+          name: lib-modules
+          readOnly: true
         - mountPath: /etc/config/
           name: config
         - mountPath: /var/run/drbd/lock/
@@ -271,6 +276,10 @@ spec:
           path: /sys/
           type: Directory
         name: sys-dir
+      - hostPath:
+          path: /lib/modules
+          type: Directory
+        name: lib-modules
       - name: config
         configMap:
           name: agent-config

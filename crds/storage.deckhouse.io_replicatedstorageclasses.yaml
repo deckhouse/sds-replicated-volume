@@ -370,6 +370,12 @@ spec:
                   rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
                 description: |-
+                  The four optional fields below (systemNetworkNames, configurationRolloutStrategy,
+                  eligibleNodesConflictResolutionStrategy, eligibleNodesPolicy) are defaulted by the controller
+                  (rsc_controller applySpecDefaults), NOT by +kubebuilder:default. A schema default is applied
+                  before validating admission, and the legacy control-plane webhook (validateLegacySpecFields)
+                  rejects an RSC that has any of these set — so a schema default would break RSC on every legacy
+                  installation. Revisit once the legacy control plane is removed.
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
 
