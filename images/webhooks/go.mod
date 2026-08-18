@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/deckhouse/sds-common-lib v0.9.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817194503-235c540151ea
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260818070900-d7c44bf2740b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/go-logr/logr v1.4.3
 	github.com/sirupsen/logrus v1.9.4
