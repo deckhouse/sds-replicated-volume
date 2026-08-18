@@ -22,7 +22,6 @@ import (
 	"log/slog"
 	"time"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +31,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/internal/kubeutils"

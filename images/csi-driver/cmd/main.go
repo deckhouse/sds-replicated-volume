@@ -24,13 +24,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/deckhouse/sds-common-lib/kubeclient"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 
+	"github.com/deckhouse/sds-common-lib/kubeclient"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/config"

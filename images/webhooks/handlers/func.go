@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"os"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/go-logr/logr"
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	"github.com/slok/kubewebhook/v2/pkg/log"
@@ -40,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 

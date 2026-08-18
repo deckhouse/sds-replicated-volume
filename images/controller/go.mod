@@ -3,10 +3,10 @@ module github.com/deckhouse/sds-replicated-volume/images/controller
 go 1.26.6
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817194503-f992ade8debd
+	github.com/deckhouse/sds-common-lib v0.9.0
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817194503-235c540151ea
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
-	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/go-logr/logr v1.4.3
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
