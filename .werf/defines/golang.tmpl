@@ -59,8 +59,11 @@
   export GOPRIVATE=github.com
   export GIT_TERMINAL_PROMPT=0
   if [ -n "${GO_PRIVATE_TOKEN}" ]; then
-    umask 077
-    printf 'machine github.com login oauth2 password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc"
+    # The tightened umask stays inside a subshell. werf runs every line of a stage in ONE shell, so a
+    # umask left set here would reach the `go build` and the `chmod` that follow and strip the group and
+    # other bits off the produced binary, which then cannot be executed by the non-root user the
+    # workloads run as. Only the netrc needs to be private.
+    ( umask 077; printf 'machine github.com login oauth2 password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc" )
     git config --global url."https://oauth2:${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
   else
     echo "GO_PRIVATE_TOKEN is empty: modules under ${GOPRIVATE} cannot be fetched"

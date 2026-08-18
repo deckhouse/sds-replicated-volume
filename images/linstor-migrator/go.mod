@@ -5,7 +5,7 @@ go 1.26.6
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817175335-6cbd94c30050
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260817194503-f992ade8debd
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/spf13/cobra v1.10.2

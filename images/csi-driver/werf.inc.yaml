@@ -42,7 +42,9 @@ shell:
     {{- include "auth for private go modules" . | nindent 4 }}
     - cd /src/images/{{ $.ImageName }}/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
-    - chmod +x /{{ $.ImageName }}
+    # Absolute mode: see the note in .werf/defines/golang.tmpl — `chmod +x` is masked by
+    # the umask in effect and can leave the binary executable by root only.
+    - chmod 0755 /{{ $.ImageName }}
 
 ---
 {{- $csiBinariesMount     := "/lib64/libnss_files.so.2 /lib64/libnss_dns.so.2 /bin/mount /bin/umount" }}
@@ -104,6 +106,8 @@ import:
 ---
 image: {{ $.ImageName }}
 fromImage: {{ $.ImageName }}-distroless
+# An import is keyed on file content, not on mode: without this the pre-fix stage stays cached.
+fromCacheVersion: "1"
 import:
   - image: {{ $.ImageName }}-golang-artifact
     add: /{{ $.ImageName }}

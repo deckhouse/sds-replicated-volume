@@ -46,11 +46,15 @@ shell:
     - cd /src/images/{{ $.ImageName }}/cmd
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
-    - chmod +x /{{ $.ImageName }}
+    # Absolute mode: see the note in .werf/defines/golang.tmpl — `chmod +x` is masked by
+    # the umask in effect and can leave the binary executable by root only.
+    - chmod 0755 /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}
 from: {{ index $.Images "builder/distroless" }}
+# An import is keyed on file content, not on mode: without this the pre-fix stage stays cached.
+fromCacheVersion: "1"
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
