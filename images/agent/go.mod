@@ -7,7 +7,7 @@ replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go
 require (
 	github.com/deckhouse/sds-common-lib v0.9.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260818070900-d7c44bf2740b
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
 	github.com/go-logr/logr v1.4.3
 	golang.org/x/sync v0.21.0
 	k8s.io/api v0.35.1
@@ -59,7 +59,7 @@ require (
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
-	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-20260818081835-2e871a30aeb7
 	github.com/4meepo/tagalign v1.4.3 // indirect
 	github.com/Abirdcfly/dupword v0.1.7 // indirect
 	github.com/Antonboom/errname v1.1.1 // indirect
