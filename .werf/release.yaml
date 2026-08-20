@@ -25,6 +25,15 @@ shell:
 ---
 image: release-channel-version
 from: {{ index $.Images "builder/scratch" }}
+git:
+  - add: /
+    to: /
+    includePaths:
+      - crds
+      - docs
+      - openapi
+    excludePaths:
+      - docs/internal
 import:
   - image: release-channel-version-artifact
     add: /
