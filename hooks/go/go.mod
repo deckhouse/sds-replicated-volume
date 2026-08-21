@@ -1,8 +1,9 @@
 module github.com/deckhouse/sds-replicated-volume/hooks/go
 
 go 1.26.6
+
 require (
-	github.com/deckhouse/sds-common-lib v0.9.0
+	github.com/deckhouse/sds-common-lib v0.10.0
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/module-sdk v0.7.0
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0

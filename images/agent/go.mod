@@ -1,11 +1,12 @@
 module github.com/deckhouse/sds-replicated-volume/images/agent
 
 go 1.26.6
+
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
-	github.com/deckhouse/sds-common-lib v0.9.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260818070900-d7c44bf2740b
+	github.com/deckhouse/sds-common-lib v0.10.0
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260821070809-7c0d06d31bb2
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
 	github.com/go-logr/logr v1.4.3
 	golang.org/x/sync v0.21.0
