@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/controller
 
 go 1.26.6
-
 require (
 	github.com/deckhouse/sds-common-lib v0.9.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260818070900-d7c44bf2740b
