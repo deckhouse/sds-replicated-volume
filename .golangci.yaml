@@ -40,6 +40,17 @@ linters:
       - linters: [staticcheck]
         path: images/oldcontroller/
         text: "SA1019:"
+      # The linstor-migrator suite attaches to a cluster through
+      # storage-e2e/pkg/cluster, which is deprecated in favour of pkg/e2e
+      # (e2e.Connect) with the lifecycle driven by cmd/bootstrap-cluster. That
+      # migration is an ecosystem-wide one -- eleven storage modules and
+      # storage-e2e itself still import the package, and it is explicitly kept for
+      # existing suites -- so it is not this repository's to make on its own.
+      # Until the suite is moved, keep the deprecation from holding go_linter red,
+      # where it hides every other finding.
+      - linters: [staticcheck]
+        path: e2e/linstor-migrator/
+        text: "SA1019:"
       # We want to keep our naming of packages
       - path: (.+)\.go$
         text: 'var-naming: .*'
