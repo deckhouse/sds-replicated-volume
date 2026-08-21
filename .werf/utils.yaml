@@ -15,6 +15,34 @@
   {{- include "utils:checkout-git" $ctx | nindent 2 }}
 */}}
 
+{{- /*
+  utils:fox-fork-git-config teaches git how to reach our drbd forks on fox.
+
+  The forks of drbd, drbd-utils and drbd-headers live in deckhouse/storage/fork.
+  Those projects are internal, and the deploy key behind SOURCE_REPO is scoped to
+  deckhouse/3p, so it cannot read them: the token that already fetches our private
+  Go modules is used instead. It is answered from the environment by a credential
+  helper rather than written into a file or into the clone URLs, so it ends up
+  neither in the build log nor on disk in the image.
+
+  The insteadOf rule exists for the drbd-headers submodule: its URL is recorded in
+  .gitmodules inside the drbd tag and still points at github, and rewriting it here
+  avoids cutting a new drbd tag only to change an URL.
+
+  The image must declare the token secret: {{ include "secret for private go modules" . }}
+*/}}
+{{ define "utils:fox-fork-git-config" }}
+  - |
+    GO_PRIVATE_TOKEN="$(cat /run/secrets/GO_PRIVATE_TOKEN)"
+    if [ -z "${GO_PRIVATE_TOKEN}" ]; then
+      echo "GO_PRIVATE_TOKEN is empty: cannot clone the drbd forks from github.com"
+      exit 1
+    fi
+    export GO_PRIVATE_TOKEN
+    git config --global credential."https://github.com".helper '!f() { echo username=oauth2; echo "password=${GO_PRIVATE_TOKEN}"; }; f'
+    git config --global url."https://github.com/deckhouse/fork/".insteadOf "https://github.com/deckhouse/3p-"
+{{ end }}
+
 {{ define "utils:checkout-git" }}
   - 'echo ">>> utils:checkout-git <<< folder={{ .folder }} repo={{ .repo }} branch={{ .branch }}"'
   # Clone just the repository's .git folder

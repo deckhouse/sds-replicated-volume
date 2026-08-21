@@ -15,10 +15,17 @@ git:
         - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
+
+secrets:
+{{ include "secret for private go modules" . }}
+
 shell:
   install:
+    {{- include "utils:fox-fork-git-config" . | nindent 2 }}
     - git clone --depth 1 --branch v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }} https://github.com/deckhouse/3p-drbd-utils.git /src/drbd-utils
     - cd /src/drbd-utils
+    # drbd-headers comes from the gitlink of this tag; the insteadOf rule above sends
+    # the fetch to the fork instead of the github URL recorded in .gitmodules.
     - git submodule update --init --recursive
     #- rm -rf /src/drbd-utils/.git # needed for make
     # LVM2

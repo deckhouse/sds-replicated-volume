@@ -4,15 +4,10 @@ image: {{ $.ImageName }}-utils-artifact
 from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
-git:
-  - url: https://github.com/deckhouse/3p-drbd-utils
-    add: /
-    to: /drbd-utils
-    tag: v{{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
-    stageDependencies:
-      setup:
-        - "**/*"
+secrets:
+{{ include "secret for private go modules" . }}
 
+git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
@@ -37,9 +32,13 @@ shell:
     - sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
     - export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
   setup:
-    # clone drbd-utils git repo
+    {{- include "utils:fox-fork-git-config" . | nindent 2 }}
+    # clone drbd-utils git repo. The werf git mapping that used to place the working
+    # tree here cannot authenticate against an internal fox project, so the sources
+    # come from the clone below instead of being pre-populated by werf.
+    - mkdir -p /drbd-utils
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/deckhouse/3p-drbd-utils" }}
+    {{- $_ := set $ctx "repo" "https://github.com/deckhouse/3p-drbd-utils.git" }}
     {{- $_ := set $ctx "branch" (printf "v%s" (include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root))) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}

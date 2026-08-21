@@ -8,6 +8,10 @@ git:
     stageDependencies:
       beforeSetup:
         - "**/*"
+
+secrets:
+{{ include "secret for private go modules" . }}
+
 shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
@@ -27,8 +31,11 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} https://github.com/deckhouse/3p-drbd.git  /drbd
+    {{- include "utils:fox-fork-git-config" . | nindent 2 }}
+    - git clone --depth 1 --branch drbd-{{ include "get_oss_version_by_id" (list "DRBD" $.Root) }} https://github.com/deckhouse/3p-drbd.git /drbd
     - cd /drbd
+    # drbd-headers comes from the gitlink of this tag; the insteadOf rule above sends
+    # the fetch to the fork instead of the github URL recorded in .gitmodules.
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
