@@ -39,7 +39,7 @@
       exit 1
     fi
     export GO_PRIVATE_TOKEN
-    git config --global credential."https://github.com".helper '!f() { echo username=oauth2; echo "password=${GO_PRIVATE_TOKEN}"; }; f'
+    git config --global credential."https://github.com".helper '!f() { echo username=gitlab-ci-token; echo "password=${GO_PRIVATE_TOKEN}"; }; f'
     git config --global url."https://github.com/deckhouse/fork/".insteadOf "https://github.com/deckhouse/3p-"
 {{ end }}
 

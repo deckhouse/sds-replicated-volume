@@ -59,12 +59,19 @@
   export GOPRIVATE=github.com
   export GIT_TERMINAL_PROMPT=0
   if [ -n "${GO_PRIVATE_TOKEN}" ]; then
+    # The login has to be gitlab-ci-token, not oauth2. GitLab recognises a CI job token
+    # only under that name (Gitlab::Auth::CI_JOB_USER; build_access_token_check bails out
+    # with `return unless login == CI_JOB_USER`), while a personal, project or group access
+    # token is matched by the password alone and ignores the login. So gitlab-ci-token
+    # accepts both kinds of token and oauth2 accepts only the personal ones -- and a
+    # rejected credential makes GitLab answer 404, which the go command reports as an
+    # unrecognized import path.
     # The tightened umask stays inside a subshell. werf runs every line of a stage in ONE shell, so a
     # umask left set here would reach the `go build` and the `chmod` that follow and strip the group and
     # other bits off the produced binary, which then cannot be executed by the non-root user the
     # workloads run as. Only the netrc needs to be private.
-    ( umask 077; printf 'machine github.com login oauth2 password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc" )
-    git config --global url."https://oauth2:${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+    ( umask 077; printf 'machine github.com login gitlab-ci-token password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc" )
+    git config --global url."https://gitlab-ci-token:${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
   else
     echo "GO_PRIVATE_TOKEN is empty: modules under ${GOPRIVATE} cannot be fetched"
   fi
