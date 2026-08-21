@@ -22,10 +22,13 @@ mount:
 secrets:
 - id: GOPROXY
   value: {{ .GOPROXY }}
+{{ include "secret for private go modules" . }}
 
 shell:
   setup:
-    - pm install git
+    # Patch 004 makes the driver import our api modules, which now live on fox and are
+    # private, so this build needs the same credential as every other Go image here.
+    {{- include "auth for private go modules" . | nindent 4 }}
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi
