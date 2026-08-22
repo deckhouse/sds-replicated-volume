@@ -9,8 +9,13 @@ git:
   includePaths:
   - CHANGELOG
   - module.yaml
+  # The dependency has to sit on `install`, the stage that actually consumes these
+  # files below. Declared on `setup` -- a stage this image defines no commands for
+  # -- it never invalidates anything: werf reused the cached `install` stage and
+  # baked a stale CHANGELOG into the release image, so re-tagging the same version
+  # with a fixed changelog silently republished the broken one.
   stageDependencies:
-    setup:
+    install:
     - '**/*'
 import:
   - from: {{ index $.Images "yq" }}
