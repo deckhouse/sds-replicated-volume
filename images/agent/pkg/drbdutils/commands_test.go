@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
@@ -96,36 +97,155 @@ func TestExecuteNewMinorKnownErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("auto minor retries", func(t *testing.T) {
-		sysBlock := t.TempDir()
-		if err := os.Mkdir(sysBlock+"/drbd0", 0o755); err != nil {
-			t.Fatal(err)
+	// setupSysfs points minor discovery at temp dirs standing in for
+	// /sys/block (holding the given drbd<minor> entries) and
+	// /sys/devices/virtual/bdi (empty), and drops any previously seeded
+	// allocation state. It returns both dirs so a test can add entries mid-run.
+	setupSysfs := func(t *testing.T, blockMinors ...string) (sysBlock, sysBDI string) {
+		t.Helper()
+		sysBlock, sysBDI = t.TempDir(), t.TempDir()
+		for _, m := range blockMinors {
+			if err := os.Mkdir(sysBlock+"/drbd"+m, 0o755); err != nil {
+				t.Fatal(err)
+			}
 		}
 		drbdutils.SysBlockPath = sysBlock
-
+		drbdutils.SysBDIPath = sysBDI
 		drbdutils.ResetNextDeviceMinor()
+		return sysBlock, sysBDI
+	}
+
+	newMinorOK := func(resource string, minor, volume uint) *fakedrbdutils.ExpectedCmd {
+		return &fakedrbdutils.ExpectedCmd{
+			Name: drbdutils.DRBDSetupCommand,
+			Args: drbdutils.NewMinorArgs(resource, minor, volume, false),
+		}
+	}
+
+	newMinorVolumeExists := func(resource string, minor, volume uint) *fakedrbdutils.ExpectedCmd {
+		return &fakedrbdutils.ExpectedCmd{
+			Name:         drbdutils.DRBDSetupCommand,
+			Args:         drbdutils.NewMinorArgs(resource, minor, volume, false),
+			ResultOutput: []byte("res: Failure: (161) Minor or volume exists already (delete it first)\n"),
+			ResultErr:    fakedrbdutils.ExitErr{Code: 10},
+		}
+	}
+
+	// The counter is seeded past the highest minor in sysfs and then handed out
+	// without re-reading it: the drbd100 added mid-run must not be picked up
+	// while allocations keep succeeding.
+	t.Run("auto minor allocates past the highest used", func(t *testing.T) {
+		sysBlock, _ := setupSysfs(t, "0", "5")
 
 		fakeExec := &fakedrbdutils.Exec{}
-		fakeExec.ExpectCommands(
-			&fakedrbdutils.ExpectedCmd{
-				Name:         drbdutils.DRBDSetupCommand,
-				Args:         drbdutils.NewMinorArgs("res", 0, 0, false),
-				ResultOutput: []byte("Failure: (161) Minor or volume exists already (delete it first)\n"),
-				ResultErr:    fakedrbdutils.ExitErr{Code: 10},
-			},
-			&fakedrbdutils.ExpectedCmd{
-				Name: drbdutils.DRBDSetupCommand,
-				Args: drbdutils.NewMinorArgs("res", 1, 0, false),
-			},
-		)
+		fakeExec.ExpectCommands(newMinorOK("res", 6, 0), newMinorOK("res", 7, 0))
 		fakeExec.Setup(t)
 
 		minor, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
-		if err != nil {
-			t.Fatalf("ExecuteNewAutoMinor() unexpected error: %v", err)
+		if err != nil || minor != 6 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (6, nil)", minor, err)
 		}
-		if minor != 1 {
-			t.Fatalf("ExecuteNewAutoMinor() minor = %d, want 1", minor)
+
+		if err := os.Mkdir(sysBlock+"/drbd100", 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		minor, err = drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if err != nil || minor != 7 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (7, nil)", minor, err)
+		}
+	})
+
+	t.Run("auto minor starts at zero when nothing is used", func(t *testing.T) {
+		setupSysfs(t)
+
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(newMinorOK("res", 0, 0))
+		fakeExec.Setup(t)
+
+		minor, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if err != nil || minor != 0 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (0, nil)", minor, err)
+		}
+	})
+
+	// 161 out of new-minor means the volume already exists in the resource, so
+	// no other minor can satisfy the request. It must surface to the caller
+	// after a single attempt instead of being retried; the fake asserts the
+	// exact command count. This is the case that used to loop forever.
+	t.Run("auto minor does not retry a failure", func(t *testing.T) {
+		setupSysfs(t, "0")
+
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(newMinorVolumeExists("res", 1, 0))
+		fakeExec.Setup(t)
+
+		_, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if !errors.Is(err, drbdutils.ErrNewMinorAlreadyExists) {
+			t.Fatalf("ExecuteNewAutoMinor() error = %v, want ErrNewMinorAlreadyExists", err)
+		}
+	})
+
+	// A failure invalidates the seeded counter, so the next allocation re-reads
+	// sysfs and skips minors that appeared in the meantime.
+	t.Run("auto minor re-seeds after a failure", func(t *testing.T) {
+		sysBlock, _ := setupSysfs(t, "0")
+
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(newMinorVolumeExists("res", 1, 0), newMinorOK("res", 8, 0))
+		fakeExec.Setup(t)
+
+		if _, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false); err == nil {
+			t.Fatal("ExecuteNewAutoMinor() error = nil, want error")
+		}
+
+		if err := os.Mkdir(sysBlock+"/drbd7", 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		minor, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if err != nil || minor != 8 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (8, nil)", minor, err)
+		}
+	})
+
+	// A torn-down device leaves its /sys/devices/virtual/bdi entry behind for a
+	// short while after /sys/block is clean. drbdsetup new-minor refuses such a
+	// minor with (161), so allocation must skip it — otherwise every re-seed
+	// lands on the same blocked minor until the leftover is reaped.
+	t.Run("auto minor skips a leftover bdi node", func(t *testing.T) {
+		_, sysBDI := setupSysfs(t, "0", "1")
+		if err := os.Mkdir(sysBDI+"/147:2", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// An unrelated major must not be mistaken for a DRBD minor.
+		if err := os.Mkdir(sysBDI+"/252:3", 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(newMinorOK("res", 3, 0))
+		fakeExec.Setup(t)
+
+		minor, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if err != nil || minor != 3 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (3, nil)", minor, err)
+		}
+	})
+
+	// When the highest minor in use sits at the top of the minor space, seeding
+	// one past it would be out of range, so allocation restarts from the lowest
+	// free minor instead.
+	t.Run("auto minor wraps to the lowest free minor", func(t *testing.T) {
+		setupSysfs(t, "0", "2", strconv.Itoa(drbdutils.MaxDeviceMinor))
+
+		fakeExec := &fakedrbdutils.Exec{}
+		fakeExec.ExpectCommands(newMinorOK("res", 1, 0))
+		fakeExec.Setup(t)
+
+		minor, err := drbdutils.ExecuteNewAutoMinor(t.Context(), "res", 0, false)
+		if err != nil || minor != 1 {
+			t.Fatalf("ExecuteNewAutoMinor() = (%d, %v), want (1, nil)", minor, err)
 		}
 	})
 }
