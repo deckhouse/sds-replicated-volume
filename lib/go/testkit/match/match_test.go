@@ -209,6 +209,24 @@ var _ = Describe("ConditionReason", func() {
 	})
 })
 
+var _ = Describe("ConditionStatusReason", func() {
+	It("matches correct status and reason", func() {
+		Expect(objWithCondition("Ready", "True", "Ready", "")).To(ConditionStatusReason("Ready", "True", "Ready"))
+	})
+
+	It("fails on wrong status", func() {
+		Expect(objWithCondition("Ready", "False", "Ready", "")).ToNot(ConditionStatusReason("Ready", "True", "Ready"))
+	})
+
+	It("fails on wrong reason", func() {
+		Expect(objWithCondition("Ready", "True", "Forming", "")).ToNot(ConditionStatusReason("Ready", "True", "Ready"))
+	})
+
+	It("fails when condition is absent", func() {
+		Expect(&testObj{}).ToNot(ConditionStatusReason("Ready", "True", "Ready"))
+	})
+})
+
 var _ = Describe("ConditionMessageContains", func() {
 	It("matches substring", func() {
 		Expect(objWithCondition("Ready", "True", "Ready", "quorum: 2/3")).To(ConditionMessageContains("Ready", "quorum"))

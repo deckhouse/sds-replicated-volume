@@ -243,6 +243,26 @@ func ConditionReason(name, reason string) types.GomegaMatcher {
 	})
 }
 
+// ConditionStatusReason matches when the named condition has both the given
+// status and the given reason on a single snapshot. Use this instead of two
+// separate ConditionStatus + ConditionReason Await calls when the assertion
+// must be atomic (two Await calls may match different snapshots).
+func ConditionStatusReason(name, status, reason string) types.GomegaMatcher {
+	return NewMatcher(func(obj client.Object) (bool, string) {
+		found, actualStatus, actualReason, _ := getCondition(obj, name)
+		if !found {
+			return false, fmt.Sprintf("condition %s not found", name)
+		}
+		if actualStatus != status {
+			return false, fmt.Sprintf("condition %s status is %s, expected %s", name, actualStatus, status)
+		}
+		if actualReason != reason {
+			return false, fmt.Sprintf("condition %s reason is %s, expected %s", name, actualReason, reason)
+		}
+		return true, fmt.Sprintf("condition %s is %s/%s", name, actualStatus, actualReason)
+	})
+}
+
 // ConditionMessageContains matches when the named condition's message
 // contains the given substring.
 func ConditionMessageContains(name, substr string) types.GomegaMatcher {

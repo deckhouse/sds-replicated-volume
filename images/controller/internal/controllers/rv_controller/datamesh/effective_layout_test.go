@@ -142,6 +142,17 @@ func readyTB(id uint8, peers ...peerEntry) replicaEntry {
 	}
 }
 
+// readyTBQuorumFalse builds a replicaEntry for a TieBreaker whose agent is
+// ready (fresh data) but Quorum=false: DRBD-isolated but node alive.
+func readyTBQuorumFalse(id uint8, peers ...peerEntry) replicaEntry {
+	return replicaEntry{
+		id:         id,
+		memberType: v1alpha1.DatameshMemberTypeTieBreaker,
+		quorum:     ptr.To(false),
+		peers:      peers,
+	}
+}
+
 // staleD builds a replicaEntry for a stale (AgentNotReady) Diskful voter.
 func staleD(id uint8, peers ...peerEntry) replicaEntry {
 	return replicaEntry{
@@ -471,6 +482,23 @@ var _ = Describe("updateEffectiveLayout peer reconstruction", func() {
 		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(0))))
 		Expect(el.ReachableTieBreakers).To(Equal(int8(0)))
 	})
+
+	It("2D+1TB, TB agent ready but Quorum=false (DRBD-isolated): TB not reachable", func() {
+		// TB agent is alive (fresh data) but Quorum=false: the tie-breaker
+		// is DRBD-isolated from the diskful nodes. Its vote does not count
+		// toward quorum, so reachableTB=0 and ftt=0 (Degraded).
+		gctx := mkEffGctx(2, 1,
+			readyD(0, peerEntry{"rv-1-2", false, false}),
+			readyD(1, peerEntry{"rv-1-2", false, false}),
+			readyTBQuorumFalse(2),
+		)
+		var el v1alpha1.ReplicatedVolumeEffectiveLayout
+		updateEffectiveLayout(gctx, &el)
+
+		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(0))))
+		Expect(el.ReachableTieBreakers).To(Equal(int8(0)))
+		Expect(el.StaleAgents).To(Equal(int8(0)))
+	})
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -512,6 +540,27 @@ var _ = Describe("updateEffectiveLayout TB bonus", func() {
 		updateEffectiveLayout(gctx, &el)
 
 		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(2))))
+	})
+
+	It("2D+1TB, one diskful stale: 1D+1TB reachable → ftt=0 (TB vote always counts)", func() {
+		// Scenario: 2D+1TB (FTT=1, GMDR=0 → q=2, qmr=1), one diskful node down.
+		// Survivor diskful is ready (quorum=true, UpToDate); TB is ready (quorum=true).
+		// The stale diskful's agent is not ready, and the survivor does not see it Connected.
+		// Reachable votes: 1 diskful + 1 TB = 2; quorum=2 → quorum holds → FTT=0.
+		// This is the tiebreaker-rescue case: the TB keeps quorum at 2/3 while the
+		// diskful node is down, and the volume stays Ready (FTT=0, not -1).
+		gctx := mkEffGctx(2, 1,
+			readyD(0, peerEntry{"rv-1-2", true, false}),
+			staleD(1),
+			readyTB(2),
+		)
+		var el v1alpha1.ReplicatedVolumeEffectiveLayout
+		updateEffectiveLayout(gctx, &el)
+
+		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(0))))
+		Expect(el.ReachableVoters).To(Equal(int8(1)))
+		Expect(el.ReachableTieBreakers).To(Equal(int8(1)))
+		Expect(el.StaleAgents).To(Equal(int8(1)))
 	})
 })
 

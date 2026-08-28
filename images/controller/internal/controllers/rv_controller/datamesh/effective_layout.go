@@ -99,7 +99,8 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 		Union(staleVoters.Intersect(peerConnected))
 	upToDateVoters := voters.Intersect(diskUpToDate).
 		Union(staleVoters.Intersect(peerUpToDate))
-	reachableTBs := tbs.Intersect(ready.Union(peerConnected))
+	reachableTBs := tbs.Intersect(quorumTrue).
+		Union(staleTBs.Intersect(peerConnected))
 
 	// ── Write counts ───────────────────────────────────────────────────
 
@@ -120,12 +121,19 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 		upToDateD := el.UpToDateVoters
 		reachableTB := el.ReachableTieBreakers
 
+		// tbBonus models the numeric quorum contract: the module configures quorum
+		// as an absolute number (recommended by drbd.conf(5): the heuristic for counting
+		// diskful nodes is unreliable), so a reachable tie-breaker always contributes
+		// its vote. Cap at 1 — a single TB is the maximum rescue the contract needs;
+		// the data side is already bounded by min(..., upToDateD-qmr).
+		// Kernel reference: calc_quorum() in drbd-9.2.18-flant.10 (drbd_state.c:~1490).
+		// Revisit when bumping oss.yaml to a new DRBD tag.
 		var tbBonus int8
-		if reachableD%2 == 0 && reachableTB > 0 {
+		if reachableTB > 0 {
 			tbBonus = 1
 		}
 
-		ftt := min(reachableD-int8(q)+tbBonus, upToDateD-int8(qmr))
+		ftt := min(reachableD+tbBonus-int8(q), upToDateD-int8(qmr))
 		gmdr := min(upToDateD, int8(qmr)) - 1
 		changed = setOptInt8(&el.FailuresToTolerate, &ftt) || changed
 		changed = setOptInt8(&el.GuaranteedMinimumDataRedundancy, &gmdr) || changed
