@@ -125,6 +125,22 @@ type GenSelfSignedTLSHookConf struct {
 	// (!) Data in values is already in base64, so
 	// in helm templates you DON'T need use `b64enc` function
 	CommonCAValuesPath string
+
+	// CASecretName - name of the secret keeping the CA of the cert group, in Namespace.
+	// The CA certificate is stored under the [CASecretCertKey] key, its private key under the
+	// [CASecretKeyKey] one. Keeping the CA private key is what makes it possible to renew a leaf
+	// certificate without re-issuing the whole group.
+	// Required, must be the same for every cert of a group.
+	CASecretName string
+
+	// CAValuesPath - full path to store the CA certificate and its private key
+	// full paths will be
+	//   CAValuesPath + .crt - CA certificate
+	//   CAValuesPath + .key - CA private key
+	// Data in values is stored as plain text, so in helm templates you need to use the `b64enc`
+	// function.
+	// Required, must be the same for every cert of a group.
+	CAValuesPath string
 	// Canonical name (CN) of common CA certificate.
 	// If not specified (empty), then (if no CA cert already generated) using CN property of this struct
 	CommonCACanonicalName string
@@ -145,6 +161,10 @@ func (conf GenSelfSignedTLSHookConf) Path() string {
 
 func (conf GenSelfSignedTLSHookConf) CommonCAPath() string {
 	return strings.TrimSuffix(conf.CommonCAValuesPath, ".")
+}
+
+func (conf GenSelfSignedTLSHookConf) CAPath() string {
+	return strings.TrimSuffix(conf.CAValuesPath, ".")
 }
 
 func (conf GenSelfSignedTLSHookConf) UsagesStrings() []string {

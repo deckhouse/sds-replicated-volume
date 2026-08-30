@@ -861,57 +861,78 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 
 DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
 
-## How to manually trigger the certificate renewal process?
+## How are the module certificates renewed?
 
-To check for expiring certificates in the module, inspect the certificate expiration dates stored in the secrets:
+The module certificates are renewed automatically, no operator action is required.
 
-```shell
-kubectl -n d8-sds-replicated-volume get secrets | grep 'cert' | grep -v 'webhooks' | awk '{ print "echo "$1" && kubectl -n d8-sds-replicated-volume get secrets "$1" -ojson | jq -r '\''.data.\"ca.crt\"'\'' | base64 -d | openssl x509 -text -noout | grep \"Not After\"" }' | bash
-```
+Certificates are grouped by the CA signing them. Every group keeps its CA, both the certificate
+and the private key, in a dedicated secret:
 
-Example output:
+| CA secret | Certificates signed by it |
+| --- | --- |
+| `linstor-ca` | `linstor-controller-https-cert`, `linstor-client-https-cert`, `linstor-controller-ssl-cert`, `linstor-node-ssl-cert` |
+| `webhooks-ca` | `webhooks-https-certs` |
+| `spaas-ca` | `spaas-certs` |
+| `linstor-scheduler-extender-ca` | `linstor-scheduler-extender-https-certs` |
 
-```console
-linstor-client-https-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-controller-https-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-controller-ssl-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-node-ssl-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-scheduler-admission-certs
-            Not After : Oct 29 18:14:58 2025 GMT
-linstor-scheduler-extender-https-certs
-            Not After : Feb 17 14:16:50 2026 GMT
-spaas-certs
-            Not After : Oct 21 10:38:05 2025 GMT
-```
+A CA is issued for ten years, the certificates it signs for one year. A certificate is re-signed
+by the same CA 45 days before it expires, and the workloads consuming it are restarted afterwards,
+one by one: the CA does not change, so a component trusts both the old and the new certificate and
+the restarts do not have to be synchronized.
 
-If any of them is close to expiration, delete it:
+The whole group, its CA included, is re-issued only when the CA itself is missing or is about to
+expire. That invalidates every certificate of the group at once, so all its consumers are
+restarted. For the LINSTOR group this means the LINSTOR control plane is unavailable until the
+`linstor-controller` Deployment and the `linstor-node` DaemonSet are rolled out; data access is not
+affected, since DRBD devices keep working without the control plane.
+
+To inspect the expiration dates:
 
 ```shell
-kubectl -n d8-sds-replicated-volume delete secret <secret names>
+kubectl -n d8-sds-replicated-volume get secret -l 'heritage=deckhouse,module=sds-replicated-volume' \
+  -o custom-columns='NAME:.metadata.name,CERT:.data.tls\.crt,CA:.data.ca\.crt' --no-headers \
+  | while read -r name cert ca; do
+      for data in "$cert" "$ca"; do
+        [ "$data" = '<none>' ] && continue
+        echo "$name $(echo "$data" | base64 -d | openssl x509 -noout -subject -enddate | tr '\n' ' ')"
+      done
+    done
 ```
 
-Restart Deckhouse:
+The monitoring system alerts about a certificate which is about to expire but has not been renewed,
+see the `D8LinstorCertificateExpiringIn30d` alert. Such an alert means the renewal is blocked:
+inspect the Deckhouse log and queue for errors reported by the module hooks.
+
+## How to renew the module certificates manually?
+
+Renewing a certificate manually is only needed when the automatic renewal is blocked and the cause
+cannot be fixed.
+
+To re-sign a single certificate by the CA of its group, delete its secret:
+
+```shell
+kubectl -n d8-sds-replicated-volume delete secret <secret name>
+```
+
+To re-issue a whole group, delete the secret with its CA as well, for example:
+
+```shell
+kubectl -n d8-sds-replicated-volume delete secret linstor-ca
+```
+
+The certificates are re-created before the module is deployed, so trigger a Deckhouse convergence
+and wait until the queue is empty:
 
 ```shell
 kubectl -n d8-system rollout restart deployment deckhouse
-```
-
-Wait until it becomes `Ready` and the queue is empty:
-
-```shell
 kubectl -n d8-system exec -ti deployments/deckhouse -- deckhouse-controller queue main
 # Queue 'main': length 0, status: 'waiting for task 16s'
 ```
 
-Restart all module pods:
+The workloads consuming the re-created certificates are restarted by the module itself. Should that
+not happen, restart them manually:
 
 ```shell
 kubectl -n d8-sds-replicated-volume rollout restart deployment
 kubectl -n d8-sds-replicated-volume rollout restart daemonset
 ```
-
-Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `D8LinstorCertificateExpiringIn30d` alert).
