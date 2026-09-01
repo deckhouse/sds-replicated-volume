@@ -40,6 +40,11 @@ linters:
       - linters: [staticcheck]
         path: images/oldcontroller/
         text: "SA1019:"
+      # Test files may use deprecated API fields (StoragePool, Replication)
+      # to verify backward compatibility with the old API surface.
+      - linters: [staticcheck]
+        path: images/controller/.*_test\.go
+        text: "SA1019:"
       # The linstor-migrator suite attaches to a cluster through
       # storage-e2e/pkg/cluster, which is deprecated in favour of pkg/e2e
       # (e2e.Connect) with the lifecycle driven by cmd/bootstrap-cluster. That

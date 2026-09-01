@@ -33,7 +33,7 @@ import (
 //   - Ready agent (fresh data): isAgentReady && Quorum != nil.
 //   - Voter reachable = own Quorum==true OR stale but peer sees Connected.
 //   - Voter upToDate = own BackingVolume==UpToDate OR stale but peer sees UpToDate.
-//   - TB reachable = agent ready OR stale but peer sees Connected.
+//   - TB reachable = own Quorum==true OR stale but peer sees Connected.
 //
 // FTT/GMDR are set to nil when no voter members exist or no agents have
 // fresh data. Counts and Message are always populated.
@@ -123,10 +123,11 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 
 		// tbBonus models the numeric quorum contract: the module configures quorum
 		// as an absolute number (recommended by drbd.conf(5): the heuristic for counting
-		// diskful nodes is unreliable), so a reachable tie-breaker always contributes
-		// its vote. Cap at 1 — a single TB is the maximum rescue the contract needs;
+		// diskful nodes is unreliable). calc_quorum() counts all reachable votes
+		// including tie-breakers, without a parity gate on the diskful count — so the
+		// controller must not gate the TB vote by reachableD parity either.
+		// Cap at 1 — a single TB is the maximum rescue the contract needs;
 		// the data side is already bounded by min(..., upToDateD-qmr).
-		// Kernel reference: calc_quorum() in drbd-9.2.18-flant.10 (drbd_state.c:~1490).
 		// Revisit when bumping oss.yaml to a new DRBD tag.
 		var tbBonus int8
 		if reachableTB > 0 {

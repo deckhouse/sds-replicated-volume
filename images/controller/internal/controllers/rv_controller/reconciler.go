@@ -612,14 +612,14 @@ func computeTargetLayoutAction(
 			}
 		}
 		return targetLayoutAction{
-				kind:          layoutActionRetypeToTieBreaker,
-				retypeRVRName: name,
-			}, membershipLayoutConvergedReport{
-				status: metav1.ConditionFalse,
-				reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
-				message: fmt.Sprintf("retyping Diskful replica %s to tie-breaker: have %s, want %s",
-					name, actualLayout, intendedLayout),
-			}
+			kind:          layoutActionRetypeToTieBreaker,
+			retypeRVRName: name,
+		}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("retyping Diskful replica %s to tie-breaker: have %s, want %s",
+				name, actualLayout, intendedLayout),
+		}
 
 	// P2 heal: correct diskful count but a tie-breaker deficit.
 	case actualD == intendedD && actualTB < intendedTB:
@@ -1702,7 +1702,10 @@ func (r *Reconciler) reconcileLayoutStatus(
 // Reconcile: data-plane conditions
 //
 
-// reconcileDataPlaneConditions is the SINGLE writer of the Ready and Resilient conditions.
+// reconcileDataPlaneConditions is the SINGLE writer of the Ready and Resilient conditions
+// in the normal-operation flow. The deletion branch (reconcileDeletion) also writes
+// Ready=False/Terminating via the same computeReadyReport + applyReadyCond helpers in
+// its own atomic status patch, mirroring the MembershipLayoutConverged pattern.
 // It computes both from the effective layout, configuration, deletion timestamp, and formation
 // state, and applies them in place. It only reports; it reuses the already-refreshed
 // EffectiveLayout (updated inside reconcileNormalOperation) and the already-set configuration.
@@ -1900,8 +1903,7 @@ func applyMembershipLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, re
 //  2. Formation in progress or never formed → False / Forming
 //  3. Effective FTT or GMDR nil           → Unknown / StatusUnknown
 //  4. FTT < 0                             → False / QuorumLost
-//  5. GMDR < 0                            → False / InsufficientUpToDateReplicas
-//  6. otherwise                           → True / Ready
+//  5. otherwise                           → True / Ready
 //
 // It is a pure read-only computation: it MUST NOT mutate rv.
 func computeReadyReport(rv *v1alpha1.ReplicatedVolume) readyReport {
@@ -1941,22 +1943,13 @@ func computeReadyReport(rv *v1alpha1.ReplicatedVolume) readyReport {
 		return readyReport{
 			status: metav1.ConditionFalse,
 			reason: v1alpha1.ReplicatedVolumeCondReadyReasonQuorumLost,
-			message: fmt.Sprintf("Quorum lost: reachable voters=%d, tie-breakers=%d, quorum=%d",
-				el.ReachableVoters, el.ReachableTieBreakers, rv.Status.Datamesh.Quorum),
+			message: fmt.Sprintf("Quorum lost: FTT=%d (reachable %d+%dTB-%dq, UpToDate %d-%dqmr)",
+				ftt, el.ReachableVoters, el.ReachableTieBreakers, rv.Status.Datamesh.Quorum,
+				el.UpToDateVoters, rv.Status.Datamesh.QuorumMinimumRedundancy),
 		}
 	}
 
-	// 5. IO blocked (GMDR < 0)
-	if gmdr < 0 {
-		return readyReport{
-			status: metav1.ConditionFalse,
-			reason: v1alpha1.ReplicatedVolumeCondReadyReasonInsufficientUpToDateReplicas,
-			message: fmt.Sprintf("IO blocked: UpToDate voters=%d, need >= %d (qmr=%d)",
-				el.UpToDateVoters, rv.Status.Datamesh.QuorumMinimumRedundancy, rv.Status.Datamesh.QuorumMinimumRedundancy),
-		}
-	}
-
-	// 6. Ready
+	// 5. Ready
 	return readyReport{
 		status:  metav1.ConditionTrue,
 		reason:  v1alpha1.ReplicatedVolumeCondReadyReasonReady,

@@ -566,8 +566,12 @@ Where:
   as Connected by at least one peer with a ready agent.
 - **UpToDate_D** = voters with UpToDate backing volume, or stale voters seen
   as UpToDate by a peer.
-- **TB_bonus** = 1 when reachable_D is even and at least one TieBreaker is
-  reachable; 0 otherwise.
+- **reachable_TB** = tie-breakers whose own Quorum==true, or stale tie-breakers
+  seen as Connected by at least one peer with a ready agent.
+- **TB_bonus** = 1 when at least one TieBreaker is reachable; 0 otherwise.
+  The module configures quorum as an absolute number, so a reachable
+  tie-breaker always contributes its vote — there is no parity gate on
+  the diskful count.
 
 When no voter members exist or no agent has fresh data, FTT and GMDR are
 reported as unavailable (nil).

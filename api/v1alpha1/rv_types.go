@@ -828,7 +828,7 @@ type ReplicatedVolumeEffectiveLayout struct {
 	TotalTieBreakers int8 `json:"totalTieBreakers"`
 
 	// ReachableTieBreakers is the number of TieBreakers confirmed reachable
-	// (agent ready or seen Connected by peers).
+	// (own Quorum==true, or stale but seen Connected by ready peers).
 	// +kubebuilder:default=0
 	ReachableTieBreakers int8 `json:"reachableTieBreakers"`
 

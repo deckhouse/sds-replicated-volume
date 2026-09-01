@@ -61,15 +61,15 @@ const (
 	// means the mesh can serve IO, but a specific attachment (RVA) may still be frozen on
 	// an isolated side of a partition — per-consumer readiness will be reported by a
 	// dedicated AttachedReady condition (planned).
-	// Reasons are ordered by precedence (first match wins); the cause of unavailability is
-	// carried in the reason.
-	ReplicatedVolumeCondReadyType                               = "Ready"
-	ReplicatedVolumeCondReadyReasonForming                      = "Forming"                      // Volume is forming: an initial or post-formation transition is in progress, or the volume never reached an IO-serving state.
-	ReplicatedVolumeCondReadyReasonInsufficientUpToDateReplicas = "InsufficientUpToDateReplicas" // Quorum is met but the number of UpToDate voters is below qmr; IO is blocked.
-	ReplicatedVolumeCondReadyReasonQuorumLost                   = "QuorumLost"                   // Quorum is lost: the number of reachable voters plus tie-breakers is below the quorum threshold.
-	ReplicatedVolumeCondReadyReasonReady                        = "Ready"                        // Volume is serving IO at the guaranteed minimum redundancy.
-	ReplicatedVolumeCondReadyReasonStatusUnknown                = "StatusUnknown"                // Effective layout cannot be determined (e.g. stale agents).
-	ReplicatedVolumeCondReadyReasonTerminating                  = "Terminating"                  // Volume is being deleted.
+	// Reasons carry the cause of unavailability; precedence is implemented in
+	// computeReadyReport (Terminating → Forming → StatusUnknown → QuorumLost →
+	// Ready), not in the alphabetical order below.
+	ReplicatedVolumeCondReadyType                = "Ready"
+	ReplicatedVolumeCondReadyReasonForming       = "Forming"       // Volume is forming: an initial or post-formation transition is in progress, or the volume never reached an IO-serving state.
+	ReplicatedVolumeCondReadyReasonQuorumLost    = "QuorumLost"    // Quorum is lost: the number of reachable voters plus tie-breakers is below the quorum threshold.
+	ReplicatedVolumeCondReadyReasonReady         = "Ready"         // Volume is serving IO at the guaranteed minimum redundancy.
+	ReplicatedVolumeCondReadyReasonStatusUnknown = "StatusUnknown" // Effective layout cannot be determined (e.g. stale agents).
+	ReplicatedVolumeCondReadyReasonTerminating   = "Terminating"   // Volume is being deleted.
 )
 
 const (

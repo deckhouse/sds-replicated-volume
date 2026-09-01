@@ -1317,20 +1317,24 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **Stale agent's own peer data is IGNORED.**
   Stale agent reports peer as Connected. That peer data is not used (stale agent not in ready set). Only ready agents' peer observations count.
 - ⚡ **2D+1TB, TB stale, peers see TB Connected → reachableTBs=1.**
-  2D ready. 1TB stale. Ready D peer sees TB as Connected. ReachableTieBreakers=1. FTT=1 (even voters + reachable TB → tbBonus=1).
+  2D ready. 1TB stale. Ready D peer sees TB as Connected. ReachableTieBreakers=1. FTT=1 (reachable TB → tbBonus=1).
 - **2D+1TB, TB stale, peers do NOT see TB → reachableTBs=0.**
   FTT=0 (no TB bonus).
+- ⚡ **2D+1TB, TB agent ready but Quorum=false (DRBD-isolated) → reachableTBs=0.**
+  TB agent is alive but Quorum=false. ReachableTieBreakers=0. FTT=0 (no TB bonus).
 
 ### TB bonus
 
-- **2D ready + 1TB ready: even voters + TB → tbBonus=1.**
-  FTT = min(2-2+1, 2-1) = min(1, 1) = 1.
-- **3D ready + 1TB ready: odd voters → tbBonus=0.**
-  TB bonus only for even voters. FTT=1 (no bonus).
-- **2D ready + 0TB: even but no TB → tbBonus=0.**
-  FTT = min(2-2+0, 2-1) = min(0, 1) = 0.
+- **2D ready + 1TB ready: reachable TB → tbBonus=1.**
+  FTT = min(2+1-2, 2-1) = min(1, 1) = 1.
+- **3D+1TB ready: tbBonus=1 but data-side limits ftt to 1.**
+  FTT = min(3+1-2, 3-2) = min(2, 1) = 1.
+- **3D+1TB ready, qmr=1 (r2 config): tbBonus=1, ftt=2.**
+  FTT = min(3+1-2, 3-1) = min(2, 2) = 2.
+- **2D ready + 0TB: no TB → tbBonus=0.**
+  FTT = min(2+0-2, 2-1) = min(0, 1) = 0.
 - ⚡ **4D ready + 1TB stale, peer sees TB → reconstructed → tbBonus=1.**
-  Even voters (4) + reconstructed TB. FTT=2.
+  Reconstructed TB. FTT=2.
 
 ### Formula edge cases
 

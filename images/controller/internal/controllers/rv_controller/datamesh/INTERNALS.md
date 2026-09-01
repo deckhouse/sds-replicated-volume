@@ -642,15 +642,16 @@ voter failure/recovery).
 
 ```
 staleVoters      = voters - ready
+staleTBs         = tbs - ready
 reachableVoters  = (voters ∩ quorumTrue) ∪ (staleVoters ∩ peerConnected)
 upToDateVoters   = (voters ∩ diskUpToDate) ∪ (staleVoters ∩ peerUpToDate)
-reachableTBs     = tbs ∩ (ready ∪ peerConnected)
+reachableTBs     = (tbs ∩ quorumTrue) ∪ (staleTBs ∩ peerConnected)
 ```
 
 **Formulas:**
 
 - `FTT = min(reachableD - q + tbBonus, upToDateD - qmr)`
-  where tbBonus = 1 when reachableD is even and reachableTBs > 0.
+  where tbBonus = 1 when reachableTBs > 0.
 - `GMDR = min(upToDateD, qmr) - 1`
 - Both set to nil when no voters exist or no agents have fresh data.
 

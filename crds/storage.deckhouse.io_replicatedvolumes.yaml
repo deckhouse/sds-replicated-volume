@@ -833,7 +833,7 @@ spec:
                     default: 0
                     description: |-
                       ReachableTieBreakers is the number of TieBreakers confirmed reachable
-                      (agent ready or seen Connected by peers).
+                      (own Quorum==true, or stale but seen Connected by ready peers).
                     type: integer
                   reachableVoters:
                     default: 0

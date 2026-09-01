@@ -133,23 +133,21 @@ func readyD(id uint8, peers ...peerEntry) replicaEntry {
 }
 
 // readyTB builds a replicaEntry for a ready TieBreaker with Quorum=true.
-func readyTB(id uint8, peers ...peerEntry) replicaEntry {
+func readyTB(id uint8) replicaEntry {
 	return replicaEntry{
 		id:         id,
 		memberType: v1alpha1.DatameshMemberTypeTieBreaker,
 		quorum:     ptr.To(true),
-		peers:      peers,
 	}
 }
 
 // readyTBQuorumFalse builds a replicaEntry for a TieBreaker whose agent is
 // ready (fresh data) but Quorum=false: DRBD-isolated but node alive.
-func readyTBQuorumFalse(id uint8, peers ...peerEntry) replicaEntry {
+func readyTBQuorumFalse(id uint8) replicaEntry {
 	return replicaEntry{
 		id:         id,
 		memberType: v1alpha1.DatameshMemberTypeTieBreaker,
 		quorum:     ptr.To(false),
-		peers:      peers,
 	}
 }
 
@@ -514,7 +512,10 @@ var _ = Describe("updateEffectiveLayout TB bonus", func() {
 		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(1))))
 	})
 
-	It("3D ready + 1TB ready: odd voters → tbBonus=0", func() {
+	It("3D+1TB ready: tbBonus=1 but data-side limits ftt to 1", func() {
+		// 3D+1TB with FTT=1, GMDR=1 → q=2, qmr=2. All reachable.
+		// tbBonus=1 (reachableTB=1), but the data side is the limiting factor:
+		// ftt = min(3+1-2, 3-2) = min(2, 1) = 1.
 		gctx := mkEffGctx(2, 2, readyD(0), readyD(1), readyD(2), readyTB(3))
 		var el v1alpha1.ReplicatedVolumeEffectiveLayout
 		updateEffectiveLayout(gctx, &el)
@@ -561,6 +562,20 @@ var _ = Describe("updateEffectiveLayout TB bonus", func() {
 		Expect(el.ReachableVoters).To(Equal(int8(1)))
 		Expect(el.ReachableTieBreakers).To(Equal(int8(1)))
 		Expect(el.StaleAgents).To(Equal(int8(1)))
+	})
+
+	It("3D+1TB ready, qmr=1 (r2 config): tbBonus=1, ftt=2", func() {
+		// 3D+1TB with FTT=1, GMDR=0 → q=2, qmr=1. All reachable.
+		// tbBonus=1 (reachableTB=1), ftt = min(3+1-2, 3-1) = min(2, 2) = 2.
+		// The old parity-gate would also give 1 (reachableD=3, odd → tbBonus=0,
+		// ftt = min(3-2, 3-1) = min(1, 2) = 1), so this case distinguishes
+		// the old and new formula.
+		gctx := mkEffGctx(2, 1, readyD(0), readyD(1), readyD(2), readyTB(3))
+		var el v1alpha1.ReplicatedVolumeEffectiveLayout
+		updateEffectiveLayout(gctx, &el)
+
+		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(2))))
+		Expect(el.ReachableTieBreakers).To(Equal(int8(1)))
 	})
 })
 

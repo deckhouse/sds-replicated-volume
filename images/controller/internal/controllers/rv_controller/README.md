@@ -73,6 +73,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── reconcileDeletion [In-place reconciliation] ← details
 │   │   ├── reconcileRVAWaiting ("ReplicatedVolume is terminating")
 │   │   ├── deleteRVRWithForcedFinalizerRemoval (loop)
+│   │   ├── applyReadyCond (Ready=False/Terminating)
 │   │   └── clear datamesh members + patchRVStatus
 │   ├── reconcileRVAMetadata [Target-state driven]
 │   │   ├── add RVControllerFinalizer + labels to non-deleting RVAs
@@ -150,6 +151,10 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
 │   ├── applyMembershipLayout + applyMembershipLayoutConvergedCondTrue/False/Unknown
 │   └── (not called during formation → MembershipLayoutConverged absent while forming)
+├── reconcileDataPlaneConditions [In-place reconciliation] (Ready + Resilient conditions; SINGLE writer)
+│   ├── computeReadyReport (pure: Terminating → Forming → StatusUnknown → QuorumLost → Ready)
+│   ├── computeResilientReport (pure: deletion→frozen, Forming → StatusUnknown → Resilient/Degraded)
+│   └── applyReadyCond + applyResilientCond
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -325,6 +330,55 @@ operation. In the latter the condition is written in the same status patch that 
 members. Leaving the previous `Converging`/`CannotConverge` message in place would promise an action
 the deletion path never performs.
 
+### Ready
+
+Indicates whether the datamesh (as a whole) has quorum and enough UpToDate replicas to serve I/O
+at the guaranteed minimum redundancy. It is a mesh-level availability + lifecycle aggregate, not a
+per-consumer signal: `Ready=True` means the mesh can serve IO, but a specific attachment (RVA) may
+still be frozen on an isolated side of a partition — per-consumer readiness will be reported by a
+dedicated `AttachedReady` condition (planned).
+
+Set by `reconcileDataPlaneConditions`, which is the **single writer** of the `Ready` condition in
+the normal-operation flow. `reconcileDeletion` also writes `Ready=False/Terminating` in its atomic
+status patch (the early deletion branch never reaches `reconcileDataPlaneConditions`).
+
+**Decision order in `computeReadyReport`** (fixed; each earlier step wins):
+
+1. `DeletionTimestamp` set → `False`/`Terminating`.
+2. `isFormationInProgress` (DatameshRevision==0 or active Formation transition) → `False`/`Forming`.
+3. EffectiveLayout FTT or GMDR nil → `Unknown`/`StatusUnknown`.
+4. FTT < 0 → `False`/`QuorumLost`.
+5. Otherwise → `True`/`Ready`.
+
+Narrowly **not** part of `Ready`: `CannotConverge`, `TransitionUnsupported`, `Resilient=False`,
+config rollout/staleness, eligible-nodes conflict, scheduling deficit — those leave `Ready=True`
+and surface in their own conditions (ticket, not page).
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | Ready | Quorum holds and enough UpToDate replicas to satisfy GMDR |
+| False | Terminating | Volume is being deleted |
+| False | Forming | Formation in progress or volume never reached IO-serving state (DatameshRevision==0) |
+| False | QuorumLost | Quorum lost: reachable voters + tie-breakers < quorum threshold (FTT < 0) |
+| Unknown | StatusUnknown | Effective layout undetermined (FTT or GMDR nil, e.g. stale agents) |
+
+### Resilient
+
+Indicates whether the effective redundancy (FTT/GMDR) meets the redundancy intended by the
+volume's configuration. Covers the "degraded-but-serving" gap: the volume still serves IO
+(`Ready=True`) but cannot tolerate the intended number of failures. Set by
+`reconcileDataPlaneConditions` (single writer alongside `Ready`).
+
+On deletion the condition is **frozen** at its last value and is not recomputed
+(`computeResilientReport` returns `present=false`).
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | Resilient | Effective FTT ≥ intended FTT AND effective GMDR ≥ intended GMDR |
+| False | Degraded | Effective redundancy below intended (FTT or GMDR < intended) |
+| False | Forming | Configuration not set, or formation in progress |
+| Unknown | StatusUnknown | Effective layout undetermined (FTT or GMDR nil) |
+
 ### Layout convergence (`reconcileLayoutConvergence`)
 
 A normal-operation step that performs **at most one** whitelisted action per reconcile pass to move
@@ -477,8 +531,8 @@ name and the leading ones take the free slots together, each slot freed only by 
 Migration monitoring:
 
 ```sh
-# Per-volume layout and convergence reason (MembershipLayout is a priority-1 column, -o wide shows it):
-kubectl get rv -o wide
+# Per-volume layout and convergence reason (Layout is a default column):
+kubectl get rv
 kubectl get rv <name> -o jsonpath='{.status.membershipLayout}{"  "}{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{end}{"\n"}'
 
 # Class-wide rollout aggregate:

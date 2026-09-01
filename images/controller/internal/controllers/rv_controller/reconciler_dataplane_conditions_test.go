@@ -68,11 +68,6 @@ var _ = Describe("data-plane conditions", func() {
 					rv.Status.EffectiveLayout.FailuresToTolerate = ptr.To(int8(-1))
 				},
 				metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondReadyReasonQuorumLost),
-			Entry("FTT >= 0 but GMDR < 0",
-				func(rv *v1alpha1.ReplicatedVolume) {
-					rv.Status.EffectiveLayout.GuaranteedMinimumDataRedundancy = ptr.To(int8(-1))
-				},
-				metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondReadyReasonInsufficientUpToDateReplicas),
 			Entry("FTT >= 0 and GMDR >= 0",
 				func(*v1alpha1.ReplicatedVolume) {},
 				metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady),
