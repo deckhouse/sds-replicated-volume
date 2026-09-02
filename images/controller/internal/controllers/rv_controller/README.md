@@ -73,7 +73,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── reconcileDeletion [In-place reconciliation] ← details
 │   │   ├── reconcileRVAWaiting ("ReplicatedVolume is terminating")
 │   │   ├── deleteRVRWithForcedFinalizerRemoval (loop)
-│   │   ├── applyReadyCond (Ready=False/Terminating)
+│   │   ├── applyReadyCond (Ready=False/Terminating; Resilient and AttachedReady left frozen)
 │   │   └── clear datamesh members + patchRVStatus
 │   ├── reconcileRVAMetadata [Target-state driven]
 │   │   ├── add RVControllerFinalizer + labels to non-deleting RVAs
@@ -151,10 +151,11 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
 │   ├── applyMembershipLayout + applyMembershipLayoutConvergedCondTrue/False/Unknown
 │   └── (not called during formation → MembershipLayoutConverged absent while forming)
-├── reconcileDataPlaneConditions [In-place reconciliation] (Ready + Resilient conditions; SINGLE writer)
-│   ├── computeReadyReport (pure: Terminating → Forming → StatusUnknown → QuorumLost → Ready)
+├── reconcileDataPlaneConditions [In-place reconciliation] (Ready + Resilient + AttachedReady conditions; SINGLE writer)
+│   ├── computeAttachedReadyReport (pure: established attachments → worst computeAttachmentVerdict)
+│   ├── computeReadyReport (pure: Terminating → Forming → StatusUnknown → QuorumLost → AttachmentNotReady → Ready)
 │   ├── computeResilientReport (pure: deletion→frozen, Forming → StatusUnknown → Resilient/Degraded)
-│   └── applyReadyCond + applyResilientCond
+│   └── applyAttachedReadyCond + applyReadyCond + applyResilientCond
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -332,11 +333,12 @@ the deletion path never performs.
 
 ### Ready
 
-Indicates whether the datamesh (as a whole) has quorum and enough UpToDate replicas to serve I/O
-at the guaranteed minimum redundancy. It is a mesh-level availability + lifecycle aggregate, not a
-per-consumer signal: `Ready=True` means the mesh can serve IO, but a specific attachment (RVA) may
-still be frozen on an isolated side of a partition — per-consumer readiness will be reported by a
-dedicated `AttachedReady` condition (planned).
+Indicates whether the volume is serving I/O at the guaranteed minimum redundancy. It is an
+availability + lifecycle aggregate over two levels: the datamesh as a whole (quorum and UpToDate
+replicas, derived from the effective layout) and its consumers (an established attachment can be
+frozen on the isolated side of a partition even while the mesh holds quorum). The consumer level
+enters through a single reason, `AttachmentNotReady`; which attachment and why is reported by the
+`AttachedReady` condition.
 
 Set by `reconcileDataPlaneConditions`, which is the **single writer** of the `Ready` condition in
 the normal-operation flow. `reconcileDeletion` also writes `Ready=False/Terminating` in its atomic
@@ -348,7 +350,15 @@ status patch (the early deletion branch never reaches `reconcileDataPlaneConditi
 2. `isFormationInProgress` (DatameshRevision==0 or active Formation transition) → `False`/`Forming`.
 3. EffectiveLayout FTT or GMDR nil → `Unknown`/`StatusUnknown`.
 4. FTT < 0 → `False`/`QuorumLost`.
-5. Otherwise → `True`/`Ready`.
+5. `AttachedReady` is `False` → `False`/`AttachmentNotReady` (message carried over from it).
+6. Otherwise → `True`/`Ready`.
+
+Step 5 sits **below** the mesh-level rules on purpose: when the mesh itself lost quorum, a frozen
+consumer is a symptom of it, and the operator needs the mesh-level root cause in the reason. It
+sits **above** step 6 to close the opposite gap — the mesh holds quorum on the majority side of a
+partition while the consumer is frozen on the isolated one. Only a definite `False` counts:
+`AttachedReady=Unknown` (attach ramp-up, stale agent) leaves `Ready=True`, otherwise `Ready` would
+flap on every pod start.
 
 Narrowly **not** part of `Ready`: `CannotConverge`, `TransitionUnsupported`, `Resilient=False`,
 config rollout/staleness, eligible-nodes conflict, scheduling deficit — those leave `Ready=True`
@@ -356,11 +366,77 @@ and surface in their own conditions (ticket, not page).
 
 | Status | Reason | When |
 |--------|--------|------|
-| True | Ready | Quorum holds and enough UpToDate replicas to satisfy GMDR |
+| True | Ready | Quorum holds, enough UpToDate replicas to satisfy GMDR, and every established attachment is serving I/O |
 | False | Terminating | Volume is being deleted |
 | False | Forming | Formation in progress or volume never reached IO-serving state (DatameshRevision==0) |
 | False | QuorumLost | Quorum lost: reachable voters + tie-breakers < quorum threshold (FTT < 0) |
+| False | AttachmentNotReady | Mesh-level availability holds, but an established attachment is not serving I/O (see `AttachedReady`) |
 | Unknown | StatusUnknown | Effective layout undetermined (FTT or GMDR nil, e.g. stale agents) |
+
+### AttachedReady
+
+Indicates whether every **established attachment** of the volume is actually serving I/O on its
+node. It is the per-consumer counterpart of `Ready`: a datamesh that holds quorum as a whole can
+still have a consumer frozen on the isolated side of a partition, and this condition is what
+reports which one and why.
+
+Set by `reconcileDataPlaneConditions` (single writer alongside `Ready` and `Resilient`). Frozen on
+deletion (`computeAttachedReadyReport` returns `present=false`), absent until the volume has a
+configuration.
+
+An attachment is **established** when all three hold:
+
+1. the datamesh member is marked `Attached`,
+2. a non-deleting RVA exists on its node (a live consumer),
+3. no `Detach`/`ForceDetach` transition is in flight for it.
+
+Members without a consumer and members mid-detach are skipped, so a routine attach or detach never
+turns the condition `False`.
+
+The per-attachment verdict comes from `computeAttachmentVerdict`, which mirrors the **replica's
+`Attached` condition** rather than reading `rvr.Status.Attachment` directly: the replica controller
+is the single writer of that condition, so the verdict does not depend on the order in which this
+controller writes its own RVA status within the same pass. Mirroring the replica's `Ready`
+condition instead would be wrong — an isolated tie-breaker reports `Ready=False/QuorumViaPeers`
+while every consumer keeps writing.
+
+| RVR `Attached` reason | Verdict | Severity |
+|---|---|---|
+| `Attached` | serving | — |
+| `IOSuspended` | `False`/`IOSuspended` | highest |
+| `AttachmentFailed` | `False`/`AttachmentFailed` | middle |
+| `AgentNotReady`, `ApplyingConfiguration`, `DetachmentFailed`, condition absent, replica missing | `Unknown`/`StatusUnknown` | lowest |
+
+The volume-level report is the **worst** verdict across all established attachments; the message
+names the first member holding it and counts the offenders.
+
+Both the verb and the count follow the worst verdict, so the message never states more than is
+known: `are not serving IO` is a fact and belongs to a definite verdict, while an Unknown one is
+only the absence of a report. Under a definite worst the count covers the definite offenders only,
+so it never speaks for a member that merely failed to report.
+
+```
+1/2 attachments are not serving IO: replica rv-r1 on node n1 (IO is suspended on the device)
+1/1 attachments are not confirmed serving IO: replica rv-r0 on node n0 (replica Attached=False/AgentNotReady)
+```
+
+| Status | Reason | When |
+|--------|--------|------|
+| True | AttachedReady | Every established attachment is serving I/O |
+| True | NoAttachments | No established attachment; the volume is not in use |
+| False | IOSuspended | An established attachment is frozen (device attached, I/O suspended) |
+| False | AttachmentFailed | An established attachment is expected to be attached but is not |
+| Unknown | StatusUnknown | An established attachment is in a transient or unreported state |
+
+**Known limitation: a node cut off from both the DRBD network and the API.** The verdict is a
+mirror of the replica's `Attached` condition, so it is never fresher than the agent's last report.
+A node isolated from the DRBD network *and* from the API server keeps its last reported
+`Attached=True/Attached`, so a frozen consumer reads as serving until the node is detected NotReady
+and the replica controller turns `Attached` into `Unknown/AgentNotReady` — which, by design, does
+not lower `Ready` either. The mesh level does not cover the window: `canCompute`
+(`datamesh/effective_layout.go`) needs only one live agent, and the majority side keeps FTT ≥ 0, so
+neither `StatusUnknown` nor `QuorumLost` fires. Nothing in this condition distinguishes "not
+reported" from "serving"; node readiness is the signal for that.
 
 ### Resilient
 
@@ -798,7 +874,7 @@ Key concepts:
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
-| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready), DatameshRequest, DatameshRevision, DatameshRevisionObservedByAgent, Addresses, Quorum, Attachment, BackingVolume, Peers (incl. BackingVolumeState, ConnectionEstablishedOn), DeletionTimestamp, Finalizers changes | mapRVRToRV |
+| ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready, Attached), DatameshRequest, DatameshRevision, DatameshRevisionObservedByAgent, Addresses, Quorum, Attachment, BackingVolume, Peers (incl. BackingVolumeState, ConnectionEstablishedOn), DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
 
 ## Indexes

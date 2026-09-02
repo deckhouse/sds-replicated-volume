@@ -214,12 +214,15 @@ func rvrPredicates() []predicate.Predicate {
 				// - DRBDConfigured: DRBD configuration progress (preconfigure + establish-connectivity phases)
 				// - SatisfyEligibleNodes: misplaced replica detection (preconfigure phase)
 				// - Ready: attachment guards + RVA ReplicaReady/message updates
+				// - Attached: RV AttachedReady condition (a freeze can be reported by reason
+				//   alone, e.g. AgentNotReady, without touching status.attachment below)
 				if !obju.AreConditionsSemanticallyEqual(
 					oldRVR, newRVR,
 					v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
 					v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
 					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
 					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+					v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
 				) {
 					return true
 				}

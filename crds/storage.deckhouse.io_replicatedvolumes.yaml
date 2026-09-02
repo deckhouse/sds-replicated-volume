@@ -34,6 +34,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.conditions[?(@.type=='AttachedReady')].reason
+      name: AttachedReady
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

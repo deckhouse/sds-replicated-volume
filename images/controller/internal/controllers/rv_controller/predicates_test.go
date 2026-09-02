@@ -847,6 +847,65 @@ var _ = Describe("rvrPredicates", func() {
 			}
 		})
 
+		It("returns true when Attached condition status changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(oldRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+				Status: metav1.ConditionTrue,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttached,
+			})
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(newRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+				Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonIOSuspended,
+			})
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		// The load-bearing case for the RV AttachedReady condition: the replica
+		// controller can change only the reason of Attached, leaving status.attachment
+		// byte-identical. The condition list is then the ONLY channel that can wake the
+		// RV, so dropping Attached from it would silently stop AttachedReady (and with
+		// it Ready=AttachmentNotReady) from ever being recomputed.
+		It("returns true when Attached condition reason changes while the status stays False", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(oldRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+				Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
+			})
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(newRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+				Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAgentNotReady,
+			})
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns true when Quorum changes", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},

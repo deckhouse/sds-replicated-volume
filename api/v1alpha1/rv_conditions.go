@@ -17,6 +17,27 @@ limitations under the License.
 package v1alpha1
 
 const (
+	// ReplicatedVolumeCondAttachedReadyType indicates whether every established attachment of the
+	// volume is actually serving I/O on its node. It is the per-consumer counterpart of the
+	// mesh-level Ready condition: a datamesh that holds quorum as a whole (Ready would be True)
+	// can still have a consumer frozen on the isolated side of a network partition, and this
+	// condition is what reports it.
+	//
+	// An attachment is "established" when a datamesh member is marked Attached, a non-deleting
+	// RVA exists on its node, and no Detach transition is in flight for it. The per-attachment
+	// verdict mirrors the replica's Attached condition; the volume-level report is the worst
+	// verdict across all established attachments.
+	//
+	// On deletion the condition is frozen at its last value and is not recomputed.
+	ReplicatedVolumeCondAttachedReadyType                   = "AttachedReady"
+	ReplicatedVolumeCondAttachedReadyReasonAttachedReady    = "AttachedReady"    // Every established attachment is serving I/O.
+	ReplicatedVolumeCondAttachedReadyReasonAttachmentFailed = "AttachmentFailed" // An established attachment is expected to be attached but is not.
+	ReplicatedVolumeCondAttachedReadyReasonIOSuspended      = "IOSuspended"      // An established attachment is frozen: the device is attached but I/O is suspended.
+	ReplicatedVolumeCondAttachedReadyReasonNoAttachments    = "NoAttachments"    // The volume has no established attachment; nothing consumes it right now.
+	ReplicatedVolumeCondAttachedReadyReasonStatusUnknown    = "StatusUnknown"    // An established attachment is in a transient or unreported state (e.g. stale agent).
+)
+
+const (
 	// ReplicatedVolumeCondConfigurationReadyType indicates whether the volume's configuration
 	// matches the storage class configuration.
 	//
@@ -55,21 +76,23 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondReadyType indicates whether the datamesh (as a whole) has quorum
-	// and enough UpToDate replicas to serve I/O at the guaranteed minimum redundancy. It is
-	// a mesh-level availability + lifecycle aggregate, not a per-consumer signal: Ready=True
-	// means the mesh can serve IO, but a specific attachment (RVA) may still be frozen on
-	// an isolated side of a partition — per-consumer readiness will be reported by a
-	// dedicated AttachedReady condition (planned).
+	// ReplicatedVolumeCondReadyType indicates whether the volume is serving I/O at the
+	// guaranteed minimum redundancy. It is an availability + lifecycle aggregate over two
+	// levels: the datamesh as a whole (quorum and UpToDate replicas, derived from the
+	// effective layout) and its consumers (an established attachment can be frozen on the
+	// isolated side of a partition even while the mesh holds quorum). The consumer level
+	// enters through a single reason, AttachmentNotReady; which attachment and why is
+	// reported by the AttachedReady condition.
 	// Reasons carry the cause of unavailability; precedence is implemented in
 	// computeReadyReport (Terminating → Forming → StatusUnknown → QuorumLost →
-	// Ready), not in the alphabetical order below.
-	ReplicatedVolumeCondReadyType                = "Ready"
-	ReplicatedVolumeCondReadyReasonForming       = "Forming"       // Volume is forming: an initial or post-formation transition is in progress, or the volume never reached an IO-serving state.
-	ReplicatedVolumeCondReadyReasonQuorumLost    = "QuorumLost"    // Quorum is lost: the number of reachable voters plus tie-breakers is below the quorum threshold.
-	ReplicatedVolumeCondReadyReasonReady         = "Ready"         // Volume is serving IO at the guaranteed minimum redundancy.
-	ReplicatedVolumeCondReadyReasonStatusUnknown = "StatusUnknown" // Effective layout cannot be determined (e.g. stale agents).
-	ReplicatedVolumeCondReadyReasonTerminating   = "Terminating"   // Volume is being deleted.
+	// AttachmentNotReady → Ready), not in the alphabetical order below.
+	ReplicatedVolumeCondReadyType                     = "Ready"
+	ReplicatedVolumeCondReadyReasonAttachmentNotReady = "AttachmentNotReady" // Mesh-level availability holds, but an established attachment is not serving I/O; see the AttachedReady condition.
+	ReplicatedVolumeCondReadyReasonForming            = "Forming"            // Volume is forming: an initial or post-formation transition is in progress, or the volume never reached an IO-serving state.
+	ReplicatedVolumeCondReadyReasonQuorumLost         = "QuorumLost"         // Quorum is lost: the number of reachable voters plus tie-breakers is below the quorum threshold.
+	ReplicatedVolumeCondReadyReasonReady              = "Ready"              // Volume is serving IO at the guaranteed minimum redundancy.
+	ReplicatedVolumeCondReadyReasonStatusUnknown      = "StatusUnknown"      // Effective layout cannot be determined (e.g. stale agents).
+	ReplicatedVolumeCondReadyReasonTerminating        = "Terminating"        // Volume is being deleted.
 )
 
 const (

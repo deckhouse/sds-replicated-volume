@@ -178,14 +178,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	// Compute and apply data-plane conditions (Ready, Resilient) from the refreshed
-	// effective layout, configuration, and formation/deletion state. Runs for every RV
-	// that did not enter reconcileDeletion this pass — including deleting-but-still-
-	// attached volumes (DeletionTimestamp != nil, rvShouldNotExist == false), where
-	// computeReadyReport yields Terminating by design during graceful detach. The
-	// force-delete branch (reconcileDeletion) writes Ready separately inside its own
-	// atomic status patch.
-	outcome = outcome.Merge(r.reconcileDataPlaneConditions(rf.Ctx(), rv))
+	// Compute and apply data-plane conditions (Ready, Resilient, AttachedReady) from the
+	// refreshed effective layout, configuration, formation/deletion state and the attachment
+	// state of the members. Runs for every RV that did not enter reconcileDeletion this pass —
+	// including deleting-but-still-attached volumes (DeletionTimestamp != nil,
+	// rvShouldNotExist == false), where computeReadyReport yields Terminating by design during
+	// graceful detach. The force-delete branch (reconcileDeletion) writes Ready separately
+	// inside its own atomic status patch.
+	outcome = outcome.Merge(r.reconcileDataPlaneConditions(rf.Ctx(), rv, rvrs, rvas))
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -1698,35 +1698,6 @@ func (r *Reconciler) reconcileLayoutStatus(
 	return rf.Continue().ReportChangedIf(changed)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Reconcile: data-plane conditions
-//
-
-// reconcileDataPlaneConditions is the SINGLE writer of the Ready and Resilient conditions
-// in the normal-operation flow. The deletion branch (reconcileDeletion) also writes
-// Ready=False/Terminating via the same computeReadyReport + applyReadyCond helpers in
-// its own atomic status patch, mirroring the MembershipLayoutConverged pattern.
-// It computes both from the effective layout, configuration, deletion timestamp, and formation
-// state, and applies them in place. It only reports; it reuses the already-refreshed
-// EffectiveLayout (updated inside reconcileNormalOperation) and the already-set configuration.
-//
-// Reconcile pattern: In-place reconciliation
-func (r *Reconciler) reconcileDataPlaneConditions(
-	ctx context.Context,
-	rv *v1alpha1.ReplicatedVolume,
-) (outcome flow.ReconcileOutcome) {
-	rf := flow.BeginReconcile(ctx, "data-plane-conditions")
-	defer rf.OnEnd(&outcome)
-
-	ready := computeReadyReport(rv)
-	resilient := computeResilientReport(rv)
-
-	changed := applyReadyCond(rv, ready)
-	changed = applyResilientCond(rv, resilient) || changed
-
-	return rf.Continue().ReportChangedIf(changed)
-}
-
 // computeActualLayout counts the actual datamesh layout from members:
 //   - diskful     = Diskful + LiminalDiskful members (quorum voters holding data)
 //   - tiebreakers = TieBreaker members
@@ -1794,25 +1765,6 @@ type layoutReport struct {
 	membershipLayout *string
 	// converged is the MembershipLayoutConverged report produced by the convergence decision.
 	converged membershipLayoutConvergedReport
-}
-
-// readyReport is the computed Ready condition report: the aggregate availability + lifecycle
-// state of the volume, with the cause of unavailability carried in the reason.
-type readyReport struct {
-	status  metav1.ConditionStatus
-	reason  string
-	message string
-}
-
-// resilientReport is the computed Resilient condition report: whether the effective redundancy
-// meets the redundancy intended by the volume's configuration. present=false means the
-// condition must not be touched this pass (e.g. the volume is being deleted and the last
-// known value is preserved).
-type resilientReport struct {
-	present bool
-	status  metav1.ConditionStatus
-	reason  string
-	message string
 }
 
 // computeLayoutReport produces the status.membershipLayout string and the MembershipLayoutConverged report by
@@ -1894,161 +1846,6 @@ func applyMembershipLayoutConvergedCondUnknown(rv *v1alpha1.ReplicatedVolume, re
 		Status:  metav1.ConditionUnknown,
 		Reason:  reason,
 		Message: message,
-	})
-}
-
-// computeReadyReport computes the Ready condition from the effective layout, the configuration,
-// the deletion timestamp, and the formation state. Ordered precedence, first match wins:
-//  1. DeletionTimestamp set               → False / Terminating
-//  2. Formation in progress or never formed → False / Forming
-//  3. Effective FTT or GMDR nil           → Unknown / StatusUnknown
-//  4. FTT < 0                             → False / QuorumLost
-//  5. otherwise                           → True / Ready
-//
-// It is a pure read-only computation: it MUST NOT mutate rv.
-func computeReadyReport(rv *v1alpha1.ReplicatedVolume) readyReport {
-	// 1. Terminating
-	if rv.DeletionTimestamp != nil {
-		return readyReport{
-			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondReadyReasonTerminating,
-			message: "Volume is being deleted",
-		}
-	}
-
-	// 2. Forming (active formation transition or volume never reached IO-serving state)
-	if forming, _ := isFormationInProgress(rv); forming {
-		return readyReport{
-			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondReadyReasonForming,
-			message: "Volume formation in progress",
-		}
-	}
-
-	// 3. Effective layout undetermined
-	el := &rv.Status.EffectiveLayout
-	if el.FailuresToTolerate == nil || el.GuaranteedMinimumDataRedundancy == nil {
-		return readyReport{
-			status:  metav1.ConditionUnknown,
-			reason:  v1alpha1.ReplicatedVolumeCondReadyReasonStatusUnknown,
-			message: effectiveLayoutUndeterminedMessage(el),
-		}
-	}
-
-	ftt := *el.FailuresToTolerate
-	gmdr := *el.GuaranteedMinimumDataRedundancy
-
-	// 4. Quorum lost (FTT < 0)
-	if ftt < 0 {
-		return readyReport{
-			status: metav1.ConditionFalse,
-			reason: v1alpha1.ReplicatedVolumeCondReadyReasonQuorumLost,
-			message: fmt.Sprintf("Quorum lost: FTT=%d (reachable %d+%dTB-%dq, UpToDate %d-%dqmr)",
-				ftt, el.ReachableVoters, el.ReachableTieBreakers, rv.Status.Datamesh.Quorum,
-				el.UpToDateVoters, rv.Status.Datamesh.QuorumMinimumRedundancy),
-		}
-	}
-
-	// 5. Ready
-	return readyReport{
-		status:  metav1.ConditionTrue,
-		reason:  v1alpha1.ReplicatedVolumeCondReadyReasonReady,
-		message: fmt.Sprintf("Serving IO with guaranteed minimum redundancy (FTT=%d, GMDR=%d)", ftt, gmdr),
-	}
-}
-
-// effectiveLayoutUndeterminedMessage builds the StatusUnknown message from the effective layout
-// stale-agent count. Pure.
-func effectiveLayoutUndeterminedMessage(el *v1alpha1.ReplicatedVolumeEffectiveLayout) string {
-	if el.StaleAgents > 0 {
-		return fmt.Sprintf("Effective layout undetermined: %d stale agents", el.StaleAgents)
-	}
-	return "Effective layout undetermined"
-}
-
-// computeResilientReport computes the Resilient condition: whether the effective redundancy
-// (FTT/GMDR) meets the redundancy intended by the volume's configuration.
-//
-// Deletion: present=false (the condition is not recomputed; the last known value is preserved).
-// Formation / configuration not set / never formed: False / Forming.
-// Effective layout undetermined: Unknown / StatusUnknown.
-// Effective FTT and GMDR both >= intended: True / Resilient.
-// Otherwise: False / Degraded.
-//
-// It is a pure read-only computation: it MUST NOT mutate rv.
-func computeResilientReport(rv *v1alpha1.ReplicatedVolume) resilientReport {
-	// Deletion: preserve the last known value.
-	if rv.DeletionTimestamp != nil {
-		return resilientReport{present: false}
-	}
-
-	// Formation / no configuration / never reached IO-serving state.
-	forming, _ := isFormationInProgress(rv)
-	if rv.Status.Configuration == nil || forming {
-		return resilientReport{
-			present: true,
-			status:  metav1.ConditionFalse,
-			reason:  v1alpha1.ReplicatedVolumeCondResilientReasonForming,
-			message: "Volume formation in progress",
-		}
-	}
-
-	// Effective layout undetermined.
-	el := &rv.Status.EffectiveLayout
-	if el.FailuresToTolerate == nil || el.GuaranteedMinimumDataRedundancy == nil {
-		return resilientReport{
-			present: true,
-			status:  metav1.ConditionUnknown,
-			reason:  v1alpha1.ReplicatedVolumeCondResilientReasonStatusUnknown,
-			message: effectiveLayoutUndeterminedMessage(el),
-		}
-	}
-
-	ftt := *el.FailuresToTolerate
-	gmdr := *el.GuaranteedMinimumDataRedundancy
-	intendedFTT := int8(rv.Status.Configuration.FailuresToTolerate)
-	intendedGMDR := int8(rv.Status.Configuration.GuaranteedMinimumDataRedundancy)
-
-	if ftt >= intendedFTT && gmdr >= intendedGMDR {
-		return resilientReport{
-			present: true,
-			status:  metav1.ConditionTrue,
-			reason:  v1alpha1.ReplicatedVolumeCondResilientReasonResilient,
-			message: fmt.Sprintf("Effective redundancy meets intent: FTT=%d/%d, GMDR=%d/%d",
-				ftt, intendedFTT, gmdr, intendedGMDR),
-		}
-	}
-	return resilientReport{
-		present: true,
-		status:  metav1.ConditionFalse,
-		reason:  v1alpha1.ReplicatedVolumeCondResilientReasonDegraded,
-		message: fmt.Sprintf("Redundancy below intent: FTT=%d (intended %d), GMDR=%d (intended %d)",
-			ftt, intendedFTT, gmdr, intendedGMDR),
-	}
-}
-
-// applyReadyCond sets the Ready condition from a computed readyReport.
-func applyReadyCond(rv *v1alpha1.ReplicatedVolume, report readyReport) bool {
-	return obju.SetStatusCondition(rv, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeCondReadyType,
-		Status:  report.status,
-		Reason:  report.reason,
-		Message: report.message,
-	})
-}
-
-// applyResilientCond sets the Resilient condition from a computed resilientReport.
-// When report.present is false the condition is left untouched (the last known value
-// is preserved, e.g. during deletion).
-func applyResilientCond(rv *v1alpha1.ReplicatedVolume, report resilientReport) bool {
-	if !report.present {
-		return false
-	}
-	return obju.SetStatusCondition(rv, metav1.Condition{
-		Type:    v1alpha1.ReplicatedVolumeCondResilientType,
-		Status:  report.status,
-		Reason:  report.reason,
-		Message: report.message,
 	})
 }
 
@@ -2279,9 +2076,10 @@ func (r *Reconciler) reconcileDeletion(
 	changed := applyMembershipLayoutConvergedCondUnknown(rv,
 		v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
 		membershipLayoutConvergedVolumeDeletingMessage)
-	// Ready=False/Terminating: the volume is being deleted. Resilient is left untouched
-	// (the last known value is preserved).
-	changed = applyReadyCond(rv, computeReadyReport(rv)) || changed
+	// Ready=False/Terminating: the volume is being deleted. Resilient and AttachedReady are
+	// left untouched (the last known value is preserved), so the empty attachedReadyReport is
+	// only a placeholder here — rule 1 of computeReadyReport wins before it is consulted.
+	changed = applyReadyCond(rv, computeReadyReport(rv, attachedReadyReport{})) || changed
 	if len(rv.Status.Datamesh.Members) > 0 {
 		rv.Status.Datamesh.Members = nil
 		changed = true
