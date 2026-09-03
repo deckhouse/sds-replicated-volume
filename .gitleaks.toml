@@ -15,4 +15,12 @@ stopwords = [
   # images/linstor-csi/src/pkg/client/linstor_test.go.
   "6uwedER7tGEifV9WzGMf",
   "0iTx8wUc7WfRFZ9f5clx",
+  # The DRBD resource secret carried by the same fixtures: a recorded LINSTOR API
+  # response from somebody's OpenShift test cluster, repeated once per node in the
+  # payload. Upstream test data, never a secret of ours.
+  "cADS/SmRP49riL4Ge+zf",
+  # The shared DRBD secret the stale-UUID e2e lab sets on its own resource
+  # (uuidLabSecret in e2e/full/diskless_primary_stale_uuid_helpers_test.go). The lab
+  # creates the resource, reads it back and tears it down inside one spec.
+  "e2eUuidLabSecret01",
 ]
