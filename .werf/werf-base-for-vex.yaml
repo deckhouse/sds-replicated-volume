@@ -4,4 +4,4 @@ from: {{ index $.Images "builder/distroless" }}
 final: false
 shell:
   install:
-    - pm install coreutils ca-certificates cosign=2.6.3 jq curl bash
+    - pm install coreutils ca-certificates cosign=2.6.5 jq curl bash
