@@ -915,3 +915,20 @@ kubectl -n d8-sds-replicated-volume rollout restart daemonset
 ```
 
 Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `D8LinstorCertificateExpiringIn30d` alert).
+## How much of a volume is reserved for the superuser?
+
+Nothing, by default: a volume of this module is formatted with `-m 0`, so the whole volume is available to the workload.
+
+Where the classic 5% ext4 reserve is wanted — for example to keep a filesystem writable for a privileged process after a workload has filled it — annotate the `ReplicatedStorageClass` with the percentage to reserve:
+
+```shell
+d8 k annotate replicatedstorageclass <name> storage.deckhouse.io/ext4-reserved-percent=5
+```
+
+The value is a whole number of percent between 0 and 50; an invalid one is rejected by the validating webhook.
+
+The reserve applies only to volumes created after the annotation was set — filesystems that already exist keep the reserve they were created with. Only the ext filesystems keep blocks for the superuser, so the annotation is ignored for XFS volumes.
+
+Changing the annotation makes the controller recreate the StorageClass, because `parameters` of an existing StorageClass are immutable in Kubernetes. Existing volumes and PVCs are not affected.
+
+On the legacy LINSTOR control plane the same annotation is honoured through the `FileSystem/MkfsParameters` property of the LINSTOR resource definition. The one exception there is the rescue path that formats a volume when LINSTOR did not: it always uses the module default of 0%, because the percentage does not reach it.

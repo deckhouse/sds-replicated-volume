@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
@@ -111,6 +112,13 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 
 	mountOptions := collectMountOptions(fsType, mountVolume.GetMountFlags(), []string{})
 
+	// The StorageClass carries the reserve in its parameters, which reach us as
+	// the volume context: annotations are invisible to a CSI driver.
+	reservedPercent, err := fsreserve.FromMap(request.GetVolumeContext())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "[NodeStageVolume] %v", err)
+	}
+
 	d.log.Debug(fmt.Sprintf("[NodeStageVolume] Volume %s operation started", volumeID))
 	ok = d.inFlight.Insert(volumeID)
 	if !ok {
@@ -139,7 +147,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolu
 	d.log.Trace(fmt.Sprintf("mountOptions = %s", mountOptions))
 	d.log.Trace(fmt.Sprintf("fsType = %s", fsType))
 
-	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions)
+	err = d.storeManager.NodeStageVolumeFS(devPath, target, fsType, mountOptions, formatOptions, reservedPercent)
 	if err != nil {
 		d.log.Error(err, "[NodeStageVolume] Error mounting volume")
 		return nil, status.Errorf(codes.Internal, "[NodeStageVolume] Error format device %q and mounting volume at %q: %v", devPath, target, err)

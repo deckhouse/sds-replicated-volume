@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
@@ -111,6 +112,11 @@ const (
 	Failed  = "InvalidConfiguration"
 
 	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
+
+	// StorageClassParamFSOptsKey reaches LINSTOR as the FileSystem/MkfsParameters
+	// property of the resource definition, and the satellite appends it to
+	// "mkfs.ext4 -q ... <device>" when it creates the filesystem.
+	StorageClassParamFSOptsKey = "replicated.csi.storage.deckhouse.io/fsOpts"
 )
 
 func NewReplicatedStorageClass(
@@ -532,6 +538,14 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
+	// A value the webhook would have rejected can only appear here on an object
+	// that predates the webhook, and this deprecated controller has nowhere to
+	// report it: fall back to the module default rather than to ext4's 5%.
+	reservedPercent, err := fsreserve.FromMap(replicatedSC.Annotations)
+	if err != nil {
+		reservedPercent = fsreserve.Default
+	}
+
 	storageClassParameters := map[string]string{
 		StorageClassParamFSTypeKey:                     FsTypeExt4,
 		StorageClassStoragePoolKey:                     replicatedSC.Spec.StoragePool,
@@ -544,6 +558,11 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
 	}
+
+	// LINSTOR formats with a bare "mkfs.ext4 -q", which leaves ext4 with its
+	// default 5% reserved for the superuser. State the module default of 0%
+	// explicitly, and let a StorageClass ask for a different share.
+	storageClassParameters[StorageClassParamFSOptsKey] = fmt.Sprintf("-m%d", reservedPercent)
 
 	switch replicatedSC.Spec.Replication {
 	case ReplicationNone:

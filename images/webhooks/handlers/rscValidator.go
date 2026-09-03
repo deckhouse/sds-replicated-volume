@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -63,6 +64,13 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 		if r := validateImmutableSpecFields(oldRSC, rsc); !r.Valid {
 			return r, nil
 		}
+	}
+
+	// The reserved-block percentage travels as an annotation, so the CRD schema
+	// cannot vet it. Reject a bad value here instead of letting the controller
+	// fail on every reconcile of this object.
+	if _, err := fsreserve.FromMap(rsc.Annotations); err != nil {
+		return &kwhvalidating.ValidatorResult{Valid: false, Message: err.Error()}, nil
 	}
 
 	// Determine control plane type based on environment variable.

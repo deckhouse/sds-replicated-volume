@@ -2,6 +2,7 @@ module github.com/deckhouse/sds-replicated-volume/images/oldcontroller
 
 go 1.27.0
 require (
+	github.com/deckhouse/sds-common-lib v0.17.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260821070809-7c0d06d31bb2
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
 	github.com/LINBIT/golinstor v0.49.0

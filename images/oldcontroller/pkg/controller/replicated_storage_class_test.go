@@ -106,6 +106,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 				controller.StorageClassParamReplicasOnDifferentKey:        controller.ZoneLabel,
 				controller.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
 				controller.QuorumMinimumRedundancyWithPrefixSCKey:         "2",
+				controller.StorageClassParamFSOptsKey:                     "-m0",
 			}
 
 			expectedSC = &storagev1.StorageClass{

@@ -6,13 +6,13 @@ Subject: [PATCH] add filesystem creation on mount failure
 Signed-off-by: Pavel Karpov <pavel.karpov@flant.com>
 ---
  pkg/driver/driver.go | 29 ++++++++++++++++++++++++++++-
- 1 file changed, 28 insertions(+), 1 deletion(-)
+ 1 file changed, 32 insertions(+), 1 deletion(-)
 
 diff --git a/pkg/driver/driver.go b/pkg/driver/driver.go
 index 78fce3a..b27e5fe 100644
 --- a/pkg/driver/driver.go
 +++ b/pkg/driver/driver.go
-@@ -381,7 +381,34 @@ func (d Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolum
+@@ -381,7 +381,38 @@ func (d Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolum
  
  	err = d.Mounter.Mount(ctx, assignment.Path, req.GetTargetPath(), fsType, ro, volCtx.MountOptions)
  	if err != nil {
@@ -29,7 +29,11 @@ index 78fce3a..b27e5fe 100644
 +				}
 +
 +				d.log.Infof("NodePublishVolume for %s: wrong fs type, create ext4 filesystem on %v", req.GetVolumeId(), assignment.Path)
-+				out, err := exec.Command("mkfs.ext4", "-E", "nodiscard", assignment.Path).CombinedOutput()
++				// "-m0" matches the module default: a volume keeps nothing back
++				// for the superuser unless its StorageClass asks for a share.
++				// A class that does ask cannot be honoured here, because the
++				// linstor-csi volume context does not carry fsOpts.
++				out, err := exec.Command("mkfs.ext4", "-m0", "-E", "nodiscard", assignment.Path).CombinedOutput()
 +				if err != nil {
 +					return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s; mkfs.ext4 failed: %v (%s)", req.GetVolumeId(), err, out)
 +				}

@@ -25,6 +25,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
@@ -1751,7 +1753,10 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 		return rf.Fail(err)
 	}
 
-	targetSC := computeTargetStorageClass(rsc, oldSC)
+	targetSC, err := computeTargetStorageClass(rsc, oldSC)
+	if err != nil {
+		return rf.Fail(err)
+	}
 
 	if oldSC == nil {
 		if err := r.createStorageClass(rf.Ctx(), targetSC); err != nil {
@@ -1793,7 +1798,10 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 // computeTargetStorageClass builds the target StorageClass from RSC spec.
 // If oldSC is non-nil, existing labels/annotations/finalizers are preserved
 // (our values are added on top).
-func computeTargetStorageClass(rsc *v1alpha1.ReplicatedStorageClass, oldSC *storagev1.StorageClass) *storagev1.StorageClass {
+func computeTargetStorageClass(
+	rsc *v1alpha1.ReplicatedStorageClass,
+	oldSC *storagev1.StorageClass,
+) (*storagev1.StorageClass, error) {
 	allowVolumeExpansion := true
 	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
 
@@ -1825,6 +1833,17 @@ func computeTargetStorageClass(rsc *v1alpha1.ReplicatedStorageClass, oldSC *stor
 		VolumeBindingMode: &volumeBindingMode,
 	}
 
+	// A CSI driver never sees the annotations of a StorageClass, so the share of
+	// the filesystem to keep for the superuser travels as a parameter, which the
+	// driver receives as the volume context of NodeStageVolume.
+	reservedPercent, err := fsreserve.FromMap(rsc.Annotations)
+	if err != nil {
+		return nil, err
+	}
+	if reservedPercent != fsreserve.Default {
+		sc.Parameters[fsreserve.ParameterKey] = strconv.Itoa(reservedPercent)
+	}
+
 	if oldSC != nil {
 		sc.Labels = maps.Clone(oldSC.Labels)
 		sc.Annotations = maps.Clone(oldSC.Annotations)
@@ -1834,7 +1853,7 @@ func computeTargetStorageClass(rsc *v1alpha1.ReplicatedStorageClass, oldSC *stor
 	objutilv1.AddFinalizer(sc, v1alpha1.StorageClassFinalizer)
 	objutilv1.SetLabel(sc, v1alpha1.ManagedByLabelKey, v1alpha1.ManagedByLabelValue)
 
-	return sc
+	return sc, nil
 }
 
 func isStorageClassSpecInSync(targetSC, oldSC *storagev1.StorageClass) bool {
