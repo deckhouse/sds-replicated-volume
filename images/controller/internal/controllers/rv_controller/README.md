@@ -156,6 +156,9 @@ Reconcile (root) [Pure orchestration]
 │   ├── computeReadyReport (pure: Terminating → Forming → StatusUnknown → QuorumLost → AttachmentNotReady → Ready)
 │   ├── computeResilientReport (pure: deletion→frozen, Forming → StatusUnknown → Resilient/Degraded)
 │   └── applyAttachedReadyCond + applyReadyCond + applyResilientCond
+├── reconcileConfiguredCondition [In-place reconciliation] (Configured condition; SINGLE writer)
+│   ├── computeConfiguredReport (pure: deletion→frozen, no config→absent, revision 0 / no members → ConfigurationUnknown, else per-member revision equality)
+│   └── applyConfiguredCond
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -191,16 +194,19 @@ flowchart TD
     CheckConfigNil -->|No| EnsurePending
     EnsurePending["ensureDatameshReplicaRequests +<br/>ensureStatusSize"]
     EnsurePending --> CheckConfig{Configuration exists?}
-    CheckConfig -->|No| Finalizers
+    CheckConfig -->|No| Conditions
 
     CheckConfig -->|Yes| CheckForming{Formation in progress?}
     CheckForming -->|Yes| Formation[reconcileFormation]
     Formation --> FormingRVAWaiting["reconcileRVAWaiting<br/>(datamesh forming)"]
-    FormingRVAWaiting --> Finalizers
+    FormingRVAWaiting --> Conditions
     CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
     UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + RVA conditions +<br/>reconcileLayoutConvergence)"]
     NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.membershipLayout + MembershipLayoutConverged)"]
-    LayoutStatus --> Finalizers
+    LayoutStatus --> Conditions
+
+    Conditions["reconcileDataPlaneConditions<br/>(Ready + Resilient + AttachedReady) +<br/>reconcileConfiguredCondition<br/>(Configured)"]
+    Conditions --> Finalizers
 
     Finalizers["reconcileRVAMetadata +<br/>reconcileRVRFinalizers"]
     Finalizers --> PatchDecision{Changed?}
@@ -258,6 +264,84 @@ Indicates whether the RV configuration is valid and derived from the appropriate
 `NewerConfigurationHeld` and `ConfigurationRolloutInProgress` are reporting states, not blocks:
 nothing gates on `ConfigurationReady`, so the volume keeps operating on its own configuration. The
 class-level aggregate counts such a volume as `staleConfiguration` (see `rsc_controller`).
+
+### Configured
+
+Indicates whether every datamesh member has applied the volume's current `status.datameshRevision`.
+Set by `reconcileConfiguredCondition`, which is the **single writer** of this condition.
+
+| Status | Reason | When |
+|--------|--------|------|
+| — | (absent) | `status.configuration` is nil — nothing has been evaluated yet |
+| — | (frozen) | `DeletionTimestamp` is set — the last known value is preserved |
+| Unknown | ConfigurationUnknown | `status.datameshRevision` is 0 (never formed, or formation was restarted), or the datamesh has no members |
+| True | AllReplicasConfigured | Every member's `rvr.status.datameshRevision` equals the volume's |
+| False | ConfigurationInProgress | At least one member lags behind, has no RVR object, or reports a revision the volume never assigned |
+
+**Where it sits relative to `ConfigurationReady`.** `ConfigurationReady` answers whether the
+configuration itself is valid and current with respect to the storage class; `Configured` answers
+whether that configuration has actually reached the replicas. The two are independent in both
+directions: a volume can hold a valid configuration that has not rolled out yet
+(`ConfigurationReady=True`, `Configured=False`), and a volume can have fully rolled out a
+configuration that the storage class has since superseded (`ConfigurationReady=False/StaleConfiguration`,
+`Configured=True`).
+
+Neither enters `Ready`: a volume mid-rollout keeps serving I/O, so the signal is ticket-worthy, not
+page-worthy.
+
+**Why revision 0 is Unknown rather than True.** A volume that never formed sits at revision 0 and so
+do its replicas, so a plain equality check would hold vacuously and report a convergence that never
+happened. The guard is what makes `AllReplicasConfigured` mean something.
+
+In practice the `ConfigurationUnknown` seen on a forming volume is the no-members one: formation
+assigns revision 1 before it populates the member list, so the revision-0 branch closes within a
+pass or two and does not usually make it into a status the operator observes.
+
+**Every member type counts**, tie-breakers and Access members included: `rvr_controller` records
+`status.datameshRevision` for every member it configures, gated only on datamesh membership (see
+`reconciler_drbd_resource.go`). This is unlike `Scheduled`, which is a placement concept and does
+not apply to Access replicas.
+
+**Why it does NOT mirror the replica's own `Configured` condition.** `ReplicatedVolumeReplica` has a
+condition of the same name, and mirroring it — the way `AttachedReady` mirrors the replica's
+`Attached` — would be wrong. RVR `Configured` is written from `computeTargetDatameshRequest`
+(`rvr_controller/reconciler_status.go`) and answers a different question: *does this replica have an
+outstanding membership request* (join / leave / role change / backing-volume change), plus its
+prerequisites (scheduling, eligibility). It never compares revisions; it reads the replica's own
+`status.datameshRevision` only as `isMember := revision != 0`.
+
+So RVR `Configured=True` means "I am a member of *some* revision and my type and backing volume
+match my spec" — not "I have applied the *current* revision". Any datamesh change that leaves each
+replica's own spec untouched (`ChangeQuorum`, `RepairNetworkAddresses`, `ChangeSystemNetworks`,
+`EnableMultiattach`, or a neighbour joining or leaving) bumps the volume's revision and requires
+every member to reconfigure DRBD — peer list, quorum settings — while leaving every membership
+request empty. An RV-level mirror would report `AllReplicasConfigured` before the rollout had even
+started, which is precisely the state this condition exists to catch. Rollout progress is visible in
+the replica's `DRBDConfigured` condition (`Configured` → `ApplyingConfiguration`), not in its
+`Configured` one.
+
+Mirroring would also fold placement into the wrong condition: RVR `Configured` reports
+`PendingScheduling`, `NodeNotEligible` and `StorageNotEligible`, which are the failure domains of
+`Scheduled` and `SatisfyEligibleNodes`.
+
+The rule behind both this condition and `AttachedReady` is the same — aggregate the source that
+answers *exactly* the question being asked, which is also why `AttachedReady` mirrors the replica's
+`Attached` and not its `Ready`. Here that source is the `status.datameshRevision` field. It is a
+field rather than a condition, but it carries the properties that mattered: it is the replica
+controller's own verdict ("fully configured for revision N", see the field docs in `rvr_types.go`),
+written in exactly one place, so the report does not depend on the order in which this controller
+writes its own status within a pass.
+
+**Placement in the flow.** It runs next to the data-plane conditions rather than inside
+`reconcileNormalOperation`, because a forming volume runs `reconcileFormation` instead and a
+config-less volume runs neither — yet both have to be reported (a forming volume as
+`ConfigurationUnknown` until the datamesh has both a revision and members, then
+`ConfigurationInProgress` as the rollout runs; a config-less one as absent). The early deletion
+branch (`reconcileDeletion`) does not write it at all; the condition freezes, like `Resilient` and
+`AttachedReady`.
+
+No `RVR` watch change was needed: `predicates.go` already requeues the volume on
+`rvr.status.datameshRevision` changes (rollout progress).
 
 ### MembershipLayoutConverged
 

@@ -52,14 +52,26 @@ const (
 )
 
 const (
-	// ReplicatedVolumeCondConfiguredType indicates whether all replicas are configured.
+	// ReplicatedVolumeCondConfiguredType indicates whether every datamesh member has applied the
+	// volume's current datamesh revision, i.e. whether the intended configuration has actually
+	// converged on the replicas. A member has applied it when its DatameshRevision equals the
+	// volume's: DRBD matches the intended state derived from that revision, the backing volume
+	// (if any) exists, matches and is ready, and the agent confirmed the configuration. It does
+	// NOT mean peers are connected or the backing volume is in sync — those happen afterwards.
 	//
-	// Reasons describe configuration progress / mismatch.
+	// It complements ConfigurationReady, which reports whether the configuration itself is valid
+	// and current with respect to the storage class: a volume can hold a perfectly valid
+	// configuration (ConfigurationReady=True) that has not reached all replicas yet
+	// (Configured=False), and vice versa.
+	//
+	// Both are orthogonal to availability: a volume mid-rollout keeps serving I/O, so neither
+	// condition enters Ready.
+	//
+	// On deletion the condition is frozen at its last value and is not recomputed.
 	ReplicatedVolumeCondConfiguredType                          = "Configured"
-	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // Configuration is still in progress.
-
-// ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured = "AllReplicasConfigured" // All replicas are configured.
-// ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured = "ReplicasNotConfigured" // Some replicas are not configured yet.
+	ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured   = "AllReplicasConfigured"   // Every datamesh member has applied the current datamesh revision.
+	ReplicatedVolumeCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress" // At least one datamesh member has not applied the current datamesh revision yet.
+	ReplicatedVolumeCondConfiguredReasonConfigurationUnknown    = "ConfigurationUnknown"    // Convergence cannot be evaluated: no datamesh revision has been assigned yet, or the datamesh has no members.
 )
 
 const (

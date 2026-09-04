@@ -33,6 +33,7 @@ import (
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="AttachedReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='AttachedReady')].reason"
+// +kubebuilder:printcolumn:name="Configured",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`

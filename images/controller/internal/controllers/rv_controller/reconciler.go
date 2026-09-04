@@ -190,6 +190,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return outcome.ToCtrl()
 	}
 
+	// Report configuration convergence (Configured) from the applied datamesh revision of the
+	// members. Placed next to the data-plane conditions rather than inside normal operation:
+	// a forming volume runs reconcileFormation instead, and a volume without a configuration
+	// runs neither, yet both must have the condition reported (a forming volume as
+	// ConfigurationUnknown until the datamesh has both a revision and members, then
+	// ConfigurationInProgress; a config-less one as absent). The deletion branch does not write
+	// it at all — the condition freezes at its last value, like Resilient and AttachedReady.
+	outcome = outcome.Merge(r.reconcileConfiguredCondition(rf.Ctx(), rv, rvrs))
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// If datamesh just made the RV eligible for deletion (e.g., last member detached),
 	// requeue immediately so the next reconcile enters reconcileDeletion.
 	if rv.DeletionTimestamp != nil && rvShouldNotExist(rv) {
