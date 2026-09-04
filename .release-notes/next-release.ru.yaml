@@ -1,0 +1,21 @@
+# Заготовка для следующего релиза. Перед тегом переименовать в vX.Y.Z.ru.yaml
+# (имя файла должно совпадать с тегом) и заполнить.
+date: "2026-xx-xx"
+summary: ""
+highlights: []
+
+# Необязательные разделы — пустые не оставлять, а удалять.
+# new_features: []
+# improvements: []
+# fixes: []
+# security: []
+# breaking: []
+# upgrade_notes: []
+# known_issues: []
+# docs: []
+# dependencies:
+#   - name: component
+#     from: "1.0"
+#     to: "1.1"
+#     changelog_url: "https://..."
+#     notes: "..."

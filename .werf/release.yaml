@@ -7,6 +7,7 @@ git:
 - add: /
   to: /
   includePaths:
+  - .release-notes
   - CHANGELOG
   - module.yaml
   # The dependency has to sit on `install`, the stage that actually consumes these
@@ -26,7 +27,48 @@ shell:
   install:
     - |
       yq -n '.version = "{{ env "MODULES_MODULE_TAG" }}"' -o=json > version.json
-    - cp -f CHANGELOG/{{ env "MODULES_MODULE_TAG" "local" }}.yml /changelog.yaml || touch /changelog.yaml
+    - |
+      # changelog.yaml is what DKP reads out of the release image into
+      # ModuleRelease.spec.changelog, and Console renders from there. Since the move to the
+      # sectioned format the source is the locale pair under .release-notes/, and both
+      # locales are shipped under `en` and `ru`; versions released before that move keep
+      # their flat CHANGELOG file.
+      TAG="{{ env "MODULES_MODULE_TAG" "local" }}"
+      EN=".release-notes/${TAG}.yaml"
+      RU=".release-notes/${TAG}.ru.yaml"
+      LEGACY="CHANGELOG/${TAG}.yml"
+      if [ -f "${EN}" ] && [ -f "${RU}" ]; then
+        MODULE_NAME="$(yq '.name' module.yaml)"
+        # The yq image is built from scratch and has no --arg, so the values are
+        # interpolated by the shell.
+        yq -n "
+          load(\"${EN}\") as \$en |
+          load(\"${RU}\") as \$ru |
+          {
+            \"version\": \"${TAG#v}\",
+            \"module\": \"${MODULE_NAME}\",
+            \"en\": \$en,
+            \"ru\": \$ru
+          }
+        " > /changelog.yaml
+        yq -e '.' /changelog.yaml >/dev/null || {
+          echo "merged changelog.yaml for ${TAG} is not valid YAML" >&2
+          exit 1
+        }
+      elif [ -f "${LEGACY}" ]; then
+        cp -f "${LEGACY}" /changelog.yaml
+      else
+        # A release tag without release notes is a defect: the previous `|| touch` hid it
+        # and published an empty changelog. Dev tags (mr<N>, main, local) legitimately
+        # have none.
+        case "${TAG}" in
+          v[0-9]*.[0-9]*.[0-9]*)
+            echo "No release notes for ${TAG}: expected ${EN} and ${RU}" >&2
+            exit 1
+            ;;
+        esac
+        : > /changelog.yaml
+      fi
 ---
 image: release-channel-version
 from: {{ index $.Images "builder/scratch" }}

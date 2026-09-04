@@ -1,3 +1,10 @@
+# The renderer of the release-notes pages lives in sds-common-lib: it is the same for
+# every storage module, and the copy that used to sit in `hack/` here came with a
+# committed 2.4-3.6 MB binary that the image depended on. Bump the pin below to pick up a
+# new renderer; the module keeps only its notes.
+{{- $_ := set $ "ReleaseNotesTool" "github.com/deckhouse/sds-common-lib/cmd/release-notes-docs@v0.16.0" }}
+{{- $_ := set $ "GO_PRIVATE_TOKEN" (env "FOX_GO_TOKEN" (env "CI_JOB_TOKEN" "")) }}
+{{- if not $.GOPROXY }}{{- $_ := set $ "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}{{- end }}
 ---
 image: docs-generator
 from: {{ index $.Images "builder/golang-alt" }}
@@ -7,18 +14,33 @@ git:
   - add: /
     to: /
     includePaths:
+      - .release-notes
       - CHANGELOG
-      - hack/generate_release_notes
     stageDependencies:
       setup:
         - "**/*"
 
+mount:
+{{ include "mount points for golang builds" $ }}
+
+# sds-common-lib is a private fox module, so the fetch needs the same netrc the Go images
+# set up. Without it the go command reports the import path as unrecognised.
+secrets:
+- id: GOPROXY
+  value: {{ $.GOPROXY }}
+{{ include "secret for private go modules" $ }}
+
 shell:
   setup:
+    {{- include "auth for private go modules" $ | nindent 4 }}
     - cd /
     - mkdir -p /docs
-    - /hack/generate_release_notes
-    - rm -rf CHANGELOG hack
+    - |
+      GOPROXY="$(cat /run/secrets/GOPROXY)" go run {{ $.ReleaseNotesTool }} \
+        --root / \
+        --out-en /docs/RELEASE_NOTES.md \
+        --out-ru /docs/RELEASE_NOTES.ru.md
+    - rm -rf .release-notes CHANGELOG
     - cat /docs/RELEASE_NOTES.md
     - cat /docs/RELEASE_NOTES.ru.md
 

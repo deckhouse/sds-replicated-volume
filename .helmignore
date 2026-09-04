@@ -10,6 +10,7 @@
 .werf
 *.md
 base_images.yml
+.release-notes
 CHANGELOG
 api
 crds
