@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -35,10 +36,18 @@ const (
 	// (sdsReplicatedVolume.dataNodes.nodeSelector) serialized as a JSON object
 	// of string labels. An empty/unset value means "match all nodes".
 	DataNodeSelectorEnvVar = "DATA_NODE_SELECTOR"
+	// ResyncSlotsPerNodeEnvVar holds how many resync ends one node may carry at a time.
+	// An unset value means DefaultResyncSlotsPerNode; 0 switches the limit off entirely.
+	ResyncSlotsPerNodeEnvVar = "RESYNC_SLOTS_PER_NODE"
 
 	// defaults are different for each app, do not merge them
 	DefaultHealthProbeBindAddress = ":4271"
 	DefaultMetricsBindAddress     = ":4272"
+
+	// DefaultResyncSlotsPerNode is the resync-end budget assumed for a node when
+	// RESYNC_SLOTS_PER_NODE is not set. Zero: the limiter is opt-in, so that an upgrade never
+	// starts deferring placements a cluster did not ask to have deferred.
+	DefaultResyncSlotsPerNode = 0
 )
 
 type Config struct {
@@ -46,6 +55,7 @@ type Config struct {
 	podNamespace         string
 	schedulerExtenderURL string
 	dataNodeSelector     labels.Set
+	resyncSlotsPerNode   int
 }
 
 func (c *Config) PodNamespace() string {
@@ -63,10 +73,17 @@ func (c *Config) DataNodeSelector() labels.Set {
 	return c.dataNodeSelector
 }
 
+// ResyncSlotsPerNode returns how many resync ends one node may carry at a time.
+// Zero means no limit. See syncbudget.Limit.
+func (c *Config) ResyncSlotsPerNode() int {
+	return c.resyncSlotsPerNode
+}
+
 type ConfigProvider interface {
 	PodNamespace() string
 	SchedulerExtenderURL() string
 	DataNodeSelector() labels.Set
+	ResyncSlotsPerNode() int
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 	IsControllerEnabled(name string) bool
@@ -110,6 +127,13 @@ func loadConfig() (*Config, error) {
 	}
 	cfg.dataNodeSelector = dataNodeSelector
 
+	// Resync-slot budget (optional): caps concurrent resync ends per node.
+	resyncSlotsPerNode, err := parseResyncSlotsPerNode(os.Getenv(ResyncSlotsPerNodeEnvVar))
+	if err != nil {
+		return nil, err
+	}
+	cfg.resyncSlotsPerNode = resyncSlotsPerNode
+
 	cfg.Load(DefaultHealthProbeBindAddress, DefaultMetricsBindAddress)
 
 	return cfg, nil
@@ -142,4 +166,27 @@ func parseDataNodeSelector(raw string) (labels.Set, error) {
 	}
 
 	return set, nil
+}
+
+// parseResyncSlotsPerNode parses the RESYNC_SLOTS_PER_NODE env var, the per-node resync-end
+// budget. An empty value yields DefaultResyncSlotsPerNode; an explicit 0 switches the limit off.
+// A non-numeric or negative value fails fast at startup rather than silently disabling the
+// limiter: "off" has to be asked for in the one documented way.
+func parseResyncSlotsPerNode(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultResyncSlotsPerNode, nil
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s must be a non-negative integer (0 disables the limit): %w",
+			commonenv.ErrInvalidConfig, ResyncSlotsPerNodeEnvVar, err)
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("%w: %s must be a non-negative integer (0 disables the limit), got %d",
+			commonenv.ErrInvalidConfig, ResyncSlotsPerNodeEnvVar, value)
+	}
+
+	return value, nil
 }

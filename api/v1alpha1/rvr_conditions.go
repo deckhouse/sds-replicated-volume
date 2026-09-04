@@ -173,4 +173,5 @@ const (
 	ReplicatedVolumeReplicaCondScheduledReasonScheduled                  = "Scheduled"                  // Node, LVG, and ThinPool (if applicable) are all assigned.
 	ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed           = "SchedulingFailed"           // No suitable candidate found (no available nodes/LVGs, all filtered out, etc.).
 	ReplicatedVolumeReplicaCondScheduledReasonWaitingForReplicatedVolume = "WaitingForReplicatedVolume" // Waiting for ReplicatedVolume to be ready.
+	ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot       = "WaitingForResyncSlot"       // Placement is deferred: a node that would send this replica its data is at its resync limit.
 )

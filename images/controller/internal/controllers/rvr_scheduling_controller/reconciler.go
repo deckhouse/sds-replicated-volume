@@ -19,6 +19,7 @@ package rvrschedulingcontroller
 import (
 	"cmp"
 	"context"
+	"maps"
 	"slices"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/syncbudget"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -47,9 +49,18 @@ type Reconciler struct {
 	log            logr.Logger
 	scheme         *runtime.Scheme
 	extenderClient schext.Client
+
+	// resyncLimit is the per-node resync-end budget. Zero means the limiter is off — no budget is
+	// consulted and no replica ever waits for a resync slot.
+	resyncLimit syncbudget.Limit
 }
 
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, extenderClient schext.Client) *Reconciler {
+func NewReconciler(
+	cl client.Client,
+	log logr.Logger,
+	scheme *runtime.Scheme,
+	extenderClient schext.Client,
+) *Reconciler {
 	return &Reconciler{
 		cl:             cl,
 		log:            log,
@@ -57,6 +68,17 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, ex
 		extenderClient: extenderClient,
 	}
 }
+
+// resyncSlotRequeueInterval is how often a replica waiting for a resync slot re-checks the budget.
+//
+// Nothing wakes it when a resync elsewhere finishes: fanning out over nodes would enqueue up to
+// 500 volumes per node transition, so the periodic re-check is the progress mechanism instead.
+const resyncSlotRequeueInterval = 5 * time.Second
+
+// resyncSlotWaitMessage is what a replica waiting for a resync slot reports. It carries no live
+// numbers on purpose — those would repatch every waiting replica whenever any resync finished.
+const resyncSlotWaitMessage = "Waiting for a resync slot: a node that would send this volume's " +
+	"data is already at its resync limit; placement resumes when a resync finishes"
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile
@@ -169,14 +191,65 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// the chance of placing two replicas on the same node; the ultimate
 	// uniqueness guarantee is enforced by datamesh.
 	unscheduledDiskful := unscheduled.Intersect(sctx.Diskful)
+
+	// The resync budget is a property of the volume, not of a replica, so it is decided
+	// once per reconciliation and lazily: most volumes never reach this loop at all.
+	var targetResyncBudget *resyncBudgetDecision
+
 	for _, rvr := range rvrs {
 		if !unscheduledDiskful.Contains(rvr.ID()) {
 			continue
 		}
+
+		// Only a replica with no node yet has its whole copy arriving over the network. One that
+		// already has a node is here for its LVG, and holding that back would leave it partially
+		// placed forever.
+		unplaced := rvr.Spec.NodeName == ""
+		if unplaced {
+			if targetResyncBudget == nil {
+				target, budgetOutcome := r.reconcileResyncBudget(rf.Ctx(), rv, rvrs)
+				outcome = outcome.Merge(budgetOutcome.Enrichf("deciding the resync budget"))
+				if outcome.ShouldReturn() {
+					return outcome.ToCtrl()
+				}
+				targetResyncBudget = &target
+				sctx.ResyncOccupancy = targetResyncBudget.occupancyAtAdmission
+			}
+
+			// The sending side is re-measured per replica: admission asked for room for one end on
+			// each sender, while every replica placed below charges those same senders one more.
+			sendersFull := len(targetResyncBudget.senderNodes) > 0 && sctx.ResyncOccupancy != nil &&
+				!r.resyncLimit.HasRoomOnAll(targetResyncBudget.senderNodes, sctx.ResyncOccupancy)
+
+			if targetResyncBudget.waiting || sendersFull {
+				// Unknown, not False: computeActualSchedulingFailureMessages buckets on IsFalse(),
+				// and waiting for a slot is not a failure.
+				outcome = outcome.Merge(
+					r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionUnknown,
+						v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot,
+						resyncSlotWaitMessage).
+						Enrichf("setting WaitingForResyncSlot on rvr %s", rvr.Name),
+					rf.ContinueAndRequeueAfter(resyncSlotRequeueInterval),
+				)
+				if outcome.ShouldReturn() {
+					return outcome.ToCtrl()
+				}
+				continue
+			}
+		}
+
 		outcome = outcome.Merge(r.reconcileOneRVRScheduling(rf.Ctx(), rvr, sctx).
 			Enrichf("scheduling Diskful"))
 		if outcome.ShouldReturn() {
 			return outcome.ToCtrl()
+		}
+
+		// A node on the replica, not the outcome, is what says it was placed: scheduling that found
+		// nowhere to land also returns a non-terminal outcome.
+		if unplaced && rvr.Spec.NodeName != "" && sctx.ResyncOccupancy != nil {
+			for _, node := range targetResyncBudget.senderNodes {
+				sctx.ResyncOccupancy[node]++
+			}
 		}
 	}
 
@@ -268,6 +341,91 @@ func (r *Reconciler) reconcileRVRsCondition(
 	}
 
 	return rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: resync-budget
+//
+
+// resyncBudgetDecision is what the resync limiter decided about one volume in one reconciliation.
+//
+// It is a target in the sense of controller-terminology.mdc, not a report: nothing about it is
+// published and nothing about it is stored.
+type resyncBudgetDecision struct {
+	// waiting is true when the volume must not start filling replicas yet.
+	waiting bool
+
+	// occupancyAtAdmission is the "node → resync ends" map this volume's admission was decided
+	// against — see syncbudget.Pass.SubjectOccupancy. It is nil when the decision did not need it:
+	// no claim, limiter off, or the volume is waiting.
+	occupancyAtAdmission map[string]int
+
+	// senderNodes are the nodes this volume reads its data from, sorted. They are the nodes the
+	// admitted claim charged, so every replica placed against this decision loads exactly them.
+	// Empty in the same cases occupancyAtAdmission is nil.
+	senderNodes []string
+}
+
+// reconcileResyncBudget decides whether rv may start filling replicas over the network now, and
+// against which occupancy the receiving node must then be chosen.
+//
+// The whole ordered queue is walked, not just this volume's own sender nodes: a volume ahead of
+// this one may want the same nodes, and only the walk knows what it holds there.
+//
+// It reads the informer cache without DeepCopy and hands the objects to syncbudget, which never
+// mutates them.
+//
+// Reconcile pattern: Target-state driven. This method owns the target half only; the root
+// Reconcile turns a "wait" into the WaitingForResyncSlot condition on the individual replicas.
+func (r *Reconciler) reconcileResyncBudget(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (_ resyncBudgetDecision, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "resync-budget")
+	defer rf.OnEnd(&outcome)
+
+	if r.resyncLimit <= 0 {
+		return resyncBudgetDecision{}, rf.Continue()
+	}
+
+	actualClaim, claiming := syncbudget.ComputeActualClaim(rv, rvrs)
+	if !claiming {
+		return resyncBudgetDecision{}, rf.Continue()
+	}
+
+	actualRVs, err := r.getRVs(rf.Ctx())
+	if err != nil {
+		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumes")
+	}
+
+	actualRVRs, err := r.getRVRs(rf.Ctx())
+	if err != nil {
+		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumeReplicas")
+	}
+
+	reportPass := syncbudget.RunPassForSubject(
+		syncbudget.ComputeActualQueue(actualRVs, actualRVRs),
+		syncbudget.ComputeActualOccupancy(actualRVRs),
+		r.resyncLimit,
+		rv.Name,
+	)
+	if reportPass.IsWaiting(rv.Name) {
+		rf.Log().V(2).Info("waiting for a resync slot: a needed node is full or held by a volume ahead in the queue",
+			"claimClass", actualClaim.Class.String(), "neededEnds", actualClaim.NeededEnds,
+			"waiters", reportPass.Waiters)
+		return resyncBudgetDecision{waiting: true}, rf.Continue()
+	}
+
+	// SubjectOccupancy, not the raw occupancy the pass started from: the receiving-node filter must
+	// see the holds this pass created, or it would pick a node a waiting volume is holding.
+	//
+	// The sender nodes come from the claim rather than from a second ComputeActualSenderNodes call,
+	// so that what is charged per placement is exactly what the pass charged for this volume.
+	return resyncBudgetDecision{
+		occupancyAtAdmission: reportPass.SubjectOccupancy,
+		senderNodes:          slices.Sorted(maps.Keys(actualClaim.NeededEnds)),
+	}, rf.Continue()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -435,6 +593,28 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		}
 	}
 
+	// Exclude nodes with no free resync end. The sending side of the budget
+	// is settled before this pipeline runs; the receiving node is chosen here.
+	//
+	// The gate repeats the one in Reconcile: a tie-breaker receives no data, and a partially placed
+	// replica would be judged against its own owed end on the only node left to it.
+	//
+	// The stage sits last among the filters, so everything it saw had already survived the others:
+	// when it admitted none of them, the budget alone is what left the replica nowhere to land.
+	resyncSeen, resyncAdmitted := 0, 0
+	if isDiskful && rvr.Spec.NodeName == "" && sctx.ResyncOccupancy != nil {
+		resyncOccupancy := sctx.ResyncOccupancy
+		resyncLimit := r.resyncLimit
+		p = WithPredicate(p, "no free resync end", logger, func(e *CandidateEntry) *CandidateEntry {
+			resyncSeen++
+			if !resyncLimit.HasRoom(resyncOccupancy[e.Node.NodeName]) {
+				return nil
+			}
+			resyncAdmitted++
+			return e
+		})
+	}
+
 	// reservationID identifies the capacity reservation in the scheduler-extender.
 	// It is either namespace/pvc (set by CSI via annotation on the RV) or the
 	// deterministic LVMLogicalVolume name that will be created for this RVR.
@@ -538,6 +718,17 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	})
 
 	if best == nil {
+		// Nowhere to land only because the receiving side of the budget is full: a wait, not a
+		// failure, reported the way the sending-side gate reports one.
+		if resyncSeen > 0 && resyncAdmitted == 0 {
+			logger.V(2).Info("no candidate left after the resync budget filter; waiting for a resync slot",
+				"summary", summary)
+			return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot,
+				resyncSlotWaitMessage).
+				Merge(rf.ContinueAndRequeueAfter(resyncSlotRequeueInterval))
+		}
+
 		return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary)
 	}
@@ -611,6 +802,14 @@ type schedulingContext struct {
 	EligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode
 	OccupiedNodes map[string]struct{}
 	AttachToNodes []string
+
+	// ResyncOccupancy is the "node → resync ends" map the resync budget was decided against — see
+	// resyncBudgetDecision.occupancyAtAdmission — or nil when the budget was not consulted.
+	// Reconcile fills it in once the decision is taken, since it is derived from the whole cluster
+	// while this context is built from one volume, and charges the volume's sender nodes in it as
+	// it places replicas, so that later replicas of the same volume see the load the earlier ones
+	// created. The map is owned by this context.
+	ResyncOccupancy map[string]int
 
 	// Topology and zone layout.
 	//
@@ -953,6 +1152,22 @@ func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1a
 	return result, nil
 }
 
+// getRVRs lists every replica in the cluster through the informer cache (UnsafeDisableDeepCopy).
+//
+// The scan cannot be narrowed by an index: a claim ahead of this volume may sit on any node.
+func (r *Reconciler) getRVRs(ctx context.Context) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
+	list := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+
+	result := make([]*v1alpha1.ReplicatedVolumeReplica, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
+}
+
 func (r *Reconciler) patchRVR(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
@@ -994,6 +1209,21 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 		return nil, err
 	}
 	return rv, nil
+}
+
+// getRVs lists every volume in the cluster through the informer cache (UnsafeDisableDeepCopy),
+// so that the resync queue can be built. See getRVRs on why it is not narrowed by an index.
+func (r *Reconciler) getRVs(ctx context.Context) ([]*v1alpha1.ReplicatedVolume, error) {
+	list := &v1alpha1.ReplicatedVolumeList{}
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+
+	result := make([]*v1alpha1.ReplicatedVolume, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
 }
 
 // --- RSP ---

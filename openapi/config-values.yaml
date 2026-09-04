@@ -47,6 +47,35 @@ properties:
           If parameter is omitted, Linstor nodes will be placed on all nodes.
 
           **Caution!** Changing this parameter does not result in data redistribution. If node with data no longer matches the `nodeSelector`, data on that node will become inaccessible.
+  resyncSlotsPerNode:
+    type: integer
+    default: 0
+    minimum: 0
+    description: |
+      How many concurrent resyncs a single node may take part in. `0`, the default, means no
+      limit: the limiter is opt-in and has to be switched on deliberately.
+
+      A resync is the transfer of a volume's contents over the network into a replica that has no
+      data yet or whose data is stale. It is counted in *resync ends*: a transfer between two nodes
+      occupies one end on the sending node (reading its disk and pushing to the network) and one on
+      the receiving node (receiving and writing). This parameter caps the number of ends per node,
+      because the bottleneck is the network interface and the disk of that particular node — not the
+      volume, not the replica, and not the cluster as a whole.
+
+      When every node that could send a replica its data is already at the limit, placement of that
+      replica is deferred and retried; nothing is interrupted. A resync already in progress is never
+      aborted, since that would discard everything already transferred.
+
+      Volumes that are still being created are never deferred, but the load of their resyncs is
+      still counted, so that recovery of an existing volume does not oversubscribe a node that
+      volume creation is already using.
+
+      A good value to start from is `2` — the smallest that still lets a node send and receive at
+      the same time. Switching the limit on defers the placement of replicas that would otherwise
+      be placed at once, so expect recovery of a large cluster to take visibly longer.
+
+      **Caution!** This parameter and the DRBD resync rate ceiling are configured independently.
+      Their product must stay within the throughput of the node's link.
   storageClassLabelIgnoredPrefixes:
     type: array
     default:

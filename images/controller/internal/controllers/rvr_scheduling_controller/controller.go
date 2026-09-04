@@ -33,6 +33,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/syncbudget"
 )
 
 // RVRSchedulingControllerName is the controller name for rvr-scheduling-controller.
@@ -61,6 +62,9 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetScheme(),
 		extenderClient,
 	)
+	// Per-node resync-end budget, read at the wiring layer since syncbudget holds no configuration
+	// of its own.
+	r.resyncLimit = syncbudget.Limit(cfg.ResyncSlotsPerNode())
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVRSchedulingControllerName).

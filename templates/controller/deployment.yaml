@@ -103,6 +103,8 @@ spec:
               value: "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099"
             - name: DATA_NODE_SELECTOR
               value: {{ .Values.sdsReplicatedVolume.dataNodes.nodeSelector | toJson | quote }}
+            - name: RESYNC_SLOTS_PER_NODE
+              value: "{{ .Values.sdsReplicatedVolume.resyncSlotsPerNode }}"
           volumeMounts:
             - mountPath: /etc/config/
               name: config
