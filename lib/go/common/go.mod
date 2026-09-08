@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/lib/go/common
 
-go 1.27.0
-
+go 1.27.1
 require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/pilebones/go-udev v0.9.0
