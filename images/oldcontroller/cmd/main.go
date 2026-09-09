@@ -41,6 +41,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
 	kubutils "github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/kubeutils"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/linstorlogger"
 )
 
 var (
@@ -117,7 +118,7 @@ func main() {
 	log.Info("created kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
 
 	controllerruntime.SetLogger(log.GetLogger())
-	lc, err := lapi.NewClient(lapi.Log(log))
+	lc, err := lapi.NewClient(lapi.Log(linstorlogger.New(log)))
 	if err != nil {
 		log.Error("failed to create a linstor client", logger.Err(err))
 		os.Exit(1)

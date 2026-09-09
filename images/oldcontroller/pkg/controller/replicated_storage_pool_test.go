@@ -31,6 +31,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
+	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/linstorlogger"
 )
 
 var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
@@ -43,7 +44,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		ctx    = context.Background()
 		cl     = newFakeClientWithStatusSubresource()
 		log, _ = logger.NewLogger("2")
-		lc, _  = lapi.NewClient(lapi.Log(log))
+		lc, _  = lapi.NewClient(lapi.Log(linstorlogger.New(log)))
 
 		testReplicatedSP = &srv.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{
