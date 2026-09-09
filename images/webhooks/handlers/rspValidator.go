@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -84,7 +83,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 		if slices.Contains(lvmVolumeGroupUnique, rspLVMvg.Name) {
 			errMsg = fmt.Sprintf("There must be unique LVMVolumeGroup names (%s duplicates)", rspLVMvg.Name)
-			klog.Info(errMsg)
+			log.Info(errMsg)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: errMsg},
 				nil
 		}
@@ -93,7 +92,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 		if rsp.Spec.Type == LVMThinType && rspLVMvg.ThinPoolName == "" {
 			errMsg = fmt.Sprintf("ThinPoolName must be set for LVMThin type in LVMVolumeGroup %s; ", rspLVMvg.Name)
-			klog.Info(errMsg)
+			log.Info(errMsg)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: errMsg},
 				nil
 		}
@@ -112,7 +111,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 				for _, lvgNode := range lvmVG.Status.Nodes {
 					if slices.Contains(ephemeralNodesList, lvgNode.Name) {
-						klog.Infof("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
+						log.Info(fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name))
 						return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)},
 							nil
 					}
@@ -123,14 +122,14 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 
 		if !lvgExists {
 			errMsg = fmt.Sprintf("LVMVolumeGroup %s not found; ", rspLVMvg.Name)
-			klog.Info(errMsg)
+			log.Info(errMsg)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: errMsg},
 				nil
 		}
 
 		if rsp.Spec.Type == LVMThinType && !thinPoolExists {
 			errMsg = fmt.Sprintf("ThinPool %s not found in LVMVolumeGroup %s; ", rspLVMvg.ThinPoolName, rspLVMvg.Name)
-			klog.Info(errMsg)
+			log.Info(errMsg)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: errMsg},
 				nil
 		}

@@ -42,7 +42,10 @@ const (
 
 	// defaults are different for each app, do not merge them
 	DefaultHealthProbeBindAddress = ":4271"
-	DefaultMetricsBindAddress     = ":4272"
+	// Loopback, like the agent: the kube-rbac-proxy of the same pod is what
+	// publishes this endpoint, and a wildcard bind would answer unauthenticated
+	// on the pod IP.
+	DefaultMetricsBindAddress = "127.0.0.1:4272"
 
 	// DefaultResyncSlotsPerNode is the resync-end budget assumed for a node when
 	// RESYNC_SLOTS_PER_NODE is not set. Zero: the limiter is opt-in, so that an upgrade never

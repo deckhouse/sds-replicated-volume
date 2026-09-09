@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func TestPublishUtils(t *testing.T) {
@@ -49,7 +49,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 	BeforeEach(func() {
 		cl = newFakeClient()
-		log = logger.WrapLorg(GinkgoLogr)
+		log, _ = logger.NewLoggerToWriter(GinkgoWriter, logger.TraceLevel)
 		traceID = "test-trace-id"
 	})
 
@@ -57,7 +57,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		rvaName, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rvaName).ToNot(BeEmpty())
 
@@ -71,9 +71,9 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		_, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		_, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
-		_, err = EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		_, err = EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 
 		list := &v1alpha1.ReplicatedVolumeAttachmentList{}
@@ -85,11 +85,11 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		_, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		_, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(DeleteRVA(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
-		Expect(DeleteRVA(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
+		Expect(DeleteRVA(ctx, cl, log, traceID, volumeName, nodeName)).To(Succeed())
+		Expect(DeleteRVA(ctx, cl, log, traceID, volumeName, nodeName)).To(Succeed())
 
 		list := &v1alpha1.ReplicatedVolumeAttachmentList{}
 		Expect(cl.List(ctx, list)).To(Succeed())
@@ -100,7 +100,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		rvaName, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -128,14 +128,14 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		})
 		Expect(cl.Status().Update(ctx, rva)).To(Succeed())
 
-		Expect(WaitForRVAReady(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
+		Expect(WaitForRVAReady(ctx, cl, log, traceID, volumeName, nodeName)).To(Succeed())
 	})
 
 	It("WaitForRVAReady returns error immediately when Attached=False and reason=LocalityNotSatisfied", func(ctx SpecContext) {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		rvaName, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -157,7 +157,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		Expect(cl.Status().Update(ctx, rva)).To(Succeed())
 
 		start := time.Now()
-		err = WaitForRVAReady(ctx, cl, &log, traceID, volumeName, nodeName)
+		err = WaitForRVAReady(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).To(HaveOccurred())
 		Expect(time.Since(start)).To(BeNumerically("<", time.Second))
 
@@ -174,7 +174,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		volumeName := "test-volume"
 		nodeName := "node-1"
 
-		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		rvaName, err := EnsureRVA(ctx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -198,7 +198,7 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 		defer cancel()
 
-		err = WaitForRVAReady(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+		err = WaitForRVAReady(timeoutCtx, cl, log, traceID, volumeName, nodeName)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 
@@ -223,13 +223,13 @@ var _ = Describe("WaitForRVADeleted", func() {
 
 	BeforeEach(func() {
 		cl = newFakeClient()
-		log = logger.WrapLorg(GinkgoLogr)
+		log, _ = logger.NewLoggerToWriter(GinkgoWriter, logger.TraceLevel)
 		traceID = "test-trace-id"
 	})
 
 	Context("when RVA does not exist", func() {
 		It("should return immediately without error", func(ctx SpecContext) {
-			err := WaitForRVADeleted(ctx, cl, &log, traceID, "missing-volume", "missing-node")
+			err := WaitForRVADeleted(ctx, cl, log, traceID, "missing-volume", "missing-node")
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -268,7 +268,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 			waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForRVADeleted(waitCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForRVADeleted(waitCtx, cl, log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			got := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -299,7 +299,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 			defer cancel()
 
-			err := WaitForRVADeleted(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForRVADeleted(timeoutCtx, cl, log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 			Expect(err.Error()).To(ContainSubstring(stuckFinalizer))
@@ -328,7 +328,7 @@ var _ = Describe("WaitForRVADeleted", func() {
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForRVADeleted(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForRVADeleted(cancelledCtx, cl, log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 		})
@@ -346,7 +346,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 
 	BeforeEach(func() {
 		cl = newFakeClient()
-		log = logger.WrapLorg(GinkgoLogr)
+		log, _ = logger.NewLoggerToWriter(GinkgoWriter, logger.TraceLevel)
 		traceID = "test-trace-id"
 	})
 
@@ -381,7 +381,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 			ensureCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			got, err := EnsureRVA(ensureCtx, cl, &log, traceID, volumeName, nodeName)
+			got, err := EnsureRVA(ensureCtx, cl, log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(Equal(rvaName))
 
@@ -414,7 +414,7 @@ var _ = Describe("EnsureRVA with stale deleting RVA", func() {
 			ensureCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 			defer cancel()
 
-			_, err := EnsureRVA(ensureCtx, cl, &log, traceID, volumeName, nodeName)
+			_, err := EnsureRVA(ensureCtx, cl, log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 

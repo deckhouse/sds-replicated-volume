@@ -28,6 +28,32 @@ properties:
       controlPlaneMigration:
         type: string
         default: "not_started"
+      controllerMetricsPort:
+        type: integer
+        default: 4272
+        description: |
+          The port the controller serves its metrics on, bound on 127.0.0.1: the only
+          thing that reaches it is the kube-rbac-proxy of the same pod.
+      controllerMetricsProxyPort:
+        type: integer
+        default: 8080
+        description: |
+          The port the kube-rbac-proxy publishes the controller metrics on. Reaching
+          it requires "get" on deployments/prometheus-metrics for the controller.
+      oldControllerMetricsProxyPort:
+        type: integer
+        default: 8080
+        description: |
+          The port the kube-rbac-proxy publishes the legacy controller metrics on.
+          Reaching it requires "get" on deployments/prometheus-metrics for the
+          controller; the controller itself keeps its metrics on 127.0.0.1.
+      oldControllerMetricsPort:
+        type: integer
+        default: 8080
+        description: |
+          The port the legacy control-plane controller serves its metrics on: the
+          manager's reconcile and workqueue series. controller-runtime has always
+          bound this port; until now nothing declared it or scraped it.
       newControlPlane:
         type: boolean
         default: false

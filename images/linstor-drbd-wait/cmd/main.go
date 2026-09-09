@@ -26,11 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 const (
-	EnvLogLevel      = "LOG_LEVEL"
 	EnvTimeout       = "TIMEOUT_SEC"
 	EnvSleep         = "SLEEP_SEC"
 	EnvFilePath      = "FILE_PATH"
@@ -135,7 +134,7 @@ func extractVersionFromLine(line string) (string, bool) {
 	return fields[0], true
 }
 
-func mainExecution(log *logger.Logger, filePath string, minVersion string, waitingMsg string, sleepSec int64) int {
+func mainExecution(log logger.Logger, filePath string, minVersion string, waitingMsg string, sleepSec int64) int {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 	log.Info(fmt.Sprintf("Start to watch file '%s' for version >= '%s'", filePath, minVersion))
@@ -143,7 +142,7 @@ func mainExecution(log *logger.Logger, filePath string, minVersion string, waiti
 	// Parse the minimum required version
 	minMajor, minMinor, minPatch, err := parseVersion(minVersion)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("unable to parse minimum version '%s'", minVersion))
+		log.Error(fmt.Sprintf("unable to parse minimum version '%s'", minVersion), logger.Err(err))
 		return 2
 	}
 
@@ -151,7 +150,7 @@ func mainExecution(log *logger.Logger, filePath string, minVersion string, waiti
 		// Open the file for reading
 		file, err := os.Open(filePath)
 		if err != nil {
-			log.Warning(fmt.Sprintf("Error opening file %s: %v", filePath, err))
+			log.Warn(fmt.Sprintf("Error opening file %s: %v", filePath, err))
 			log.Info(waitingMsg)
 			time.Sleep(time.Duration(sleepSec) * time.Second)
 			continue
@@ -174,7 +173,7 @@ func mainExecution(log *logger.Logger, filePath string, minVersion string, waiti
 			currentVersion = versionStr
 			curMajor, curMinor, curPatch, err := parseVersion(versionStr)
 			if err != nil {
-				log.Warning(fmt.Sprintf("Unable to parse version from line '%s': %v", line, err))
+				log.Warn(fmt.Sprintf("Unable to parse version from line '%s': %v", line, err))
 				continue
 			}
 
@@ -189,7 +188,7 @@ func mainExecution(log *logger.Logger, filePath string, minVersion string, waiti
 
 		// Check for any scanning error
 		if scanErr := scanner.Err(); scanErr != nil {
-			log.Error(scanErr, fmt.Sprintf("reading file %s", filePath))
+			log.Error(fmt.Sprintf("reading file %s", filePath), logger.Err(scanErr))
 			file.Close()
 			return 3
 		}
@@ -211,12 +210,10 @@ func mainExecution(log *logger.Logger, filePath string, minVersion string, waiti
 }
 
 func main() {
-	loglevel := os.Getenv(EnvLogLevel)
-	if loglevel == "" {
-		Loglevel = logger.DebugLevel
-	} else {
-		Loglevel = logger.Verbosity(loglevel)
-	}
+	// Info, not Debug: an unset LOG_LEVEL has to mean the same thing in every
+	// binary of the fleet, and the chart sets the variable in every container
+	// anyway, so this is only what a container started outside the chart gets.
+	Loglevel = logger.VerbosityFromEnv(logger.InfoLevel)
 
 	log, err := logger.NewLogger(Loglevel)
 	if err != nil {
@@ -228,7 +225,7 @@ func main() {
 	sleepSec := int64(15)
 	if sleep != "" {
 		if sleepSec, err = strconv.ParseInt(sleep, 10, 0); err != nil {
-			log.Error(err, fmt.Sprintf("unable to parse %s env variable to int", EnvSleep))
+			log.Error(fmt.Sprintf("unable to parse %s env variable to int", EnvSleep), logger.Err(err))
 		}
 	}
 

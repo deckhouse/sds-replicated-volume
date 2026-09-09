@@ -19,9 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -31,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheme"
@@ -45,7 +44,7 @@ type managerConfig interface {
 
 func newManager(
 	ctx context.Context,
-	log *slog.Logger,
+	log logger.Logger,
 	envConfig managerConfig,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
@@ -74,7 +73,7 @@ func newManager(
 	mgrOpts := manager.Options{
 		Scheme:                  scheme,
 		BaseContext:             func() context.Context { return ctx },
-		Logger:                  logr.FromSlogHandler(log.Handler()),
+		Logger:                  log.GetLogger(),
 		HealthProbeBindAddress:  envConfig.HealthProbeBindAddress(),
 		LeaderElection:          true,
 		LeaderElectionNamespace: envConfig.PodNamespace(),

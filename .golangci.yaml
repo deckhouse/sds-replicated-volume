@@ -10,11 +10,44 @@ linters:
     - ineffassign
     - misspell
     - revive
+    - sloglint
     - staticcheck
     - unconvert
     - unparam
     - whitespace
   settings:
+    sloglint:
+      # sloglint matches a call site by the full name of its callee, and its list
+      # holds only log/slog functions and (*log/slog.Logger) methods. Info, Debug
+      # and Warn are promoted from the *slog.Logger that sds-common-lib's
+      # logger.Logger embeds, so they resolve to (*log/slog.Logger).Info and are
+      # checked. Error and Fatal are not: pkg/log declares them on its own
+      # *log.Logger to attach a stack trace, and Trace is a method of
+      # logger.Logger. Neither sloglint nor govet's slog analyser sees those three.
+      #
+      # So everything below covers Info, Debug, Warn and With, and nothing else.
+      # Error -- the one place logger.Err(err) is actually used -- is on the
+      # honour system: sloglint can take extra callees through custom-funcs, but
+      # golangci-lint v2.9.0 does not expose that key ("golangci-lint config
+      # verify" rejects it), so there is no configuration that closes the gap.
+      #
+      # no-mixed-args is on by default and stated here so that a later edit cannot
+      # drop it without saying so. It allows a pure-attribute call such as
+      # log.Error(msg, logger.Err(err)) and a pure
+      # key-value call such as log.Info(msg, "name", n), but rejects mixing the two
+      # in one call -- which is how a format-string argument ends up as a key.
+      # kv-only is deliberately NOT set, because it would outlaw logger.Err(err).
+      #
+      # static-msg and no-raw-keys are left off: converting the remaining Sprintf
+      # messages is a separate change.
+      no-mixed-args: true
+      forbidden-keys:
+        # Reserved by the handler; shadowing them silently drops the real value.
+        - level
+        - msg
+        - source
+        - stacktrace
+        - time
     errcheck:
       exclude-functions:
         - fmt:.*,[rR]ead|[wW]rite|[cC]lose

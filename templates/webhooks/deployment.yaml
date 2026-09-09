@@ -81,6 +81,8 @@ spec:
         env:
           - name: NEW_CONTROL_PLANE
             value: "true"
+          - name: LOG_LEVEL
+            value: {{ include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | quote }}
         readinessProbe:
           httpGet:
             path: /healthz

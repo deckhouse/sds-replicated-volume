@@ -25,13 +25,13 @@ import (
 	v12 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 	ctx := context.Background()
 	cl := newFakeClient()
-	log := logger.Logger{}
+	log := logger.NewNop()
 
 	const (
 		testNode1 = "test-node1"
@@ -162,7 +162,7 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 	ctx := context.Background()
 	cl := newFakeClient()
-	log := logger.Logger{}
+	log := logger.NewNop()
 
 	const (
 		testNode1 = "test-node1"

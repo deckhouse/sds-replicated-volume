@@ -27,14 +27,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 func TestLinstorLeaderController(t *testing.T) {
 	var (
 		cl                = newFakeClient()
 		ctx               = context.Background()
-		log               = logger.Logger{}
+		log               = logger.NewNop()
 		namespace         = "test-ns"
 		leaseName         = "test-lease"
 		linstorLabelValue = "test"

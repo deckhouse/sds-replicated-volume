@@ -2127,8 +2127,9 @@ func levelColored(level string) string {
 	case strings.EqualFold(level, "DEBUG"):
 		return fmt.Sprintf("%sDEBUG%s", colorDim, colorReset)
 	default:
-		// slogh outputs non-standard levels as raw numbers: "-1", "-5", "-8", etc.
-		// Map to V<N> where N is the logr verbosity (negate the slog level).
+		// A level the shared logger does not name is printed as a raw number:
+		// "-1", "-5", "-8". Map it to V<N>, N being the logr verbosity (the
+		// negated slog level). slogh, now gone from this repo, emitted these.
 		if n, err := strconv.Atoi(level); err == nil && n < 0 {
 			return fmt.Sprintf("%s%-5s%s", colorDim, fmt.Sprintf("V%d", -n), colorReset)
 		}

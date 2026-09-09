@@ -12,9 +12,11 @@ spec:
   selector:
     app: controller
   ports:
-  - name: metrics
-    port: 4272
-    targetPort: 4272
+  # The proxy's port, not the controller's: the controller keeps its metrics on
+  # 127.0.0.1 and only the kube-rbac-proxy of the pod can reach them.
+  - name: https-metrics
+    port: {{ .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort }}
+    targetPort: https-metrics
     protocol: TCP
 {{- end }}
 {{- end }}

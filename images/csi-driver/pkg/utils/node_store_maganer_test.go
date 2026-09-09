@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mountutils "k8s.io/mount-utils"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 func TestNodeStoreManager(t *testing.T) {
@@ -52,7 +52,7 @@ func TestNodeStoreManager(t *testing.T) {
 
 			f := &mountutils.FakeMounter{}
 			store := &Store{
-				Log: &logger.Logger{},
+				Log: logger.NewNop(),
 				NodeStorage: mountutils.SafeFormatAndMount{
 					Interface: f,
 				},
@@ -79,7 +79,7 @@ func TestNodeStoreManager(t *testing.T) {
 				},
 			}
 			store := &Store{
-				Log: &logger.Logger{},
+				Log: logger.NewNop(),
 				NodeStorage: mountutils.SafeFormatAndMount{
 					Interface: f,
 				},
@@ -102,7 +102,7 @@ func TestNodeStoreManager(t *testing.T) {
 				},
 			}
 			store := &Store{
-				Log: &logger.Logger{},
+				Log: logger.NewNop(),
 				NodeStorage: mountutils.SafeFormatAndMount{
 					Interface: f,
 				},
@@ -125,7 +125,7 @@ func TestNodeStoreManager(t *testing.T) {
 				},
 			}
 			store := &Store{
-				Log: &logger.Logger{},
+				Log: logger.NewNop(),
 				NodeStorage: mountutils.SafeFormatAndMount{
 					Interface: f,
 				},

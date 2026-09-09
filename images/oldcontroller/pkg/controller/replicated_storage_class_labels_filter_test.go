@@ -29,10 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 // defaultIgnoredPrefixes mirrors the union of the system list (internal values)
@@ -60,7 +60,7 @@ var _ = Describe("replicated-storage-class-controller label filtering", Ordered,
 	var (
 		ctx         = context.Background()
 		cl          client.Client
-		log         = logger.Logger{}
+		log         = logger.NewNop()
 		validCFG, _ = config.NewConfig()
 
 		validZones = []string{testZone1, testZone2, testZone3}

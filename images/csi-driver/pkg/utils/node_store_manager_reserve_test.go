@@ -25,7 +25,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 	testingexec "k8s.io/utils/exec/testing"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 // recordingExec captures the commands setReservedPercent runs, so the test can
@@ -48,7 +48,7 @@ func recordingExec(runErr error) (*testingexec.FakeExec, *[][]string) {
 
 func newReserveStore(fake *testingexec.FakeExec) *Store {
 	return &Store{
-		Log: &logger.Logger{},
+		Log: logger.NewNop(),
 		NodeStorage: mountutils.SafeFormatAndMount{
 			Interface: &mountutils.FakeMounter{},
 			Exec:      fake,

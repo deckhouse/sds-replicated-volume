@@ -18,6 +18,8 @@ package internal
 
 import (
 	"testing"
+
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type testRequest struct {
@@ -94,7 +96,7 @@ func TestInFlight(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := NewInFlight()
+			db := NewInFlight(logger.NewNop())
 			for _, r := range tc.requests {
 				var resp bool
 				if r.delete {

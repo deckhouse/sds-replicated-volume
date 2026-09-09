@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/api/linstor"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 const (
@@ -67,7 +67,7 @@ func NewLinstorPortRangeWatcher(
 
 				shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 				if shouldRequeue {
-					log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
+					log.Error(fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval), logger.Err(err))
 					return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
 				}
 
@@ -89,7 +89,7 @@ func NewLinstorPortRangeWatcher(
 
 				shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 				if shouldRequeue {
-					log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
+					log.Error(fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval), logger.Err(err))
 					q.AddAfter(request, time.Duration(interval)*time.Second)
 				}
 
@@ -103,7 +103,7 @@ func NewLinstorPortRangeWatcher(
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 					if shouldRequeue {
-						log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
+						log.Error(fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval), logger.Err(err))
 						q.AddAfter(request, time.Duration(interval)*time.Second)
 					}
 					log.Info("END from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
@@ -150,7 +150,7 @@ func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, lc *lapi.Cli
 		if err != nil {
 			return true, err
 		}
-		log.Error(err, fmt.Sprintf("range start port %d is less than range end port %d", minPortInt, maxPortInt))
+		log.Error(fmt.Sprintf("range start port %d is less than range end port %d", minPortInt, maxPortInt), logger.Err(err))
 		return false, fmt.Errorf("range start port %d is less than range end port %d", minPortInt, maxPortInt)
 	}
 
@@ -159,7 +159,7 @@ func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, lc *lapi.Cli
 		if err != nil {
 			return true, err
 		}
-		log.Error(err, fmt.Sprintf("range end port %d must be less then %d", maxPortInt, maxPortValue))
+		log.Error(fmt.Sprintf("range end port %d must be less then %d", maxPortInt, maxPortValue), logger.Err(err))
 		return false, fmt.Errorf("range end port %d must be less then %d", maxPortInt, maxPortValue)
 	}
 
@@ -168,7 +168,7 @@ func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, lc *lapi.Cli
 		if err != nil {
 			return true, err
 		}
-		log.Error(err, fmt.Sprintf("range start port %d must be more then %d", minPortInt, minPortValue))
+		log.Error(fmt.Sprintf("range start port %d must be more then %d", minPortInt, minPortValue), logger.Err(err))
 		return false, fmt.Errorf("range start port %d must be more then %d", minPortInt, minPortValue)
 	}
 

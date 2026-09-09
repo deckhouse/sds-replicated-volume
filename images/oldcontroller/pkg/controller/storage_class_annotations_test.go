@@ -31,10 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
@@ -102,7 +102,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		cl = newFakeClient()
-		log = logger.Logger{}
+		log = logger.NewNop()
 		storageClassResource = nil
 		configMap = nil
 		replicatedStorageClassResource = nil

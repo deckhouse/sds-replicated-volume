@@ -107,8 +107,21 @@ spec:
             value: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.minPort }}"
           - name: DRBD_MAX_PORT
             value: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
-          - name: SLOGH_CONFIG_PATH
-            value: "/etc/config/slogh.cfg"
+          - name: LOG_LEVEL
+            value: {{ include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | quote }}
+          # The pod is hostNetwork, so an address without a host binds the agent's
+          # metrics on every node interface -- past the kube-rbac-proxy in this same
+          # pod, whose whole purpose is to gate that endpoint. Loopback is what the
+          # proxy forwards to.
+          #
+          # Note what loopback does and does not buy here: in hostNetwork it is the
+          # NODE's loopback, so the endpoint is unreachable from off the node but stays
+          # open, unauthenticated, to anything running in the node's network namespace.
+          # That is acceptable for these metrics and is not a place to put anything else.
+          - name: METRICS_BIND_ADDRESS
+            value: "127.0.0.1:4270"
+          - name: HEALTH_PROBE_BIND_ADDRESS
+            value: "127.0.0.1:4269"
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
@@ -119,15 +132,8 @@ spec:
           name: dev-sdsrv
         - mountPath: /sys/
           name: sys-dir
-        - mountPath: /etc/config/
-          name: config
         - mountPath: /var/run/drbd/lock/
           name: var-run-drbd-lock
-        ports:
-          - containerPort: 4215
-            hostPort: 4215
-            name: prometheus
-            protocol: TCP
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -145,6 +151,13 @@ spec:
           - --logtostderr=true
           - --stale-cache-interval=1h30m
           - "--livez-path=/livez"
+        {{- /* Declared on this container and not on the agent: 4215 is the proxy's
+               listener, and the PodMonitor next to this file selects it by name. */}}
+        ports:
+          - containerPort: 4215
+            hostPort: 4215
+            name: prometheus
+            protocol: TCP
         env:
           - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
             valueFrom:
@@ -153,6 +166,8 @@ spec:
                 fieldPath: status.podIP
           - name: KUBE_RBAC_PROXY_CONFIG
             value: |
+              excludePaths:
+              - /livez
               upstreams:
               - upstream: http://127.0.0.1:4270
                 path: /
@@ -271,12 +286,6 @@ spec:
           path: /sys/
           type: Directory
         name: sys-dir
-      - name: config
-        configMap:
-          name: agent-config
-          items:
-            - key: slogh.cfg
-              path: slogh.cfg
       - name: dev-sdsrv
         hostPath:
           path: /dev/sdsrv/

@@ -27,8 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 const (
@@ -38,36 +38,40 @@ const (
 )
 
 func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, log logger.Logger, request reconcile.Request) (bool, error) {
+	log = log.Named("ReconcileControllerConfigMapEvent")
+
 	virtualizationEnabled, err := GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
 	if err != nil {
-		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get virtualization module enabled")
+		log.Error("Failed to get virtualization module enabled", logger.Err(err))
 		return true, err
 	}
-	log.Debug(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
+	log.Debug(fmt.Sprintf("virtualization module enabled: %t", virtualizationEnabled))
 
 	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
-		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
+		log.Error("Failed to get storage class list for annotations reconcile", logger.Err(err))
 		return true, err
 	}
-	log.Debug("[ReconcileControllerConfigMapEvent] Successfully got storage class list for annotations reconcile")
-	log.Trace(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Storage class list for annotations reconcile: %+v", storageClassList))
+	log.Debug("successfully got storage class list for annotations reconcile")
+	log.Trace(fmt.Sprintf("storage class list for annotations reconcile: %+v", storageClassList))
 
 	return reconcileStorageClassAnnotations(ctx, cl, log, storageClassList)
 }
 
 func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log logger.Logger, namespacedName client.ObjectKey) (bool, error) {
+	log = log.Named("GetVirtualizationModuleEnabled")
+
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, namespacedName, configMap)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return false, err
 		}
-		log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s not found. Set virtualization module enabled to false", namespacedName.Namespace, namespacedName.Name))
+		log.Trace(fmt.Sprintf("ConfigMap %s/%s not found. Set virtualization module enabled to false", namespacedName.Namespace, namespacedName.Name))
 		return false, nil
 	}
 
-	log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s: %+v", namespacedName.Namespace, namespacedName.Name, configMap))
+	log.Trace(fmt.Sprintf("ConfigMap %s/%s: %+v", namespacedName.Namespace, namespacedName.Name, configMap))
 	virtualizationEnabledString, exists := configMap.Data[VirtualizationModuleEnabledKey]
 	if !exists {
 		return false, nil
@@ -77,15 +81,17 @@ func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log l
 }
 
 func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.Client, log logger.Logger, provisioner string, virtualizationEnabled bool) (*storagev1.StorageClassList, error) {
+	log = log.Named("getStorageClassForAnnotationsReconcile")
+
 	storageClassesWithReplicatedVolumeProvisioner, err := getStorageClassListWithProvisioner(ctx, cl, log, provisioner)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get storage classes with provisioner %s", provisioner))
+		log.Error(fmt.Sprintf("failed to get storage classes with provisioner %s", provisioner), logger.Err(err))
 		return nil, err
 	}
 
 	storageClassList := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassesWithReplicatedVolumeProvisioner.Items {
-		log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Processing storage class %+v", storageClass))
+		log.Trace(fmt.Sprintf("processing storage class %+v", storageClass))
 		if storageClass.Parameters[StorageClassParamAllowRemoteVolumeAccessKey] == "false" {
 			if storageClass.Annotations == nil {
 				storageClass.Annotations = make(map[string]string)
@@ -94,10 +100,10 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 			value, exists := storageClass.Annotations[StorageClassVirtualizationAnnotationKey]
 
 			replicatedSC := &srv.ReplicatedStorageClass{}
-			log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Virtualization enabled. Get replicated storage class %s for annotations reconcile", storageClass.Name))
+			log.Debug(fmt.Sprintf("virtualization enabled. Get replicated storage class %s for annotations reconcile", storageClass.Name))
 			err = cl.Get(ctx, client.ObjectKey{Name: storageClass.Name}, replicatedSC)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get replicated storage class %s", storageClass.Name))
+				log.Error(fmt.Sprintf("failed to get replicated storage class %s", storageClass.Name), logger.Err(err))
 				return nil, err
 			}
 
@@ -109,7 +115,7 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 				if value != StorageClassVirtualizationAnnotationValue {
 					storageClass.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey, StorageClassVirtualizationAnnotationValue))
+					log.Debug(fmt.Sprintf("storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey, StorageClassVirtualizationAnnotationValue))
 				}
 			} else {
 				if exists {
@@ -118,7 +124,7 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 						storageClass.Annotations = nil
 					}
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey))
+					log.Debug(fmt.Sprintf("storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey))
 				}
 			}
 		}
@@ -128,6 +134,8 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 }
 
 func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, log logger.Logger, provisioner string) (*storagev1.StorageClassList, error) {
+	log = log.Named("getStorageClassListWithProvisioner")
+
 	storageClassList := &storagev1.StorageClassList{}
 	err := cl.List(ctx, storageClassList)
 	if err != nil {
@@ -136,9 +144,9 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, l
 
 	storageClassesWithProvisioner := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassList.Items {
-		log.Debug(fmt.Sprintf("[getStorageClassListWithProvisioner] process StorageClass %s with provisioner %s", storageClass.Name, provisioner))
+		log.Debug(fmt.Sprintf("process StorageClass %s with provisioner %s", storageClass.Name, provisioner))
 		if storageClass.Provisioner == provisioner {
-			log.Debug(fmt.Sprintf("[getStorageClassListWithProvisioner] StorageClass %s has provisioner %s and will be added to the list", storageClass.Name, provisioner))
+			log.Debug(fmt.Sprintf("StorageClass %s has provisioner %s and will be added to the list", storageClass.Name, provisioner))
 			storageClassesWithProvisioner.Items = append(storageClassesWithProvisioner.Items, storageClass)
 		}
 	}
@@ -147,14 +155,16 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, l
 }
 
 func reconcileStorageClassAnnotations(ctx context.Context, cl client.Client, log logger.Logger, storageClassList *storagev1.StorageClassList) (bool, error) {
+	log = log.Named("reconcileStorageClassAnnotations")
+
 	for _, storageClass := range storageClassList.Items {
-		log.Debug(fmt.Sprintf("[reconcileStorageClassAnnotations] Update storage class %s", storageClass.Name))
+		log.Debug(fmt.Sprintf("update storage class %s", storageClass.Name))
 		err := cl.Update(ctx, &storageClass)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileStorageClassAnnotations] Failed to update storage class %s", storageClass.Name))
+			log.Error(fmt.Sprintf("failed to update storage class %s", storageClass.Name), logger.Err(err))
 			return true, err
 		}
-		log.Debug(fmt.Sprintf("[reconcileStorageClassAnnotations] Successfully updated storage class %s", storageClass.Name))
+		log.Debug(fmt.Sprintf("successfully updated storage class %s", storageClass.Name))
 	}
 
 	return false, nil

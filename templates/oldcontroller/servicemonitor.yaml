@@ -1,0 +1,38 @@
+{{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- if (include "helm_lib_api_version_exists" (list . "monitoring.coreos.com/v1/ServiceMonitor")) }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sds-replicated-volume-oldcontroller
+  namespace: d8-monitoring
+  {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
+spec:
+  endpoints:
+  - port: https-metrics
+    scheme: https
+    path: /metrics
+    bearerTokenSecret:
+      name: "prometheus-token"
+      key: "token"
+    tlsConfig:
+      insecureSkipVerify: true
+    relabelings:
+    - regex: endpoint|namespace|pod|container
+      action: labeldrop
+    - targetLabel: job
+      replacement: sds-replicated-volume-oldcontroller
+    - targetLabel: tier
+      replacement: cluster
+    - sourceLabels: [__meta_kubernetes_endpointslice_endpoint_conditions_ready]
+      regex: "true"
+      action: keep
+  selector:
+    matchLabels:
+      # The label helm_lib_module_webhook_service puts on the Service it renders.
+      app: controller
+  namespaceSelector:
+    matchNames:
+    - d8-{{ .Chart.Name }}
+{{- end }}
+{{- end }}

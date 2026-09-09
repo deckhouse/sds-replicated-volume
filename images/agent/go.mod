@@ -4,7 +4,7 @@ go 1.27.1
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
-	github.com/deckhouse/sds-common-lib v0.10.0
+	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260821070809-7c0d06d31bb2
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
 	github.com/go-logr/logr v1.4.3
@@ -21,6 +21,7 @@ require (
 	dev.gaijin.team/go/golib v0.6.0 // indirect
 	github.com/AdminBenni/iota-mixing v1.0.0 // indirect
 	github.com/AlwxSin/noinlineerr v1.0.5 // indirect
+	github.com/DataDog/gostackparse v0.7.0 // indirect
 	github.com/MirrexOne/unqueryvet v1.5.4 // indirect
 	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
 	github.com/alfatraining/structtag v1.0.0 // indirect
@@ -34,6 +35,8 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/dave/dst v0.27.3 // indirect
+	github.com/deckhouse/deckhouse/pkg/log v0.2.1 // indirect
+	github.com/deckhouse/deckhouse/pkg/metrics-storage v0.3.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/godoc-lint/godoc-lint v0.11.2 // indirect
 	github.com/golangci/asciicheck v0.5.0 // indirect
@@ -42,6 +45,8 @@ require (
 	github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/ldez/structtags v0.6.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/manuelarte/embeddedstructfieldcheck v0.4.0 // indirect

@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type ReconcilerOptions struct {

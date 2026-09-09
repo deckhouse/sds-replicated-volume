@@ -34,9 +34,9 @@ import (
 	"google.golang.org/grpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (
@@ -63,7 +63,7 @@ type Driver struct {
 
 	srv     *grpc.Server
 	httpSrv http.Server
-	log     *logger.Logger
+	log     logger.Logger
 
 	readyMu      sync.Mutex // protects ready
 	ready        bool
@@ -79,7 +79,7 @@ type Driver struct {
 // NewDriver returns a CSI plugin that contains the necessary gRPC
 // interfaces to interact with Kubernetes over unix domain sockets for
 // managing  disks
-func NewDriver(csiAddress, driverName, address string, nodeName *string, log *logger.Logger, cl client.Client) (*Driver, error) {
+func NewDriver(csiAddress, driverName, address string, nodeName *string, log logger.Logger, cl client.Client) (*Driver, error) {
 	if driverName == "" {
 		driverName = DefaultDriverName
 	}
@@ -95,7 +95,7 @@ func NewDriver(csiAddress, driverName, address string, nodeName *string, log *lo
 		waitActionTimeout: defaultWaitActionTimeout,
 		cl:                cl,
 		storeManager:      st,
-		inFlight:          internal.NewInFlight(),
+		inFlight:          internal.NewInFlight(log),
 	}, nil
 }
 
@@ -136,7 +136,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	errHandler := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		resp, err := handler(ctx, req)
 		if err != nil {
-			d.log.Error(err, fmt.Sprintf("method %s method failed ", info.FullMethod))
+			d.log.Error(fmt.Sprintf("method %s method failed ", info.FullMethod), logger.Err(err))
 		}
 		return resp, err
 	}

@@ -22,11 +22,11 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sirupsen/logrus"
-	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
@@ -65,31 +65,37 @@ const (
 )
 
 func main() {
-	logrusLogEntry := logrus.NewEntry(logrus.New())
-	logrusLogEntry.Logger.SetLevel(logrus.DebugLevel)
-	logger := kwhlogrus.NewLogrus(logrusLogEntry)
+	// LOG_LEVEL, the numeric 0..4 value lib-helm emits. This webhook used to ignore
+	// the module setting and log at Debug whatever it said.
+	log, err := logger.NewLoggerFromEnv(logger.InfoLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
+		os.Exit(1)
+	}
+	kwhLog := kwhlogger.New(log)
+	handlers.SetLogger(log)
 
 	cfg := initFlags()
 
-	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorID, &srv.ReplicatedStoragePool{}, logger)
+	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorID, &srv.ReplicatedStoragePool{}, kwhLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating rspValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
-	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorID, &srv.ReplicatedStorageClass{}, logger)
+	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorID, &srv.ReplicatedStorageClass{}, kwhLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating rscValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
-	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorID, &storagev1.StorageClass{}, logger)
+	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorID, &storagev1.StorageClass{}, kwhLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating scValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
-	pvcValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.PVCValidate, PVCValidatorID, &corev1.PersistentVolumeClaim{}, logger)
+	pvcValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.PVCValidate, PVCValidatorID, &corev1.PersistentVolumeClaim{}, kwhLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating pvcValidatingWebhookHandler: %s", err)
 		os.Exit(1)
@@ -102,7 +108,7 @@ func main() {
 	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
-	logger.Infof("Listening on %s", port)
+	log.Info("listening", "address", port)
 	err = http.ListenAndServeTLS(port, cfg.certFile, cfg.keyFile, mux)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error serving webhook: %s", err)

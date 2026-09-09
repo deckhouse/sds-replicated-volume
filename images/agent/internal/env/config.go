@@ -31,9 +31,15 @@ const (
 	DRBDMinPortEnvVar = "DRBD_MIN_PORT"
 	DRBDMaxPortEnvVar = "DRBD_MAX_PORT"
 
-	// defaults are different for each app, do not merge them
-	DefaultHealthProbeBindAddress = ":4269"
-	DefaultMetricsBindAddress     = ":4270"
+	// defaults are different for each app, do not merge them.
+	//
+	// Loopback and not ":4269"/":4270": the agent runs in a hostNetwork pod, where an
+	// address without a host publishes both endpoints on every node interface --
+	// including the metrics endpoint the kube-rbac-proxy in the same pod exists to
+	// gate. The drbd-reactor exporter next door already binds 127.0.0.1 for that
+	// reason.
+	DefaultHealthProbeBindAddress = "127.0.0.1:4269"
+	DefaultMetricsBindAddress     = "127.0.0.1:4270"
 )
 
 type config struct {

@@ -32,14 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
 	kubutils "github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/kubeutils"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 var (
@@ -74,7 +75,10 @@ func main() {
 	// Create default config Kubernetes client
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "error by reading a kubernetes configuration")
+		// Without a config the manager cannot be built at all; continuing only moved
+		// the failure a few lines down, to a message that does not name the cause.
+		log.Error("error by reading a kubernetes configuration", logger.Err(err))
+		os.Exit(1)
 	}
 	log.Info("read Kubernetes config")
 
@@ -83,7 +87,7 @@ func main() {
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "failed to add to scheme")
+			log.Error("failed to add to scheme", logger.Err(err))
 			os.Exit(1)
 		}
 	}
@@ -96,8 +100,8 @@ func main() {
 	}
 
 	managerOpts := manager.Options{
-		Scheme: scheme,
-		// MetricsBindAddress: cfgParams.MetricsPort,
+		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: cfgParams.MetricsBindAddress},
 		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
 		Cache:                   cacheOpt,
 		LeaderElection:          true,
@@ -107,7 +111,7 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "failed to create a manager")
+		log.Error("failed to create a manager", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("created kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
@@ -115,63 +119,63 @@ func main() {
 	controllerruntime.SetLogger(log.GetLogger())
 	lc, err := lapi.NewClient(lapi.Log(log))
 	if err != nil {
-		log.Error(err, "failed to create a linstor client")
+		log.Error("failed to create a linstor client", logger.Err(err))
 		os.Exit(1)
 	}
 
-	if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorNode controller")
+	if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, log); err != nil {
+		log.Error("failed to create the NewLinstorNode controller", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorNode controller starts")
 
-	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStorageClass controller")
+	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, log); err != nil {
+		log.Error("failed to create the NewReplicatedStorageClass controller", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("the NewReplicatedStorageClass controller starts")
 
-	if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStoragePool controller")
+	if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, log); err != nil {
+		log.Error("failed to create the NewReplicatedStoragePool controller", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("the NewReplicatedStoragePool controller starts")
 
-	if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorPortRangeWatcher controller")
+	if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, log); err != nil {
+		log.Error("failed to create the NewLinstorPortRangeWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorPortRangeWatcher controller starts")
 
-	if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewLinstorLeader controller")
+	if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, log); err != nil {
+		log.Error("failed to create the NewLinstorLeader controller", logger.Err(err))
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorLeader controller starts")
 
-	if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewStorageClassAnnotationsReconciler controller")
+	if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, log); err != nil {
+		log.Error("failed to create the NewStorageClassAnnotationsReconciler controller", logger.Err(err))
 		os.Exit(1)
 	}
 
-	controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log)
+	controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, log)
 	log.Info("the NewLinstorResourcesWatcher controller starts")
 
-	controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log)
+	controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, log)
 	log.Info("the RunReplicatedStorageClassWatcher controller starts")
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "unable to set up health check")
+		log.Error("unable to set up health check", logger.Err(err))
 		os.Exit(1)
 	}
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "unable to set up ready check")
+		log.Error("unable to set up ready check", logger.Err(err))
 		os.Exit(1)
 	}
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "error by starting the manager")
+		log.Error("error by starting the manager", logger.Err(err))
 		os.Exit(1)
 	}
 

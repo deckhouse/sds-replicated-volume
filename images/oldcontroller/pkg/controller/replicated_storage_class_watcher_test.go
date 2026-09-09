@@ -30,15 +30,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 func TestReplicatedStorageClassWatcher(t *testing.T) {
 	var (
 		cl        = newFakeClient()
 		ctx       = context.Background()
-		log       = logger.Logger{}
+		log       = logger.NewNop()
 		namespace = "test_namespace"
 	)
 

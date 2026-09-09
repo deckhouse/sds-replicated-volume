@@ -24,12 +24,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	"github.com/deckhouse/sds-common-lib/slogh"
+	"github.com/deckhouse/sds-common-lib/logger"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
@@ -37,17 +36,23 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	slogh.EnableConfigReload(ctx, nil)
-	logHandler := &slogh.Handler{}
-	log := slog.New(logHandler).
-		With("startedAt", time.Now().Format(time.RFC3339))
-	slog.SetDefault(log)
+	// LOG_LEVEL, the numeric 0..4 value lib-helm emits, in place of the slogh
+	// ConfigMap this app used to reload at runtime: that file carried a hard-coded
+	// level=INFO and never saw sdsReplicatedVolume.logLevel, so the module setting
+	// did nothing for this binary.
+	baseLog, err := logger.NewLoggerFromEnv(logger.InfoLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
+		os.Exit(1)
+	}
+	log := baseLog.With("startedAt", time.Now().Format(time.RFC3339))
+	slog.SetDefault(slog.New(log.Handler()))
 
-	crlog.SetLogger(logr.FromSlogHandler(logHandler))
+	crlog.SetLogger(log.GetLogger())
 
 	log.Info("controller app started")
 
-	err := run(ctx, log)
+	err = run(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
 		log.Error("exited unexpectedly", "err", err, "ctxerr", ctx.Err())
 		os.Exit(1)
@@ -59,7 +64,7 @@ func main() {
 	)
 }
 
-func run(ctx context.Context, log *slog.Logger) (err error) {
+func run(ctx context.Context, log logger.Logger) (err error) {
 	// The derived Context is canceled the first time a function passed to eg.Go
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)

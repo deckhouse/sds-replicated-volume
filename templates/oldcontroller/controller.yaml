@@ -22,11 +22,19 @@
   "podSecurityContext" "deckhouse"
   "additionalControllerEnvs" $linstorEnvs
   "controllerImageName" "oldcontroller"
+  "controllerMetricsPort" (int .Values.sdsReplicatedVolume.internal.oldControllerMetricsPort)
+  "controllerMetricsProxyPort" (int .Values.sdsReplicatedVolume.internal.oldControllerMetricsProxyPort)
 }}
 {{ include "helm_lib_module_controller_manifests" (list . $config) }}
 
-{{- /* Webhook Service */ -}}
-{{ include "helm_lib_module_webhook_service" (list . dict) }}
+{{- /* Webhook Service, with the controller metrics port on it so the
+       ServiceMonitor next to this file has something to select. */ -}}
+{{- $serviceConfig := dict
+  "additionalPorts" (list
+    (dict "name" "https-metrics" "port" (int .Values.sdsReplicatedVolume.internal.oldControllerMetricsProxyPort) "targetPort" "https-metrics")
+  )
+}}
+{{ include "helm_lib_module_webhook_service" (list . $serviceConfig) }}
 
 {{- /* ValidatingWebhookConfiguration for ReplicatedStoragePools */ -}}
 {{- $rspWebhookConfig := dict

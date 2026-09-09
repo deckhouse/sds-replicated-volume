@@ -27,6 +27,7 @@ spec:
       maxAllowed:
         cpu: 200m
         memory: 100Mi
+    {{- include "helm_lib_vpa_kube_rbac_proxy_resources" . | nindent 4 }}
 {{- end }}
 ---
 apiVersion: policy/v1
@@ -97,22 +98,70 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: SLOGH_CONFIG_PATH
-              value: "/etc/config/slogh.cfg"
+            - name: LOG_LEVEL
+              value: {{ include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | quote }}
+            {{- /*
+              Loopback: the endpoint authenticates nobody, and a pod port is reachable
+              from every pod in the cluster. The kube-rbac-proxy below is what
+              publishes it, after an authorization check -- the same shape the agent
+              of this module has always used.
+            */}}
+            - name: METRICS_BIND_ADDRESS
+              value: "127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.controllerMetricsPort }}"
             - name: SCHEDULER_EXTENDER_URL
               value: "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099"
             - name: DATA_NODE_SELECTOR
               value: {{ .Values.sdsReplicatedVolume.dataNodes.nodeSelector | toJson | quote }}
             - name: RESYNC_SLOTS_PER_NODE
               value: "{{ .Values.sdsReplicatedVolume.resyncSlotsPerNode }}"
-          volumeMounts:
-            - mountPath: /etc/config/
-              name: config
-      volumes:
-        - name: config
-          configMap:
-            name: controller-config
-            items:
-              - key: slogh.cfg
-                path: slogh.cfg
+        - name: kube-rbac-proxy
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 10 }}
+          image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):{{ .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort }}"
+            - "--v=2"
+            - "--logtostderr=true"
+            - "--stale-cache-interval=1h30m"
+            - "--livez-path=/livez"
+          env:
+            - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: KUBE_RBAC_PROXY_CONFIG
+              value: |
+                excludePaths:
+                - /livez
+                upstreams:
+                - upstream: http://127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.controllerMetricsPort }}/metrics
+                  path: /metrics
+                  authorization:
+                    resourceAttributes:
+                      namespace: d8-{{ .Chart.Name }}
+                      apiGroup: apps
+                      apiVersion: v1
+                      resource: deployments
+                      subresource: prometheus-metrics
+                      name: controller
+          ports:
+            - name: https-metrics
+              containerPort: {{ .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: {{ .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort }}
+              scheme: HTTPS
+          {{- /* No readinessProbe on purpose: readiness of the pod gates the endpoints of
+                 its Services, and a sidecar that only serves metrics must not be able to take
+                 the webhook or the APIService of this pod out of rotation. A proxy that wedges
+                 is restarted by the liveness probe, and a proxy that is not up yet is kept out
+                 of the scrape targets by the readiness filter in the PodMonitor/ServiceMonitor. */}}
+          resources:
+            requests:
+              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+              {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
+              {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 14 }}
+              {{- end }}
 {{- end }}

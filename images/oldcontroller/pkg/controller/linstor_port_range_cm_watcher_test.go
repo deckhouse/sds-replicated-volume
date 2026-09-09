@@ -30,12 +30,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 func TestLinstorPortRangeWatcher(t *testing.T) {
 	ctx := context.Background()
-	log := logger.Logger{}
+	log := logger.NewNop()
 	cl := newFakeClient()
 
 	t.Run("updateConfigMapLabel", func(t *testing.T) {

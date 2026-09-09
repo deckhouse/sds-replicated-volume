@@ -27,10 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
@@ -234,7 +234,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		goodReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodReplicatedStoragePool.Namespace, Name: goodReplicatedStoragePool.Name}}
-		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, *log, lc)
+		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
 
@@ -253,7 +253,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		badReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badReplicatedStoragePool.Namespace, Name: badReplicatedStoragePool.Name}}
-		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, *log, lc)
+		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
 

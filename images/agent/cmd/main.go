@@ -24,12 +24,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	"github.com/deckhouse/sds-common-lib/slogh"
+	"github.com/deckhouse/sds-common-lib/logger"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
@@ -38,18 +37,24 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	slogh.EnableConfigReload(ctx, nil)
-	logHandler := &slogh.Handler{}
-	log := slog.New(logHandler).
-		With("startedAt", time.Now().Format(time.RFC3339))
-	crlog.SetLogger(logr.FromSlogHandler(logHandler))
-	slog.SetDefault(log)
+	// LOG_LEVEL, the numeric 0..4 value lib-helm emits, in place of the slogh
+	// ConfigMap this app used to reload at runtime: that file carried a hard-coded
+	// level=INFO and never saw sdsReplicatedVolume.logLevel, so the module setting
+	// did nothing for this binary.
+	baseLog, err := logger.NewLoggerFromEnv(logger.InfoLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
+		os.Exit(1)
+	}
+	log := baseLog.With("startedAt", time.Now().Format(time.RFC3339))
+	crlog.SetLogger(log.GetLogger())
+	slog.SetDefault(slog.New(log.Handler()))
 
 	log.Info("agent app started")
 
-	err := run(ctx, log)
+	err = run(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		log.Error("agent exited unexpectedly", "err", err, "ctxerr", ctx.Err())
+		log.Error("agent exited unexpectedly", logger.Err(err), slog.Any("ctxError", ctx.Err()))
 		os.Exit(1)
 	}
 	log.Info(
@@ -61,7 +66,7 @@ func main() {
 
 const drbdUsermodeHelperPath = "/sys/module/drbd/parameters/usermode_helper"
 
-func disableDRBDUsermodeHelper(log *slog.Logger) {
+func disableDRBDUsermodeHelper(log logger.Logger) {
 	// MUST be exactly "disabled" without a trailing newline: DRBD's
 	// drbd_maybe_khelper short-circuits on strcmp(drbd_usermode_helper,
 	// "disabled") == 0 (see 3p-drbd drbd/drbd_nl.c). The kernel's
@@ -77,7 +82,7 @@ func disableDRBDUsermodeHelper(log *slog.Logger) {
 	}
 }
 
-func run(ctx context.Context, log *slog.Logger) (err error) {
+func run(ctx context.Context, log logger.Logger) (err error) {
 	// Detect capabilities first: it runs "drbdsetup status", which loads and
 	// initializes the DRBD kernel module when /sys/module/drbd is absent. The
 	// usermode-helper write below targets /sys/module/drbd and needs it present.

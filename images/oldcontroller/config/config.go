@@ -20,7 +20,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring"
 )
 
 // ScanInterval Scan block device interval seconds
@@ -33,11 +34,9 @@ const (
 	NodeName                             = "NODE_NAME"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":8081"
-	MetricsPortEnv                       = "METRICS_PORT"
 	ControllerNamespaceEnv               = "CONTROLLER_NAMESPACE"
 	HardcodedControllerNS                = "d8-sds-replicated-volume"
 	ControllerName                       = "d8-controller"
-	LogLevel                             = "LOG_LEVEL"
 )
 
 type Options struct {
@@ -46,11 +45,17 @@ type Options struct {
 	ReplicatedStorageClassWatchInterval int
 	ConfigSecretName                    string
 	LinstorLeaseName                    string
-	MetricsPort                         string
+	MetricsBindAddress                  string
 	HealthProbeBindAddress              string
 	ControllerNamespace                 string
 	Loglevel                            logger.Verbosity
 }
+
+// defaultMetricsBindAddress keeps the endpoint on loopback when the chart says
+// nothing: the kube-rbac-proxy of the same pod is what publishes it. The fleet-wide
+// fallback is the wildcard ":8080", which would both answer unauthenticated on the
+// pod IP and collide with the proxy, since the two carry the same port number.
+const defaultMetricsBindAddress = "127.0.0.1:8080"
 
 func NewConfig() (*Options, error) {
 	var opts Options
@@ -60,17 +65,16 @@ func NewConfig() (*Options, error) {
 	opts.LinstorLeaseName = LinstorLeaseName
 	opts.ConfigSecretName = ConfigSecretName
 
-	loglevel := os.Getenv(LogLevel)
-	if loglevel == "" {
-		opts.Loglevel = logger.DebugLevel
-	} else {
-		opts.Loglevel = logger.Verbosity(loglevel)
-	}
+	// Info, not Debug: an unset LOG_LEVEL has to mean the same thing in every
+	// binary of the fleet, and the chart sets the variable in every container
+	// anyway, so this is only what a container started outside the chart gets.
+	opts.Loglevel = logger.VerbosityFromEnv(logger.InfoLevel)
 
-	opts.MetricsPort = os.Getenv(MetricsPortEnv)
-	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":8080"
-	}
+	// METRICS_BIND_ADDRESS, the name the rest of the fleet reads. The value used to
+	// be parsed from METRICS_PORT and then thrown away: the manager option that
+	// consumed it had been commented out since controller-runtime moved it into
+	// Metrics.BindAddress, so the endpoint ran on the library default.
+	opts.MetricsBindAddress = monitoring.BindAddressFromEnvOr(defaultMetricsBindAddress)
 
 	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if opts.HealthProbeBindAddress == "" {

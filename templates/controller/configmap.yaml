@@ -14,18 +14,4 @@ data:
 {{- else }}
   virtualizationEnabled: "false"
 {{- end }}
-  slogh.cfg: |
-    # those are all keys with default values:
-
-    # any slog level, or just a number
-    level=INFO
-
-    # also supported: "text"
-    format=json
-
-    # for each log print "source" property with information about callsite
-    callsite=true
-
-    render=true
-    stringValues=true
 {{- end }}

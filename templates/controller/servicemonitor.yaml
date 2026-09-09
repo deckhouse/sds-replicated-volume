@@ -9,9 +9,14 @@ metadata:
   {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
 spec:
   endpoints:
-  - port: metrics
-    scheme: http
+  - port: https-metrics
+    scheme: https
     path: /metrics
+    bearerTokenSecret:
+      name: "prometheus-token"
+      key: "token"
+    tlsConfig:
+      insecureSkipVerify: true
     relabelings:
     - regex: endpoint|namespace|pod|container
       action: labeldrop

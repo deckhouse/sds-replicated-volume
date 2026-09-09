@@ -26,9 +26,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 var _ = Describe(controller.LinstorNodeControllerName, func() {
@@ -201,7 +201,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		mockLc, err := NewLinstorClientWithMockNodes()
 		Expect(err).NotTo(HaveOccurred())
 
-		log := logger.Logger{}
+		log := logger.NewNop()
 		drbdNodeSelector := map[string]string{controller.SdsReplicatedVolumeNodeSelectorKey: ""}
 		replicatedStorageClasses := srv.ReplicatedStorageClassList{}
 		Expect(err).NotTo(HaveOccurred())

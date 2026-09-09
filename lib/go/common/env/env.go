@@ -26,12 +26,16 @@ import (
 	"errors"
 	"os"
 	"strings"
+
+	"github.com/deckhouse/sds-common-lib/monitoring"
 )
 
 const (
 	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
-	MetricsBindAddressEnvVar     = "METRICS_BIND_ADDRESS"
-	EnabledControllersEnvVar     = "ENABLED_CONTROLLERS"
+	// The fleet-wide spelling, taken from the package that owns it rather than
+	// repeated here, so the two cannot drift apart.
+	MetricsBindAddressEnvVar = monitoring.EnvMetricsBindAddress
+	EnabledControllersEnvVar = "ENABLED_CONTROLLERS"
 )
 
 // ErrInvalidConfig is returned (wrapped) when the loaded environment is

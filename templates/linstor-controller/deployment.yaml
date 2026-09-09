@@ -226,11 +226,12 @@ spec:
             path: /livez
             port: 3370
             scheme: HTTPS
-        readinessProbe:
-          httpGet:
-            path: /livez
-            port: 3370
-            scheme: HTTPS
+        {{- /* No readinessProbe on purpose: this pod's readiness fills the endpoints of
+               Service/linstor, which is the LINSTOR API the CSI driver and the controller
+               talk to. A sidecar that only serves metrics must not be able to take that
+               API out of rotation; a wedged proxy is still restarted by the liveness probe.
+               The cost is a scrape or two failing during a rollout, while this container
+               starts after the pod is already Ready. */}}
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}

@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 const (
@@ -56,7 +56,7 @@ func NewLinstorLeader(
 				log.Info("Start reconcile of linstor-controller pods.")
 				err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 				if err != nil {
-					log.Error(err, "Failed reconcile linstor-controller pods")
+					log.Error("Failed reconcile linstor-controller pods", logger.Err(err))
 					return reconcile.Result{
 						RequeueAfter: time.Duration(interval) * time.Second,
 					}, nil
@@ -80,7 +80,7 @@ func NewLinstorLeader(
 					log.Info("Start of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
 					err = reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
+						log.Error(fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval), logger.Err(err))
 						q.AddAfter(request, time.Duration(interval)*time.Second)
 					}
 
@@ -109,7 +109,7 @@ func NewLinstorLeader(
 						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 						err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 						if err != nil {
-							log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
+							log.Error(fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval), logger.Err(err))
 							q.AddAfter(request, time.Duration(interval)*time.Second)
 						}
 						log.Info("END from UPDATE event of leases.coordination.k8s.io with name: " + e.ObjectNew.GetName())
@@ -132,7 +132,7 @@ func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log l
 		Namespace: linstorNamespace,
 	}, linstorLease)
 	if err != nil {
-		log.Error(err, "Failed get lease:"+linstorNamespace+"/"+linstorLeaseName)
+		log.Error("Failed get lease:"+linstorNamespace+"/"+linstorLeaseName, logger.Err(err))
 		return err
 	}
 
@@ -145,7 +145,7 @@ func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log l
 	linstorControllerPods := &v1.PodList{}
 	err = cl.List(ctx, linstorControllerPods, client.InNamespace(linstorNamespace), client.MatchingLabels{"app": LinstorControllerAppLabelValue})
 	if err != nil {
-		log.Error(err, "Failed get linstor-controller pods by label app="+LinstorControllerAppLabelValue)
+		log.Error("Failed get linstor-controller pods by label app="+LinstorControllerAppLabelValue, logger.Err(err))
 		return err
 	}
 
@@ -157,7 +157,7 @@ func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log l
 				delete(pod.Labels, LinstorLeaderLabel)
 				err := cl.Update(ctx, &pod)
 				if err != nil {
-					log.Error(err, "Failed update pod:"+pod.Namespace+"/"+pod.Name)
+					log.Error("Failed update pod:"+pod.Namespace+"/"+pod.Name, logger.Err(err))
 					return err
 				}
 			}
@@ -172,7 +172,7 @@ func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log l
 			pod.Labels[LinstorLeaderLabel] = "true"
 			err := cl.Update(ctx, &pod)
 			if err != nil {
-				log.Error(err, "Failed update pod:"+pod.Namespace+"/"+pod.Name)
+				log.Error("Failed update pod:"+pod.Namespace+"/"+pod.Name, logger.Err(err))
 				return err
 			}
 		}

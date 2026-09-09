@@ -18,6 +18,7 @@ package utils //nolint:revive // pre-existing package name; renaming is a separa
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,7 +28,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 
 	"github.com/deckhouse/sds-common-lib/fsreserve"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type NodeStoreManager interface {
@@ -43,11 +44,11 @@ type NodeStoreManager interface {
 }
 
 type Store struct {
-	Log         *logger.Logger
+	Log         logger.Logger
 	NodeStorage mountutils.SafeFormatAndMount
 }
 
-func NewStore(logger *logger.Logger) *Store {
+func NewStore(logger logger.Logger) *Store {
 	return &Store{
 		Log: logger,
 		NodeStorage: mountutils.SafeFormatAndMount{
@@ -61,11 +62,11 @@ func (s *Store) NodeStageVolumeFS(source, target string, fsType string, mountOpt
 	s.Log.Trace(" ----== Start NodeStageVolumeFS ==---- ")
 
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Format options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
-	s.Log.Trace(fmt.Sprintf("[format] params device=%s fs=%s formatOptions=%v", source, fsType, formatOpts))
+	s.Log.Named("format").Trace(fmt.Sprintf("params device=%s fs=%s formatOptions=%v", source, fsType, formatOpts))
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Format options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
 
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Mount options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
-	s.Log.Trace(fmt.Sprintf("[mount] params source=%s target=%s fs=%s mountOptions=%v", source, target, fsType, mountOpts))
+	s.Log.Named("mount").Trace(fmt.Sprintf("params source=%s target=%s fs=%s mountOptions=%v", source, target, fsType, mountOpts))
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Mount options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
 
 	info, err := os.Stat(source)
@@ -165,7 +166,7 @@ func (s *Store) setReservedPercent(devicePath, fsType string, reservedPercent in
 	}
 
 	if !fsreserve.SupportedFSType(fsType) {
-		s.Log.Warning(fmt.Sprintf("filesystem %s keeps no blocks for the superuser, ignoring the requested reserve of %d%% on %s",
+		s.Log.Warn(fmt.Sprintf("filesystem %s keeps no blocks for the superuser, ignoring the requested reserve of %d%% on %s",
 			fsType, reservedPercent, devicePath))
 		return nil
 	}
@@ -182,10 +183,12 @@ func (s *Store) setReservedPercent(devicePath, fsType string, reservedPercent in
 }
 
 func (s *Store) NodePublishVolumeBlock(source, target string, mountOpts []string) error {
+	log := s.Log.Named("NodePublishVolumeBlock")
+
 	s.Log.Info(" ----== Start NodePublishVolumeBlock ==---- ")
 
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Mount options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
-	s.Log.Trace(fmt.Sprintf("[NodePublishVolumeBlock] params source=%s target=%s mountOptions=%v", source, target, mountOpts))
+	log.Trace(fmt.Sprintf("params source=%s target=%s mountOptions=%v", source, target, mountOpts))
 	s.Log.Trace("≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈ Mount options ≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈≈")
 
 	info, err := os.Stat(source)
@@ -218,7 +221,7 @@ func (s *Store) NodePublishVolumeBlock(source, target string, mountOpts []string
 			// block device path, so checkMount() cannot verify the source.
 			// The target path is unique per volume and pod, which makes a
 			// false-positive mount point practically impossible.
-			s.Log.Info(fmt.Sprintf("[NodePublishVolumeBlock] target %s is already a mount point. Skipping mount", target))
+			log.Info(fmt.Sprintf("target %s is already a mount point. Skipping mount", target))
 			return nil
 		}
 	}
@@ -236,7 +239,7 @@ func (s *Store) NodePublishVolumeBlock(source, target string, mountOpts []string
 	s.Log.Trace("-----------------== start Mount ==---------------")
 	err = s.NodeStorage.Mount(source, target, "", mountOpts)
 	if err != nil {
-		s.Log.Error(err, "[NodePublishVolumeBlock] mount error :")
+		s.Log.Error("mount error :", logger.Err(err))
 		return err
 	}
 	s.Log.Trace("-----------------== stop Mount ==---------------")
@@ -245,8 +248,10 @@ func (s *Store) NodePublishVolumeBlock(source, target string, mountOpts []string
 }
 
 func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, mountOpts []string) error {
+	log := s.Log.Named("NodePublishVolumeFS")
+
 	s.Log.Info(" ----== Start NodePublishVolumeFS ==---- ")
-	s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] params source=%q target=%q mountOptions=%v", source, target, mountOpts))
+	log.Trace(fmt.Sprintf("params source=%q target=%q mountOptions=%v", source, target, mountOpts))
 	isMountPoint := false
 	exists, err := s.PathExists(target)
 	if err != nil {
@@ -254,25 +259,25 @@ func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, moun
 	}
 
 	if exists {
-		s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] target file %s already exists", target))
+		log.Trace(fmt.Sprintf("target file %s already exists", target))
 		isMountPoint, err = s.NodeStorage.IsMountPoint(target)
 		if err != nil {
 			return fmt.Errorf("[NodePublishVolumeFS] could not check if target file %s is a mount point: %w", target, err)
 		}
 	} else {
-		s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] creating target file %q", target))
+		log.Trace(fmt.Sprintf("creating target file %q", target))
 		if err := os.MkdirAll(target, os.FileMode(0755)); err != nil {
 			return fmt.Errorf("[NodePublishVolumeFS] could not create target file %q: %w", target, err)
 		}
 	}
 
 	if isMountPoint {
-		s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] target directory %q is a mount point. Check mount", target))
+		log.Trace(fmt.Sprintf("target directory %q is a mount point. Check mount", target))
 		err := checkMount(s, devPath, target, mountOpts)
 		if err != nil {
 			return fmt.Errorf("[NodePublishVolumeFS] failed to check mount info for %q: %w", target, err)
 		}
-		s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] target directory %q is a mount point and already mounted to source %s. Skipping mount", target, source))
+		log.Trace(fmt.Sprintf("target directory %q is a mount point and already mounted to source %s. Skipping mount", target, source))
 		return nil
 	}
 
@@ -298,7 +303,7 @@ func (s *Store) NodePublishVolumeFS(source, devPath, target, fsType string, moun
 		return fmt.Errorf("[NodePublishVolumeFS] staging path %q is mounted from device %q, expected %s (mapper: %s, resolved: %s)",
 			source, mountedDevice, devPath, mapperDevPath, resolvedDevPath)
 	}
-	s.Log.Trace(fmt.Sprintf("[NodePublishVolumeFS] staging path %q is mounted from expected device %s", source, mountedDevice))
+	log.Trace(fmt.Sprintf("staging path %q is mounted from expected device %s", source, mountedDevice))
 
 	err = s.NodeStorage.Mount(source, target, fsType, mountOpts)
 	if err != nil {
@@ -343,7 +348,7 @@ func (s *Store) ResizeFS(mountTarget string) error {
 	s.Log.Info(" ----== Resize FS ==---- ")
 	devicePath, _, err := mountutils.GetDeviceNameFromMount(s.NodeStorage.Interface, mountTarget)
 	if err != nil {
-		s.Log.Error(err, "Failed to find the device mounted at mountTarget", "mountTarget", mountTarget)
+		s.Log.Error("Failed to find the device mounted at mountTarget", logger.Err(err), slog.Any("mountTarget", mountTarget))
 		return fmt.Errorf("failed to find the device mounted at %s: %w", mountTarget, err)
 	}
 
@@ -351,7 +356,7 @@ func (s *Store) ResizeFS(mountTarget string) error {
 
 	_, err = mountutils.NewResizeFs(s.NodeStorage.Exec).Resize(devicePath, mountTarget)
 	if err != nil {
-		s.Log.Error(err, "Failed to resize filesystem", "devicePath", devicePath, "mountTarget", mountTarget)
+		s.Log.Error("Failed to resize filesystem", logger.Err(err), slog.Any("devicePath", devicePath), slog.Any("mountTarget", mountTarget))
 		return fmt.Errorf("failed to resize filesystem %s on device %s: %w", mountTarget, devicePath, err)
 	}
 
@@ -387,6 +392,8 @@ func resolveDevicePath(devPath string) string {
 }
 
 func checkMount(s *Store, devPath, target string, mountOpts []string) error {
+	log := s.Log.Named("checkMount")
+
 	mntInfo, err := s.NodeStorage.List()
 	if err != nil {
 		return fmt.Errorf("[checkMount] failed to list mounts: %w", err)
@@ -399,15 +406,15 @@ func checkMount(s *Store, devPath, target string, mountOpts []string) error {
 			if m.Device != devPath && m.Device != mapperDevicePath && m.Device != resolvedDevPath {
 				return fmt.Errorf("[checkMount] device from mount point %q does not match expected source device path %s, mapper device path %s or resolved device path %s", m.Device, devPath, mapperDevicePath, resolvedDevPath)
 			}
-			s.Log.Trace(fmt.Sprintf("[checkMount] mount point %s is mounted to device %s", target, m.Device))
+			log.Trace(fmt.Sprintf("mount point %s is mounted to device %s", target, m.Device))
 
 			if slices.Contains(mountOpts, "ro") {
 				if !slices.Contains(m.Opts, "ro") {
 					return fmt.Errorf("[checkMount] passed mount options contain 'ro' but mount options from mount point %q do not", target)
 				}
-				s.Log.Trace(fmt.Sprintf("[checkMount] mount point %s is mounted read-only", target))
+				log.Trace(fmt.Sprintf("mount point %s is mounted read-only", target))
 			}
-			s.Log.Trace(fmt.Sprintf("[checkMount] mount point %s is mounted to device %s with mount options %v", target, m.Device, m.Opts))
+			log.Trace(fmt.Sprintf("mount point %s is mounted to device %s with mount options %v", target, m.Device, m.Opts))
 
 			return nil
 		}

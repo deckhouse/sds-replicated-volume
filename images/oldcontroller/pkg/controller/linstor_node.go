@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
 )
 
 const (
@@ -97,7 +97,7 @@ func NewLinstorNode(
 				log.Info("Start reconcile of LINSTOR nodes.")
 				err := reconcileLinstorNodes(ctx, cl, lc, log, request.Namespace, request.Name, drbdNodeSelector)
 				if err != nil {
-					log.Error(nil, "Failed reconcile of LINSTOR nodes")
+					log.Error("Failed reconcile of LINSTOR nodes")
 				} else {
 					log.Info("END reconcile of LINSTOR nodes.")
 				}
@@ -134,73 +134,73 @@ func reconcileLinstorNodes(
 
 	configSecret, err := GetKubernetesSecretByName(ctx, cl, secretName, secretNamespace)
 	if err != nil {
-		log.Error(err, "Failed get secret:"+secretNamespace+"/"+secretName)
+		log.Error("Failed get secret:"+secretNamespace+"/"+secretName, logger.Err(err))
 		return err
 	}
 
 	configNodeSelector, err := GetNodeSelectorFromConfig(*configSecret)
 	if err != nil {
-		log.Error(err, "Failed get node selector from secret:"+secretName+"/"+secretNamespace)
+		log.Error("Failed get node selector from secret:"+secretName+"/"+secretNamespace, logger.Err(err))
 		return err
 	}
 	selectedKubernetesNodes, err := GetKubernetesNodesBySelector(ctx, cl, configNodeSelector)
 	if err != nil {
-		log.Error(err, "Failed get nodes from Kubernetes by selector:"+fmt.Sprint(configNodeSelector))
+		log.Error("Failed get nodes from Kubernetes by selector:"+fmt.Sprint(configNodeSelector), logger.Err(err))
 		return err
 	}
 
 	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
 	if err != nil {
-		log.Error(err, "Failed get LINSTOR nodes")
+		log.Error("Failed get LINSTOR nodes", logger.Err(err))
 		return err
 	}
 
 	replicatedStorageClasses := srv.ReplicatedStorageClassList{}
 	err = cl.List(ctx, &replicatedStorageClasses)
 	if err != nil {
-		log.Error(err, "Failed get DRBD storage classes")
+		log.Error("Failed get DRBD storage classes", logger.Err(err))
 		return err
 	}
 
 	if len(selectedKubernetesNodes.Items) != 0 {
 		err = AddOrConfigureDRBDNodes(ctx, cl, lc, log, selectedKubernetesNodes, linstorSatelliteNodes, replicatedStorageClasses, drbdNodeSelector)
 		if err != nil {
-			log.Error(err, "Failed add DRBD nodes:")
+			log.Error("Failed add DRBD nodes:", logger.Err(err))
 			return err
 		}
 	} else {
-		log.Warning("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector))
+		log.Warn("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector))
 	}
 
 	err = renameLinbitLabels(ctx, cl, selectedKubernetesNodes.Items)
 	if err != nil {
-		log.Error(err, "[reconcileLinstorNodes] unable to rename linbit labels")
+		log.Error("unable to rename linbit labels", logger.Err(err))
 		return err
 	}
 
 	err = ReconcileCSINodeLabels(ctx, cl, log, selectedKubernetesNodes.Items)
 	if err != nil {
-		log.Error(err, "[reconcileLinstorNodes] unable to reconcile CSI node labels")
+		log.Error("unable to reconcile CSI node labels", logger.Err(err))
 		return err
 	}
 
 	// Remove logic
 	allKubernetesNodes, err := GetAllKubernetesNodes(ctx, cl)
 	if err != nil {
-		log.Error(err, "Failed get all nodes from Kubernetes")
+		log.Error("Failed get all nodes from Kubernetes", logger.Err(err))
 		return err
 	}
 	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
 
 	err = removeDRBDNodes(ctx, cl, log, drbdNodesToRemove, linstorSatelliteNodes, replicatedStorageClasses, drbdNodeSelector)
 	if err != nil {
-		log.Error(err, "Failed remove DRBD nodes:")
+		log.Error("Failed remove DRBD nodes:", logger.Err(err))
 		return err
 	}
 
 	err = removeLinstorControllerNodes(ctx, lc, log, linstorControllerNodes)
 	if err != nil {
-		log.Error(err, "Failed remove LINSTOR controller nodes:")
+		log.Error("Failed remove LINSTOR controller nodes:", logger.Err(err))
 		return err
 	}
 
@@ -208,6 +208,8 @@ func reconcileLinstorNodes(
 }
 
 func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Logger, nodes []v1.Node) error {
+	log = log.Named("syncCSINodesLabels")
+
 	nodeLabels := make(map[string]map[string]string, len(nodes))
 	for _, node := range nodes {
 		nodeLabels[node.Name] = node.Labels
@@ -216,12 +218,12 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 	csiList := &storagev1.CSINodeList{}
 	err := cl.List(ctx, csiList)
 	if err != nil {
-		log.Error(err, "[syncCSINodesLabels] unable to list CSI nodes")
+		log.Error("unable to list CSI nodes", logger.Err(err))
 		return err
 	}
 
 	for _, csiNode := range csiList.Items {
-		log.Debug(fmt.Sprintf("[syncCSINodesLabels] starts the topology keys check for a CSI node %s", csiNode.Name))
+		log.Debug(fmt.Sprintf("starts the topology keys check for a CSI node %s", csiNode.Name))
 
 		var (
 			kubeNodeLabelsToSync = make(map[string]struct{}, len(nodeLabels[csiNode.Name]))
@@ -230,7 +232,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		)
 
 		for _, driver := range csiNode.Spec.Drivers {
-			log.Trace(fmt.Sprintf("[syncCSINodesLabels] CSI node %s has a driver %s", csiNode.Name, driver.Name))
+			log.Trace(fmt.Sprintf("CSI node %s has a driver %s", csiNode.Name, driver.Name))
 			if driver.Name == LinstorDriverName {
 				syncedCSIDriver = driver
 				csiTopoKeys = make(map[string]struct{}, len(driver.TopologyKeys))
@@ -242,7 +244,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		}
 
 		if syncedCSIDriver.Name == "" {
-			log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s does not have a driver %s", csiNode.Name, LinstorDriverName))
+			log.Debug(fmt.Sprintf("CSI node %s does not have a driver %s", csiNode.Name, LinstorDriverName))
 			continue
 		}
 
@@ -260,33 +262,33 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		}
 
 		if reflect.DeepEqual(kubeNodeLabelsToSync, csiTopoKeys) {
-			log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s topology keys is synced with its corresponding node", csiNode.Name))
+			log.Debug(fmt.Sprintf("CSI node %s topology keys is synced with its corresponding node", csiNode.Name))
 			return nil
 		}
-		log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s topology keys need to be synced with its corresponding node labels", csiNode.Name))
+		log.Debug(fmt.Sprintf("CSI node %s topology keys need to be synced with its corresponding node labels", csiNode.Name))
 
 		syncedTopologyKeys := make([]string, 0, len(kubeNodeLabelsToSync))
 		for label := range kubeNodeLabelsToSync {
 			syncedTopologyKeys = append(syncedTopologyKeys, label)
 		}
-		log.Trace(fmt.Sprintf("[syncCSINodesLabels] final topology keys for a CSI node %s: %v", csiNode.Name, syncedTopologyKeys))
+		log.Trace(fmt.Sprintf("final topology keys for a CSI node %s: %v", csiNode.Name, syncedTopologyKeys))
 		syncedCSIDriver.TopologyKeys = syncedTopologyKeys
 
 		err = removeDriverFromCSINode(ctx, cl, &csiNode, syncedCSIDriver.Name)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[syncCSINodesLabels] unable to remove driver %s from CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+			log.Error(fmt.Sprintf("unable to remove driver %s from CSI node %s", syncedCSIDriver.Name, csiNode.Name), logger.Err(err))
 			return err
 		}
-		log.Debug(fmt.Sprintf("[syncCSINodesLabels] removed old driver %s of a CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+		log.Debug(fmt.Sprintf("removed old driver %s of a CSI node %s", syncedCSIDriver.Name, csiNode.Name))
 
 		err = addDriverToCSINode(ctx, cl, &csiNode, syncedCSIDriver)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[syncCSINodesLabels] unable to add driver %s to a CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+			log.Error(fmt.Sprintf("unable to add driver %s to a CSI node %s", syncedCSIDriver.Name, csiNode.Name), logger.Err(err))
 			return err
 		}
 
-		log.Debug(fmt.Sprintf("[syncCSINodesLabels] add updated driver %s of the CSI node %s", syncedCSIDriver.Name, csiNode.Name))
-		log.Debug(fmt.Sprintf("[syncCSINodesLabels] successfully updated topology keys for CSI node %s", csiNode.Name))
+		log.Debug(fmt.Sprintf("add updated driver %s of the CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+		log.Debug(fmt.Sprintf("successfully updated topology keys for CSI node %s", csiNode.Name))
 	}
 
 	return nil
@@ -365,7 +367,7 @@ func removeDRBDNodes(
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
 				log.Info(fmt.Sprintf("Detected a LINSTOR node '%s' that no longer matches the user-defined selector and needs to be removed. Initiating the deletion process.", drbdNodeToRemove.Name))
-				log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+				log.Error("Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
 				break
 			}
 		}
@@ -643,7 +645,7 @@ func ReconcileKubernetesNodeLabels(
 		}
 	} else if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
 		log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing DRBD label.", kubernetesNode.Name))
-		log.Error(nil, "Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
+		log.Error("Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
 	}
 
 	for labelKey := range kubernetesNode.Labels {

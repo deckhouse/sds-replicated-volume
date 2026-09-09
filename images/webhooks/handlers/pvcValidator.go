@@ -29,7 +29,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -89,11 +88,11 @@ func PVCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	}
 
 	if userAllowed(arReview.UserInfo.Username, arReview.UserInfo.Groups, allowedUsernames, allowedGroups) {
-		klog.Infof("User %s is allowed to create RWX PVC with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
+		log.Info(fmt.Sprintf("User %s is allowed to create RWX PVC with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner))
 		return &kwhvalidating.ValidatorResult{Valid: true}, nil
 	}
 
-	klog.Infof("User %s is not allowed to create RWX PVC with provisioner %s (storageClass=%s)", arReview.UserInfo.Username, replicatedCSIProvisioner, sc.Name)
+	log.Info(fmt.Sprintf("User %s is not allowed to create RWX PVC with provisioner %s (storageClass=%s)", arReview.UserInfo.Username, replicatedCSIProvisioner, sc.Name))
 	return &kwhvalidating.ValidatorResult{
 		Valid: false,
 		Message: fmt.Sprintf(

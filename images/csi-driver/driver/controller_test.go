@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const testStuckFinalizer = "test.deckhouse.io/stuck"
@@ -48,7 +48,7 @@ func newTestDriver(t *testing.T, cl client.Client, timeout time.Duration) *Drive
 		cl:                cl,
 		log:               log,
 		waitActionTimeout: timeout,
-		inFlight:          internal.NewInFlight(),
+		inFlight:          internal.NewInFlight(log),
 	}
 }
 

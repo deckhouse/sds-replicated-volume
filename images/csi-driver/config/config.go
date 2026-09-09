@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (
 	NodeName                             = "KUBE_NODE_NAME"
-	LogLevel                             = "LOG_LEVEL"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":8081"
 )
@@ -55,12 +54,10 @@ func NewConfig() (*Options, error) {
 		opts.HealthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
-	loglevel := os.Getenv(LogLevel)
-	if loglevel == "" {
-		opts.Loglevel = logger.DebugLevel
-	} else {
-		opts.Loglevel = logger.Verbosity(loglevel)
-	}
+	// Info, not Debug: an unset LOG_LEVEL has to mean the same thing in every
+	// binary of the fleet, and the chart sets the variable in every container
+	// anyway, so this is only what a container started outside the chart gets.
+	opts.Loglevel = logger.VerbosityFromEnv(logger.InfoLevel)
 
 	opts.Version = "dev"
 

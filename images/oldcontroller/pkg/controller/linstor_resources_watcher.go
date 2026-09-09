@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 const (
@@ -78,16 +78,18 @@ func NewLinstorResourcesWatcher(
 	cl := mgr.GetClient()
 	ctx := context.Background()
 
-	log.Info(fmt.Sprintf("[NewLinstorResourcesWatcher] the controller %s starts the work", linstorResourcesWatcherCtrlName))
+	log.Named("NewLinstorResourcesWatcher").Info(fmt.Sprintf("the controller %s starts the work", linstorResourcesWatcherCtrlName))
 
 	go func() {
+		log := log.Named("NewLinstorResourcesWatcher")
+
 		for {
 			time.Sleep(time.Second * time.Duration(interval))
-			log.Info("[NewLinstorResourcesWatcher] starts reconcile")
+			log.Info("starts reconcile")
 
 			runLinstorResourcesReconcile(ctx, log, cl, lc)
 
-			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
+			log.Info("ends reconcile")
 		}
 	}()
 }
@@ -98,9 +100,11 @@ func runLinstorResourcesReconcile(
 	cl client.Client,
 	lc *lapi.Client,
 ) {
+	log = log.Named("runLinstorResourcesReconcile")
+
 	scs, err := GetStorageClasses(ctx, cl)
 	if err != nil {
-		log.Error(err, "[runLinstorResourcesReconcile] unable to get Kubernetes Storage Classes")
+		log.Error("unable to get Kubernetes Storage Classes", logger.Err(err))
 		return
 	}
 
@@ -111,7 +115,7 @@ func runLinstorResourcesReconcile(
 
 	rds, err := lc.ResourceDefinitions.GetAll(ctx, lapi.RDGetAllRequest{})
 	if err != nil {
-		log.Error(err, "[runLinstorResourcesReconcile] unable to get Linstor Resource Definitions")
+		log.Error("unable to get Linstor Resource Definitions", logger.Err(err))
 		return
 	}
 
@@ -122,7 +126,7 @@ func runLinstorResourcesReconcile(
 
 	rgs, err := lc.ResourceGroups.GetAll(ctx)
 	if err != nil {
-		log.Error(err, "[runLinstorResourcesReconcile] unable to get Linstor Resource Groups")
+		log.Error("unable to get Linstor Resource Groups", logger.Err(err))
 		return
 	}
 
@@ -133,7 +137,7 @@ func runLinstorResourcesReconcile(
 
 	pvs, err := GetListPV(ctx, cl)
 	if err != nil {
-		log.Error(err, "[runLinstorResourcesReconcile] unable to get Persistent Volumes")
+		log.Error("unable to get Persistent Volumes", logger.Err(err))
 		return
 	}
 
@@ -153,7 +157,7 @@ func runLinstorResourcesReconcile(
 	for name := range rdMap {
 		res, err := lc.Resources.GetAll(ctx, name)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[runLinstorResourcesReconcile] unable to get Linstor Resources, name: %s", name))
+			log.Error(fmt.Sprintf("unable to get Linstor Resources, name: %s", name), logger.Err(err))
 			return
 		}
 		resMap[name] = res
@@ -174,34 +178,36 @@ func ReconcileParams(
 	rgs map[string]lapi.ResourceGroup,
 	pvs []*core.PersistentVolume,
 ) {
-	log.Info("[ReconcileParams] starts work")
+	log = log.Named("ReconcileParams")
+
+	log.Info("starts work")
 
 	for _, pv := range pvs {
 		sc := scs[pv.Spec.StorageClassName]
 		rd := rds[pv.Name]
 		RGName := rd.ResourceGroupName
 		rg := rgs[RGName]
-		log.Debug(fmt.Sprintf("[ReconcileParams] PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
+		log.Debug(fmt.Sprintf("PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
 
 		if missMatched := getMissMatchedParams(sc, rg); len(missMatched) > 0 {
-			log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have missmatched params."+
+			log.Info(fmt.Sprintf("the Kubernetes Storage Class %s and the Linstor Resource Group %s have missmatched params."+
 				" The corresponding PV %s will have the special missmatched label %s if needed", sc.Name, rg.Name, pv.Name, missMatchedLabel))
-			log.Info(fmt.Sprintf("[ReconcileParams] missmatched Storage Class params: %s", strings.Join(missMatched, ",")))
+			log.Info(fmt.Sprintf("missmatched Storage Class params: %s", strings.Join(missMatched, ",")))
 
 			labelsToAdd := make(map[string]string)
 
 			if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey] != "" {
-				log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
-				log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey]))
+				log.Info(fmt.Sprintf("the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
+				log.Info(fmt.Sprintf("the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey]))
 				err := setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name)
 
 				if err != nil {
-					log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
+					log.Error(fmt.Sprintf("unable to set the quorum-minimum-redundancy value, name: %s", pv.Name), logger.Err(err))
 					labelsToAdd = map[string]string{unableToSetQuorumMinimumRedundancyLabel: "true"}
 				} else {
 					rgWithNewValue, err := lc.ResourceGroups.Get(ctx, rg.Name)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to get the Resource Group, name: %s", rg.Name))
+						log.Error(fmt.Sprintf("unable to get the Resource Group, name: %s", rg.Name), logger.Err(err))
 					} else {
 						rgs[RGName] = rgWithNewValue
 						missMatched = getMissMatchedParams(sc, rgs[RGName])
@@ -214,14 +220,14 @@ func ReconcileParams(
 			}
 			setLabelsIfNeeded(ctx, log, cl, pv, labelsToAdd)
 		} else {
-			log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
+			log.Info(fmt.Sprintf("the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
 			setLabelsIfNeeded(ctx, log, cl, pv, nil)
 		}
 
 		setQuorumIfNeeded(ctx, log, lc, sc, rd)
 	}
 
-	log.Info("[ReconcileParams] ends work")
+	log.Info("ends work")
 }
 
 func ReconcilePVReplicas(
@@ -234,38 +240,40 @@ func ReconcilePVReplicas(
 	res map[string][]lapi.Resource,
 	pvs []*core.PersistentVolume,
 ) {
-	log.Info("[ReconcilePVReplicas] starts work")
+	log = log.Named("ReconcilePVReplicas")
+
+	log.Info("starts work")
 
 	for _, pv := range pvs {
 		RGName := rds[pv.Name].ResourceGroupName
 		rg := rgs[RGName]
-		log.Debug(fmt.Sprintf("[ReconcilePVReplicas] PV: %s, RG: %s", pv.Name, rg.Name))
+		log.Debug(fmt.Sprintf("PV: %s, RG: %s", pv.Name, rg.Name))
 
 		resources := res[pv.Name]
 		replicasErrLevel, err := checkPVMinReplicasCount(ctx, log, lc, rg, resources)
 		if err != nil {
-			log.Error(err, "[ReconcilePVReplicas] unable to validate replicas count")
+			log.Error("unable to validate replicas count", logger.Err(err))
 			continue
 		}
 
 		origLabelVal, exists := pv.Labels[pvNotEnoughReplicasLabel]
-		log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%s\"", pvNotEnoughReplicasLabel, origLabelVal, replicasErrLevel))
+		log.Debug(fmt.Sprintf("update label \"%s\", old: \"%s\", new: \"%s\"", pvNotEnoughReplicasLabel, origLabelVal, replicasErrLevel))
 
 		if replicasErrLevel == "" && exists {
 			delete(pv.Labels, pvNotEnoughReplicasLabel)
 			if err := cl.Update(ctx, pv); err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
+				log.Error(fmt.Sprintf("unable to update the PV, name: %s", pv.Name), logger.Err(err))
 			}
 		}
 		if replicasErrLevel != "" && replicasErrLevel != origLabelVal {
 			pv.Labels[pvNotEnoughReplicasLabel] = replicasErrLevel
 			if err := cl.Update(ctx, pv); err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
+				log.Error(fmt.Sprintf("unable to update the PV, name: %s", pv.Name), logger.Err(err))
 			}
 		}
 	}
 
-	log.Info("[ReconcilePVReplicas] ends work")
+	log.Info("ends work")
 }
 
 func checkPVMinReplicasCount(
@@ -275,6 +283,8 @@ func checkPVMinReplicasCount(
 	rg lapi.ResourceGroup,
 	resources []lapi.Resource,
 ) (string, error) {
+	log = log.Named("checkPVMinReplicasCount")
+
 	placeCount := int(rg.SelectFilter.PlaceCount)
 	if placeCount <= 0 {
 		return "", nil
@@ -284,7 +294,7 @@ func checkPVMinReplicasCount(
 	for _, r := range resources {
 		volList, err := lc.Resources.GetVolumes(ctx, r.Name, r.NodeName)
 		if err != nil {
-			log.Warning(fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
+			log.Warn(fmt.Sprintf("unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
 			return "", err
 		}
 
@@ -315,7 +325,9 @@ func ReconcileTieBreaker(
 	rgs map[string]lapi.ResourceGroup,
 	res map[string][]lapi.Resource,
 ) {
-	log.Info("[ReconcileTieBreaker] starts work")
+	log = log.Named("ReconcileTieBreaker")
+
+	log.Info("starts work")
 
 	var (
 		nodes []lapi.Node
@@ -323,44 +335,44 @@ func ReconcileTieBreaker(
 	)
 	for name, resources := range res {
 		if len(resources) == 0 {
-			log.Warning(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
+			log.Warn(fmt.Sprintf("no actual Linstor Resources for the Resource Definition, name: %s", name))
 			continue
 		}
 
 		if len(resources)%2 != 0 {
-			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has odd replicas count. No need to create diskless one", name))
+			log.Info(fmt.Sprintf("the Linstor Resource, name: %s has odd replicas count. No need to create diskless one", name))
 			continue
 		}
 
 		if hasDisklessReplica(resources) {
-			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has already have a diskless replica. No need to create one", name))
+			log.Info(fmt.Sprintf("the Linstor Resource, name: %s has already have a diskless replica. No need to create one", name))
 			continue
 		}
 
 		if len(nodes) == 0 {
 			nodes, err = lc.Nodes.GetAll(ctx)
 			if err != nil || len(nodes) == 0 {
-				log.Error(err, "[getNodeForTieBreaker] unable to get all Linstor nodes")
+				log.Error("unable to get all Linstor nodes", logger.Err(err))
 				return
 			}
 		}
 
 		nodeName, err := getNodeForTieBreaker(log, nodes, resources, rds, rgs)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to get a node for a Tie-breaker replica for the Linstor Resource, name: %s", name))
+			log.Error(fmt.Sprintf("unable to get a node for a Tie-breaker replica for the Linstor Resource, name: %s", name), logger.Err(err))
 			continue
 		}
 
 		err = createTieBreaker(ctx, lc, name, nodeName)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to create a diskless replica on the node %s for the Linstor Resource, name: %s", nodeName, name))
+			log.Error(fmt.Sprintf("unable to create a diskless replica on the node %s for the Linstor Resource, name: %s", nodeName, name), logger.Err(err))
 			continue
 		}
 
-		log.Info(fmt.Sprintf("[ReconcileTieBreaker] a diskless replica for the Linstor Resource, name: %s has been successfully created", name))
+		log.Info(fmt.Sprintf("a diskless replica for the Linstor Resource, name: %s has been successfully created", name))
 	}
 
-	log.Info("[ReconcileTieBreaker] ends work")
+	log.Info("ends work")
 }
 
 func createTieBreaker(ctx context.Context, lc *lapi.Client, resourceName, nodeName string) error {
@@ -388,9 +400,11 @@ func getNodeForTieBreaker(
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
 ) (string, error) {
+	log = log.Named("getNodeForTieBreaker")
+
 	unusedNodes := filterOutUsedNodes(nodes, resources)
 	for _, node := range unusedNodes {
-		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s does not use a node %s", resources[0].Name, node.Name))
+		log.Trace(fmt.Sprintf("resource %s does not use a node %s", resources[0].Name, node.Name))
 	}
 
 	rg := getResourceGroupByResource(resources[0].Name, rds, rgs)
@@ -398,7 +412,7 @@ func getNodeForTieBreaker(
 	if key, exist := rg.Props[replicasOnSameRGKey]; exist {
 		unusedNodes = filterNodesByReplicasOnSame(unusedNodes, key)
 		for _, node := range unusedNodes {
-			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnSame key", node.Name))
+			log.Trace(fmt.Sprintf("node %s has passed the filter by ReplicasOnSame key", node.Name))
 		}
 	}
 
@@ -406,18 +420,18 @@ func getNodeForTieBreaker(
 		values := getReplicasOnDifferentValues(nodes, resources, key)
 		unusedNodes = filterNodesByReplicasOnDifferent(unusedNodes, key, values)
 		for _, node := range unusedNodes {
-			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnDifferent key", node.Name))
+			log.Trace(fmt.Sprintf("node %s has passed the filter by ReplicasOnDifferent key", node.Name))
 		}
 	}
 
 	unusedNodes = filterNodesByAutoplaceTarget(unusedNodes)
 	for _, node := range unusedNodes {
-		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by AutoplaceTarget key", node.Name))
+		log.Trace(fmt.Sprintf("node %s has passed the filter by AutoplaceTarget key", node.Name))
 	}
 
 	if len(unusedNodes) == 0 {
 		err := errors.New("no any node is available to create tie-breaker")
-		log.Error(err, fmt.Sprintf("[getNodeForTieBreaker] unable to create tie-breaker for resource, name: %s", resources[0].Name))
+		log.Error(fmt.Sprintf("unable to create tie-breaker for resource, name: %s", resources[0].Name), logger.Err(err))
 		return "", err
 	}
 
@@ -628,7 +642,9 @@ func setLabelsIfNeeded(
 	pv *core.PersistentVolume,
 	labelsToAdd map[string]string,
 ) {
-	log.Debug(fmt.Sprintf("[setLabelsIfNeeded] Original labels: %+v", pv.Labels))
+	log = log.Named("ReconcileParams")
+
+	log.Named("setLabelsIfNeeded").Debug(fmt.Sprintf("original labels: %+v", pv.Labels))
 
 	newLabels := pv.Labels
 	updated := false
@@ -648,20 +664,22 @@ func setLabelsIfNeeded(
 	}
 
 	if updated {
-		log.Debug(fmt.Sprintf("[ReconcileParams] New labels: %+v", newLabels))
+		log.Debug(fmt.Sprintf("new labels: %+v", newLabels))
 
 		if err := cl.Update(ctx, pv); err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
+			log.Error(fmt.Sprintf("unable to update the PV, name: %s", pv.Name), logger.Err(err))
 		}
 	}
 }
 
 func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, sc v1.StorageClass, rd lapi.ResourceDefinitionWithVolumeDefinition) {
+	log = log.Named("setQuorumIfNeeded")
+
 	rdPropQuorum := rd.Props[quorumWithPrefixRDKey]
 	if sc.Provisioner == ReplicatedCSIProvisioner &&
 		sc.Parameters[StorageClassPlacementCountKey] != "1" &&
 		slices.Contains([]string{"off", "1", ""}, rdPropQuorum) {
-		log.Info(fmt.Sprintf("[setQuorumIfNeeded] Resource Definition %s quorum value will be set to 'majority'", rd.Name))
+		log.Info(fmt.Sprintf("resource Definition %s quorum value will be set to 'majority'", rd.Name))
 
 		err := lc.ResourceDefinitions.Modify(ctx, rd.Name, lapi.GenericPropsModify{
 			OverrideProps: map[string]string{
@@ -669,7 +687,7 @@ func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, 
 			},
 		})
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[setQuorumIfNeeded] unable to set the quorum value for Resource Definition %s", rd.Name))
+			log.Error(fmt.Sprintf("unable to set the quorum value for Resource Definition %s", rd.Name), logger.Err(err))
 		}
 	}
 }

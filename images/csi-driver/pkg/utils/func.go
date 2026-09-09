@@ -29,8 +29,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (
@@ -42,7 +42,7 @@ const (
 func CreateReplicatedVolume(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, name, pvcName, pvcNamespace string,
 	rvSpec srv.ReplicatedVolumeSpec,
 ) (*srv.ReplicatedVolume, error) {
@@ -59,7 +59,7 @@ func CreateReplicatedVolume(
 		Spec: rvSpec,
 	}
 
-	log.Trace(fmt.Sprintf("[CreateReplicatedVolume][traceID:%s][volumeID:%s] ReplicatedVolume: %+v", traceID, name, rv))
+	log.Named("CreateReplicatedVolume").Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolume: %+v", traceID, name, rv))
 
 	err := kc.Create(ctx, rv)
 	return rv, err
@@ -101,16 +101,18 @@ func IsReplicatedVolumePastFormation(rv *srv.ReplicatedVolume) bool {
 func WaitForReplicatedVolumeReady(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, name string,
 ) (*srv.ReplicatedVolume, int, error) {
+	log = log.Named("WaitForReplicatedVolumeReady")
+
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to become ready", traceID, name))
 	for {
 		attemptCounter++
 		select {
 		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s] context done. Failed to wait for ReplicatedVolume", traceID, name))
 			return nil, attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
@@ -122,7 +124,7 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt: %d, ReplicatedVolume: %+v", traceID, name, attemptCounter, rv))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Attempt: %d, ReplicatedVolume: %+v", traceID, name, attemptCounter, rv))
 		}
 
 		if rv.DeletionTimestamp != nil {
@@ -130,10 +132,10 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if IsReplicatedVolumePastFormation(rv) {
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolume is ready (datameshRevision=%d, no Formation transition)", traceID, name, rv.Status.DatameshRevision))
 			return rv, attemptCounter, nil
 		}
-		log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
+		log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet (datameshRevision=%d, hasFormation=%v). Waiting...", traceID, name, attemptCounter, rv.Status.DatameshRevision, hasFormationTransition(rv.Status.DatameshTransitions)))
 	}
 }
 
@@ -147,17 +149,19 @@ func quantityWithBytes(q resource.Quantity) string {
 func WaitForReplicatedVolumeResized(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, name string,
 	targetSize resource.Quantity,
 ) (*srv.ReplicatedVolume, int, error) {
+	log = log.Named("WaitForReplicatedVolumeResized")
+
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Waiting for status.size >= %s", traceID, name, quantityWithBytes(targetSize)))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Waiting for status.size >= %s", traceID, name, quantityWithBytes(targetSize)))
 	for {
 		attemptCounter++
 		select {
 		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] context done after %d attempts", traceID, name, attemptCounter))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s] context done after %d attempts", traceID, name, attemptCounter))
 			return nil, attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
@@ -175,7 +179,7 @@ func WaitForReplicatedVolumeResized(
 			} else {
 				currentSize = "<nil>"
 			}
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Attempt: %d, status.size=%s, target=%s", traceID, name, attemptCounter, currentSize, quantityWithBytes(targetSize)))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Attempt: %d, status.size=%s, target=%s", traceID, name, attemptCounter, currentSize, quantityWithBytes(targetSize)))
 		}
 
 		if rv.DeletionTimestamp != nil {
@@ -183,38 +187,40 @@ func WaitForReplicatedVolumeResized(
 		}
 
 		if rv.Status.Size != nil && rv.Status.Size.Cmp(targetSize) >= 0 {
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeResized][traceID:%s][volumeID:%s] Resize complete: status.size=%s >= target=%s", traceID, name, quantityWithBytes(*rv.Status.Size), quantityWithBytes(targetSize)))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Resize complete: status.size=%s >= target=%s", traceID, name, quantityWithBytes(*rv.Status.Size), quantityWithBytes(targetSize)))
 			return rv, attemptCounter, nil
 		}
 	}
 }
 
 // DeleteReplicatedVolume deletes a ReplicatedVolume resource
-func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, name string) error {
-	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Trying to find ReplicatedVolume", traceID, name))
+func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log logger.Logger, traceID, name string) error {
+	log = log.Named("DeleteReplicatedVolume")
+
+	log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] Trying to find ReplicatedVolume", traceID, name))
 	rv, err := GetReplicatedVolume(ctx, kc, name)
 	if err != nil {
 		if kerrors.IsNotFound(err) {
-			log.Info(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] ReplicatedVolume not found, already deleted", traceID, name))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolume not found, already deleted", traceID, name))
 			return nil
 		}
 		return fmt.Errorf("get ReplicatedVolume %s: %w", name, err)
 	}
 
-	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] ReplicatedVolume found: %+v", traceID, name, rv))
-	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Removing finalizer %s if exists", traceID, name, srv.CSIControllerFinalizer))
+	log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolume found: %+v", traceID, name, rv))
+	log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] Removing finalizer %s if exists", traceID, name, srv.CSIControllerFinalizer))
 
 	removed, err := removervdeletepropagationIfExist(ctx, kc, log, rv, srv.CSIControllerFinalizer)
 	if err != nil {
 		return fmt.Errorf("remove finalizers from ReplicatedVolume %s: %w", name, err)
 	}
 	if removed {
-		log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s removed from ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
+		log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] finalizer %s removed from ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
 	} else {
-		log.Warning(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] finalizer %s not found in ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
+		log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s] finalizer %s not found in ReplicatedVolume %s", traceID, name, srv.CSIControllerFinalizer, name))
 	}
 
-	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Trying to delete ReplicatedVolume", traceID, name))
+	log.Trace(fmt.Sprintf("[traceID:%s][volumeID:%s] Trying to delete ReplicatedVolume", traceID, name))
 	err = kc.Delete(ctx, rv)
 	return err
 }
@@ -223,16 +229,18 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 func WaitForReplicatedVolumeDeleted(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, name string,
 ) (int, error) {
+	log = log.Named("WaitForReplicatedVolumeDeleted")
+
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to be deleted", traceID, name))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Waiting for ReplicatedVolume to be deleted", traceID, name))
 	for {
 		attemptCounter++
 		select {
 		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] context done", traceID, name))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s] context done", traceID, name))
 			return attemptCounter, ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
@@ -241,19 +249,21 @@ func WaitForReplicatedVolumeDeleted(
 		_, err := GetReplicatedVolume(ctx, kc, name)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
-				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] ReplicatedVolume is fully deleted", traceID, name))
+				log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolume is fully deleted", traceID, name))
 				return attemptCounter, nil
 			}
 			return attemptCounter, err
 		}
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeDeleted][traceID:%s][volumeID:%s] Attempt: %d, still waiting...", traceID, name, attemptCounter))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] Attempt: %d, still waiting...", traceID, name, attemptCounter))
 		}
 	}
 }
 
-func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *srv.ReplicatedVolume, finalizer string) (bool, error) {
+func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log logger.Logger, rv *srv.ReplicatedVolume, finalizer string) (bool, error) {
+	log = log.Named("removervdeletepropagationIfExist")
+
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		removed := false
 		for i, val := range rv.Finalizers {
@@ -268,7 +278,7 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 			return false, nil
 		}
 
-		log.Trace(fmt.Sprintf("[removervdeletepropagationIfExist] removing finalizer %s from ReplicatedVolume %s", finalizer, rv.Name))
+		log.Trace(fmt.Sprintf("removing finalizer %s from ReplicatedVolume %s", finalizer, rv.Name))
 		err := kc.Update(ctx, rv)
 		if err == nil {
 			return true, nil
@@ -279,7 +289,7 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 		}
 
 		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[removervdeletepropagationIfExist] conflict while updating ReplicatedVolume %s, retrying...", rv.Name))
+			log.Trace(fmt.Sprintf("conflict while updating ReplicatedVolume %s, retrying...", rv.Name))
 			select {
 			case <-ctx.Done():
 				return false, ctx.Err()
@@ -329,7 +339,7 @@ func GetDevicePathFromRVA(ctx context.Context, kc client.Client, volumeName, nod
 
 // createRVA creates a fresh ReplicatedVolumeAttachment with the CSI finalizer.
 // Treats AlreadyExists as success (another caller won the race).
-func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+func createRVA(ctx context.Context, kc client.Client, log logger.Logger, traceID, volumeName, nodeName string) (string, error) {
 	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 	rva := &srv.ReplicatedVolumeAttachment{
@@ -343,7 +353,7 @@ func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		},
 	}
 
-	log.Info(fmt.Sprintf("[createRVA][traceID:%s][volumeID:%s][node:%s] Creating ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
+	log.Named("createRVA").Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Creating ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Create(ctx, rva); err != nil {
 		if kerrors.IsAlreadyExists(err) {
 			return rvaName, nil
@@ -353,7 +363,9 @@ func createRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 	return rvaName, nil
 }
 
-func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+func EnsureRVA(ctx context.Context, kc client.Client, log logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+	log = log.Named("EnsureRVA")
+
 	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 
 	existing := &srv.ReplicatedVolumeAttachment{}
@@ -376,7 +388,7 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		// (typically by rv-controller holding RVControllerFinalizer).
 		// Wait for it to fully disappear within the parent ctx deadline,
 		// then create a fresh one.
-		log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Existing RVA %s has DeletionTimestamp (phase=%s, finalizers=%v); waiting for deletion to complete",
+		log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Existing RVA %s has DeletionTimestamp (phase=%s, finalizers=%v); waiting for deletion to complete",
 			traceID, volumeName, nodeName, rvaName, existing.Status.Phase, existing.Finalizers))
 		if werr := WaitForRVADeleted(ctx, kc, log, traceID, volumeName, nodeName); werr != nil {
 			return "", fmt.Errorf("wait for stale ReplicatedVolumeAttachment %s deletion: %w", rvaName, werr)
@@ -389,17 +401,19 @@ func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		if uerr := kc.Update(ctx, existing); uerr != nil {
 			return "", fmt.Errorf("add finalizer to ReplicatedVolumeAttachment %s: %w", rvaName, uerr)
 		}
-		log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
+		log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Added finalizer to existing RVA %s", traceID, volumeName, nodeName, rvaName))
 	}
 	return rvaName, nil
 }
 
-func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
+func DeleteRVA(ctx context.Context, kc client.Client, log logger.Logger, traceID, volumeName, nodeName string) error {
+	log = log.Named("DeleteRVA")
+
 	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	rva := &srv.ReplicatedVolumeAttachment{}
 	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s not found, skipping", traceID, volumeName, nodeName, rvaName))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s not found, skipping", traceID, volumeName, nodeName, rvaName))
 			return nil
 		}
 		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
@@ -414,10 +428,10 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 		if err := kc.Update(ctx, rva); err != nil {
 			return fmt.Errorf("remove finalizer from ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
-		log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Removed finalizer from RVA %s", traceID, volumeName, nodeName, rvaName))
+		log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Removed finalizer from RVA %s", traceID, volumeName, nodeName, rvaName))
 	}
 
-	log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
 	if err := kc.Delete(ctx, rva); err != nil {
 		return client.IgnoreNotFound(err)
 	}
@@ -427,7 +441,7 @@ func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceI
 // CheckNoRVAsExist lists RVAs for the given volume and returns an error if any
 // still exist. This prevents deleting a ReplicatedVolume while it has active
 // attachments.
-func CheckNoRVAsExist(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName string) error {
+func CheckNoRVAsExist(ctx context.Context, kc client.Client, log logger.Logger, traceID, volumeName string) error {
 	list := &srv.ReplicatedVolumeAttachmentList{}
 	if err := kc.List(ctx, list); err != nil {
 		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
@@ -441,7 +455,7 @@ func CheckNoRVAsExist(ctx context.Context, kc client.Client, log *logger.Logger,
 	if len(remaining) > 0 {
 		return fmt.Errorf("cannot delete volume %s: %d ReplicatedVolumeAttachment(s) still exist: %v", volumeName, len(remaining), remaining)
 	}
-	log.Info(fmt.Sprintf("[CheckNoRVAsExist][traceID:%s][volumeID:%s] No RVAs found, safe to proceed with deletion", traceID, volumeName))
+	log.Named("CheckNoRVAsExist").Info(fmt.Sprintf("[traceID:%s][volumeID:%s] No RVAs found, safe to proceed with deletion", traceID, volumeName))
 	return nil
 }
 
@@ -499,18 +513,20 @@ func sleepWithContext(ctx context.Context) error {
 func WaitForRVAReady(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
+	log = log.Named("WaitForRVAReady")
+
 	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	var attemptCounter int
 	var lastReadyCond *metav1.Condition
 	var lastAttachedCond *metav1.Condition
-	log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to become Ready=True", traceID, volumeName, nodeName, rvaName))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to become Ready=True", traceID, volumeName, nodeName, rvaName))
 	for {
 		attemptCounter++
 		if err := ctx.Err(); err != nil {
-			log.Warning(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
 			return &RVAWaitError{
 				VolumeName:            volumeName,
 				NodeName:              nodeName,
@@ -525,7 +541,7 @@ func WaitForRVAReady(
 		if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				if attemptCounter%10 == 0 {
-					log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA not found yet", traceID, volumeName, nodeName, attemptCounter))
+					log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA not found yet", traceID, volumeName, nodeName, attemptCounter))
 				}
 				if err := sleepWithContext(ctx); err != nil {
 					return &RVAWaitError{
@@ -552,7 +568,7 @@ func WaitForRVAReady(
 
 		if readyCond == nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA Ready condition missing", traceID, volumeName, nodeName, attemptCounter))
+				log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA Ready condition missing", traceID, volumeName, nodeName, attemptCounter))
 			}
 			if err := sleepWithContext(ctx); err != nil {
 				return &RVAWaitError{
@@ -572,11 +588,11 @@ func WaitForRVAReady(
 		lastReadyCond = &condCopy
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, Ready=%s reason=%s message=%q", traceID, volumeName, nodeName, attemptCounter, readyCond.Status, readyCond.Reason, readyCond.Message))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Attempt: %d, Ready=%s reason=%s message=%q", traceID, volumeName, nodeName, attemptCounter, readyCond.Status, readyCond.Reason, readyCond.Message))
 		}
 
 		if readyCond.Status == metav1.ConditionTrue {
-			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] RVA Ready=True", traceID, volumeName, nodeName))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] RVA Ready=True", traceID, volumeName, nodeName))
 			return nil
 		}
 
@@ -617,18 +633,20 @@ func WaitForRVAReady(
 func WaitForRVADeleted(
 	ctx context.Context,
 	kc client.Client,
-	log *logger.Logger,
+	log logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
+	log = log.Named("WaitForRVADeleted")
+
 	rvaName := srv.FormatReplicatedVolumeAttachmentName(volumeName, nodeName)
 	var attemptCounter int
 	var lastFinalizers []string
 	var lastPhase string
-	log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to be fully deleted", traceID, volumeName, nodeName, rvaName))
+	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to be fully deleted", traceID, volumeName, nodeName, rvaName))
 	for {
 		attemptCounter++
 		if err := ctx.Err(); err != nil {
-			log.Warning(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] context done after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] context done after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
 			return fmt.Errorf("wait for RVA %s deletion: last finalizers=%v phase=%q: %w", rvaName, lastFinalizers, lastPhase, err)
 		}
 
@@ -636,7 +654,7 @@ func WaitForRVADeleted(
 		err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
-				log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s is fully deleted", traceID, volumeName, nodeName, rvaName))
+				log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s is fully deleted", traceID, volumeName, nodeName, rvaName))
 				return nil
 			}
 			return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
@@ -646,11 +664,11 @@ func WaitForRVADeleted(
 		lastPhase = string(rva.Status.Phase)
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] Attempt: %d, still present (deletionTimestamp=%v finalizers=%v phase=%q)", traceID, volumeName, nodeName, attemptCounter, rva.DeletionTimestamp, lastFinalizers, lastPhase))
+			log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] Attempt: %d, still present (deletionTimestamp=%v finalizers=%v phase=%q)", traceID, volumeName, nodeName, attemptCounter, rva.DeletionTimestamp, lastFinalizers, lastPhase))
 		}
 
 		if err := sleepWithContext(ctx); err != nil {
-			log.Warning(fmt.Sprintf("[WaitForRVADeleted][traceID:%s][volumeID:%s][node:%s] context done while sleeping after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] context done while sleeping after %d attempts; last finalizers=%v phase=%q: %v", traceID, volumeName, nodeName, attemptCounter, lastFinalizers, lastPhase, err))
 			return fmt.Errorf("wait for RVA %s deletion: last finalizers=%v phase=%q: %w", rvaName, lastFinalizers, lastPhase, err)
 		}
 	}
