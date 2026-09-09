@@ -47,9 +47,22 @@ var (
 	})
 )
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Port allocation
+//
+
+// DRBDPortRangeUsage is sampled on every allocation attempt, so it holds its
+// last value while no allocation happens on the IP. It is a warning signal, and
+// erring towards a stale-high value is the safe direction for that.
+var DRBDPortRangeUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "sds_drbd_port_range_usage_ratio",
+	Help: "Share of the configured DRBD port range (DRBD_MIN_PORT..DRBD_MAX_PORT) in use on a local IP, as of the last port allocation attempt for that IP.",
+}, []string{"ip"})
+
 func init() {
 	crmetrics.Registry.MustRegister(
 		DRBDRConfiguredDuration,
 		DRBDRDeletionDuration,
+		DRBDPortRangeUsage,
 	)
 }

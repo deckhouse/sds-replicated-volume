@@ -58,10 +58,19 @@ func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry
 	}
 }
 
+// isInDeletion returns true once the DRBDResource is marked for deletion.
+//
+// Weaker than isInCleanup on purpose: it marks the point after which no new
+// resources should be acquired for the object, while teardown still has to wait
+// for the foreign finalizers isInCleanup accounts for.
+func isInDeletion(drbdr *v1alpha1.DRBDResource) bool {
+	return drbdr.DeletionTimestamp != nil
+}
+
 // isInCleanup returns true when the DRBDResource is marked for deletion and
 // the agent holds the only remaining finalizer (ready for final cleanup).
 func isInCleanup(drbdr *v1alpha1.DRBDResource) bool {
-	return drbdr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer)
+	return isInDeletion(drbdr) && !obju.HasFinalizersOtherThan(drbdr, v1alpha1.AgentFinalizer)
 }
 
 // isUpAndNotInCleanup returns true when the DRBDResource is NOT being torn
@@ -181,7 +190,8 @@ func (r *Reconciler) reconcileDRBDR(
 	// so a stale-cache race fails here on the optimistic lock rather than after
 	// a kernel change.
 	existingPorts := existingPortsFromState(aState)
-	if addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts); addrOutcome.ShouldReturn() {
+	addrPortErr, addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts)
+	if addrOutcome.ShouldReturn() {
 		if addrOutcome.Error() != nil {
 			return rf.Fail(addrOutcome.Error())
 		}
@@ -266,7 +276,9 @@ func (r *Reconciler) reconcileDRBDR(
 	// Phase 8: Report status (lvmLogicalVolumeName mirrors the actual disk) and
 	// patch it. The pending-release list is written after ensureReportState,
 	// which may initialize ActiveConfiguration.
-	reconcileErr := errors.Join(llvErr, aErr, aErr2, drbdErr)
+	// addrPortErr comes first: getConfiguredReason takes the first reason in the
+	// joined tree, and port exhaustion is the root cause of what follows it.
+	reconcileErr := errors.Join(addrPortErr, llvErr, aErr, aErr2, drbdErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
@@ -673,32 +685,38 @@ func (r *Reconciler) reconcileFinalizer(
 //
 // existingPorts provides ports from a pre-existing DRBD resource on the node.
 // When status.addresses has no port for an IP, the existing port is adopted
-// before falling back to portAllocator.
+// before falling back to the allocator.
+//
+// portErr is returned separately from the outcome, because raising it as an
+// outcome error would stop the reconcile before the down and detach phases, so
+// a node that ran out of ports could never be made to release any. The
+// optimistic-lock patch failure stays a hard error.
 func (r *Reconciler) reconcileAddresses(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	existingPorts ExistingPorts,
-) (outcome flow.ReconcileOutcome) {
+) (portErr error, outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "reconcile-addresses")
 	defer rf.OnEnd(&outcome)
 
 	node, err := r.getRequiredCurrentNode(rf.Ctx())
 	if err != nil {
-		return rf.Fail(err)
+		return nil, rf.Fail(err)
 	}
 
 	base := drbdr.DeepCopy()
-	if addrErr := ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portRegistry.Allocate).Error(); addrErr != nil {
-		return rf.Fail(addrErr)
-	}
+	portErr = ConfiguredReasonError(
+		ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portRegistry.Allocate).Error(),
+		v1alpha1.DRBDResourceCondConfiguredReasonPortAllocationFailed,
+	)
 
 	if !equality.Semantic.DeepEqual(base.Status.Addresses, drbdr.Status.Addresses) {
 		if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
-			return rf.Fail(err)
+			return portErr, rf.Fail(err)
 		}
 	}
 
-	return rf.Continue()
+	return portErr, rf.Continue()
 }
 
 // ensureFinalizer adds or removes the finalizer based on resource state.

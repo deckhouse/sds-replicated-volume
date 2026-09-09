@@ -45,6 +45,7 @@ const (
 	DRBDResourceCondConfiguredReasonNewPeerFailed            = "NewPeerFailed"
 	DRBDResourceCondConfiguredReasonNewResourceFailed        = "NewResourceFailed"
 	DRBDResourceCondConfiguredReasonPeerDeviceOptionsFailed  = "PeerDeviceOptionsFailed"
+	DRBDResourceCondConfiguredReasonPortAllocationFailed     = "PortAllocationFailed"
 	DRBDResourceCondConfiguredReasonPrimaryFailed            = "PrimaryFailed"
 	DRBDResourceCondConfiguredReasonReadDevUUIDFailed        = "ReadDevUUIDFailed"
 	DRBDResourceCondConfiguredReasonRenameFailed             = "RenameFailed"

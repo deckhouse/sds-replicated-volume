@@ -69,8 +69,11 @@ type IntendedPort struct {
 // and the Node's addresses. It returns the networks and IPs that should be used,
 // ignoring ports.
 func computeIntendedIPs(drbdr *v1alpha1.DRBDResource, node *corev1.Node) []IntendedIP {
-	// No addresses for down resources
-	if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown {
+	// No addresses for resources being torn down. Clearing them is also what
+	// keeps a doomed resource from taking a port it will never use: with no
+	// addresses left there is nothing to allocate for, so teardown stays
+	// possible on a node whose range is exhausted.
+	if drbdr.Spec.State == v1alpha1.DRBDResourceStateDown || isInDeletion(drbdr) {
 		return nil
 	}
 

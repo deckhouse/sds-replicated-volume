@@ -1,0 +1,60 @@
+# Alerts on DRBD port range exhaustion (new control plane).
+#
+# The sds_drbd_port_range_usage_ratio series is exported only by the agent
+# (images/agent/internal/metrics/metrics.go), whose PodMonitor is itself gated on
+# newControlPlane, so on the old control plane the series does not exist and the expression below
+# yields an empty vector. That is why this file is a plain static .yaml with no Helm templating
+# and no newControlPlane gate: {{ $labels.* }} stays a Prometheus template.
+- name: kubernetes.replicated.volume.drbd_ports
+  rules:
+    - alert: D8ReplicatedVolumeDRBDPortRangeAlmostExhausted
+      expr: max by (node, ip) (sds_drbd_port_range_usage_ratio) > 0.9
+      for: 10m
+      labels:
+        severity_level: "5"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "node,ip"
+        plk_create_group_if_not_exists__d8_replicated_volume_drbd_ports: "D8ReplicatedVolumeDRBDPorts,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_volume_drbd_ports: "D8ReplicatedVolumeDRBDPorts,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: DRBD port range is almost exhausted on a node
+        description: |
+          More than 90% of the DRBD port range is in use on node `{{ $labels.node }}` for the local address `{{ $labels.ip }}`.
+
+          DRBD takes one local port per replica path, per local IP. Once the range is full, no new replica can be configured on this address: the affected `DRBDResource` reports `Configured=False` with reason `PortAllocationFailed`. Replicas that are already configured keep serving I/O.
+
+          The value is sampled when a port is allocated, so it stays at its last reading while the node allocates nothing.
+
+          The recommended course of action:
+
+          1. Check the configured range (module setting `drbdPortRange`, 7000-7999 by default):
+
+             ```shell
+             kubectl get mc sds-replicated-volume -o jsonpath='{.spec.settings.drbdPortRange}'
+             ```
+
+          2. Find replicas that already failed to get a port:
+
+             ```shell
+             kubectl get drbdr --field-selector=spec.nodeName={{ $labels.node }} -o wide
+             ```
+
+          3. Count the replicas the node hosts — a node near the limit usually hosts far more than intended:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o wide
+             ```
+
+          4. Widen the range, or move replicas off the node. Only grow the range: ports already in use outside a narrowed range keep their replicas running but are no longer managed.
+
+             ```shell
+             kubectl edit mc sds-replicated-volume
+             ```
+
+          5. If utilization stays high while the replica count is low, ports are held by DRBD resources the control plane does not know about. Compare the kernel's view against the objects from step 2, and contact tech support rather than removing anything by hand:
+
+             ```shell
+             kubectl -n d8-sds-replicated-volume exec ds/agent -c agent -- drbdsetup status --json
+             ```

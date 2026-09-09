@@ -28,6 +28,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/metrics"
 )
 
 type pendingEntry struct {
@@ -96,6 +97,21 @@ func (r *PortRegistry) collectK8sPorts(ctx context.Context, ip string) (map[uint
 		}
 	}
 	return result, nil
+}
+
+// observeRangeUsage records what share of the configured range is taken on ip.
+// Ports adopted from outside the range consume the address but not the range.
+func (r *PortRegistry) observeRangeUsage(ip string, usedPorts map[uint]struct{}) {
+	if r.max < r.min {
+		return
+	}
+	var inRange uint
+	for p := range usedPorts {
+		if p >= r.min && p <= r.max {
+			inRange++
+		}
+	}
+	metrics.DRBDPortRangeUsage.WithLabelValues(ip).Set(float64(inRange) / float64(r.max-r.min+1))
 }
 
 func NewPortRegistry(
@@ -167,6 +183,8 @@ func (r *PortRegistry) Allocate(ctx context.Context, ip string) (uint, error) {
 	for _, e := range r.pending[ip] {
 		usedPorts[e.port] = struct{}{}
 	}
+
+	r.observeRangeUsage(ip, usedPorts)
 
 	// 7. Find a free port.
 	for p := r.min; p <= r.max; p++ {
