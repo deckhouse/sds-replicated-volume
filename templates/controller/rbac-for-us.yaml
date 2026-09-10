@@ -122,4 +122,27 @@ roleRef:
   kind: Role
   name: controller
   apiGroup: rbac.authorization.k8s.io
+
+---
+{{- /*
+  The kube-rbac-proxy in front of the controller's metrics port answers every
+  scrape by asking the API server who the caller is (TokenReview) and whether
+  they hold get on the prometheus-metrics subresource (SubjectAccessReview).
+  Both verbs live in d8:rbac-proxy. Without this binding the proxy fails closed
+  with 401 while the pod stays Ready, so the only symptom is up == 0 on the
+  module's job and a TargetDown that never clears.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:controller-rbac-proxy
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:rbac-proxy
 {{- end }}
