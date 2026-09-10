@@ -899,60 +899,86 @@ DRBD с количеством реплик больше 1 предоставл�
 DRBD использует сеть для репликации данных. При использовании NAS нагрузка на сеть будет расти кратно, так как узлы будут синхронизировать данные не только с NAS, но и между собой. Аналогично будет расти задержка на чтение или запись.
 NAS обычно предполагает использование RAID на своей стороны, что также увеличивает дополнительную нагрузку.
 
-## Как вручную инициировать процесс перевыпуска сертификатов?
+## Как перевыпускаются сертификаты модуля?
 
-Для проверки просроченных сертификатов в модуле просматриваем дату окончания сертификатов в секретах:
+Сертификаты модуля перевыпускаются автоматически, действий администратора это не требует.
+
+Сертификаты объединены в группы по подписавшему их CA. Каждая группа хранит свой CA — и сертификат,
+и приватный ключ — в отдельном секрете:
+
+| Секрет с CA | Подписанные им сертификаты |
+| --- | --- |
+| `linstor-ca` | `linstor-controller-https-cert`, `linstor-client-https-cert`, `linstor-controller-ssl-cert`, `linstor-node-ssl-cert` |
+| `webhooks-ca` | `webhooks-https-certs` |
+| `spaas-ca` | `spaas-certs` |
+| `linstor-scheduler-extender-ca` | `linstor-scheduler-extender-https-certs` |
+
+CA выпускается на десять лет, подписанные им сертификаты — на один год. Сертификат перевыпускается
+тем же CA за 45 дней до истечения срока, а использующие его поды перезапускаются на следующей
+сходимости, когда перевыпущенный сертификат уже лежит в своём секрете. Ни синхронизировать
+перезапуски, ни торопить их не нужно: CA не меняется, поэтому компонент доверяет и старому, и
+новому сертификату, а старый остаётся действительным все оставшиеся 45 дней.
+
+Группа целиком, вместе с CA, перевыпускается только если сам CA отсутствует или у него истекает срок.
+При этом все сертификаты группы становятся недействительными одновременно, поэтому перезапускаются
+все её потребители. Для группы LINSTOR это означает недоступность control plane LINSTOR до окончания
+раскатки Deployment `linstor-controller` и DaemonSet `linstor-node`; на доступ к данным это не влияет,
+так как устройства DRBD работают и без control plane.
+
+Посмотреть сроки действия:
 
 ```shell
-kubectl -n d8-sds-replicated-volume get secrets | grep 'cert' | grep -v 'webhooks' | awk '{ print "echo "$1" && kubectl -n d8-sds-replicated-volume get secrets "$1" -ojson | jq -r '\''.data.\"ca.crt\"'\'' | base64 -d | openssl x509 -text -noout | grep \"Not After\"" }' | bash
+kubectl -n d8-sds-replicated-volume get secret -l 'heritage=deckhouse,module=sds-replicated-volume' \
+  -o custom-columns='NAME:.metadata.name,CERT:.data.tls\.crt,CA:.data.ca\.crt' --no-headers \
+  | while read -r name cert ca; do
+      for data in "$cert" "$ca"; do
+        [ "$data" = '<none>' ] && continue
+        echo "$name $(echo "$data" | base64 -d | openssl x509 -noout -subject -enddate | tr '\n' ' ')"
+      done
+    done
 ```
 
-Пример вывода:
+Система мониторинга оповещает о сертификате, у которого истекает срок действия, но который не был
+перевыпущен, — см. оповещение `D8LinstorCertificateExpiringIn30d`. Такое оповещение означает, что
+автоматический перевыпуск заблокирован: проверьте лог и очередь Deckhouse на ошибки хуков модуля.
 
-```console
-linstor-client-https-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-controller-https-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-controller-ssl-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-node-ssl-cert
-            Not After : Feb 17 14:16:46 2026 GMT
-linstor-scheduler-admission-certs
-            Not After : Oct 29 18:14:58 2025 GMT
-linstor-scheduler-extender-https-certs
-            Not After : Feb 17 14:16:50 2026 GMT
-spaas-certs
-            Not After : Oct 21 10:38:05 2025 GMT
-```
+## Как перевыпустить сертификаты модуля вручную?
 
-Если какой-то из них близок к окончанию — удаляем его:
+Перевыпускать сертификат вручную нужно только если автоматический перевыпуск заблокирован и причину
+устранить не удаётся.
+
+Чтобы сертификат был заново подписан CA своей группы, удалите его секрет:
 
 ```shell
-kubectl -n d8-sds-replicated-volume delete secret <нужные секреты>
+kubectl -n d8-sds-replicated-volume delete secret <имя секрета>
 ```
 
-Перезапускаем Deckhouse:
+Чтобы перевыпустить группу целиком, удалите также секрет с её CA, например:
+
+```shell
+kubectl -n d8-sds-replicated-volume delete secret linstor-ca
+```
+
+Удалить секрет само по себе недостаточно: модуль держит сертификат во внутреннем состоянии
+(values), из которого собираются его шаблоны, и восстановит удалённый секрет в прежнем виде.
+Перезапустите Deckhouse — тогда модуль выпустит сертификат заново перед развёртыванием — и
+дождитесь, пока очередь опустеет:
 
 ```shell
 kubectl -n d8-system rollout restart deployment deckhouse
-```
-
-И дожидаемся, пока он станет `Ready` и очередь будет пуста:
-
-```shell
 kubectl -n d8-system exec -ti deployments/deckhouse -- deckhouse-controller queue main
 # Queue 'main': length 0, status: 'waiting for task 16s'
 ```
 
-Перезапускаем все поды модуля:
+Поды, использующие созданные заново сертификаты, модуль перезапускает сам — но на следующей
+сходимости, а не на той, которая эти сертификаты создала. Если новый сертификат должен вступить в
+силу сразу, перезапустите поды вручную:
 
 ```shell
 kubectl -n d8-sds-replicated-volume rollout restart deployment
 kubectl -n d8-sds-replicated-volume rollout restart daemonset
 ```
 
-Сертификаты выдаются сроком на один год и помечаются как устаревающие за 30 дней до истечения срока действия. Система мониторинга оповещает о наличии устаревающих сертификатов (см. оповещение `D8LinstorCertificateExpiringIn30d`).
 ## Сколько места тома резервируется под суперпользователя?
 
 По умолчанию — нисколько: том модуля форматируется с `-m 0`, весь его объём доступен нагрузке.

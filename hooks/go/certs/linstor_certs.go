@@ -99,6 +99,8 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 					args.valuesPropName,
 				),
 				CommonCACanonicalName: "linstor-ca",
+				CASecretName:          "linstor-ca",
+				CAValuesPath:          fmt.Sprintf("%s.internal.linstorCA", ModuleName),
 				Usages: []kcertificates.KeyUsage{
 					kcertificates.UsageDigitalSignature,
 					kcertificates.UsageKeyEncipherment,
@@ -106,7 +108,7 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 					kcertificates.UsageServerAuth,
 					kcertificates.UsageClientAuth,
 				},
-				CAExpiryDuration:     DefaultCertExpiredDuration,
+				CAExpiryDuration:     DefaultCAExpiredDuration,
 				CertExpiryDuration:   DefaultCertExpiredDuration,
 				CertOutdatedDuration: DefaultCertOutdatedDuration,
 			}

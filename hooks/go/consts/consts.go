@@ -29,8 +29,20 @@ const (
 )
 
 const (
-	DefaultCertExpiredDuration  = time.Hour * 24 * 365
-	DefaultCertOutdatedDuration = time.Hour * 24 * 30
+	// DefaultCAExpiredDuration is the lifespan of the CA certificate of a cert group.
+	// It must be significantly longer than DefaultCertExpiredDuration: leaf certificates
+	// are re-signed by the same CA, which keeps renewal rolling, while replacing the CA
+	// itself invalidates every leaf certificate of the group at once.
+	DefaultCAExpiredDuration = time.Hour * 24 * 365 * 10
+	// DefaultCertExpiredDuration is the lifespan of a leaf certificate.
+	DefaultCertExpiredDuration = time.Hour * 24 * 365
+	// DefaultCertOutdatedDuration is how long before expiration a certificate is renewed. It is
+	// deliberately longer than CertExpirationAlertThreshold, so that a certificate is only reported
+	// as expiring when its renewal has been failing for a while.
+	DefaultCertOutdatedDuration = time.Hour * 24 * 45
+	// CertExpirationAlertThreshold is how long before expiration a certificate which has not been
+	// renewed is reported to the monitoring.
+	CertExpirationAlertThreshold = time.Hour * 24 * 30
 )
 
 var AllowedProvisioners = []string{
