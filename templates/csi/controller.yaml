@@ -64,6 +64,15 @@
       fieldPath: spec.nodeName
 - name: LOG_LEVEL
   value: {{ include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | quote }}
+{{- /* Only this branch runs our own driver; the legacy branch is LINSTOR's CSI, which
+       does not read this. Loopback, because the kube-rbac-proxy added below is what
+       publishes it.
+
+       The CSI node DaemonSet deliberately gets no such env: it is hostNetwork, where a
+       bound port is a node-level resource and needs an entry in the Deckhouse port
+       registry. With the variable unset the driver opens no endpoint at all. */}}
+- name: METRICS_BIND_ADDRESS
+  value: "127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.csiControllerMetricsPort }}"
 {{- end }}
 
 {{- include "helm_lib_envs_for_proxy" . }}
@@ -110,6 +119,63 @@
 
 
 {{- define "csi_additional_controller_volume_mounts" }}
+{{- end }}
+
+
+{{- define "csi_controller_metrics_proxy_vpa" }}
+{{- include "helm_lib_vpa_kube_rbac_proxy_resources" . }}
+{{- end }}
+
+
+{{- define "csi_controller_metrics_proxy" }}
+- name: kube-rbac-proxy
+  {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 2 }}
+  image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
+  imagePullPolicy: IfNotPresent
+  args:
+    - "--secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):{{ .Values.sdsReplicatedVolume.internal.csiControllerMetricsProxyPort }}"
+    - "--v=2"
+    - "--logtostderr=true"
+    - "--stale-cache-interval=1h30m"
+    - "--livez-path=/livez"
+  env:
+    - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: KUBE_RBAC_PROXY_CONFIG
+      value: |
+        excludePaths:
+        - /livez
+        upstreams:
+        - upstream: http://127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.csiControllerMetricsPort }}/metrics
+          path: /metrics
+          authorization:
+            resourceAttributes:
+              namespace: d8-{{ .Chart.Name }}
+              apiGroup: apps
+              apiVersion: v1
+              resource: deployments
+              subresource: prometheus-metrics
+              name: csi-controller
+  ports:
+    - name: https-metrics
+      containerPort: {{ .Values.sdsReplicatedVolume.internal.csiControllerMetricsProxyPort }}
+      protocol: TCP
+  livenessProbe:
+    httpGet:
+      path: /livez
+      port: {{ .Values.sdsReplicatedVolume.internal.csiControllerMetricsProxyPort }}
+      scheme: HTTPS
+  {{- /* No readinessProbe on purpose: readiness of this pod is what the provisioning
+         path hangs on, and a container that only serves metrics must not be able to
+         take it out. A wedged proxy is still restarted by the liveness probe. */}}
+  resources:
+    requests:
+      {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 6 }}
+{{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
+      {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 6 }}
+{{- end }}
 {{- end }}
 
 
@@ -166,6 +232,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumeMounts" (include "csi_additional_controller_volume_mounts" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "initContainers" (include "csi_controller_init_containers" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalContainers" (include "csi_controller_metrics_proxy" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalControllerVPA" (include "csi_controller_metrics_proxy_vpa" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 {{- end }}
@@ -229,6 +297,16 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
       fieldPath: spec.nodeName
 - name: LOG_LEVEL
   value: {{ include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | quote }}
+{{- /* Only this branch runs our own driver; the legacy branch is LINSTOR's CSI. The
+       DaemonSet is hostNetwork, so this number is node-level and registered in the
+       Deckhouse port reference; the kube-rbac-proxy of this pod publishes the same
+       number on the node address, which is a different socket.
+
+       Note what loopback does and does not buy here: in hostNetwork it is the NODE's
+       loopback, so the endpoint is unreachable from off the node but stays open,
+       unauthenticated, to anything in the node's network namespace. */}}
+- name: METRICS_BIND_ADDRESS
+  value: "127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.csiNodeMetricsPort }}"
 {{- end }}
 {{- end }}
 
@@ -278,6 +356,62 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
 
+{{- define "csi_node_metrics_proxy" }}
+- name: kube-rbac-proxy
+  {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 2 }}
+  image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
+  imagePullPolicy: IfNotPresent
+  args:
+    - "--secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):{{ .Values.sdsReplicatedVolume.internal.csiNodeMetricsPort }}"
+    - "--v=2"
+    - "--logtostderr=true"
+    - "--stale-cache-interval=1h30m"
+    - "--livez-path=/livez"
+  env:
+    - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: KUBE_RBAC_PROXY_CONFIG
+      value: |
+        excludePaths:
+        - /livez
+        upstreams:
+        - upstream: http://127.0.0.1:{{ .Values.sdsReplicatedVolume.internal.csiNodeMetricsPort }}/metrics
+          path: /metrics
+          authorization:
+            resourceAttributes:
+              namespace: d8-{{ .Chart.Name }}
+              apiGroup: apps
+              apiVersion: v1
+              resource: daemonsets
+              subresource: prometheus-metrics
+              name: csi-node
+  ports:
+    - name: https-metrics
+      containerPort: {{ .Values.sdsReplicatedVolume.internal.csiNodeMetricsPort }}
+      protocol: TCP
+  livenessProbe:
+    httpGet:
+      path: /livez
+      port: {{ .Values.sdsReplicatedVolume.internal.csiNodeMetricsPort }}
+      scheme: HTTPS
+  {{- /* No readinessProbe on purpose: a container that only serves metrics must not be
+         able to take this pod out of the endpoints of anything that selects it. */}}
+  resources:
+    requests:
+      {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 6 }}
+{{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
+      {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 6 }}
+{{- end }}
+{{- end }}
+
+
+{{- define "csi_node_metrics_proxy_vpa" }}
+{{- include "helm_lib_vpa_kube_rbac_proxy_resources" . }}
+{{- end }}
+
+
 {{- define "csi_additional_node_volumes" }}
 {{- end }}
 
@@ -324,6 +458,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "additionalNodeVolumeMounts" (include "csi_additional_node_volume_mounts" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "customNodeSelector" (include "csi_custom_node_selector" . | fromYaml) }}
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
+{{- $_ := set $csiNodeConfig "additionalContainers" (include "csi_node_metrics_proxy" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "additionalNodeVPA" (include "csi_node_metrics_proxy_vpa" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
 {{- end }}

@@ -28,6 +28,35 @@ properties:
       controlPlaneMigration:
         type: string
         default: "not_started"
+      csiControllerMetricsPort:
+        type: integer
+        default: 8080
+        description: |
+          The port the CSI controller serves its operation metrics on, bound on
+          127.0.0.1: the kube-rbac-proxy of the same pod is the only thing that reaches
+          it. What is on it is sds_replicated_volume_csi_operations_total and
+          sds_replicated_volume_csi_operation_duration_seconds -- how many CSI calls the
+          driver answered, with which gRPC status, and how long each took.
+
+      csiNodeMetricsPort:
+        type: integer
+        default: 4268
+        description: |
+          The port the CSI node serves its operation metrics on. The DaemonSet is
+          hostNetwork, so this is a node-level port and is registered in the Deckhouse
+          port reference; it must not be changed to an unregistered number.
+
+          The driver binds it on 127.0.0.1 and the kube-rbac-proxy of the same pod
+          publishes the same number on the node address -- two different sockets. What is
+          on it is sds_replicated_volume_csi_operations_total and
+          sds_replicated_volume_csi_operation_duration_seconds for the node calls:
+          NodeStageVolume, NodePublishVolume and their unstage/unpublish counterparts.
+      csiControllerMetricsProxyPort:
+        type: integer
+        default: 8080
+        description: |
+          The port the kube-rbac-proxy publishes the CSI controller metrics on. Reaching
+          it requires "get" on deployments/prometheus-metrics for csi-controller.
       controllerMetricsPort:
         type: integer
         default: 4272

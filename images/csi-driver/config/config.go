@@ -22,6 +22,7 @@ import (
 	"os"
 
 	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
 )
 
@@ -36,9 +37,16 @@ type Options struct {
 	Version                string
 	Loglevel               logger.Verbosity
 	HealthProbeBindAddress string
-	CsiAddress             string
-	DriverName             string
-	Address                string
+	// MetricsBindAddress is where the CSI operation metrics are served, taken from
+	// METRICS_BIND_ADDRESS. Empty means no endpoint: this binary runs both in the CSI
+	// controller Deployment, which is on the pod network, and in the CSI node
+	// DaemonSet, which is hostNetwork -- where a bound port is a node-level resource
+	// and needs an entry in the Deckhouse port registry. The chart sets it only where
+	// that holds.
+	MetricsBindAddress string
+	CsiAddress         string
+	DriverName         string
+	Address            string
 }
 
 func NewConfig() (*Options, error) {
@@ -48,6 +56,8 @@ func NewConfig() (*Options, error) {
 	if opts.NodeName == "" {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
 	}
+
+	opts.MetricsBindAddress = os.Getenv(monitoring.EnvMetricsBindAddress)
 
 	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if opts.HealthProbeBindAddress == "" {

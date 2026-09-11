@@ -1,0 +1,81 @@
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed"))) }}
+{{- if (include "helm_lib_api_version_exists" (list . "monitoring.coreos.com/v1/PodMonitor")) }}
+{{- /*
+  A PodMonitor and not a ServiceMonitor: helm_lib_csi_controller_manifests renders no
+  Service for this Deployment, so there is nothing for a ServiceMonitor to select. The
+  port is the kube-rbac-proxy's -- the driver keeps its endpoint on 127.0.0.1.
+*/ -}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: sds-replicated-volume-csi-controller
+  namespace: d8-monitoring
+  {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
+spec:
+  podMetricsEndpoints:
+    - port: https-metrics
+      scheme: https
+      path: /metrics
+      bearerTokenSecret:
+        name: "prometheus-token"
+        key: "token"
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - regex: endpoint|namespace|pod|container
+          action: labeldrop
+        - targetLabel: job
+          replacement: sds-replicated-volume-csi-controller
+        - targetLabel: tier
+          replacement: cluster
+        # A PodMonitor selects pods by label, so without this the terminating pod of a
+        # rolling update stays in the target list and every scrape of it fails.
+        - sourceLabels: [__meta_kubernetes_pod_ready]
+          regex: "true"
+          action: keep
+  selector:
+    matchLabels:
+      app: csi-controller
+  namespaceSelector:
+    matchNames:
+      - d8-{{ .Chart.Name }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: sds-replicated-volume-csi-node
+  namespace: d8-monitoring
+  {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
+spec:
+  podMetricsEndpoints:
+    - port: https-metrics
+      scheme: https
+      path: /metrics
+      bearerTokenSecret:
+        name: "prometheus-token"
+        key: "token"
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - regex: endpoint|namespace|pod|container
+          action: labeldrop
+        - targetLabel: job
+          replacement: sds-replicated-volume-csi-node
+        # The node this line came from is the useful dimension for a DaemonSet, and
+        # the pod label is dropped above.
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - targetLabel: tier
+          replacement: cluster
+        - sourceLabels: [__meta_kubernetes_pod_ready]
+          regex: "true"
+          action: keep
+  selector:
+    matchLabels:
+      app: csi-node
+  namespaceSelector:
+    matchNames:
+      - d8-{{ .Chart.Name }}
+{{- end }}
+{{- end }}

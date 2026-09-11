@@ -35,9 +35,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring"
+	"github.com/deckhouse/sds-common-lib/monitoring/csimetrics"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
+
+// metricsPrefix names the driver rather than the module: a module can ship a
+// controller and a driver and their series have to be told apart.
+const metricsPrefix = "sds_replicated_volume_csi"
 
 const (
 	// DefaultDriverName defines the name that is used in Kubernetes and the CSI
@@ -65,6 +71,12 @@ type Driver struct {
 	httpSrv http.Server
 	log     logger.Logger
 
+	// metrics records what this driver serves. The zero value records nothing, so a
+	// process started without METRICS_BIND_ADDRESS pays for no bookkeeping and needs
+	// no nil check at the call site.
+	metrics       csimetrics.Recorder
+	metricsServer *monitoring.Server
+
 	readyMu      sync.Mutex // protects ready
 	ready        bool
 	cl           client.Client
@@ -79,14 +91,22 @@ type Driver struct {
 // NewDriver returns a CSI plugin that contains the necessary gRPC
 // interfaces to interact with Kubernetes over unix domain sockets for
 // managing  disks
-func NewDriver(csiAddress, driverName, address string, nodeName *string, log logger.Logger, cl client.Client) (*Driver, error) {
+// NewDriver returns the driver. metricsBindAddress may be empty, which leaves the
+// operation metrics unrecorded and opens no endpoint -- see Options.MetricsBindAddress.
+func NewDriver(
+	csiAddress, driverName, address string,
+	nodeName *string,
+	log logger.Logger,
+	cl client.Client,
+	metricsBindAddress string,
+) (*Driver, error) {
 	if driverName == "" {
 		driverName = DefaultDriverName
 	}
 
 	st := utils.NewStore(log)
 
-	return &Driver{
+	d := &Driver{
 		name:              driverName,
 		hostID:            *nodeName,
 		csiAddress:        csiAddress,
@@ -96,7 +116,19 @@ func NewDriver(csiAddress, driverName, address string, nodeName *string, log log
 		cl:                cl,
 		storeManager:      st,
 		inFlight:          internal.NewInFlight(log),
-	}, nil
+	}
+
+	if metricsBindAddress != "" {
+		storage := monitoring.NewStorage()
+		rec, err := csimetrics.New(storage, metricsPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("declare the CSI metrics: %w", err)
+		}
+		d.metrics = rec
+		d.metricsServer = monitoring.NewServer(metricsBindAddress, storage, log.Named("metrics"))
+	}
+
+	return d, nil
 }
 
 func (d *Driver) Run(ctx context.Context) error {
@@ -141,7 +173,14 @@ func (d *Driver) Run(ctx context.Context) error {
 		return resp, err
 	}
 
-	d.srv = grpc.NewServer(grpc.UnaryInterceptor(errHandler))
+	// The recorder goes first so that it times the handler and the error logging
+	// together; with no metrics configured its interceptor is not installed at all.
+	interceptors := []grpc.UnaryServerInterceptor{errHandler}
+	if d.metricsServer != nil {
+		interceptors = append([]grpc.UnaryServerInterceptor{d.metrics.UnaryServerInterceptor()}, interceptors...)
+	}
+
+	d.srv = grpc.NewServer(grpc.ChainUnaryInterceptor(interceptors...))
 	csi.RegisterIdentityServer(d.srv, d)
 	csi.RegisterControllerServer(d.srv, d)
 	csi.RegisterNodeServer(d.srv, d)
@@ -186,6 +225,9 @@ func (d *Driver) Run(ctx context.Context) error {
 		}
 		return err
 	})
+	if d.metricsServer != nil {
+		eg.Go(func() error { return d.metricsServer.Start(ctx) })
+	}
 
 	return eg.Wait()
 }

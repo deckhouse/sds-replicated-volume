@@ -102,7 +102,8 @@ func run() int {
 		}
 	}()
 
-	drv, err := driver.NewDriver(cfgParams.CsiAddress, cfgParams.DriverName, cfgParams.Address, &cfgParams.NodeName, log, cl)
+	drv, err := driver.NewDriver(cfgParams.CsiAddress, cfgParams.DriverName, cfgParams.Address,
+		&cfgParams.NodeName, log, cl, cfgParams.MetricsBindAddress)
 	if err != nil {
 		log.Error("create NewDriver", logger.Err(err))
 		return 1
