@@ -178,6 +178,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Done().ToCtrl()
 	}
 
+	// Node load for the tie-break below the score. Counted here rather than in
+	// computeSchedulingContext because that runs before the guard above, and a
+	// reconciliation with nothing left to place has no use for it.
+	//
+	// Only the eligible nodes are counted: candidates come from that list, so a
+	// replica anywhere else can never be compared against.
+	//
+	// Skipped when every replica left already has a node and is back only for its LVG:
+	// such a replica is narrowed to the node it sits on, so no two nodes are compared
+	// and the count could not change the outcome.
+	//
+	// Access is taken out for the same reason the guard above takes it out — this
+	// controller does not place those. They arrive with a node already set, so today
+	// they are never in Unplaced anyway; the subtraction is here so that the gate does
+	// not rest on an invariant owned by whoever creates them.
+	if !sctx.Unplaced.Difference(sctx.Access).IsEmpty() {
+		nodeLoad, loadOutcome := r.reconcileNodeLoad(rf.Ctx(), sctx.EligibleNodes)
+		outcome = outcome.Merge(loadOutcome.Enrichf("counting node load"))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
+		sctx.NodeLoad = nodeLoad
+	}
+
 	// Replicas that still need scheduling. Deleting RVRs are not excluded:
 	// the scheduler's job is to place replicas, not to decide whether they
 	// are needed. Unnecessary replicas will have their finalizers removed
@@ -344,6 +368,52 @@ func (r *Reconciler) reconcileRVRsCondition(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: node-load
+//
+
+// reconcileNodeLoad counts, for each eligible node, the replicas placed on it across all
+// volumes. The result is the tie-break SelectBest applies below the capacity score.
+//
+// Only the eligible nodes are counted: candidates come from that list, so the load of a
+// node outside the pool is never compared against anything.
+//
+// One indexed read per node rather than one read of the whole collection: the count is
+// all that is wanted, and a list of every replica in the cluster materialises each of
+// them into the list's backing array. Per node only that node's replicas are live at a
+// time, which is what keeps this path's peak flat as the cluster grows.
+//
+// Every replica on a node counts, whatever its type: a TieBreaker and an Access replica
+// carry no data but hold a DRBD resource there just as a Diskful one does. Replicas
+// being deleted count too — their resource is up until teardown completes.
+//
+// Reconcile pattern: Target-state driven. This method owns the actual half only: it
+// observes the load and returns it; the tie-break in reconcileOneRVRScheduling is what
+// acts on it.
+func (r *Reconciler) reconcileNodeLoad(
+	ctx context.Context,
+	nodes []v1alpha1.ReplicatedStoragePoolEligibleNode,
+) (_ map[string]int, outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "node-load")
+	defer rf.OnEnd(&outcome)
+
+	load := make(map[string]int, len(nodes))
+	for i := range nodes {
+		node := nodes[i].NodeName
+		count, err := r.getReplicaCountOnNode(rf.Ctx(), node)
+		if err != nil {
+			return nil, rf.Failf(err, "counting replicas on node %s", node)
+		}
+		// Idle nodes stay out of the map, so its keys are exactly the loaded nodes.
+		// A missing key reads as zero where the tie-break looks it up.
+		if count > 0 {
+			load[node] = count
+		}
+	}
+
+	return load, rf.Continue()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: resync-budget
 //
 
@@ -446,6 +516,11 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	rf := flow.BeginReconcile(ctx, "schedule-rvr", "rvr", rvr.Name)
 	defer rf.OnEnd(&outcome)
 
+	// Whether this replica is arriving without a node at all, as opposed to being
+	// back only for its LVG. Read before anything places it, since placement fills
+	// the field in.
+	unplaced := rvr.Spec.NodeName == ""
+
 	logger := rf.Log()
 
 	var p SchedulingPipeline
@@ -491,7 +566,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// LVG on it. The "node occupied" filter is intentionally skipped
 	// because the RVR's own node is in OccupiedNodes and would block
 	// itself.
-	if rvr.Spec.NodeName == "" {
+	if unplaced {
 		occupied := sctx.OccupiedNodes
 		p = WithPredicate(p, "node occupied", logger, func(e *CandidateEntry) *CandidateEntry {
 			if _, ok := occupied[e.Node.NodeName]; ok {
@@ -602,7 +677,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// The stage sits last among the filters, so everything it saw had already survived the others:
 	// when it admitted none of them, the budget alone is what left the replica nowhere to land.
 	resyncSeen, resyncAdmitted := 0, 0
-	if isDiskful && rvr.Spec.NodeName == "" && sctx.ResyncOccupancy != nil {
+	if isDiskful && unplaced && sctx.ResyncOccupancy != nil {
 		resyncOccupancy := sctx.ResyncOccupancy
 		resyncLimit := r.resyncLimit
 		p = WithPredicate(p, "no free resync end", logger, func(e *CandidateEntry) *CandidateEntry {
@@ -707,9 +782,21 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		}
 	}
 
+	// Ordering: score first, then how loaded the node already is, then names.
+	//
+	// The load only ever decides a tie, so capacity still outranks it for Diskful and
+	// the attach-to bonus still outranks both. For a TieBreaker it decides everything:
+	// nothing above scores a diskless candidate, so without it every tie-breaker in the
+	// cluster lands on whichever eligible node sorts first by name.
+	//
+	// The name comparison stays as the last key. It is what makes the choice repeatable
+	// across reconciliations of the same unchanged state.
 	best, summary := SelectBest(p, func(a, b *CandidateEntry) bool {
 		if a.Score != b.Score {
 			return a.Score > b.Score
+		}
+		if la, lb := sctx.NodeLoad[a.Node.NodeName], sctx.NodeLoad[b.Node.NodeName]; la != lb {
+			return la < lb
 		}
 		if a.Node.NodeName != b.Node.NodeName {
 			return a.Node.NodeName < b.Node.NodeName
@@ -749,6 +836,25 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	if outcome.ShouldReturn() {
 		return outcome
 	}
+
+	// The only record of why this node was picked. The Scheduled condition says that
+	// the replica was placed, never against what; the pipeline summary is built for
+	// the failure paths and is discarded here.
+	//
+	// The replica type is worth a field of its own: a TieBreaker is scored by nobody,
+	// so "score 0" on it is the normal case rather than the anomaly it looks like.
+	placed := []any{
+		"type", rvr.Spec.Type,
+		"node", best.Node.NodeName,
+		"lvg", best.LVGName(),
+		"score", best.Score,
+	}
+	// Left out rather than logged as zero when the count was skipped: on that path the
+	// node was never compared against another, and a zero would read as an idle node.
+	if sctx.NodeLoad != nil {
+		placed = append(placed, "nodeLoad", sctx.NodeLoad[best.Node.NodeName])
+	}
+	logger.V(2).Info("replica placed", placed...)
 
 	// Placement succeeded — update scheduling context for subsequent RVRs.
 	sctx.Update(rvr, best)
@@ -811,6 +917,15 @@ type schedulingContext struct {
 	// created. The map is owned by this context.
 	ResyncOccupancy map[string]int
 
+	// NodeLoad maps an eligible node to the replicas already placed on it, counted
+	// across all volumes. It breaks ties between candidates of equal score, so that
+	// the least loaded node wins instead of the alphabetically first one.
+	//
+	// A snapshot: Update does not charge placements to it — see Update. Nil unless
+	// some replica of the volume has no node at all, and nil for every reconciliation
+	// that returns at the "all scheduled" guard.
+	NodeLoad map[string]int
+
 	// Topology and zone layout.
 	//
 	// ReplicasByZone maps zone name → IDSet of replicas in that zone.
@@ -836,11 +951,18 @@ type schedulingContext struct {
 	//
 	// Scheduled holds the replicas whose placement is already complete for their
 	// type (see isReplicaScheduled); Access replicas are never in it.
+	//
+	// Unplaced holds the replicas with no node at all, as opposed to the ones back
+	// only for their LVG; it gates the node-load count, since a replica that already
+	// has a node is narrowed to it and no two nodes are ever compared for it. It is
+	// the state the reconciliation started from — Update does not remove a replica it
+	// places, the way it adds one to Scheduled.
 	All        idset.IDSet
 	Access     idset.IDSet
 	Diskful    idset.IDSet
 	TieBreaker idset.IDSet
 	Scheduled  idset.IDSet
+	Unplaced   idset.IDSet
 }
 
 // computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
@@ -905,6 +1027,8 @@ func computeSchedulingContext(
 			if isReplicaScheduled(rvr, poolType) {
 				sctx.Scheduled.Add(id)
 			}
+		} else {
+			sctx.Unplaced.Add(id)
 		}
 	}
 
@@ -948,8 +1072,17 @@ func isReplicaScheduled(rvr *v1alpha1.ReplicatedVolumeReplica, poolType v1alpha1
 	}
 }
 
-// Update records a successful placement: marks the node as occupied and adds
-// the RVR to its zone in ReplicasByZone.
+// Update records a successful placement: marks the node as occupied and adds the RVR
+// to its zone in ReplicasByZone.
+//
+// NodeLoad is deliberately left alone. Charging the node here could not change a later
+// decision: this same call puts it in OccupiedNodes, and the "node occupied" predicate
+// then keeps it out of the candidates of every replica of this volume that still needs
+// one. What keeps the replicas of one volume apart is that predicate, not the count.
+//
+// It would not be free either: the placement log reads NodeLoad for the chosen node,
+// and were the increment to happen before it, the line would report a load that already
+// includes the replica being reported.
 func (sctx *schedulingContext) Update(rvr *v1alpha1.ReplicatedVolumeReplica, entry *CandidateEntry) {
 	id := rvr.ID()
 	sctx.OccupiedNodes[entry.Node.NodeName] = struct{}{}
@@ -1106,6 +1239,47 @@ func (r *Reconciler) reconcileRVRCondition(
 
 // --- RVR ---
 
+// getRVRs lists every ReplicatedVolumeReplica in the cluster.
+//
+// Its one consumer is the resync budget, and an index does not narrow what that needs:
+// a claim ahead of this one may sit on any node, and the pass reads each replica's
+// peers rather than counting them. Counting is a different question with a different
+// answer — see getReplicaCountOnNode, which does narrow by node.
+//
+// It reads only a few fields, so the copies the cache would otherwise make are pure
+// overhead — hence UnsafeDisableDeepCopy. The returned replicas MUST be treated as
+// read-only: they alias the informer cache.
+//
+// No ordering is imposed; the consumer does not depend on the order it walks them in.
+func (r *Reconciler) getRVRs(ctx context.Context) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
+	list := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+
+	// Same []T-to-[]*T copy loop as getRVRsByRVName below; see the HACK note there.
+	result := make([]*v1alpha1.ReplicatedVolumeReplica, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
+}
+
+// getReplicaCountOnNode reports how many ReplicatedVolumeReplicas sit on one node.
+//
+// Only the count leaves this function, so nothing keeps the listed replicas alive past
+// the call and the caller can walk the nodes one at a time.
+func (r *Reconciler) getReplicaCountOnNode(ctx context.Context, nodeName string) (int, error) {
+	list := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, list,
+		client.MatchingFields{indexes.IndexFieldRVRByNodeName: nodeName},
+		client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return 0, err
+	}
+	return len(list.Items), nil
+}
+
 func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	list := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, list, client.MatchingFields{
@@ -1149,22 +1323,6 @@ func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1a
 		return cmp.Compare(a.Name, b.Name)
 	})
 
-	return result, nil
-}
-
-// getRVRs lists every replica in the cluster through the informer cache (UnsafeDisableDeepCopy).
-//
-// The scan cannot be narrowed by an index: a claim ahead of this volume may sit on any node.
-func (r *Reconciler) getRVRs(ctx context.Context) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
-	list := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
-		return nil, err
-	}
-
-	result := make([]*v1alpha1.ReplicatedVolumeReplica, len(list.Items))
-	for i := range list.Items {
-		result[i] = &list.Items[i]
-	}
 	return result, nil
 }
 

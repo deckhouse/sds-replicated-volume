@@ -57,9 +57,11 @@ func newScheme() *runtime.Scheme {
 }
 
 func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
-	return testhelpers.WithRVAByReplicatedVolumeNameIndex(
-		testhelpers.WithRVRByReplicatedVolumeNameIndex(
-			fake.NewClientBuilder().WithScheme(scheme),
+	return testhelpers.WithRVRByNodeNameIndex(
+		testhelpers.WithRVAByReplicatedVolumeNameIndex(
+			testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().WithScheme(scheme),
+			),
 		),
 	)
 }

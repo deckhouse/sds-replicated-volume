@@ -162,6 +162,51 @@ Selection within a node always picks the LVG with the highest extender score.
 
 ---
 
+## Node Load Tie-Break
+
+Placement compares candidates by score first, by how many replicas the node already
+carries second, by name last. `NodeLoad` counts every replica on a node across all
+volumes — distinct from `OccupiedNodes`, which is the set of nodes used by the volume
+being scheduled and is a hard filter.
+
+| # | Case | Expected |
+|---|------|----------|
+| 1 | Replicas of several volumes on one node | Counted together — the load is per node, not per volume |
+| 2 | Replica with no node yet | Not counted anywhere |
+| 3 | ⚡ TieBreaker and Access replicas | Counted — they carry no data but hold a DRBD resource all the same |
+| 4 | Replica being deleted | Counted — its resource is up until teardown completes |
+| 5 | Replicas on nodes outside the pool | Not counted — they can never be candidates |
+| 6 | Nothing placed anywhere | The count is empty rather than a map of zeroes |
+| 7 | Equal scores, nodes differ in load | The least loaded node wins, not the first by name |
+| 8 | ⚡ Loaded node scores higher | Capacity wins; load never overrides it |
+| 9 | Scores split into tiers | The low tier stays empty; inside the high tier the load evens out |
+| 10 | Best-scored nodes sort last by name and carry the most replicas | Placement still follows score order |
+| 11 | Node carries only Access replicas, capacity ties | It is passed over — diskless replicas are load too |
+| 12 | Same, but that node scores higher | It is chosen; Access replicas only ever decide a tie |
+| 13 | Many volumes over equal nodes | Replicas per node stay within 2 of each other, and no node piles up the tie-breakers |
+| 14 | Cluster starts skewed, volumes arrive | New replicas go to the quiet nodes; the spread evens out |
+| 15 | A placement is recorded | The node is occupied; the count is left alone |
+| 16 | Only replica left has a node, needs an LVG | The count is skipped — no two nodes are compared for it |
+| 17 | A replica has no node | The count runs, one read per eligible node |
+| 18 | ⚡ A node cannot be read | The reconciliation fails; nothing is placed on a load of zeroes |
+
+Case 8 holds half the contract: the load is a tie-break, never a filter. A node that
+cannot fit the volume must not be chosen because it happens to be idle.
+
+Case 13 also checks the tie-breakers apart from the total: a level total could be offset
+by the Diskful placements, so the check is that no node holds a quarter of them. Without
+the load key all sixteen land on one node.
+
+Case 18 matters more than a covered error path: were the failure swallowed, the count
+would stay empty, every candidate would read as idle, and the tie-break would fall back
+to the node name — the original skew, silently.
+
+Case 15 checks that `Update` leaves the count alone: the node it just occupied is out of
+the candidates of every replica that follows, so charging it would only make the map
+disagree with reality.
+
+---
+
 ## RSP Not Found
 
 1. ⚡ **RSP does not exist → `WaitingForReplicatedVolume` condition on all RVRs.**

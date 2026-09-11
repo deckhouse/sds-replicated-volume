@@ -45,6 +45,11 @@ if Scheduled replicas exist:
 
 if all non-Access replicas are scheduled → Done
 
+if some replica has no node at all:
+    reconcileNodeLoad → NodeLoad: node → replicas already on it
+        (one indexed read per eligible node; skipped when every replica left is
+        back only for its LVG, since it is narrowed to the node it sits on)
+
 compute unscheduled = All - Scheduled
     (deleting RVRs are not excluded: the scheduler places replicas, it does not
     decide whether they are needed; unnecessary ones disappear on their own)
@@ -58,7 +63,7 @@ Phase 2: for each unscheduled Diskful (in ID order):
 Phase 3: for each unscheduled TieBreaker (in ID order):
     build per-RVR pipeline → filter → SelectBest (no extender scoring)
     patch RVR spec + set Scheduled condition
-    update schedulingContext
+    update schedulingContext (occupied nodes, zone counts)
 ```
 
 ## Reconciliation Structure
@@ -75,6 +80,7 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileRVRsConditionAbsent (Access replicas) [In-place reconciliation]
 ├── reconcileRVRsCondition (Scheduled=True for already-scheduled) [In-place reconciliation]
 ├── all scheduled? → Done
+├── reconcileNodeLoad (only if some replica has no node; one indexed read per eligible node)
 ├── Phase 2: for each unscheduled Diskful
 │   └── reconcileOneRVRScheduling [In-place reconciliation]
 │       ├── Build pipeline (TakeLVGsFromEligibleNodes or TakeOnlyNodesFromEligibleNodes)
@@ -86,7 +92,7 @@ Reconcile (root) [Pure orchestration]
 │       ├── WithPredicate: attach-to bonus +1000 (Diskful only)
 │       ├── WithNodeScore: multi-LVG node bonus +2 (Diskful, volumeAccess != Any)
 │       ├── WithZoneScore: zone capacity penalty -800 (Diskful + Zonal only)
-│       ├── SelectBest (by score → node name → LVG name)
+│       ├── SelectBest (by score → node load → node name → LVG name)
 │       ├── NarrowReservation (Diskful only)
 │       └── reconcileRVRPlacement [In-place reconciliation]
 │           ├── applyPlacementFromEntry → patchRVR (main domain)
@@ -151,7 +157,7 @@ Source → Predicate filters → Scoring → SelectBest
 | `FilteredAndScoredBySchedulerExtender` | Filter+Score | Calls extender, merge-joins scores, excludes unscored/zero-score |
 | `WithNodeScore` | Score | Groups by node, adds score to all candidates in a group |
 | `WithZoneScore` | Score | Groups by zone, adds score to all candidates in a group |
-| `SelectBest` | Selection | Picks the candidate with the highest score (deterministic tiebreak) |
+| `SelectBest` | Selection | Picks the highest-scored candidate, breaking ties by how many replicas the node already carries (deterministic tiebreak) |
 
 ### Pipeline Steps (per RVR)
 
@@ -164,11 +170,83 @@ Source → Predicate filters → Scoring → SelectBest
 7. **Attach-to bonus** (Diskful only): +1000 to nodes from RVA objects (`getIntendedAttachments`)
 8. **Multi-LVG bonus** (Diskful, volumeAccess != Any): +2 to nodes with >1 LVG
 9. **Zone capacity penalty** (Diskful + Zonal only): -800 to zones with insufficient free nodes
-10. **SelectBest**: highest score → alphabetical node name → alphabetical LVG name
+10. **SelectBest**: highest score → least loaded node (`NodeLoad`, replicas on it across all volumes) → alphabetical node name → alphabetical LVG name
+
+The load key is what places TieBreakers: nothing above it scores a diskless
+candidate, so without it every tie-breaker in the cluster lands on whichever
+eligible node sorts first by name. It matters for Diskful too, because the
+extender's capacity score is coarse enough that nodes routinely tie on it.
+
+`NodeLoad` is built once per reconciliation, and only when some replica has no node at
+all: one that is back merely for its LVG is narrowed to the node it sits on, so no two
+nodes are ever compared for it. Reconciliations with nothing left to place skip it at
+the guard above.
+
+It is a snapshot, not updated as replicas are placed. What keeps the replicas of one
+volume off the same node is the `node occupied` predicate, which reads `OccupiedNodes`;
+by the time a node could be counted again it is already out of the candidates.
+
+It is counted with one indexed read per eligible node rather than one read of every
+replica in the cluster. Only the count is wanted, and listing the whole collection
+materialises every replica into the list's backing array; per node only that node's
+replicas are live at a time. Nodes outside the pool are not counted at all — a replica
+there can never be a candidate.
+
+Between volumes the count is a snapshot, and the controller runs ten reconciliations
+at a time (`MaxConcurrentReconciles`), so workers do not see each other's placements.
+Ten that start from the same snapshot pick the same quietest nodes, and the overshoot
+is bounded by the worker count times the replicas per volume — not by how many volumes
+are waiting — with the next snapshot routing around it.
+
+That bound assumes the informer cache catches up between two consecutive
+reconciliations of the same worker. The assumption is weakest for a TieBreaker: nothing
+scores a diskless candidate, so its pass has no round trip to the scheduler-extender to
+sit through and is the shortest one there is.
 
 ### Diagnostic Summary
 
 Each pipeline step tracks how many candidates it excluded. When no candidate survives, the `SchedulingFailed` condition message contains the full pipeline summary (e.g., `"4 candidates (node×LVG) from 2 eligible nodes; 4 excluded: node not ready"`).
+
+That summary only reaches the failure paths. A successful placement is reported by
+a `V(2)` line instead — `replica placed`, with the replica type, the chosen node and
+LVG, the score and the node's load:
+
+```
+"replica placed" logger="schedule-rvr" controller="replicatedvolume"
+  controllerKind="ReplicatedVolume" ReplicatedVolume="/pvc-a6f05e2b" reconcileID="…"
+  rvr="pvc-a6f05e2b-2" type="TieBreaker" node="hv-07" lvg="" score=0 nodeLoad=612
+```
+
+Everything up to `rvr` comes from the phase logger and controller-runtime; the fields
+after it are the decision. `nodeLoad` is absent when the replica already had a node and
+came back only for its LVG: no load was counted on that path, and a zero would read as
+an idle node rather than an unasked question. `score=0` on a TieBreaker is the normal case, not a fault —
+nothing scores a diskless candidate, which is why the type is a field of its own.
+
+It is the only record of what the choice was made against: the `Scheduled` condition
+says the replica was placed, never why that node.
+
+`V(2)` lands below the controller's threshold, so the line is off by default. The
+module's `logLevel` does not turn it on — that setting is wired to `linstor-*` and the
+CSI parts, and never reaches this controller. The threshold lives in the `slogh.cfg`
+key of the `controller-config` ConfigMap:
+
+```
+level=DEBUG    # INFO by default; the numeric form, -2, is accepted as well
+```
+
+No restart is needed: `slogh` watches the file and reloads it, and it survives the
+symlink swap Kubernetes performs on a ConfigMap update. Expect up to a minute or so
+before the change lands — the kubelet refreshes the mount on its own schedule. The
+agent is configured the same way, through its own `slogh.cfg`.
+
+The edit also runs against what Helm believes the ConfigMap should hold, so the next
+module sync restores `INFO` — treat it as a switch for the length of an investigation,
+not a setting.
+
+Watching the placements that follow is enough to answer "why did it land there": an
+uneven spread is a property of the stream of decisions, not of any single one, so
+there is no need to recover the decisions already made.
 
 ## Conditions
 
@@ -193,6 +271,14 @@ A Diskful replica that has no node yet receives the whole volume over the networ
 placed. `RESYNC_SLOTS_PER_NODE` (`0` by default, meaning no limit) caps how many such transfers a
 node may take part in at once, counted in *resync ends* — a transfer between two nodes occupies one
 end on each. The decision itself lives in `internal/syncbudget`, a pure package holding no state.
+
+With the limiter switched on, the budget's own listing overlaps the node-load counting above:
+it materialises every replica in the cluster, and the counts are derivable from that. The two are
+kept separate all the same. The limiter is off by default, so it is the configuration without it
+that pays for the counting, and that one is better off with the per-node reads. Were the limiter
+ever to become the default, taking the counts from the budget's list would be worth revisiting —
+though it would not cover every case, since a volume whose only unplaced replica is a TieBreaker
+never reaches the budget at all.
 
 The two sides of a transfer are enforced in different places, because the two sets of nodes are
 chosen in different places:
@@ -247,7 +333,9 @@ The `schedulingContext` is built once per Reconcile invocation by `computeSchedu
 | Field | Source | Description |
 |-------|--------|-------------|
 | `EligibleNodes` | `rsp.Status.EligibleNodes` | Candidate nodes (a clone owned by the context — including each node's `LVMVolumeGroups` — sorted by NodeName; the RSP is a read-only input) |
-| `OccupiedNodes` | RVRs with `spec.nodeName != ""` | Nodes already used by any RVR |
+| `OccupiedNodes` | RVRs with `spec.nodeName != ""` | Nodes already used by any RVR of **this** volume; a hard filter, so its replicas land on distinct nodes |
+| `NodeLoad` | RVRs on each eligible node, across all volumes | Node → replicas on it; the tie-break below the score. Nil unless some replica has no node yet |
+| `Unplaced` | RVRs with `spec.nodeName == ""` | Replicas needing a node, as opposed to ones back only for their LVG; gates the count above |
 | `AttachToNodes` | RVA objects (via `getIntendedAttachments`) | Nodes preferred for attachment (sorted, deduplicated; a clone owned by the context) |
 | `ReservationID` | RV annotation or computed from LLV name | Scheduler-extender reservation key |
 | `Size` | `rv.Spec.Size` | Volume size in bytes |
@@ -315,6 +403,12 @@ This controller does not manage finalizers, labels, or owner references. It only
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVRs for an RV (used by `getRVRsByRVName`) |
 | `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV (used by `getIntendedAttachments`) |
 | `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Map RSP events to RVs (used by `mapRSPToRV`) |
+| `IndexFieldRVRByNodeName` | `spec.nodeName` | Count the replicas on one node (used by `reconcileNodeLoad`) |
+
+`reconcileNodeLoad` reads through `IndexFieldRVRByNodeName`, once per eligible node.
+Every index above is registered by `controllers.RegisterIndexes`, which "must be invoked
+before any controller starts listing with `MatchingFields`" — a read through an index
+nobody registered fails at runtime, on every reconciliation that reaches it.
 
 ## Data Flow
 
@@ -497,7 +591,7 @@ flowchart TD
 | Input | Description |
 |-------|-------------|
 | `rvr` | The RVR to schedule |
-| `sctx` | Shared scheduling context (eligible nodes, topology, zones, occupied nodes) |
+| `sctx` | Shared scheduling context (eligible nodes, topology, zones, occupied nodes, node load) |
 | scheduler-extender | Capacity scores and reservation (Diskful only) |
 
 | Output | Description |
