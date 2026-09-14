@@ -1,0 +1,24 @@
+date: "2026-09-14"
+
+summary: "The module's certificates are now renewed and rolled out on their own, the false expiry alert is gone, and the controller publishes metrics behind a kube-rbac-proxy."
+
+highlights:
+  - "Module certificates are re-signed 45 days before they expire and the workloads using them are restarted automatically. Until now nothing renewed a certificate at all: it was regenerated only when its Secret went missing or empty."
+  - "`D8LinstorCertificateExpiringIn30d` no longer fires for certificates that are not the module's own. The hook labelled every Secret in the module namespace, including the Let's Encrypt ones copied there by `secret-copier`."
+  - "The controller serves metrics behind a `kube-rbac-proxy`, with a `ServiceMonitor` for Prometheus."
+
+new_features:
+  - "The controller publishes metrics: it binds them on `127.0.0.1` and a `kube-rbac-proxy` in the same pod serves them over TLS, so reaching them takes `get` on `deployments/prometheus-metrics` and the grant goes to the Prometheus scraper alone. A `ServiceMonitor` is created where the kind exists, and the ports are settable through the `oldControllerMetricsPort` and `oldControllerMetricsProxyPort` module values."
+
+fixes:
+  - "Certificates are renewed without manual intervention. Every certificate group now keeps its CA, certificate and private key in its own Secret, and a certificate is re-signed by the same CA 45 days before it expires; the CA lives ten years and is replaced only once it can no longer cover a full certificate lifespan. Renewal takes effect on a restart, and a new hook restarts the workloads that reference a renewed certificate Secret."
+  - "The expiring-certificate hook now looks only at the module's own Secrets, strips its label from the rest and no longer panics on a Secret without labels. Before this, every Secret in the module namespace was labelled, so certificates copied in by other modules tripped `D8LinstorCertificateExpiringIn30d` every few weeks."
+  - "The `linstor-scheduler-admission-certs` Secret, left over from a component removed earlier, no longer forces the webhook certificate group to be re-issued on every hook run — which re-minted the CA and rewrote the webhook `caBundle` each time. It is dropped from the group and from the openapi schema, and a hook deletes the leftover Secret."
+  - "A volume whose filesystem the CSI driver creates itself after a failed mount is formatted with `mkfs.ext4 -m0`, so it no longer hands 5% of its space to the superuser."
+
+improvements:
+  - "The controller logs through the shared logger in the structured format the rest of the fleet uses, instead of its own copy of an older logging package."
+
+upgrade_notes:
+  - "Nothing has to be done by hand, and the update rotates nothing: certificate groups issued by earlier versions, whose CA key is unknown, are left untouched until their certificates go outdated."
+  - "Workloads that need a renewed certificate are restarted by a hook on the convergence that follows the renewal. Renewing 45 days ahead leaves the previous certificate valid in the meantime."
