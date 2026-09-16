@@ -1,6 +1,16 @@
 {{- if not .Values.sdsReplicatedVolume.internal.newControlPlane }}
 {{- /* RBAC */ -}}
+{{- /*
+  controllerMetricsProxyPort is not used as a port here. It is how
+  helm_lib_module_controller_rbac learns that the pod carries a kube-rbac-proxy in
+  front of the metrics, and therefore needs the ClusterRoleBinding to d8:rbac-proxy
+  that lets the sidecar create TokenReviews and SubjectAccessReviews. The value is
+  the one passed to helm_lib_module_controller_manifests next to this file: without
+  it the proxy fails closed on every scrape while the pod stays Ready, and the only
+  symptom is up == 0 on the controller job and a TargetDown that never clears.
+*/ -}}
 {{- $rbacConfig := dict
+  "controllerMetricsProxyPort" (int .Values.sdsReplicatedVolume.internal.oldControllerMetricsProxyPort)
   "roleRules" (list
     (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get" "list" "watch" "update"))
     (dict "apiGroups" (list "") "resources" (list "secrets") "verbs" (list "get" "list" "watch"))
