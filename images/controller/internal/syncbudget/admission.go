@@ -103,8 +103,8 @@ func (p Pass) IsWaiting(rvName string) bool {
 // RunPassForSubject walks the ordered queue once, occupying nodes for every claim in turn, and
 // reports what it decided for all of them plus the occupancy the named subject's turn saw.
 //
-// queue MUST already be ordered by CompareClaims, which is what ComputeActualQueue returns; the
-// order is what rules out mutual blocking, since the head of the queue always moves. Every claim
+// queue MUST already be ordered by CompareClaims, which is what SortQueue does; the order is what
+// rules out mutual blocking, since the head of the queue always moves. Every claim
 // occupies its nodes whether or not it was admitted — a blocked one holds them — because occupying
 // only for the admitted ones would let a volume that needs many ends starve behind a stream of
 // volumes that each need few.

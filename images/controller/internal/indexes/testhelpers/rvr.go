@@ -68,3 +68,14 @@ func WithRVRByRVAndNodeIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		return []string{indexes.RVRByRVAndNodeKey(rvr.Spec.ReplicatedVolumeName, rvr.Spec.NodeName)}
 	})
 }
+
+// WithRVRByResyncEndsOccupancyIndex registers the IndexFieldRVRByResyncEndsOccupancy index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+//
+// Unlike the helpers above it passes the extractor the manager registers instead of restating it:
+// which replicas this index selects is what the occupancy map is built from, so a copy that
+// drifted would leave the tests agreeing with themselves and with nothing else.
+func WithRVRByResyncEndsOccupancyIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByResyncEndsOccupancy,
+		indexes.ExtractRVRResyncEndsOccupancy)
+}

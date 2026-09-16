@@ -440,10 +440,19 @@ type resyncBudgetDecision struct {
 // against which occupancy the receiving node must then be chosen.
 //
 // The whole ordered queue is walked, not just this volume's own sender nodes: a volume ahead of
-// this one may want the same nodes, and only the walk knows what it holds there.
+// this one may want the same nodes, and only the walk knows what it holds there. Walking it whole
+// is not the same as reading the cluster whole, though: both inputs are selected by index, and the
+// selections are complete for what they feed — see syncbudget.MayClaim and syncbudget.OccupiesEnds.
+// Reading every volume and every replica instead costs, on a cluster of thousands, more memory per
+// worker than the controller is allowed in total.
 //
-// It reads the informer cache without DeepCopy and hands the objects to syncbudget, which never
-// mutates them.
+// The two selections are separate on purpose: a volume still forming its datamesh is left out of
+// the queue while its replicas keep occupying the nodes they sit on.
+//
+// Every read here skips DeepCopy and aliases the informer cache; the objects go to syncbudget,
+// which never mutates them, and MUST NOT be handed to anything that patches. Nor are they held:
+// each candidate's replicas become a claim and are let go before the next candidate is read, so
+// what the walk costs is the queue, not the volumes behind it.
 //
 // Reconcile pattern: Target-state driven. This method owns the target half only; the root
 // Reconcile turns a "wait" into the WaitingForResyncSlot condition on the individual replicas.
@@ -459,24 +468,74 @@ func (r *Reconciler) reconcileResyncBudget(
 		return resyncBudgetDecision{}, rf.Continue()
 	}
 
-	actualClaim, claiming := syncbudget.ComputeActualClaim(rv, rvrs)
+	// No own ends: this call decides only whether rv claims at all and what it needs, both of
+	// which are read below. The claim admission is judged on is the queue's, built with the ends
+	// the occupancy map itself reports.
+	actualClaim, claiming := syncbudget.ComputeActualClaim(rv, rvrs, nil)
 	if !claiming {
 		return resyncBudgetDecision{}, rf.Continue()
 	}
 
-	actualRVs, err := r.getRVs(rf.Ctx())
+	occupyingRVRs, err := r.getRVRsOccupyingResyncEnds(rf.Ctx())
 	if err != nil {
-		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumes")
+		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumeReplicas occupying resync ends")
 	}
 
-	actualRVRs, err := r.getRVRs(rf.Ctx())
+	candidateRVs, err := r.getRVsClaimingResyncSlots(rf.Ctx())
 	if err != nil {
-		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumeReplicas")
+		return resyncBudgetDecision{}, rf.Failf(err, "listing ReplicatedVolumes claiming resync slots")
 	}
+
+	ownEndsByRV := syncbudget.ComputeActualOccupancyByRV(occupyingRVRs)
+
+	// The subject's claim is the one computed above, from the object this reconciliation holds,
+	// with the own ends the occupancy reading reports for it. Never the listing's copy of the
+	// volume: it answers from an index that may not have caught up, and a subject missing from
+	// the queue reads as admitted.
+	actualClaim.OwnEnds = ownEndsByRV[rv.Name]
+
+	// The candidates come pre-filtered by the index, but their sender nodes cannot: whether a
+	// member holds usable data is recorded on the replica, while the member entry the volume
+	// carries says only where it is. So each candidate's replicas are read one volume at a time,
+	// which is a read per volume short of a copy — not per volume in the cluster.
+	//
+	// Each read is turned into a claim before the next one is made, and the replicas are let go:
+	// the walk needs the claims, and holding every candidate's replicas until the whole queue is
+	// built is what used to put the cluster back in memory a piece at a time.
+	//
+	// Senders are all these replicas are read for; what each claimant already occupies comes from
+	// the occupancy listing instead, so that the two cannot disagree.
+	queue := make([]syncbudget.Claim, 0, len(candidateRVs)+1)
+	queue = append(queue, actualClaim)
+
+	for _, candidate := range candidateRVs {
+		if candidate.Name == rv.Name {
+			// Already in the queue, from the object in hand. Volumes are cluster-scoped, so at
+			// most one candidate can match — and a second copy of the subject's claim would
+			// charge its own sender nodes twice and block it behind itself.
+			continue
+		}
+
+		candidateRVRs, err := r.getUnsafeRVRsByRVName(rf.Ctx(), candidate.Name)
+		if err != nil {
+			return resyncBudgetDecision{}, rf.Failf(err,
+				"listing ReplicatedVolumeReplicas of rv %s", candidate.Name)
+		}
+
+		claim, ok := syncbudget.ComputeActualClaim(candidate, candidateRVRs, ownEndsByRV[candidate.Name])
+		if !ok {
+			// MayClaim accepts a superset of the queue: this one turned out not to be short of
+			// anything it can read, now that its replicas have been seen.
+			continue
+		}
+		queue = append(queue, claim)
+	}
+
+	syncbudget.SortQueue(queue)
 
 	reportPass := syncbudget.RunPassForSubject(
-		syncbudget.ComputeActualQueue(actualRVs, actualRVRs),
-		syncbudget.ComputeActualOccupancy(actualRVRs),
+		queue,
+		syncbudget.ComputeActualOccupancy(occupyingRVRs),
 		r.resyncLimit,
 		rv.Name,
 	)
@@ -1239,21 +1298,23 @@ func (r *Reconciler) reconcileRVRCondition(
 
 // --- RVR ---
 
-// getRVRs lists every ReplicatedVolumeReplica in the cluster.
+// getRVRsOccupyingResyncEnds lists the ReplicatedVolumeReplicas that carry resync ends on their
+// node, which is every replica the occupancy map is built from and no other.
 //
-// Its one consumer is the resync budget, and an index does not narrow what that needs:
-// a claim ahead of this one may sit on any node, and the pass reads each replica's
-// peers rather than counting them. Counting is a different question with a different
-// answer — see getReplicaCountOnNode, which does narrow by node.
+// The index behind it selects by syncbudget.OccupiesEnds, the same predicate the map's own sweep
+// skips replicas by, so the narrowed result yields the same map as every replica in the cluster
+// would — bounded by how much resync is in flight rather than by how many replicas exist.
 //
 // It reads only a few fields, so the copies the cache would otherwise make are pure
 // overhead — hence UnsafeDisableDeepCopy. The returned replicas MUST be treated as
 // read-only: they alias the informer cache.
 //
 // No ordering is imposed; the consumer does not depend on the order it walks them in.
-func (r *Reconciler) getRVRs(ctx context.Context) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
+func (r *Reconciler) getRVRsOccupyingResyncEnds(ctx context.Context) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	list := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy, client.MatchingFields{
+		indexes.IndexFieldRVRByResyncEndsOccupancy: indexes.IndexValueResyncEndsOccupant,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -1278,6 +1339,31 @@ func (r *Reconciler) getReplicaCountOnNode(ctx context.Context, nodeName string)
 		return 0, err
 	}
 	return len(list.Items), nil
+}
+
+// getUnsafeRVRsByRVName lists the replicas of one volume, aliasing the informer cache instead of
+// copying it (UnsafeDisableDeepCopy). The returned replicas MUST be treated as read-only.
+//
+// It exists beside getRVRsByRVName because the resync budget reads one volume after another: the
+// copies the cache would make are the whole cost of that walk, and nothing in the budget patches
+// what it reads. Callers that go on to patch a replica MUST use getRVRsByRVName instead.
+//
+// No ordering is imposed; the budget derives its sender nodes from the volume's datamesh, which
+// carries its own order.
+func (r *Reconciler) getUnsafeRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
+	list := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
+		return nil, err
+	}
+
+	// Same []T-to-[]*T copy loop as getRVRsByRVName below; see the HACK note there.
+	result := make([]*v1alpha1.ReplicatedVolumeReplica, len(list.Items))
+	for i := range list.Items {
+		result[i] = &list.Items[i]
+	}
+	return result, nil
 }
 
 func (r *Reconciler) getRVRsByRVName(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
@@ -1369,11 +1455,21 @@ func (r *Reconciler) getRV(ctx context.Context, name string) (*v1alpha1.Replicat
 	return rv, nil
 }
 
-// getRVs lists every volume in the cluster through the informer cache (UnsafeDisableDeepCopy),
-// so that the resync queue can be built. See getRVRs on why it is not narrowed by an index.
-func (r *Reconciler) getRVs(ctx context.Context) ([]*v1alpha1.ReplicatedVolume, error) {
+// getRVsClaimingResyncSlots lists the ReplicatedVolumes that could claim a resync slot, through
+// the informer cache (UnsafeDisableDeepCopy), so that the resync queue can be built.
+//
+// The index behind it selects by syncbudget.MayClaim, which judges a volume without its replicas
+// and so accepts a superset of the queue: every volume that ends up claiming is here, and a few
+// that do not are filtered out when their replicas are read. Erring that way is deliberate — see
+// MayClaim.
+//
+// The returned volumes MUST be treated as read-only: they alias the informer cache. No ordering is
+// imposed; the claims built from them are ordered by syncbudget.SortQueue.
+func (r *Reconciler) getRVsClaimingResyncSlots(ctx context.Context) ([]*v1alpha1.ReplicatedVolume, error) {
 	list := &v1alpha1.ReplicatedVolumeList{}
-	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy); err != nil {
+	if err := r.cl.List(ctx, list, client.UnsafeDisableDeepCopy, client.MatchingFields{
+		indexes.IndexFieldRVByResyncClaimCandidacy: indexes.IndexValueResyncClaimCandidate,
+	}); err != nil {
 		return nil, err
 	}
 

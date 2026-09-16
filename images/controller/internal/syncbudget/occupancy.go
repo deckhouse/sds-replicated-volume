@@ -25,30 +25,70 @@ import (
 // It reads replicas only — never the volume — because the volume's datamesh lives in its status
 // and would cost a second selection. The map is derived fresh on every call.
 //
-// Per replica the two signals are combined by taking the largest, not the sum: they describe the
-// same transfer from different angles, so summing would charge one resync twice and halve the
-// effective limit, while the largest keeps the error in the safe direction.
+// Idle nodes stay out of the map entirely, so its keys are exactly the nodes carrying resync load.
 func ComputeActualOccupancy(rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]int {
 	occupancy := make(map[string]int)
 
 	for _, rvr := range rvrs {
-		if rvr.Spec.NodeName == "" {
-			// Not placed yet, so there is no node to charge.
+		if !OccupiesEnds(rvr) {
 			continue
 		}
 
-		ends := max(reportedResyncEnds(rvr), owedDataEnds(rvr))
-
-		if ends == 0 {
-			// Keep idle nodes out of the map entirely, so its keys are exactly the
-			// nodes carrying resync load.
-			continue
-		}
-
-		occupancy[rvr.Spec.NodeName] += ends
+		occupancy[rvr.Spec.NodeName] += occupiedEnds(rvr)
 	}
 
 	return occupancy
+}
+
+// ComputeActualOccupancyByRV reports the same ends as ComputeActualOccupancy, split by the volume
+// carrying them: summing its values over every volume gives back the whole map.
+//
+// A claim's OwnEnds must come from here rather than from a separate reading of that volume's
+// replicas. Admission charges a claim only the increment over its own ends, and that subtraction is
+// sound only while those ends are already in the occupancy map it is judged against. Two readings
+// can disagree — a transfer that started between them appears in the claim's own ends and not in
+// the map — and the claim would then be charged for neither, admitting one end past the limit.
+//
+// Replicas whose volume name is empty are left out: they belong to no volume, so no claim can
+// subtract them, though they still occupy their node in the whole map.
+func ComputeActualOccupancyByRV(rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]map[string]int {
+	byRV := make(map[string]map[string]int)
+
+	for _, rvr := range rvrs {
+		if !OccupiesEnds(rvr) || rvr.Spec.ReplicatedVolumeName == "" {
+			continue
+		}
+
+		occupancy, seen := byRV[rvr.Spec.ReplicatedVolumeName]
+		if !seen {
+			occupancy = make(map[string]int)
+			byRV[rvr.Spec.ReplicatedVolumeName] = occupancy
+		}
+		occupancy[rvr.Spec.NodeName] += occupiedEnds(rvr)
+	}
+
+	return byRV
+}
+
+// OccupiesEnds reports whether rvr contributes to the occupancy map: it sits on a node and carries
+// at least one resync end there.
+//
+// ComputeActualOccupancy counts exactly the replicas this accepts and skips exactly the ones it
+// rejects, which is what lets a caller select replicas by it — an index, say — and still get the
+// same map from the narrowed slice as from every replica in the cluster. The two must therefore
+// stay one function: a predicate that drifts from the loop would silently understate occupancy.
+func OccupiesEnds(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	// Not placed yet, so there is no node to charge.
+	return rvr.Spec.NodeName != "" && occupiedEnds(rvr) > 0
+}
+
+// occupiedEnds is how many resync ends rvr carries on its node.
+//
+// The two signals are combined by taking the largest, not the sum: they describe the same transfer
+// from different angles, so summing would charge one resync twice and halve the effective limit,
+// while the largest keeps the error in the safe direction.
+func occupiedEnds(rvr *v1alpha1.ReplicatedVolumeReplica) int {
+	return max(reportedResyncEnds(rvr), owedDataEnds(rvr))
 }
 
 // reportedResyncEnds counts the connections of rvr that DRBD reports as syncing.

@@ -75,21 +75,24 @@ func CompareClaims(a, b Claim) int {
 // It returns false when rv makes no claim at all — still forming, needing no slot, or short of
 // copies with nowhere to read them from. None of those makes the volume wait, so the caller does
 // not need to tell them apart.
+//
+// ownEnds is rv's share of the occupancy map the claim will be judged against, and MUST come from
+// that same reading of it — ComputeActualOccupancyByRV, which explains why. Only admission reads
+// it, so a caller asking merely whether rv claims, and for what, MAY pass nil.
+//
+// rvrs must be rv's own replicas, and all of them: what the volume needs and where it can read it
+// from is decided from them, so a short list reads as a volume with nowhere to read from and makes
+// no claim at all.
 func ComputeActualClaim(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	ownEnds map[string]int,
 ) (Claim, bool) {
-	// A volume being born is never held back: formation has a timeout whose expiry deletes every
-	// replica, so queueing it would turn a full budget into a rebuild loop. Its load still counts
-	// in the occupancy map — it occupies without asking.
-	if isFormingDatamesh(rv) {
+	if !MayClaim(rv) {
 		return Claim{}, false
 	}
 
 	class := ComputeActualSyncClass(rv)
-	if class == ClassNone {
-		return Claim{}, false
-	}
 
 	neededEnds := ComputeActualNeededEnds(rv, rvrs)
 	if len(neededEnds) == 0 {
@@ -100,10 +103,26 @@ func ComputeActualClaim(
 		Class:      class,
 		Name:       rv.Name,
 		NeededEnds: neededEnds,
-		// Occupancy is additive over replicas, so the volume's own share is the same sweep run
-		// over its own replicas — no second rule to keep in step with the global one.
-		OwnEnds: ComputeActualOccupancy(rvrs),
+		OwnEnds:    ownEnds,
 	}, true
+}
+
+// MayClaim reports whether rv could claim a resync slot, judged from the volume alone.
+//
+// It is the part of ComputeActualClaim that needs no replicas. A volume it rejects makes no claim
+// and can be left out of the queue unread; a volume it accepts still has to be short of ends
+// somewhere to make one, and only its replicas can say. So the volumes it accepts are a superset of
+// the queue, never a subset — which is what lets a caller select volumes by it, an index say, and
+// still walk the whole queue.
+//
+// The direction matters more than the precision: selecting too many costs a read, while selecting
+// too few drops a claim from the queue and admits a volume that should have waited.
+//
+// A volume being born is rejected outright: formation has a timeout whose expiry deletes every
+// replica, so queueing it would turn a full budget into a rebuild loop. Its load still counts in
+// the occupancy map — it occupies without asking, which is why OccupiesEnds is a separate reading.
+func MayClaim(rv *v1alpha1.ReplicatedVolume) bool {
+	return !isFormingDatamesh(rv) && ComputeActualSyncClass(rv) != ClassNone
 }
 
 // isFormingDatamesh reports whether rv's datamesh has never been formed or is still forming.
@@ -119,32 +138,14 @@ func isFormingDatamesh(rv *v1alpha1.ReplicatedVolume) bool {
 	return false
 }
 
-// ComputeActualQueue builds the claims of every volume that wants a resync slot, in the order the
-// admission pass walks them.
+// SortQueue orders claims in place, the way the admission pass walks them.
 //
-// Volumes that make no claim are absent from the result, but their replicas still count in the
-// occupancy map.
-func ComputeActualQueue(
-	rvs []*v1alpha1.ReplicatedVolume,
-	rvrs []*v1alpha1.ReplicatedVolumeReplica,
-) []Claim {
-	rvrsByRV := make(map[string][]*v1alpha1.ReplicatedVolumeReplica, len(rvs))
-	for _, rvr := range rvrs {
-		if rvr.Spec.ReplicatedVolumeName == "" {
-			continue
-		}
-		rvrsByRV[rvr.Spec.ReplicatedVolumeName] = append(rvrsByRV[rvr.Spec.ReplicatedVolumeName], rvr)
-	}
-
-	queue := make([]Claim, 0, len(rvs))
-	for _, rv := range rvs {
-		if claim, ok := ComputeActualClaim(rv, rvrsByRV[rv.Name]); ok {
-			queue = append(queue, claim)
-		}
-	}
-
+// It is the one spelling of that order, so a caller building the queue one claim at a time — which
+// is how they arrive, the replicas behind them being read one volume at a time — cannot get it
+// wrong. The queue itself is the caller's to assemble: every volume MayClaim accepts is offered to
+// ComputeActualClaim, and the ones it turns down are simply absent.
+func SortQueue(queue []Claim) {
 	slices.SortFunc(queue, CompareClaims)
-	return queue
 }
 
 // ComputeActualNeededEnds reports how many resync ends rv needs on each node that could send it

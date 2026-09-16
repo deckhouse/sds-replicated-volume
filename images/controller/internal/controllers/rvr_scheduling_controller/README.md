@@ -272,13 +272,32 @@ placed. `RESYNC_SLOTS_PER_NODE` (`0` by default, meaning no limit) caps how many
 node may take part in at once, counted in *resync ends* — a transfer between two nodes occupies one
 end on each. The decision itself lives in `internal/syncbudget`, a pure package holding no state.
 
-With the limiter switched on, the budget's own listing overlaps the node-load counting above:
-it materialises every replica in the cluster, and the counts are derivable from that. The two are
-kept separate all the same. The limiter is off by default, so it is the configuration without it
-that pays for the counting, and that one is better off with the per-node reads. Were the limiter
-ever to become the default, taking the counts from the budget's list would be worth revisiting —
-though it would not cover every case, since a volume whose only unplaced replica is a TieBreaker
-never reaches the budget at all.
+With the limiter switched on the budget reads twice, both times through an index: the volumes that
+could claim a slot, and the replicas carrying resync ends. Each volume the first read returns then
+costs one more read for its own replicas, because whether a member holds usable data is recorded on
+the replica while the member entry says only where it sits — so the fan-out is one read per volume
+short of a copy, not per volume in the cluster. Those per-volume reads alias the cache like the two
+wide ones; only `getRVRsByRVName`, whose replicas the root `Reconcile` goes on to patch, copies.
+
+Each of those reads becomes a claim before the next one is made, and the replicas behind it are let
+go: the walk needs the claims, and holding every candidate's replicas until the whole queue is built
+would put the cluster back in memory a piece at a time — the very thing the two narrowed listings
+exist to avoid.
+
+Senders are all the per-volume reads are used for. What a claimant already occupies comes from the
+occupancy reading instead, split per volume. Admission charges a claim only the increment over its
+own ends, and that subtraction holds only while those ends are already in the map being judged
+against; taken from two readings, an end that appeared between them would be subtracted from the
+charge and missing from the map at once, and a node would take one end past the limit.
+
+Neither selection overlaps the node-load counting above: the counts are over every replica on a
+node, the budget's over the few that are transferring. The two stay separate questions rather than
+one being derivable from the other.
+
+Reading both collections whole instead, as the first version of the limiter did, cost more memory
+per worker on a cluster of thousands of volumes than the controller is allowed in total — which is
+why the selections must stay complete for what they feed, and why the predicates deciding them are
+the same functions `syncbudget` counts by rather than copies of them.
 
 The two sides of a transfer are enforced in different places, because the two sets of nodes are
 chosen in different places:
@@ -404,6 +423,14 @@ This controller does not manage finalizers, labels, or owner references. It only
 | `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV (used by `getIntendedAttachments`) |
 | `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Map RSP events to RVs (used by `mapRSPToRV`) |
 | `IndexFieldRVRByNodeName` | `spec.nodeName` | Count the replicas on one node (used by `reconcileNodeLoad`) |
+| `IndexFieldRVByResyncClaimCandidacy` | derived, `syncbudget.MayClaim` | List the volumes that could claim a resync slot (used by `getRVsClaimingResyncSlots`) |
+| `IndexFieldRVRByResyncEndsOccupancy` | derived, `syncbudget.OccupiesEnds` | List the replicas carrying resync ends (used by `getRVRsOccupyingResyncEnds`) |
+
+The last two keys are derived rather than read off a field, and both derive from `status`, which
+moves as a resync progresses. That is a recomputation of the extractor per object update, against
+listings that would otherwise materialise the whole cluster — a trade taken deliberately. Because
+the key is a predicate, a volume or replica it rejects carries no key at all rather than a second
+value, so each index holds only what it selects.
 
 `reconcileNodeLoad` reads through `IndexFieldRVRByNodeName`, once per eligible node.
 Every index above is registered by `controllers.RegisterIndexes`, which "must be invoked

@@ -54,3 +54,14 @@ func WithRVByStoragePoolNameIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		return []string{rv.Status.Configuration.ReplicatedStoragePoolName}
 	})
 }
+
+// WithRVByResyncClaimCandidacyIndex registers the IndexFieldRVByResyncClaimCandidacy index
+// on a fake.ClientBuilder. This is useful for tests that need to use the index.
+//
+// Unlike the helpers above it passes the extractor the manager registers instead of restating it:
+// which volumes this index selects is what the resync queue is built from, so a copy that drifted
+// would leave the tests agreeing with themselves and with nothing else.
+func WithRVByResyncClaimCandidacyIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolume{}, indexes.IndexFieldRVByResyncClaimCandidacy,
+		indexes.ExtractRVResyncClaimCandidacy)
+}

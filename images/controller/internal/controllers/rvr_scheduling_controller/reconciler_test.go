@@ -19,6 +19,7 @@ package rvrschedulingcontroller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -35,6 +37,7 @@ import (
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
 	schext "github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheduler_extender"
@@ -57,10 +60,14 @@ func newScheme() *runtime.Scheme {
 }
 
 func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
-	return testhelpers.WithRVRByNodeNameIndex(
-		testhelpers.WithRVAByReplicatedVolumeNameIndex(
-			testhelpers.WithRVRByReplicatedVolumeNameIndex(
-				fake.NewClientBuilder().WithScheme(scheme),
+	return testhelpers.WithRVByResyncClaimCandidacyIndex(
+		testhelpers.WithRVRByResyncEndsOccupancyIndex(
+			testhelpers.WithRVRByNodeNameIndex(
+				testhelpers.WithRVAByReplicatedVolumeNameIndex(
+					testhelpers.WithRVRByReplicatedVolumeNameIndex(
+						fake.NewClientBuilder().WithScheme(scheme),
+					),
+				),
 			),
 		),
 	)
@@ -3832,6 +3839,14 @@ var _ = Describe("Reconciler", func() {
 			}
 		}
 
+		// formingReplica is a replica of rv-forming owing data on nodeName: the same one end as
+		// saturatingRVR, under a volume that is excluded from the queue rather than absent from it.
+		formingReplica := func(name, nodeName string) *v1alpha1.ReplicatedVolumeReplica {
+			rvr := saturatingRVR(name, nodeName)
+			rvr.Spec.ReplicatedVolumeName = "rv-forming"
+			return rvr
+		}
+
 		It("waits, rather than fails, when the budget is the only thing left in the way", func() {
 			// node-a is taken by the sender, node-b and node-c are at their resync limit. Nothing
 			// else is wrong, so the Diskful waits rather than fails — and the tie-breaker, which
@@ -3940,6 +3955,234 @@ var _ = Describe("Reconciler", func() {
 			Expect(getUpdatedRVR(ctx, cl, second).Spec.NodeName).To(BeEmpty(),
 				"the free node-c is no use while the only sender is full")
 			expectScheduledCondition(ctx, cl, second, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("holds the subject back for a volume ahead in the queue that occupies nothing yet", func() {
+			// rv-ahead is in deficit like the subject and sorts before it by name, so the pass
+			// walks it first and charges the end it needs on node-a — the subject's only sender.
+			// Nothing occupies node-a for real, and rv-ahead is not waiting: the charge exists
+			// only inside the walk. So the subject can be held back only if the walk saw rv-ahead
+			// at all, which is what reading the whole queue has to keep true.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			ahead := newRV(defaultConfig())
+			ahead.Name = "rv-ahead"
+			ahead.Status.DatameshRevision = 1
+			ahead.Status.EffectiveLayout.UpToDateVoters = 2
+			ahead.Status.Datamesh.Members = []v1alpha1.DatameshMember{{
+				Name:     "rv-ahead-0",
+				Type:     v1alpha1.DatameshMemberTypeDiskful,
+				NodeName: "node-a",
+			}}
+
+			aheadSender := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			aheadSender.Name = "rv-ahead-0"
+			aheadSender.Spec.ReplicatedVolumeName = "rv-ahead"
+			aheadSender.Spec.NodeName = "node-a"
+			aheadSender.Spec.LVMVolumeGroupName = "vg-a"
+			aheadSender.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+				State: v1alpha1.DiskStateUpToDate,
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, ahead, aheadSender).
+				WithStatusSubresource(sender, newD).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"node-b and node-c are both free: only the queue says the sender is spoken for")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("charges a claimant whose transfer started after the occupancy was read", func() {
+			// The occupancy map and each claimant's own ends must come from one reading. Here
+			// rv-ahead's sender starts feeding someone in the window between the two: read
+			// separately, its end would be missing from the map and subtracted from its charge at
+			// the same time, so nobody would account for it and node-a would take one end past
+			// the limit.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			ahead := newRV(defaultConfig())
+			ahead.Name = "rv-ahead"
+			ahead.Status.DatameshRevision = 1
+			ahead.Status.EffectiveLayout.UpToDateVoters = 2
+			ahead.Status.Datamesh.Members = []v1alpha1.DatameshMember{{
+				Name:     "rv-ahead-0",
+				Type:     v1alpha1.DatameshMemberTypeDiskful,
+				NodeName: "node-a",
+			}}
+
+			// UpToDate and idle when the occupancy is read, so it is absent from that map.
+			aheadSender := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			aheadSender.Name = "rv-ahead-0"
+			aheadSender.Spec.ReplicatedVolumeName = "rv-ahead"
+			aheadSender.Spec.NodeName = "node-a"
+			aheadSender.Spec.LVMVolumeGroupName = "vg-a"
+			aheadSender.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+				State: v1alpha1.DiskStateUpToDate,
+			}
+
+			// The informer cache gives no snapshot isolation across List calls, so the window is
+			// real: the transfer is made to start the moment the occupancy reading is done with.
+			startSyncing := func(ctx context.Context, c client.Client) {
+				var syncing v1alpha1.ReplicatedVolumeReplica
+				Expect(c.Get(ctx, client.ObjectKeyFromObject(aheadSender), &syncing)).To(Succeed())
+				if len(syncing.Status.Peers) > 0 {
+					return
+				}
+				syncing.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{
+					Name:             "rv-ahead-1",
+					ReplicationState: v1alpha1.ReplicationStateSyncSource,
+				}}
+				Expect(c.Status().Update(ctx, &syncing)).To(Succeed())
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, ahead, aheadSender).
+				WithStatusSubresource(sender, newD, aheadSender).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(
+						ctx context.Context,
+						c client.WithWatch,
+						list client.ObjectList,
+						opts ...client.ListOption,
+					) error {
+						if err := c.List(ctx, list, opts...); err != nil {
+							return err
+						}
+						o := &client.ListOptions{}
+						o.ApplyOptions(opts)
+						if o.FieldSelector != nil && strings.Contains(o.FieldSelector.String(),
+							indexes.IndexFieldRVRByResyncEndsOccupancy) {
+							startSyncing(ctx, c)
+						}
+						return nil
+					},
+				}).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"the end rv-ahead started is charged to node-a, not discounted away")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("walks a higher-class claimant first even though its name sorts last", func() {
+			// rv-zzz has no UpToDate copy left, so its IO is stopped and it outranks a volume
+			// merely in deficit. By name alone it would come after the subject and the subject
+			// would take the only end on node-a; by class it comes first and takes it instead.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			ioBlocked := newRV(defaultConfig())
+			ioBlocked.Name = "rv-zzz"
+			ioBlocked.Status.DatameshRevision = 1
+			ioBlocked.Status.EffectiveLayout.UpToDateVoters = 2
+			ioBlocked.Status.EffectiveLayout.GuaranteedMinimumDataRedundancy = ptr.To(int8(-1))
+			ioBlocked.Status.Datamesh.Members = []v1alpha1.DatameshMember{{
+				Name:     "rv-zzz-0",
+				Type:     v1alpha1.DatameshMemberTypeDiskful,
+				NodeName: "node-a",
+			}}
+
+			ioBlockedSender := newRVR(0, v1alpha1.ReplicaTypeDiskful)
+			ioBlockedSender.Name = "rv-zzz-0"
+			ioBlockedSender.Spec.ReplicatedVolumeName = "rv-zzz"
+			ioBlockedSender.Spec.NodeName = "node-a"
+			ioBlockedSender.Spec.LVMVolumeGroupName = "vg-a"
+			ioBlockedSender.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+				State: v1alpha1.DiskStateUpToDate,
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, ioBlocked, ioBlockedSender).
+				WithStatusSubresource(sender, newD).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"a volume whose IO is stopped outranks one merely short of a copy")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("counts a forming volume's replicas in occupancy though it makes no claim", func() {
+			// rv-forming has no datamesh revision yet, so formation is in progress and it is
+			// excluded from the queue. Its replicas still owe data on both nodes the subject
+			// could receive on, and that occupancy stands whether or not the volume ever claims
+			// a slot: the two are separate readings of the cluster, not one.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			// DatameshRevision stays zero, which is what "formation in progress" reads as.
+			forming := newRV(defaultConfig())
+			forming.Name = "rv-forming"
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, forming,
+					formingReplica("rv-forming-0", "node-b"),
+					formingReplica("rv-forming-1", "node-c")).
+				WithStatusSubresource(sender, newD).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			_, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"both receiving nodes owe data to a volume that is not in the queue")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
 		})
 	})
