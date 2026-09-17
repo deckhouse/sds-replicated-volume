@@ -285,8 +285,8 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			// mutable. Built via composite literal (not a selector assignment) to match how the
 			// deprecated Replication field is used elsewhere in the repo.
 			name: "changing replication (mutable) is accepted",
-			old:  srv.ReplicatedStorageClassSpec{ReclaimPolicy: srv.RSCReclaimPolicyDelete, Topology: srv.TopologyIgnored, Replication: srv.ReplicationConsistencyAndAvailability},
-			new:  srv.ReplicatedStorageClassSpec{ReclaimPolicy: srv.RSCReclaimPolicyDelete, Topology: srv.TopologyIgnored, Replication: srv.ReplicationAvailability},
+			old:  srv.ReplicatedStorageClassSpec{ReclaimPolicy: srv.RSCReclaimPolicyDelete, Topology: srv.TopologyIgnored, Replication: srv.ReplicationConsistencyAndAvailability}, //nolint:staticcheck // SA1019: the CEL rule under test guards the deprecated Replication field
+			new:  srv.ReplicatedStorageClassSpec{ReclaimPolicy: srv.RSCReclaimPolicyDelete, Topology: srv.TopologyIgnored, Replication: srv.ReplicationAvailability},               //nolint:staticcheck // SA1019: the CEL rule under test guards the deprecated Replication field
 		},
 		{
 			// FTT/GMDR are the primary r3->r2 migration knobs and must stay mutable; the CEL

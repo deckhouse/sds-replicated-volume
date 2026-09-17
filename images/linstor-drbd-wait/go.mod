@@ -1,7 +1,6 @@
-module github.com/sds-replicated-volume/images/linstor-drbd-wait
+module github.com/deckhouse/sds-replicated-volume/images/linstor-drbd-wait
 
 go 1.27.1
-
 require github.com/deckhouse/sds-common-lib v0.17.0
 
 require (

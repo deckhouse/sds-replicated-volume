@@ -111,7 +111,7 @@ func Test_validateLegacySpecFields(t *testing.T) {
 		},
 		{
 			name:      "minimal valid legacy spec",
-			spec:      srv.ReplicatedStorageClassSpec{StoragePool: "test-pool"},
+			spec:      srv.ReplicatedStorageClassSpec{StoragePool: "test-pool"}, //nolint:staticcheck // SA1019: the validator exists to handle the deprecated StoragePool field
 			wantValid: true,
 		},
 	}
@@ -259,7 +259,7 @@ func Test_validateLegacyControlPlaneTopology(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
 				Spec: srv.ReplicatedStorageClassSpec{
 					Topology:    tt.topology,
-					Replication: tt.replication,
+					Replication: tt.replication, //nolint:staticcheck // SA1019: the validator exists to handle the deprecated Replication field
 					Zones:       tt.zones,
 				},
 			}
@@ -339,7 +339,7 @@ func Test_validateImmutableSpecFields(t *testing.T) {
 			// Regression guard for the controller's reconcileStorageMigration: it sets
 			// storage from nil and clears the deprecated storagePool in one patch.
 			name:      "storagePool->storage migration (nil->value) is allowed",
-			oldSpec:   srv.ReplicatedStorageClassSpec{StoragePool: "legacy-pool"},
+			oldSpec:   srv.ReplicatedStorageClassSpec{StoragePool: "legacy-pool"}, //nolint:staticcheck // SA1019: the validator exists to handle the deprecated StoragePool field
 			newSpec:   srv.ReplicatedStorageClassSpec{Storage: storageA},
 			wantValid: true,
 		},
@@ -367,11 +367,11 @@ func Test_validateImmutableSpecFields(t *testing.T) {
 			name: "changing replication only is valid (mutable field, webhook does not guard it)",
 			oldSpec: srv.ReplicatedStorageClassSpec{
 				Storage:     storageA,
-				Replication: srv.ReplicationConsistencyAndAvailability,
+				Replication: srv.ReplicationConsistencyAndAvailability, //nolint:staticcheck // SA1019: the validator exists to handle the deprecated Replication field
 			},
 			newSpec: srv.ReplicatedStorageClassSpec{
 				Storage:     storageAcopy,
-				Replication: srv.ReplicationAvailability,
+				Replication: srv.ReplicationAvailability, //nolint:staticcheck // SA1019: the validator exists to handle the deprecated Replication field
 			},
 			wantValid: true,
 		},

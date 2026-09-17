@@ -41,6 +41,9 @@ shell:
     # in Alt Linux there is no '--reinstall' apt-get option (apt-get -y install --reinstall ca-certificates)
     # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
+      # base-images v3.0.x bakes a corrupt RPM database into builder/golang-alt;
+      # without this rebuild every apt-get transaction fails. Drop once fixed upstream.
+      rpm --rebuilddb
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} java-11-openjdk-devel python3 wget unzip \
       && apt-get -y install ca-certificates \
@@ -116,6 +119,9 @@ shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
     - |
+      # base-images v3.0.x bakes a corrupt RPM database into builder/golang-alt;
+      # without this rebuild every apt-get transaction fails. Drop once fixed upstream.
+      rpm --rebuilddb
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
       && apt-get -y install ca-certificates \

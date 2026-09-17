@@ -190,7 +190,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// so a stale-cache race fails here on the optimistic lock rather than after
 	// a kernel change.
 	existingPorts := existingPortsFromState(aState)
-	addrPortErr, addrOutcome := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts)
+	addrOutcome, addrPortErr := r.reconcileAddresses(rf.Ctx(), drbdr, existingPorts)
 	if addrOutcome.ShouldReturn() {
 		if addrOutcome.Error() != nil {
 			return rf.Fail(addrOutcome.Error())
@@ -687,7 +687,7 @@ func (r *Reconciler) reconcileFinalizer(
 // When status.addresses has no port for an IP, the existing port is adopted
 // before falling back to the allocator.
 //
-// portErr is returned separately from the outcome, because raising it as an
+// portErr is returned alongside the outcome, not as part of it, because raising it as an
 // outcome error would stop the reconcile before the down and detach phases, so
 // a node that ran out of ports could never be made to release any. The
 // optimistic-lock patch failure stays a hard error.
@@ -695,13 +695,13 @@ func (r *Reconciler) reconcileAddresses(
 	ctx context.Context,
 	drbdr *v1alpha1.DRBDResource,
 	existingPorts ExistingPorts,
-) (portErr error, outcome flow.ReconcileOutcome) {
+) (outcome flow.ReconcileOutcome, portErr error) {
 	rf := flow.BeginReconcile(ctx, "reconcile-addresses")
 	defer rf.OnEnd(&outcome)
 
 	node, err := r.getRequiredCurrentNode(rf.Ctx())
 	if err != nil {
-		return nil, rf.Fail(err)
+		return rf.Fail(err), nil
 	}
 
 	base := drbdr.DeepCopy()
@@ -712,11 +712,11 @@ func (r *Reconciler) reconcileAddresses(
 
 	if !equality.Semantic.DeepEqual(base.Status.Addresses, drbdr.Status.Addresses) {
 		if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {
-			return portErr, rf.Fail(err)
+			return rf.Fail(err), portErr
 		}
 	}
 
-	return portErr, rf.Continue()
+	return rf.Continue(), portErr
 }
 
 // ensureFinalizer adds or removes the finalizer based on resource state.

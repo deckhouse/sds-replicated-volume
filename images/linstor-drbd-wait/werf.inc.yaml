@@ -56,6 +56,11 @@ from: {{ index $.Images "builder/golang-alt" }}
 final: false
 shell:
   beforeInstall:
+    # base-images v3.0.x bakes a corrupt RPM database into builder/golang-alt:
+    # every apt-get transaction ends with "E: Error while running transaction"
+    # (db4 error(-30986) DB_PAGE_NOTFOUND) until the database is rebuilt. The
+    # defect is the image's, so drop this once container-base ships a sound one.
+    - rpm --rebuilddb
     - apt-get update
     - apt-get install -y {{ $.Root.ALT_BASE_PACKAGES }}
     - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial

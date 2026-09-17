@@ -54,6 +54,11 @@ git:
         - '**/*'
 shell:
   beforeInstall:
+    # base-images v3.0.x bakes a corrupt RPM database into builder/golang-alt:
+    # every apt-get transaction ends with "E: Error while running transaction"
+    # (db4 error(-30986) DB_PAGE_NOTFOUND) until the database is rebuilt. The
+    # defect is the image's, so drop this once container-base ships a sound one.
+    - rpm --rebuilddb
     - apt-get update
     - apt-get install -y make automake pkg-config gcc libtool git curl rsync
     - apt-get install -y flex libkeyutils-devel udev

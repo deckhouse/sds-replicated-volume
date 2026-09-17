@@ -1,5 +1,12 @@
 
 {{- define "alt packages proxy" }}
+# The RPM database that base-images v3.0.x bakes into builder/golang-alt is
+# corrupt: `rpm -qa` returns a single line and every apt-get transaction ends
+# with "E: Error while running transaction" (db4 error(-30986) DB_PAGE_NOTFOUND).
+# It reproduces on the bare image with no input of ours, so the fix belongs in
+# container-base; rebuilding the database here is a workaround and should be
+# dropped once a base-images tag ships a sound one.
+- rpm --rebuilddb
 # Replace altlinux repos with our proxy
   {{- if $.DistroPackagesProxy }}
 - sed -i "s|ftp.altlinux.org/pub/distributions/archive|{{ $.DistroPackagesProxy }}/repository/archive-ALT-Linux-APT-Repository|g" /etc/apt/sources.list.d/alt.list
@@ -9,6 +16,13 @@
 {{- end }}
 
 {{- define "alt packages upgrade" }}
+# The RPM database that base-images v3.0.x bakes into builder/golang-alt is
+# corrupt: `rpm -qa` returns a single line and every apt-get transaction ends
+# with "E: Error while running transaction" (db4 error(-30986) DB_PAGE_NOTFOUND).
+# It reproduces on the bare image with no input of ours, so the fix belongs in
+# container-base; rebuilding the database here is a workaround and should be
+# dropped once a base-images tag ships a sound one.
+- rpm --rebuilddb
 # Move the ALT p11 archive snapshot forward and upgrade every installed package.
 # base/golang-alt is pinned to an old snapshot, so images that ship ALT packages
 # stay on its (vulnerable) package versions until they are upgraded explicitly.

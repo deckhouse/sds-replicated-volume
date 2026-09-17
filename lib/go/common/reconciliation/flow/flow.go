@@ -373,7 +373,7 @@ func (rf ReconcileFlow) Done() ReconcileOutcome {
 // Use this when you want to stop processing immediately and schedule an immediate requeue
 // (e.g., all changes are already persisted, or no further steps are needed).
 func (rf ReconcileFlow) DoneAndRequeue() ReconcileOutcome {
-	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{Requeue: true}}
+	return ReconcileOutcome{terminal: true, requeueIntent: &ctrl.Result{Requeue: true}} //nolint:staticcheck // SA1019: the requeue intent is the point here; callers translate it, they do not wait a fixed RequeueAfter
 }
 
 // DoneAndRequeueAfter indicates "stop and return; requeue after d".
@@ -395,7 +395,7 @@ func (rf ReconcileFlow) DoneAndRequeueAfter(d time.Duration) ReconcileOutcome {
 // to continue (e.g., to run subsequent reconcile steps, persist accumulated changes,
 // or perform cleanup before returning).
 func (rf ReconcileFlow) ContinueAndRequeue() ReconcileOutcome {
-	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{Requeue: true}}
+	return ReconcileOutcome{terminal: false, requeueIntent: &ctrl.Result{Requeue: true}} //nolint:staticcheck // SA1019: see DoneAndRequeue above
 }
 
 // ContinueAndRequeueAfter indicates "remember requeue intent with delay, but keep processing".
@@ -489,7 +489,7 @@ func (o ReconcileOutcome) Enrichf(format string, args ...any) ReconcileOutcome {
 // Error level and incrementing error metrics.
 func (o ReconcileOutcome) ToCtrl() (ctrl.Result, error) {
 	if o.err != nil && isExpectedTransientError(o.err) {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true}, nil //nolint:staticcheck // SA1019: see DoneAndRequeue above
 	}
 	if o.requeueIntent != nil {
 		return *o.requeueIntent, o.err
@@ -630,7 +630,7 @@ func delayToRequeueIntent(d time.Duration) *ctrl.Result {
 	case d < 0:
 		return nil
 	case d == 0:
-		return &ctrl.Result{Requeue: true}
+		return &ctrl.Result{Requeue: true} //nolint:staticcheck // SA1019: see DoneAndRequeue above
 	default:
 		return &ctrl.Result{RequeueAfter: d}
 	}

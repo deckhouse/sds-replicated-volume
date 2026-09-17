@@ -3,7 +3,7 @@ module github.com/deckhouse/sds-replicated-volume/images/webhooks
 go 1.27.1
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260821070809-7c0d06d31bb2
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260908063329-aa33920fcf51
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/go-logr/logr v1.4.3
 	github.com/slok/kubewebhook/v2 v2.7.0

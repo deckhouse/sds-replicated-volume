@@ -122,7 +122,7 @@ func rscWithStoragePool(name, poolName string) *srvv1alpha1.ReplicatedStorageCla
 			Name: name,
 		},
 		Spec: srvv1alpha1.ReplicatedStorageClassSpec{
-			StoragePool: poolName,
+			StoragePool: poolName, //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		},
 		Status: srvv1alpha1.ReplicatedStorageClassStatus{
 			Phase: srvv1alpha1.ReplicatedStorageClassPhaseReady,
@@ -136,7 +136,7 @@ func rscReadyNoPool(name string) *srvv1alpha1.ReplicatedStorageClass {
 			Name: name,
 		},
 		Spec: srvv1alpha1.ReplicatedStorageClassSpec{
-			StoragePool: "",
+			StoragePool: "", //nolint:staticcheck // SA1019: migration from deprecated StoragePool
 		},
 		Status: srvv1alpha1.ReplicatedStorageClassStatus{
 			Phase: srvv1alpha1.ReplicatedStorageClassPhaseReady,

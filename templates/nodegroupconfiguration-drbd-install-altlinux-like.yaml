@@ -100,7 +100,7 @@ spec:
     fi
 
     current_version_regex='{{ include "drbd_current_version_regex" . }}'
-    desired_version="{{ include "drbd_desired_version" . }}"
+    desired_version={{ include "drbd_desired_version" . | quote }}
 
     if [ -e "/proc/drbd" ]; then
       # DRBD check version

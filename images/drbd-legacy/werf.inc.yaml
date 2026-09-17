@@ -12,6 +12,9 @@ shell:
   beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
     - |
+      # base-images v3.0.x bakes a corrupt RPM database into builder/golang-alt;
+      # without this rebuild every apt-get transaction fails. Drop once fixed upstream.
+      rpm --rebuilddb
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} \
       && apt-get -y install ca-certificates \
