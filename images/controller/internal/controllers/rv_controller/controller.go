@@ -63,12 +63,50 @@ func BuildController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(mapRVRToRV),
 			builder.WithPredicates(rvrPredicates()...),
 		).
+		Watches(
+			&v1alpha1.ReplicatedStoragePool{},
+			handler.EnqueueRequestsFromMapFunc(mapRSPToRVs(cl)),
+			builder.WithPredicates(rspPredicates()...),
+		).
 		Owns(&v1alpha1.DRBDResourceOperation{}, builder.WithPredicates(drbdrOpPredicates()...)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10,
 			RateLimiter:             controlleroptions.DefaultRateLimiter(),
 		}).
 		Complete(rec)
+}
+
+// mapRSPToRVs maps a ReplicatedStoragePool change to every ReplicatedVolume placed on it.
+//
+// The pool is an input to the placement conditions and to the layout decisions that read the
+// eligible nodes, and none of it reaches this controller by another route: the replica controller
+// re-evaluates its own eligibility verdict on a pool change, but that verdict does not look at
+// zones, so a node moving between zones leaves every replica condition untouched and would
+// otherwise go unnoticed here until an unrelated event.
+func mapRSPToRVs(cl client.Client) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		rsp, ok := obj.(*v1alpha1.ReplicatedStoragePool)
+		if !ok || rsp == nil {
+			return nil
+		}
+
+		var rvList v1alpha1.ReplicatedVolumeList
+		if err := cl.List(ctx, &rvList,
+			client.MatchingFields{indexes.IndexFieldRVByStoragePoolName: rsp.Name},
+			client.UnsafeDisableDeepCopy,
+		); err != nil {
+			log.FromContext(ctx).Error(err, "mapRSPToRVs: failed to list RVs", "rsp", rsp.Name)
+			return nil
+		}
+
+		requests := make([]reconcile.Request, 0, len(rvList.Items))
+		for _, rv := range rvList.Items {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: rv.Name},
+			})
+		}
+		return requests
+	}
 }
 
 // mapRSCToRVs maps a ReplicatedStorageClass change to all ReplicatedVolume resources that reference it.

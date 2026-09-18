@@ -158,9 +158,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 	outcome = outcome.WithChangeFrom(eo)
 
-	// Perform main processing.
+	// Perform main processing. The RSP view outlives the block: reconcilePlacementConditions
+	// below needs it to judge placement, and it must run for a volume in any state, including
+	// one still forming.
+	var rsp *rspView
 	if rv.Status.Configuration != nil {
-		rsp, err := r.getRSP(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvrs, rvas)
+		var err error
+		rsp, err = r.getRSP(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvrs, rvas)
 		if err != nil {
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
@@ -198,6 +202,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// ConfigurationInProgress; a config-less one as absent). The deletion branch does not write
 	// it at all — the condition freezes at its last value, like Resilient and AttachedReady.
 	outcome = outcome.Merge(r.reconcileConfiguredCondition(rf.Ctx(), rv, rvrs))
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
+	// Report placement (Scheduled, SatisfyEligibleNodes and the violations behind it) from the
+	// replica-level verdicts and the storage pool view. Placed next to the other condition
+	// reporters, and for the same reason: a forming volume runs reconcileFormation instead of
+	// normal operation, yet its scheduling progress is exactly what an operator watches then.
+	// The deletion branch does not write them at all — they freeze at their last value, like
+	// Resilient, AttachedReady and Configured.
+	outcome = outcome.Merge(r.reconcilePlacementConditions(rf.Ctx(), rv, rvrs, rsp))
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -2115,8 +2130,16 @@ func (r *Reconciler) reconcileDeletion(
 type rspView struct {
 	// Type is the RSP type (LVM or LVMThin).
 	Type v1alpha1.ReplicatedStoragePoolType
-	// Zones is the list of zones from RSP spec.
-	Zones []string
+	// EligibleZones is the zone span of the whole pool: the distinct, non-empty zones of its
+	// eligible nodes, sorted. Unlike EligibleNodes it is NOT narrowed to this volume, because a
+	// placement question like "did the voters collapse into one zone?" is asked against the
+	// zones the volume could have used, not against the ones it did.
+	//
+	// It comes from status rather than from spec.zones: spec.zones is a node selector (an empty
+	// one admits every zone), so a pool can legitimately span zones it never declared, and the
+	// storage class validates TransZonal against the zones of the eligible nodes for exactly
+	// that reason. A zoneless node contributes nothing — it is not a zone.
+	EligibleZones []string
 	// SystemNetworkNames is the list of system network names from RSP spec.
 	SystemNetworkNames []string
 	// EligibleNodes contains only nodes present in RVRs/RVAs, sorted by NodeName.
@@ -2323,15 +2346,23 @@ func (r *Reconciler) getRSP(
 	nodeNames = slices.Compact(nodeNames)
 
 	// Filter eligible nodes using binary search, then sort by NodeName for rspView lookups.
+	// The zone span is collected in the same pass but BEFORE the filter applies, so it describes
+	// the pool rather than this volume's corner of it (see rspView.EligibleZones).
 	eligibleNodes := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0, len(nodeNames))
+	eligibleZones := make([]string, 0, len(unsafeRSP.Status.EligibleNodes))
 	for i := range unsafeRSP.Status.EligibleNodes {
 		node := &unsafeRSP.Status.EligibleNodes[i]
+		if node.ZoneName != "" {
+			eligibleZones = append(eligibleZones, node.ZoneName)
+		}
 		_, found := slices.BinarySearch(nodeNames, node.NodeName)
 		if found {
 			// DeepCopy to avoid aliasing with cache (LVMVolumeGroups is a slice).
 			eligibleNodes = append(eligibleNodes, *node.DeepCopy())
 		}
 	}
+	slices.Sort(eligibleZones)
+	eligibleZones = slices.Compact(eligibleZones)
 
 	// Safety sort: RSP eligible nodes are sorted by NodeName in practice (rsp_controller
 	// maintains sorted order), but we sort here defensively to guarantee the invariant
@@ -2342,7 +2373,7 @@ func (r *Reconciler) getRSP(
 
 	return &rspView{
 		Type:               unsafeRSP.Spec.Type,
-		Zones:              slices.Clone(unsafeRSP.Spec.Zones),
+		EligibleZones:      eligibleZones,
 		SystemNetworkNames: slices.Clone(unsafeRSP.Spec.SystemNetworkNames),
 		EligibleNodes:      eligibleNodes,
 	}, nil

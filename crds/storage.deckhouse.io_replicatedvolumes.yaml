@@ -42,6 +42,14 @@ spec:
       name: Configured
       priority: 1
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
+      name: Scheduled
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='SatisfyEligibleNodes')].status
+      name: SatisfyEligibleNodes
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

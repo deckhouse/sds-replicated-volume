@@ -300,3 +300,35 @@ func rvrPredicates() []predicate.Predicate {
 		},
 	}
 }
+
+// rspPredicates returns predicates for ReplicatedStoragePool events.
+// Reacts to:
+// - EligibleNodesRevision changes (the eligible node set or the zone of one of them changed)
+//
+// spec.zones is deliberately not watched: the field is immutable, so it cannot change on an
+// existing pool, and a pool created with different zones arrives as a Create event. The revision
+// is the only moving part, and it moves on exactly what this controller reads — the eligible
+// nodes and their zones (see areEligibleNodesEqual in rsp_controller).
+//
+// Deletion is not watched either. The watch exists to recompute placement from the pool's
+// eligible nodes, and a deleted pool has none; worse, the pass could not even get that far,
+// because getRSP treats a missing pool as an error and the reconcile fails before reaching any
+// reporter. Waking every volume of the pool would buy a logged failure and a backoff cycle each
+// and tell the operator nothing. A pool that comes back arrives as a Create event.
+func rspPredicates() []predicate.Predicate {
+	return []predicate.Predicate{
+		predicate.TypedFuncs[client.Object]{
+			CreateFunc: func(event.TypedCreateEvent[client.Object]) bool { return true },
+			DeleteFunc: func(event.TypedDeleteEvent[client.Object]) bool { return false },
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				oldRSP, okOld := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
+				newRSP, okNew := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				if !okOld || !okNew || oldRSP == nil || newRSP == nil {
+					return true
+				}
+
+				return oldRSP.Status.EligibleNodesRevision != newRSP.Status.EligibleNodesRevision
+			},
+		},
+	}
+}

@@ -1081,3 +1081,85 @@ var _ = Describe("rvrPredicates", func() {
 		})
 	})
 })
+
+var _ = Describe("rspPredicates", func() {
+	Describe("UpdateFunc", func() {
+		var preds []func(event.TypedUpdateEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			predicates := rspPredicates()
+			preds = make([]func(event.TypedUpdateEvent[client.Object]) bool, 0)
+			for _, p := range predicates {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.UpdateFunc != nil {
+					preds = append(preds, fp.UpdateFunc)
+				}
+			}
+		})
+
+		newRSP := func(revision int64, zones []string) *v1alpha1.ReplicatedStoragePool {
+			return &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				Spec:       v1alpha1.ReplicatedStoragePoolSpec{Zones: zones},
+				Status: v1alpha1.ReplicatedStoragePoolStatus{
+					EligibleNodesRevision: revision,
+				},
+			}
+		}
+
+		It("returns true when EligibleNodesRevision changes", func() {
+			// The revision moves on the eligible node set AND on the zone of any of them, which
+			// is the only way a node changing zones reaches this controller: no replica
+			// condition looks at zones, so nothing else would wake it.
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: newRSP(1, []string{"zone-a"}),
+				ObjectNew: newRSP(2, []string{"zone-a"}),
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when the revision is unchanged", func() {
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: newRSP(7, []string{"zone-a", "zone-b"}),
+				ObjectNew: newRSP(7, []string{"zone-a", "zone-b"}),
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+
+		It("returns true for a non-RSP object", func() {
+			// Conservative: an object this predicate cannot read is not one it may filter out.
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: &v1alpha1.ReplicatedVolume{},
+				ObjectNew: &v1alpha1.ReplicatedVolume{},
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+	})
+})
+
+var _ = Describe("rspPredicates DeleteFunc", func() {
+	It("does not wake volumes when the pool is deleted", func() {
+		// A deleted pool has no eligible nodes to recompute placement from, and the pass could
+		// not read it anyway: getRSP treats a missing pool as an error, so every woken volume
+		// would only log a failure and back off.
+		for _, p := range rspPredicates() {
+			fp, ok := p.(predicate.TypedFuncs[client.Object])
+			if !ok || fp.DeleteFunc == nil {
+				continue
+			}
+			Expect(fp.DeleteFunc(event.TypedDeleteEvent[client.Object]{
+				Object: &v1alpha1.ReplicatedStoragePool{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+				},
+			})).To(BeFalse())
+		}
+	})
+})

@@ -34,6 +34,8 @@ import (
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="AttachedReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='AttachedReady')].reason"
 // +kubebuilder:printcolumn:name="Configured",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Configured')].status"
+// +kubebuilder:printcolumn:name="Scheduled",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='Scheduled')].status"
+// +kubebuilder:printcolumn:name="SatisfyEligibleNodes",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='SatisfyEligibleNodes')].status"
 type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`

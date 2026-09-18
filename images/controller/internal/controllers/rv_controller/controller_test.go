@@ -208,3 +208,84 @@ var _ = Describe("mapRVRToRV", func() {
 		Expect(result[0].Name).To(Equal("rv-1"))
 	})
 })
+
+var _ = Describe("mapRSPToRVs", func() {
+	// newRVOnPool builds a volume whose configuration points at the given pool, which is what
+	// the index reads: a volume without a configuration is not on any pool yet.
+	newRVOnPool := func(name, poolName string) *v1alpha1.ReplicatedVolume {
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Size: resource.MustParse("10Gi"),
+			},
+		}
+		if poolName != "" {
+			rv.Status.Configuration = &v1alpha1.ReplicatedVolumeConfiguration{
+				ReplicatedStoragePoolName: poolName,
+			}
+		}
+		return rv
+	}
+
+	It("returns nil for non-RSP object", func() {
+		cl := fake.NewClientBuilder().
+			WithScheme(newScheme()).
+			Build()
+
+		mapFn := mapRSPToRVs(cl)
+
+		result := mapFn(context.Background(), newRVOnPool("rv-1", "rsp-1"))
+		Expect(result).To(BeNil())
+	})
+
+	It("returns nil for nil object", func() {
+		cl := fake.NewClientBuilder().
+			WithScheme(newScheme()).
+			Build()
+
+		mapFn := mapRSPToRVs(cl)
+		result := mapFn(context.Background(), nil)
+		Expect(result).To(BeNil())
+	})
+
+	It("returns requests for all RVs placed on the RSP", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-1"},
+		}
+
+		cl := testhelpers.WithRVByStoragePoolNameIndex(
+			fake.NewClientBuilder().WithScheme(newScheme()),
+		).
+			WithObjects(rsp,
+				newRVOnPool("rv-1", "rsp-1"),
+				newRVOnPool("rv-2", "rsp-1"),
+				newRVOnPool("rv-3", "rsp-other"),
+				// A volume that has not derived a configuration yet is on no pool at all.
+				newRVOnPool("rv-4", "")).
+			Build()
+
+		mapFn := mapRSPToRVs(cl)
+		result := mapFn(context.Background(), rsp)
+
+		Expect(result).To(HaveLen(2))
+		names := []string{result[0].Name, result[1].Name}
+		Expect(names).To(ContainElements("rv-1", "rv-2"))
+	})
+
+	It("returns empty slice when no RVs are placed on the RSP", func() {
+		rsp := &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsp-unused"},
+		}
+
+		cl := testhelpers.WithRVByStoragePoolNameIndex(
+			fake.NewClientBuilder().WithScheme(newScheme()),
+		).
+			WithObjects(rsp, newRVOnPool("rv-1", "rsp-other")).
+			Build()
+
+		mapFn := mapRSPToRVs(cl)
+		result := mapFn(context.Background(), rsp)
+
+		Expect(result).To(BeEmpty())
+	})
+})

@@ -205,7 +205,7 @@ flowchart TD
     NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.membershipLayout + MembershipLayoutConverged)"]
     LayoutStatus --> Conditions
 
-    Conditions["reconcileDataPlaneConditions<br/>(Ready + Resilient + AttachedReady) +<br/>reconcileConfiguredCondition<br/>(Configured)"]
+    Conditions["reconcileDataPlaneConditions<br/>(Ready + Resilient + AttachedReady) +<br/>reconcileConfiguredCondition<br/>(Configured) +<br/>reconcilePlacementConditions<br/>(Scheduled + SatisfyEligibleNodes +<br/>status.eligibleNodesViolations)"]
     Conditions --> Finalizers
 
     Finalizers["reconcileRVAMetadata +<br/>reconcileRVRFinalizers"]
@@ -538,6 +538,167 @@ On deletion the condition is **frozen** at its last value and is not recomputed
 | False | Degraded | Effective redundancy below intended (FTT or GMDR < intended) |
 | False | Forming | Configuration not set, or formation in progress |
 | Unknown | StatusUnknown | Effective layout undetermined (FTT or GMDR nil) |
+
+### Scheduled
+
+Indicates whether every replica that needs a placement has one. Set by
+`reconcilePlacementConditions`, which is the **single writer** of this condition.
+
+On deletion the condition is **frozen** at its last value and is not recomputed
+(`computeScheduledReport` returns `present=false`).
+
+| Status | Reason | When |
+|--------|--------|------|
+| — | (absent) | `status.configuration` is nil — nothing has been evaluated yet |
+| False | SchedulingInProgress | No replicas to place yet, a replica has no current verdict, or formation is still running |
+| False | ReplicasNotScheduled | A replica reports `Scheduled=False` with `SchedulingFailed` or `ExtenderUnavailable` |
+| True | AllReplicasScheduled | Every replica in the set is placed |
+
+The aggregation set is every **non-deleting replica whose type is not Access**, not the datamesh
+members. A replica is scheduled long before it joins the mesh, and the two cases where that matters
+are the ones an operator needs to see: during formation there are no members yet, and a tie-breaker
+created by layout convergence (the P2 heal) is unschedulable precisely while it is still outside the
+mesh. Access replicas are excluded because the scheduler does not place them — they are created on
+the node that already runs the consumer.
+
+`ReplicasNotScheduled` outranks formation: a formation that cannot finish because the scheduler
+found no candidate must say so rather than report "in progress" forever.
+
+A verdict whose `ObservedGeneration` lags the replica generation counts as pending. The scheduler
+patches `spec.nodeName` (and the storage fields) before it writes the condition, so between those
+two writes the stored condition still describes the previous placement.
+
+`WaitingForResyncSlot` (a deliberate deferral) and `WaitingForReplicatedVolume` (an ordinary
+prerequisite) stay pending rather than failing — neither is something an operator can act on.
+
+The condition never reports `Unknown`: "not placed yet" is a known answer, not an undeterminable
+one, so it is a `False` — matching `Configured=False/ConfigurationInProgress` for the same shape of
+state.
+
+### SatisfyEligibleNodes
+
+Indicates whether every datamesh member sits where the storage pool and the volume's topology allow.
+Set by `reconcilePlacementConditions`, which is the **single writer** of this condition and of
+`status.eligibleNodesViolations`.
+
+On deletion the condition **and** the violations list are **frozen** at their last value
+(`computeSatisfyEligibleNodesReport` returns `present=false`), so the list never outlives the
+condition that explains it.
+
+| Status | Reason | When |
+|--------|--------|------|
+| — | (absent) | `status.configuration` is nil, or the RSP view is unavailable — nothing has been evaluated yet |
+| True | SatisfyEligibleNodes | No violations |
+| False | ConflictResolutionInProgress | A `RemoveReplica` or `ForceRemoveReplica` transition is taking one of the offending members out |
+| False | InConflictWithEligibleNodes | Violations exist with nothing resolving them |
+
+`ConflictResolutionInProgress` requires both halves — a removal **and** an offending member as its
+subject. Membership churn as such proves nothing: adding an Access replica for a new consumer, or
+healing a tie-breaker, moves no misplaced member. A removal is also the only repair recognizable
+from the outside, because the replacement half of a create-first repair names the new replica, not
+the offender — and while it runs the offender is still in place and the conflict is still real.
+Nothing resolves these conflicts automatically today (the storage class `RollingRepair` strategy is
+a stub), so a repair in flight means an operator is performing it.
+
+The condition reports **absent**, never `Unknown`, when it cannot evaluate. It has no `Unknown`
+reason, and `rsc_controller` counts every volume whose condition is present and not True as a
+placement conflict (`computeActualVolumesSummary`) — an `Unknown` would inflate the class-wide
+`InConflictWithEligibleNodes` counter and put a healthy storage class into `RollingOut`.
+
+#### Violations
+
+`status.eligibleNodesViolations` is the structured inventory behind the condition: one
+`{replicaName, nodeName, reason}` entry per misplaced member, sorted by replica name so the
+published list and the offender named in the message are stable across passes. The condition is a
+single verdict with one reason; the list is what tells an operator (or a future repair loop) *which*
+replica to move when several are misplaced for different reasons.
+
+Two independent checks produce violations, and they cannot both live at the replica level:
+
+| Violation reason | Source | Why it lives here |
+|---|---|---|
+| `OutOfEligibleNodes` | Mirror of the replica's `SatisfyEligibleNodes=False` with reason `NodeMismatch`, `LVMVolumeGroupMismatch` or `ThinPoolMismatch` | Per-replica predicate, already decided by `rvr_controller`; this controller only mirrors the verdict, it does not re-derive it |
+| `NodeTopologyMismatch` | Computed here from the zones of all voter members | Property of the member **set**, not of a member: every replica can sit on a perfectly eligible node while the volume as a whole has collapsed its voters into one zone (TransZonal) or split them across two (Zonal) |
+
+Node eligibility is checked first: a member on a node the pool does not allow is misplaced whatever
+zone that node is in, and that is the more actionable reason. A missing replica, a missing or
+`Unknown` condition, or a verdict whose `ObservedGeneration` lags the replica generation is **not**
+a verdict and produces no violation.
+
+**Access members are out of scope for both checks**, and the message counts only the members that
+were judged. An Access replica is created on the node that already runs a consumer rather than
+chosen by the scheduler, and being diskless it puts no data anywhere. Its node can still leave the
+pool afterwards, but reporting that would produce a conflict nobody can act on: the member cannot
+be moved (it belongs with its consumer), no transition removes it — `reconcileDeleteAccessReplicas`
+calls `deleteRVR` directly, so the report could not even reach `ConflictResolutionInProgress` — and
+that cleanup refuses to touch it while it is attached. The volume would hold its storage class out
+of `Ready` for as long as the workload runs. The replica's own `SatisfyEligibleNodes` still reports
+the fact; it just does not enter the volume-level aggregate.
+
+Only **voters** (`Diskful`, `LiminalDiskful`) are judged — tie-breakers and Access members carry no
+data, so spreading them is a quorum-survivability question the transition guards already own:
+
+| Topology | Rule | Basis |
+|---|---|---|
+| `TransZonal` | The zone must be one the pool has eligible nodes in, and the voters must not all sit in a single zone | Forbidden by both `guardTransZonalVoterPlacement` and the RSC eligible-nodes validation |
+| `Zonal` | The voters occupy exactly one zone; every voter outside the home zone (the **real** zone holding the most, ties broken lexicographically) is reported | Diverges from `guardZonalSameZone` on purpose — see below |
+| `Ignored` | No constraint | — |
+
+**`TransZonal` deliberately does not judge the voters-per-zone distribution.** That distribution
+has two supported modes — pure (one voter per zone) and composite (several voters in a zone, which
+is what lets FTT=2/GMDR=2 run on three zones as `2D|2D|1D`, see `computeTransZonalMinZones` in
+`rsc_controller`) — and the two places that define the legal shape do not fully agree on the
+boundary between them: the RSC validator admits composite layouts that
+`guardTransZonalVoterPlacement`, a per-addition quorum-survivability check, would block. A
+voters-per-zone number here would mean picking a side in that disagreement and standing a healthy,
+scheduler-produced volume up as a permanent conflict that nothing repairs.
+
+The collapse case is reported because both sources forbid it: the guard always blocks it (losing
+that zone leaves zero surviving voters, below any `qmr`) and the validator rules it out by
+requiring at least two zones with disks for every FTT/GMDR combination. It is a property of the
+set, so every voter is reported rather than one being singled out. Two preconditions narrow it —
+at least two voters (a single one is trivially "all in one zone", true of a volume mid-formation)
+and a pool declaring at least two zones (otherwise the volume had nowhere to spread to).
+
+**Every `TransZonal` branch is gated on the pool having zones at all**, the unzoned-node one
+included: a volume is not misplaced for a shape its pool never offered. A pool with no zoned nodes
+is not a silent failure either — the storage class validation groups eligible nodes by zone and
+refuses `TransZonal` below two, so such a pool already reports
+`ConfigurationReady=False/InvalidConfiguration`. Listing every voter here would repeat that at the
+wrong level and name replicas with nowhere to move them. An unzoned node in a pool that *does*
+have zones stays a violation: that one is an outlier, and a fixable one.
+
+**`Zonal` diverges from `guardZonalSameZone`, deliberately.** The guard decides whether one
+incoming member may join and admits any zone holding the most voters — on an even split that is
+every zone, because it has nothing to break the tie with and no reason to. The report sees the
+whole set, and a set already spread over two zones is already wrong, so it asks the set-level
+question instead: is exactly one zone occupied? A `2D` volume whose two nodes end up in different
+zones is the likeliest Zonal violation there is, and a most-voters rule cannot see it.
+
+Which voters are reported follows from what an operator does next: the volume has to end up in one
+zone, so everything outside the home zone is misplaced. The home zone is the cheapest destination,
+not the only legal one — under a tie the choice is arbitrary in substance, and the message names
+where the bulk sits so the operator can consolidate elsewhere. No pool-shape guard is needed here,
+unlike the collapse case: a pool spanning one zone puts every node in it, so a split cannot arise.
+A volume whose nodes carry no zone at all occupies the single zone `""` and is likewise silent.
+
+Nodes carrying **no** zone never become the home of a split, even when they hold the most voters.
+Consolidating onto them satisfies the contract in no sense, and this report already calls such a
+node an outlier under `TransZonal`; treating it as a destination under `Zonal` would be the
+opposite reading of the same state. So the home is the largest *real* zone, and with, say, three
+unzoned voters against one in `zone-a`, all three unzoned ones are reported — the shorter list
+would point at the only destination that fixes nothing.
+
+Zones come from the RSP view — the node's zone as it is **now**, not the member's `zone` field,
+which is a snapshot taken when the member joined. The snapshot is only a fallback for a node the
+view does not cover, and such a member is reported as `OutOfEligibleNodes` anyway.
+
+The pool's zone span is `rspView.EligibleZones`: the distinct non-empty zones of its eligible
+nodes, collected **before** the view narrows them to this volume — a question like "did the voters
+collapse into one zone?" is asked against the zones the volume could have used, not the ones it
+did. It is taken from status rather than `spec.zones`, because `spec.zones` is only a node selector
+(an empty one admits every zone), so a pool can legitimately span zones it never declared, and the
+storage class validates TransZonal against the zones of the eligible nodes for the same reason.
 
 ### Layout convergence (`reconcileLayoutConvergence`)
 
@@ -959,13 +1120,30 @@ Key concepts:
 | ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
 | ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready, Attached), DatameshRequest, DatameshRevision, DatameshRevisionObservedByAgent, Addresses, Quorum, Attachment, BackingVolume, Peers (incl. BackingVolumeState, ConnectionEstablishedOn), DeletionTimestamp, Finalizers changes | mapRVRToRV |
+| ReplicatedStoragePool | EligibleNodesRevision changes; Create. Deletion deliberately ignored | mapRSPToRVs (index lookup) |
 | DRBDResourceOperation | Create/Delete of *-formation ops, Phase changes, Generation changes | Owns() |
+
+The pool watch is what keeps the placement conditions level-triggered. The node/LVG/thin-pool axis
+of `SatisfyEligibleNodes` reaches this controller transitively — the replica controller re-evaluates
+its own eligibility verdict on a pool change and the resulting condition change wakes us — but the
+**zone** axis does not: no replica verdict looks at zones, so a node moving between zones changes
+nothing on any RVR. `spec.zones` is deliberately not watched, being immutable; the revision moves on
+exactly what is read here, the eligible nodes and their zones.
+
+**Fan-out.** The revision is pool-wide, so one node going `NotReady` enqueues every volume of the
+pool at once. There is no narrower key available — the revision is what the pool publishes — and
+the same shape is already in use by `rvr_scheduling_controller`, which maps the same event onto the
+same index. On a large pool this is a burst worth watching on the reconcile-latency metric after
+rollout. Deletion is not watched at all: a deleted pool has no eligible nodes to recompute from,
+and `getRSP` treats a missing pool as an error, so each woken volume would only log a failure and
+back off; a pool that comes back arrives as a Create.
 
 ## Indexes
 
 | Index | Field | Purpose |
 |-------|-------|---------|
 | `IndexFieldRVByReplicatedStorageClassName` | `spec.replicatedStorageClassName` | Map RSC events to RVs |
+| `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Map RSP events to RVs |
 | `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV |
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVRs for an RV |
 
