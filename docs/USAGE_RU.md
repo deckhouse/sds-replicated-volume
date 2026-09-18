@@ -144,7 +144,7 @@ spec:
    kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
    ```
 
-2. Контроллер мигрирует каждый том на месте: одна diskful-реплика ретайпится в tie-breaker (без полного ресинка и без переноса данных), её логический том освобождается. Прогресс по каждому тому виден через condition `MembershipLayoutConverged` и колонку `MembershipLayout`:
+2. Контроллер мигрирует каждый том на месте: одна diskful-реплика ретайпится в tie-breaker (без полного ресинка и без переноса данных), её логический том освобождается. Прогресс по каждому тому виден в колонках `LAYOUT` и `CONVERGED` (`CONVERGED` — только в `-o wide`):
 
    ```shell
    kubectl get replicatedvolume -o wide

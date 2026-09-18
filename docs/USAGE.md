@@ -149,7 +149,7 @@ Editing `spec.replication` of an existing ReplicatedStorageClass changes the int
    kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
    ```
 
-2. The controller migrates each volume in place: one diskful replica is retyped into a tie-breaker (no full resync, no data movement) and its logical volume is released. Watch progress per volume via the `MembershipLayoutConverged` condition and the `MembershipLayout` print column:
+2. The controller migrates each volume in place: one diskful replica is retyped into a tie-breaker (no full resync, no data movement) and its logical volume is released. Watch progress per volume via the `LAYOUT` and `CONVERGED` print columns (`CONVERGED` needs `-o wide`):
 
    ```shell
    kubectl get replicatedvolume -o wide

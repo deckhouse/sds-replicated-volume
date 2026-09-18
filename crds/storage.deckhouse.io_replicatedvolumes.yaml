@@ -38,8 +38,16 @@ spec:
       name: AttachedReady
       priority: 1
       type: string
+    - jsonPath: .status.conditions[?(@.type=='MembershipLayoutConverged')].status
+      name: Converged
+      priority: 1
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Configured')].status
       name: Configured
+      priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ConfigurationReady')].status
+      name: ConfigurationReady
       priority: 1
       type: string
     - jsonPath: .status.conditions[?(@.type=='Scheduled')].status
