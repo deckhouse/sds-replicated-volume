@@ -1,0 +1,28 @@
+date: "2026-09-21"
+
+summary: "A ReplicatedVolume now reports where its replicas sit, `-o wide` gained the two columns the configuration and layout pictures were missing, and switching the resync limiter on no longer drives the controller into its memory ceiling."
+
+highlights:
+  - "A `ReplicatedVolume` reports its placement: the `Scheduled` and `SatisfyEligibleNodes` conditions are set for the first time, and `status.eligibleNodesViolations` names the replicas placed on nodes their storage pool does not allow, with the reason for each."
+  - "`kubectl get replicatedvolume -o wide` shows `CONVERGED` and `CONFIGURATIONREADY`, so a volume whose layout is stuck or whose configuration is invalid is visible in the list instead of only inside the object."
+  - "Switching `resyncSlotsPerNode` on no longer costs the controller the whole cluster in memory: a cluster of thousands of volumes used to push it into its pod limit."
+
+new_features:
+  - "`Scheduled` reports whether every replica of a volume has landed on a node, aggregated over the non-deleting replicas the scheduler places — `Access` replicas, which follow their consumer, are excluded. It is orthogonal to availability and does not enter `Ready`: a volume with a misplaced replica keeps serving I/O."
+  - "`SatisfyEligibleNodes` reports whether the placement agrees with the storage pool's eligible nodes, and `status.eligibleNodesViolations` lists the offending replicas with their node and a reason. Beyond the per-replica verdict it checks what only the member set can show: under `TransZonal` a node carrying no zone, a zone the pool has no eligible nodes in, and all voters collapsed into a single zone; under `Zonal` every voter outside the home zone."
+  - "A `ReplicatedStorageClass` counts those volumes in `status.volumes.inConflictWithEligibleNodes` and sets its `VolumesSatisfyEligibleNodes` condition accordingly — the counter was structurally pinned at zero while the volume condition was never written."
+
+improvements:
+  - "Two wide print columns are back in the `ReplicatedVolume` list: `CONVERGED` (the `MembershipLayoutConverged` condition, the only list-level view of a membership that will not move without a human) and `CONFIGURATIONREADY` (whether the configuration itself is valid and current against the storage class, the half `CONFIGURED` does not answer). Both are wide-only, so the default output is unchanged."
+
+fixes:
+  - "The resync limiter no longer reads the whole cluster for every decision. Each budget decision used to materialise every `ReplicatedVolume` and every `ReplicatedVolumeReplica`, and ten workers doing that at once exceeded the controller pod's memory allowance; the listings are now narrowed by field indexes and the queue is built one claim at a time, so a candidate costs a few hundred bytes rather than its replicas. The decisions themselves are unchanged."
+  - "Metrics of the CSI controller and the CSI node driver are scraped again. Their `kube-rbac-proxy` sidecars authorise every scrape through a `TokenReview` and a `SubjectAccessReview`, and the `csi` ServiceAccount was bound to neither, so the proxy answered 401 while the pods stayed `Ready` — the only symptom was `up == 0` on both jobs and a `TargetDown` that never cleared."
+  - "The same binding was missing for the legacy control plane's controller: its metrics proxy is rendered, the `ServiceMonitor` selects the Service, and every scrape was refused by the API server."
+
+upgrade_notes:
+  - "Nothing has to be done by hand, and no volume is moved: the two placement conditions only report what is already there."
+  - "A storage class whose volumes have replicas on non-eligible nodes can leave `Ready` for the first time after the update — for `PartiallyAligned` under the `Manual` resolution strategy, for `RollingOut` where conflict resolution is enabled. The placement was already wrong; it is now reported. Which replicas are meant is in `status.eligibleNodesViolations` of the volumes the class counts."
+
+docs:
+  - "The Replication r3 → r2 migration guide names the print columns that exist: progress per volume is watched through `LAYOUT` and, in `-o wide`, `CONVERGED`."
