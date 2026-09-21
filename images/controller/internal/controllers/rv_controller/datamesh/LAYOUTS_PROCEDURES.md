@@ -709,18 +709,25 @@ When a node is permanently lost, the following chain executes automatically:
    - **ForceRemoveReplica** (removes the dead member from the datamesh
      without waiting for confirmation from the dead node).
 4. **Layout restoration** — after ForceRemove, the datamesh has fewer
-   replicas than the layout requires. A missing **TieBreaker** is re-created
-   automatically by layout convergence in `rv_controller`. A missing
-   **Diskful** replica is not: create an RVR with the target type (see
-   [README.md](README.md), "Current limitations"), and the scheduling
-   controller places it on an available node. Once the replica exists, the
-   membership dispatcher creates the AddReplica transition that joins it to
-   the datamesh and starts the resynchronization.
+   replicas than the layout requires. Layout convergence in `rv_controller`
+   re-creates the missing replica: a **TieBreaker**, or a **Diskful** copy —
+   an RVR of the target type with no placement. The scheduling controller then
+   places it on an available node (throttled by the resync-slot limiter), and
+   the membership dispatcher creates the AddReplica transition that joins it to
+   the datamesh and starts the resynchronization. Copies are added one per
+   pass, so a volume that lost two of them is restored over two rounds.
 
-Everything up to and including the removal of the dead member is fully
-automatic. Re-creating a lost **Diskful** replica is the one manual step —
-the rest of the chain (scheduling, join, resynchronization) then runs on its
-own.
+The whole chain is automatic — the removal of the dead member, the new replica,
+its placement, the join and the resynchronization. It is driven by the member
+going missing, not by what removed it, so a graceful Leave, a
+ForceRemoveReplica, a manual ForceLeave and the orphan cleanup above all lead
+to the same recovery.
+
+The exception is a layout whose restoration would leave a surplus TieBreaker
+behind (see [README.md](README.md), "Current limitations"), and the case where
+the copy cannot be placed at all: the volume then reports
+`MembershipLayoutConverged=False/CannotConverge` with the scheduler's own
+summary, and it needs a node before it can heal.
 
 ### Deckhouse fencing integration
 

@@ -82,7 +82,7 @@ const (
 	ReplicatedVolumeCondMembershipLayoutConvergedType                        = "MembershipLayoutConverged"
 	ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge        = "CannotConverge"        // A convergence pattern applies but no admissible candidate is available.
 	ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged             = "Converged"             // Actual layout matches the intended layout, no active transition.
-	ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging            = "Converging"            // A layout change is in flight: an active membership transition, a requested replica retype, or a pending tie-breaker creation; the layout has not settled on the intended one.
+	ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging            = "Converging"            // A layout change is in flight: an active membership transition, a requested replica retype, a pending tie-breaker creation, or a pending diskful copy creation (self-heal); the layout has not settled on the intended one.
 	ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported = "TransitionUnsupported" // Layout mismatch with no supported automatic transition; manual intervention required.
 	ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting        = "VolumeDeleting"        // Volume is being deleted; layout convergence is not evaluated.
 )

@@ -170,6 +170,23 @@ stale on both axes at once — it runs an older configuration generation *and* r
 `ConfigurationReady=False` — and is still counted exactly once, because the classification is
 mutually exclusive.
 
+**The rollout budget and the resync limiter are unrelated budgets, and they do compose.**
+`rollingUpdate.maxParallel` bounds how many volumes of this class may carry a configuration that
+has not converged yet; the resync-slot limiter (`resyncSlotsPerNode`, enforced by
+`rvr_scheduling_controller`) bounds how many resync ends a single *node* carries at a time. Neither
+one is expressed in the other's units, and neither knows about the other: a volume can hold a
+rollout slot for as long as its replica waits for a resync slot, and a node can be at its resync
+limit while the class has free rollout slots.
+
+The visible consequence is a slower drop of `staleConfiguration`, not a stuck rollout. A volume
+whose new replica is waiting on a resync slot reports `MembershipLayoutConverged=False/Converging`,
+so it counts as stale for this aggregate and keeps its rollout slot — which is the same rule that
+already applies to a volume waiting on a plain resync. It is also what happens on a mass event
+outside any rollout: losing a node makes every volume that lost a copy heal itself (see
+`rv_controller`, pattern P3), each healing volume is stale until it converges, and each holds one
+rollout slot of its class while it does. Before the heal existed those volumes held their slots
+*indefinitely*; the heal bounds the hold rather than introducing it.
+
 ### VolumesSatisfyEligibleNodes
 
 Indicates whether all volumes' replicas are placed on eligible nodes.

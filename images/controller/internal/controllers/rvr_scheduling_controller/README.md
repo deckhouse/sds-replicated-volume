@@ -268,7 +268,7 @@ Indicates whether the replica's placement is complete for its type (see [Schedul
 ## Resync Budget
 
 A Diskful replica that has no node yet receives the whole volume over the network once it is
-placed. `RESYNC_SLOTS_PER_NODE` (`0` by default, meaning no limit) caps how many such transfers a
+placed. `RESYNC_SLOTS_PER_NODE` (`4` by default; `0` means no limit) caps how many such transfers a
 node may take part in at once, counted in *resync ends* — a transfer between two nodes occupies one
 end on each. The decision itself lives in `internal/syncbudget`, a pure package holding no state.
 

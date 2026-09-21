@@ -23,12 +23,12 @@
         description: |
           The ReplicatedVolume `{{ $labels.name }}` runs with a layout that does not match its configuration, and the control plane will not repair it on its own (reason `{{ $labels.reason }}`).
 
-          The volume keeps serving I/O: after a replica is lost, the quorum is lowered automatically. A volume configured for two diskful replicas is therefore left with a **single copy of the data**, so the next failure of that copy means downtime and possibly data loss. The layout does not heal by itself, so the repair is manual.
+          The volume keeps serving I/O: after a replica is lost, the quorum is lowered automatically. A volume configured for two diskful replicas is therefore left with a **single copy of the data**, so the next failure of that copy means downtime and possibly data loss. This alert fires only for the layouts the control plane will not fix on its own — a volume that is re-creating a lost replica by itself reports `Converging` and does not fire here.
 
           Reasons:
 
-          - `TransitionUnsupported` — the actual layout differs from the intended one and no automatic transition covers this mismatch (a lost diskful replica has to be re-added by hand; an excess replica has to be removed by hand).
-          - `CannotConverge` — an automatic transition does apply, but no admissible candidate is available (for example, no eligible node is left to host the missing replica).
+          - `TransitionUnsupported` — the actual layout differs from the intended one and no automatic transition covers this mismatch. The control plane never removes a replica, so this is the reason for a layout with **too many** replicas: an excess diskful replica, or a tie-breaker the configuration no longer asks for. Raising `replication` from r2 to r3 lands here too, because the volume's tie-breaker becomes redundant: remove it by hand and the missing third copy is then added automatically.
+          - `CannotConverge` — an automatic transition does apply, but no admissible candidate is available: most often there is no eligible node left to host the missing replica, or not enough capacity in its storage pool. The condition message carries the scheduler's own summary.
 
           The alert compares the actual layout against the one intended by the volume configuration, so a volume that is configured to run on a single replica reports `Converged` and never fires here.
 
@@ -46,27 +46,15 @@
              kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{"\n"}{end}'
              ```
 
-          3. Inspect the replicas the volume currently has, and note which replica IDs (the `-N` name suffix) are taken:
+          3. Inspect the replicas the volume currently has — their types, their placement and their `Scheduled` condition:
 
              ```shell
              kubectl get rvr --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
              ```
 
-          4. If the volume is missing a diskful replica (`have 1D, want 2D+1TB` and similar), add one by hand. Create a `ReplicatedVolumeReplica` whose name is the volume name plus a free id in the range 0-31; leave the placement to the control plane by omitting `nodeName` and `lvmVolumeGroupName`:
+          4. If the reason is `CannotConverge`, the replica the volume needs already exists and is waiting for somewhere to live: the control plane created it and the scheduler cannot place it. Read the summary from the condition message above, then make room — bring an eligible node back, add one, or free capacity in the storage pool. No object has to be created by hand; the replica is placed as soon as a candidate appears.
 
-             ```yaml
-             apiVersion: storage.deckhouse.io/v1alpha1
-             kind: ReplicatedVolumeReplica
-             metadata:
-               name: {{ $labels.name }}-<free-id>
-             spec:
-               replicatedVolumeName: {{ $labels.name }}
-               type: Diskful
-             ```
-
-             The control plane schedules the replica, syncs the data and adds the member to the datamesh; the missing tie-breaker (if the configuration asks for one) is then created automatically.
-
-          5. If the volume has more replicas than intended (`have 3D, want 2D+1TB` and similar), delete the excess replica by hand — pick one that is not attached and is not the only up-to-date copy:
+          5. If the volume has more replicas than intended (`have 3D, want 2D+1TB` and similar), or carries a tie-breaker its configuration no longer asks for (`have 2D+1TB, want 3D`), delete the surplus replica by hand — for a diskful one, pick a replica that is not attached and is not the only up-to-date copy:
 
              ```shell
              kubectl delete rvr <replica-name>

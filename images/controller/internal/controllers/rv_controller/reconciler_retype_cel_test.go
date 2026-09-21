@@ -187,4 +187,36 @@ var _ = Describe("reconcileLayoutConvergence: CEL validity of the retype patch",
 		Expect(after.Spec.LVMVolumeGroupThinPoolName).To(BeEmpty())
 		Expect(after.Spec.NodeName).To(Equal(before.Spec.NodeName))
 	})
+
+	It("produces a CEL-valid spec when creating the diskful copy of a heal", func(ctx SpecContext) {
+		// The heal creates an unplaced Diskful replica. The fake client below does not run CEL,
+		// so nothing else in the suite proves the apiserver would accept that object — and a
+		// rejection means the volume never heals at all.
+		rv, rvrs := convergenceFixture(1, 2, 0) // r3 config wants 3D, one copy is gone
+
+		objs := make([]client.Object, 0, len(rvrs))
+		for _, r := range rvrs {
+			objs = append(objs, r)
+		}
+		rec := NewReconciler(newClientBuilder(scheme).WithObjects(objs...).Build(), scheme)
+		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
+		Expect(err).NotTo(HaveOccurred())
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse()) // ContinueAndRequeue
+
+		created := findRVRByName(fresh, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2))
+		Expect(created).NotTo(BeNil(), "the heal creates the replica at the first free id")
+
+		// oldSpec == nil: the apiserver validates this as a creation.
+		Expect(validateRVRSpecCEL(ctx, validator, specStructural, nil, &created.Spec)).To(BeEmpty())
+
+		// Spelled out: no placement at all, which is what makes the spec admissible — nodeName is
+		// required only for Access, and the backing-volume rules are conditional on being set.
+		Expect(created.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
+		Expect(created.Spec.NodeName).To(BeEmpty())
+		Expect(created.Spec.LVMVolumeGroupName).To(BeEmpty())
+		Expect(created.Spec.LVMVolumeGroupThinPoolName).To(BeEmpty())
+	})
 })

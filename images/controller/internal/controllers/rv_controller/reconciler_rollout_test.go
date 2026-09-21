@@ -536,7 +536,9 @@ var _ = Describe("Formation restart configuration preservation", func() {
 //
 
 // r2Configuration asks for the 2D+1TB layout (FTT=1, GMDR=0) — the shape an r3→r2 edit produces,
-// and the one an r2→r3 edit can never leave (convergence never creates a Diskful replica).
+// and the one an r2→r3 edit can never leave on its own: the tie-breaker r3 does not ask for is a
+// surplus, which puts the mismatch outside the convergence whitelist (the diskful heal requires
+// actualTB <= intendedTB). Remove the tie-breaker by hand and the third copy is healed for you.
 func r2Configuration() *v1alpha1.ReplicatedVolumeConfiguration {
 	return &v1alpha1.ReplicatedVolumeConfiguration{
 		Topology:                        v1alpha1.TopologyIgnored,
@@ -943,6 +945,22 @@ var _ = Describe("reconcileRVConfiguration rollout budget", func() {
 		objs := []client.Object{rsc, newTestRSP("test-pool")}
 		for _, rv := range rvs {
 			objs = append(objs, rv)
+			// Back every member with its replica. The datamesh rebuilds status.datamesh.members
+			// from the RVRs it finds, so a member without one is dropped on the first pass and
+			// the volume would report an empty layout instead of the one the spec set up.
+			for _, m := range rv.Status.Datamesh.Members {
+				objs = append(objs, &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       m.Name,
+						Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: rv.Name,
+						Type:                 v1alpha1.ReplicaType(m.Type),
+						NodeName:             m.NodeName,
+					},
+				})
+			}
 		}
 		cl := newClientBuilder(scheme).
 			WithObjects(objs...).
@@ -1020,7 +1038,9 @@ var _ = Describe("reconcileRVConfiguration rollout budget", func() {
 		rsc := newRolloutRSC(2, newConfiguration(), maxParallelStrategy(1))
 		_, rec := buildClass(rsc,
 			withLayout(newRolloutRVNamed("rv-0", newConfiguration(), 2, 2), 1, 0),
-			newRolloutRVNamed("rv-1", oldConfiguration(), 1, 1),
+			// Converged on the old configuration (1D): a volume queued for a slot has nothing
+			// else to do, so the requeue below can only come from the rollout re-check.
+			withLayout(newRolloutRVNamed("rv-1", oldConfiguration(), 1, 1), 1, 0),
 		)
 
 		result := reconcileNamed(ctx, rec, "rv-1")

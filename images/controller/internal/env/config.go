@@ -48,9 +48,12 @@ const (
 	DefaultMetricsBindAddress = "127.0.0.1:4272"
 
 	// DefaultResyncSlotsPerNode is the resync-end budget assumed for a node when
-	// RESYNC_SLOTS_PER_NODE is not set. Zero: the limiter is opt-in, so that an upgrade never
-	// starts deferring placements a cluster did not ask to have deferred.
-	DefaultResyncSlotsPerNode = 0
+	// RESYNC_SLOTS_PER_NODE is not set. Four: the limiter is on by default, because the
+	// controller heals a lost diskful copy by itself and a mass heal — a node gone, every volume
+	// that lost a copy refilling at once — is exactly the load the limiter was written to bound.
+	// Four ends let a node send and receive at the same time without saturating one interface;
+	// 0 still switches the limit off for a cluster that asks for it.
+	DefaultResyncSlotsPerNode = 4
 )
 
 type Config struct {

@@ -41,16 +41,19 @@ see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §6.
 The following capabilities are described in this documentation but **not yet
 implemented**. They are planned for the near term:
 
-- **Automatic Diskful replica creation during normal operation.** After
-  formation, the controller never creates a **Diskful** replica on its own.
-  This covers failure recovery (replacing a Diskful member that was
-  force-removed together with its node), layout changes that need more diskful
-  voters (raising FTT or GMDR), and storage pool migration. To trigger the
-  desired operation, it is sufficient to create a replica with the target type
-  (or change the type of an existing one) — the scheduler will assign the node
-  and storage, and the rest (datamesh membership, DRBD configuration, data
-  synchronization) happens fully automatically. Once automatic Diskful creation
-  is implemented, these scenarios will require no manual steps at all.
+- **Removing a replica during normal operation.** Convergence never deletes a
+  replica or its data, so three scenarios still need a manual step: lowering
+  the copy count (FTT or GMDR down), replacing a copy whose member is still
+  alive (a lost disk, or a storage pool migration), and a layout change whose
+  target needs **fewer** TieBreakers than the volume currently has (the upsize
+  r2→r3, or 4D+1TB → 5D). In that last one the manual step comes **first**: the
+  surplus TieBreaker blocks the diskful heal (see the whitelist condition in the
+  `rv_controller` README), so delete the TieBreaker replica and the missing copy
+  is then added automatically. To trigger the desired operation it is
+  sufficient to create a replica with the target type, change the type of an
+  existing one, or delete the surplus — the scheduler will assign the node and
+  storage, and the rest (datamesh membership, DRBD configuration, data
+  synchronization) happens fully automatically.
 
   What **is** created automatically after formation:
 
@@ -59,16 +62,27 @@ implemented**. They are planned for the near term:
     unused (no active RVA) or redundant (another member on the same node).
   - **TieBreaker** replicas, by the layout convergence loop in `rv_controller`:
     a missing TieBreaker is created whenever the diskful count already matches
-    the intended layout (heal — e.g. a TieBreaker whose RVR is already gone, or
-    an adopted volume that entered normal operation at 2D under an r2
+    the intended layout (e.g. a TieBreaker whose RVR is already gone, or an
+    adopted volume that entered normal operation at 2D under an r2
     configuration), and a TieBreaker whose RVR is being deleted gets its
     replacement created while the old one is still working (strict
     create-first, see §8).
+  - **Diskful** replicas, by the same loop — the heal. A copy missing from the
+    membership is re-created with no manual step, whatever removed the member:
+    a graceful Leave, a ForceRemoveReplica, a manual ForceLeave, or the
+    automatic cleanup of an orphan. The replica is created without a node and
+    without storage, the scheduler places it (throttled by the resync-slot
+    limiter) and the add-diskful plan joins it (§6). This covers failure
+    recovery and the layout changes that need more diskful voters, except the
+    ones whose target layout needs fewer TieBreakers than the volume has (see
+    above — the surplus has to go first). A copy is
+    added one at a time, so a deficit of two is closed over two passes; while
+    one copy is on its way in, no second one is created.
 
   Convergence also **retypes** one Diskful into the missing TieBreaker on the
   r3→r2 path (3D → 2D+1TB) — a type change of an existing replica, not a new
-  one. It never creates a Diskful replica and never deletes a replica or its
-  data; a layout mismatch outside those cases is reported as
+  one. It never deletes a replica or its data; a layout mismatch outside these
+  cases is reported as
   `MembershipLayoutConverged=False/TransitionUnsupported` and waits for manual
   intervention. For the full decision order and the reported reasons, see the
   `rv_controller` README, "Layout convergence".
@@ -628,9 +642,10 @@ transitioning to the new layout. Specifically:
 - **FTT / GMDR changes** trigger a layout transition (§8). The transition
   follows the edge-by-edge path through the layout graph, maintaining safety
   at every intermediate step. Steps that need an additional **Diskful** voter
-  wait for that replica to be created manually (see
+  have it created by convergence, as long as the target layout does not also
+  leave a surplus TieBreaker behind (see
   [Current limitations](#current-limitations)); a missing TieBreaker is created
-  by convergence, and the r3→r2 step retypes a Diskful into it.
+  by convergence too, and the r3→r2 step retypes a Diskful into it.
 - **Storage pool changes** are accepted. New replicas are created on the new
   pool. Existing replicas remain on their current pool
   (`SatisfyEligibleNodes` will report the mismatch). Full migration of

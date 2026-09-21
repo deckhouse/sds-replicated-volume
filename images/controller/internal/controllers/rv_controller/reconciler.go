@@ -376,19 +376,29 @@ func makeDatameshSingleStepTransition(
 //     its spec.type together with its (now invalid) backing-volume fields; the existing
 //     ChangeRole → DMTE machinery then drives the membership transition (no resync, no data
 //     movement).
-//   - P2 heal: create a missing TieBreaker replica when the diskful count is already correct
-//     (e.g. a freshly formed r2 volume still at 2D, or a manually deleted TB). The scheduler
-//     places it and it joins the datamesh via the standard tiebreaker/v1 plan. The same action
-//     replaces a TieBreaker whose RVR is being deleted: it is still a member and still counted
-//     by the raw layout, so the replacement deficit is computed separately
+//   - P2 tie-breaker deficit: create a missing TieBreaker replica when the diskful count is
+//     already correct (e.g. a freshly formed r2 volume still at 2D, or a manually deleted TB).
+//     The scheduler places it and it joins the datamesh via the standard tiebreaker/v1 plan. The
+//     same action replaces a TieBreaker whose RVR is being deleted: it is still a member and
+//     still counted by the raw layout, so the replacement deficit is computed separately
 //     (computeTargetTieBreakerReplacement) — strict create-first, the datamesh releases the old
 //     one only once the replacement is operational.
+//   - P3 heal: create a missing Diskful replica when a copy is gone from the membership — the
+//     one pattern that heals a volume, because only a copy holds data. The replica is created
+//     with no node and no storage; the scheduler places it (under the resync limiter), the
+//     replica controller asks to join, the datamesh picks an add-diskful plan and the resync runs
+//     itself. Whatever removed the member — a graceful leave, a force-removal, a manual
+//     force-leave, the automatic cleanup of an orphan — is immaterial: the trigger is the missing
+//     member, not its cause.
 //
-// Safety invariant: convergence NEVER creates a Diskful replica and NEVER deletes a replica or
-// its data. The decision is a pure compute helper (computeTargetLayoutAction), reused by the
-// MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and the action stay
-// in agreement; convergence itself never writes the condition (single-writer invariant) and
-// therefore discards the report half of that decision.
+// Safety invariant: convergence NEVER deletes a replica or its data. Shrinking the copy count,
+// replacing a copy whose member is still alive, and dropping a surplus tie-breaker therefore stay
+// manual. The invariant "convergence never creates a Diskful replica" was lifted deliberately: the
+// criterion that replaced it is the whitelist rule below — repeating the action must provably end
+// in the intended layout. The decision is a pure compute helper (computeTargetLayoutAction), reused
+// by the MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and
+// the action stay in agreement; convergence itself never writes the condition (single-writer
+// invariant) and therefore discards the report half of that decision.
 //
 // After performing an action it returns ContinueAndRequeue: the split-client cache may be stale
 // relative to our own write, so we requeue rather than rely on the watch (see
@@ -442,28 +452,40 @@ func (r *Reconciler) reconcileLayoutConvergence(
 		rf.Log().Info("Converging layout: retyped Diskful replica to TieBreaker", "rvr", rvr.Name)
 		return rf.ContinueAndRequeue()
 
-	case layoutActionCreateTieBreaker:
+	// Both creations are one policy applied to two replica types, so they share the arm: an RVR
+	// of the target type with an empty nodeName and no backing-volume fields. The scheduler
+	// assigns the node, the volume group and the thin pool, exactly as it does for formation and
+	// for a replica an operator adds by hand. (The creation stays here rather than in a create*
+	// helper: a helper of that category is one Create call and carries no policy — see
+	// controller-reconcile-helper-create.mdc — and the AlreadyExists interpretation below is
+	// policy.)
+	case layoutActionCreateTieBreaker, layoutActionCreateDiskful:
+		replicaType := v1alpha1.ReplicaTypeTieBreaker
+		if targetAction.kind == layoutActionCreateDiskful {
+			replicaType = v1alpha1.ReplicaTypeDiskful
+		}
 		// The name is chosen deterministically by newRVR (ChooseNewName), so a repeated Create
 		// after a stale-cache retry converges via AlreadyExists.
-		rvr, err := newRVR(rv, *rvrs, v1alpha1.ReplicaTypeTieBreaker, "")
+		rvr, err := newRVR(rv, *rvrs, replicaType, "")
 		if err != nil {
-			return rf.Failf(err, "creating tie-breaker RVR")
+			return rf.Failf(err, "creating %s RVR", replicaType)
 		}
 		if _, err := obju.SetControllerRef(rvr, rv, r.scheme); err != nil {
-			return rf.Failf(err, "creating tie-breaker RVR")
+			return rf.Failf(err, "creating %s RVR", replicaType)
 		}
 		if err := r.createRVR(rf.Ctx(), rvr); err != nil {
 			if apierrors.IsAlreadyExists(err) {
-				// Expected race: a concurrent reconcile already created the TB under the same
-				// deterministic name. Do not Get immediately (the cache may not yet contain it);
-				// requeue and let the next pass observe it.
-				rf.Log().Info("Converging layout: tie-breaker replica already exists, requeuing")
+				// Expected race: a concurrent reconcile — or, for a diskful copy, an operator
+				// creating a replica by hand — already claimed the same deterministic name. Do
+				// not Get immediately (the cache may not yet contain it); requeue and let the
+				// next pass observe it.
+				rf.Log().Info("Converging layout: replica already exists, requeuing", "type", replicaType)
 				return rf.ContinueAndRequeue()
 			}
-			return rf.Failf(err, "creating tie-breaker RVR")
+			return rf.Failf(err, "creating %s RVR", replicaType)
 		}
 		*rvrs = insertRVRSorted(*rvrs, rvr)
-		rf.Log().Info("Converging layout: created tie-breaker replica")
+		rf.Log().Info("Converging layout: created replica", "type", replicaType, "rvr", rvr.Name)
 		return rf.ContinueAndRequeue()
 
 	default: // layoutActionNone
@@ -488,6 +510,8 @@ const (
 	layoutActionRetypeToTieBreaker
 	// layoutActionCreateTieBreaker creates a missing TieBreaker replica (P2).
 	layoutActionCreateTieBreaker
+	// layoutActionCreateDiskful creates a missing Diskful replica (P3 heal).
+	layoutActionCreateDiskful
 )
 
 // targetLayoutAction is the pure decision of what (if anything) layout convergence should do this
@@ -524,29 +548,72 @@ type membershipLayoutConvergedReport struct {
 //     intended one for one step (the member is already a TieBreaker while the transition is still
 //     running), and reporting Converged there would flip the condition True and back.
 //  3. ANY retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
-//     Converging. The step does not look at the tie-breaker deficit: a flipped spec is a layout
-//     change in flight even when the intended layout no longer asks for it (the configuration was
-//     switched back inside the dispatch window), and Converged there would be a false "nothing is
-//     moving". Because the step also precedes the replacement domain, a terminating tie-breaker
-//     waits for the pending retype to resolve before a replacement is created — a combination
-//     convergence itself never produces (it issues at most one action per pass).
+//     Converging, in either direction (to a tie-breaker, or to diskful). The step does not look
+//     at the deficit: a flipped spec is a layout change in flight even when the intended layout
+//     no longer asks for it (the configuration was switched back inside the dispatch window), and
+//     Converged there would be a false "nothing is moving". Because the step also precedes the
+//     replacement domain, a terminating tie-breaker waits for the pending retype to resolve
+//     before a replacement is created — a combination convergence itself never produces (it
+//     issues at most one action per pass).
 //  4. A tie-breaker replacement deficit (a tie-breaker member whose RVR is being deleted has no
 //     replacement yet) → create the replacement (strict create-first). This also precedes the
 //     actual/intended comparison: the raw layout still counts the terminating tie-breaker, so the
 //     comparison alone would report Converged while the only tie-breaker is leaving.
-//  5. Comparison of actual against intended: equal → Converged; otherwise the whitelist below.
+//  5. Comparison of actual against intended: equal AND no diskful replica in flight → Converged;
+//     otherwise the whitelist below. The in-flight term belongs here for the same reason steps
+//     3 and 4 precede the comparison — see "Diskful replicas in flight" below.
 //
-// Whitelist (only these two mismatches ever trigger an action; everything else is reported but
-// never acted upon):
+// Whitelist (only these three mismatches ever trigger an action; everything else is reported but
+// never acted upon). The criterion for membership is that REPEATING the action provably ends in
+// the intended layout; it is also what explains P1's dead end below, which without it reads as
+// an unmotivated concession:
 //   - P1 retype (r3→r2): actualD > intendedD && actualTB < intendedTB — convert one Diskful voter
 //     into the missing tie-breaker. It never removes the extra diskful voters, so a 4D volume at
 //     an r2 config becomes 3D+1TB after one retype and is then reported TransitionUnsupported.
-//   - P2 heal: actualD == intendedD && actualTB < intendedTB — create the missing tie-breaker.
+//   - P2 tie-breaker deficit: actualD == intendedD && actualTB < intendedTB — create the missing
+//     tie-breaker.
+//   - P3 heal (diskful deficit): actualD < intendedD && actualTB <= intendedTB — create the
+//     missing diskful copy. A copy carries data, so this is the only pattern that actually heals
+//     a volume. The tie-breaker term is the criterion at work: with FEWER tie-breakers than
+//     intended (r1→r2, r1→r3) the copy goes first and P2 supplies the tie-breaker afterwards, so
+//     repetition arrives; with MORE than intended (upsize r2→r3) a surplus tie-breaker is left
+//     over and removing it is a deletion — a different invariant — so it stays terminal.
+//
+// The three patterns are mutually exclusive by the sign of the diskful deficit, so the order of
+// the case arms carries no meaning.
 //
 // Idempotency across the split-client cache is handled by counting in-flight work: a retype whose
-// spec was already flipped (pendingRetypeToTieBreakerMemberNames, step 3) or a tie-breaker RVR
-// already created but not yet a member (countPendingTieBreakerCreations) is reported without
+// spec was already flipped (pendingRetypeToTieBreakerMemberNames / pendingRetypeToDiskfulMemberNames,
+// step 3), a tie-breaker RVR already created but not yet a member (countPendingTieBreakerCreations)
+// or a diskful RVR the layout does not count yet (countPendingDiskfulCreations) is reported without
 // issuing a second action.
+//
+// # Diskful replicas in flight
+//
+// A diskful replica in flight is one the LAYOUT does not count: it has no member, or its member is
+// neither Diskful nor LiminalDiskful (see isDiskfulCreationInFlight). Counting by MEMBERSHIP — the
+// formula the tie-breaker pattern can afford — leaks: an add-diskful plan that has to raise quorum
+// first enters the member as Access (the vestibule), where the replica IS a member while the layout
+// still does not count it. The invariant that must hold is that counted copies plus copies in
+// flight never exceed the intended copy count through convergence's own doing; the leak breaks it,
+// and the cost is a copy too many, a full resync spent for nothing, and a permanent
+// TransitionUnsupported.
+//
+// The gate is "at least one in flight", NOT "one per missing copy" as it is for tie-breakers. For a
+// tie-breaker the deficit is structurally at most one, so the two formulas are indistinguishable
+// there; a diskful deficit can be two (r1→r3, two copies lost out of four), and the per-deficit
+// formula would put two replicas in flight before either became a member. There is nothing to win:
+// all add-diskful plans sit in one transition group, which the concurrency tracker serialises per
+// volume, so the second join waits regardless. There is something to lose: the second replica
+// occupies a node (any RVR with a node counts as occupying it), takes a volume-group reservation
+// and gets a logical volume, so capacity is allocated up front and sits idle.
+//
+// The in-flight term in step 5 is what keeps an unplaceable copy from becoming unrecoverable: a
+// configuration widened and then reverted leaves the counts matching while the copy still exists,
+// and Converged there means that once a node appears the copy joins, the layout overshoots the
+// intended copy count, no pattern applies, and the volume is terminal forever. No dispatch guard
+// refuses a join that overshoots. The replica itself costs almost nothing while it hangs (without a
+// volume group it is not placed, so no logical volume is created) — only its identifier.
 func computeTargetLayoutAction(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -565,6 +632,10 @@ func computeTargetLayoutAction(
 	actualD, actualTB := computeActualLayout(rv)
 	actualLayout := formatLayout(actualD, actualTB)
 	intendedLayout := formatLayout(intendedD, intendedTB)
+
+	// The self-heal artifacts, and with them every step P3 owns.
+	inFlightDiskful := countPendingDiskfulCreations(rv, rvrs)
+	pendingRetypeToDiskful := pendingRetypeToDiskfulMemberNames(rv, rvrs)
 
 	// 2. A layout-changing transition is already moving the composition → Converging, no new action.
 	if hasLayoutChangingTransition(rv) {
@@ -608,6 +679,32 @@ func computeTargetLayoutAction(
 		}
 	}
 
+	// 3b. The same check in the other direction: a member that is not a diskful voter while its
+	// RVR spec.type already asks for Diskful. This is the vestibule of an add-diskful plan that
+	// raises quorum (member Access, replica Diskful), or a retype requested by hand. It is
+	// formally redundant — such a replica is in flight by the definition above, so no second copy
+	// would be created anyway — and it is here for the message and for the symmetry a maintainer
+	// looking at step 3 will expect to find.
+	if len(pendingRetypeToDiskful) > 0 {
+		var message string
+		if actualD == intendedD && actualTB == intendedTB {
+			// "have 2D+1TB, want 2D+1TB" would say nothing; name the replica instead (mirrors
+			// the same branch of step 3).
+			message = fmt.Sprintf(
+				"retype to diskful pending on %s: the layout already matches the intended one (%s); "+
+					"likely a reverted configuration change, and the retype is not rolled back automatically",
+				strings.Join(pendingRetypeToDiskful, ", "), actualLayout)
+		} else {
+			message = fmt.Sprintf("retype to diskful pending on %s: have %s, want %s",
+				strings.Join(pendingRetypeToDiskful, ", "), actualLayout, intendedLayout)
+		}
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: message,
+		}
+	}
+
 	// 4. Tie-breaker replacement (strict create-first): a tie-breaker whose RVR is being deleted
 	// still counts in the raw layout, but it is on its way out and must be replaced BEFORE the
 	// datamesh releases it.
@@ -617,8 +714,15 @@ func computeTargetLayoutAction(
 		return action, report
 	}
 
-	// 5. Converged: actual matches intended.
+	// 5. Converged: actual matches intended and no copy is still in flight. A copy in flight at
+	// matching counts is the reverted-configuration case: reporting Converged there is the one
+	// unrecoverable mistake this function can make (see "Diskful replicas in flight" above), so
+	// the in-flight report — the scheduler's verdict, or progress — wins over the comparison.
 	if actualD == intendedD && actualTB == intendedTB {
+		if inFlightDiskful > 0 {
+			return targetLayoutAction{kind: layoutActionNone},
+				computeDiskfulCreationPendingReport(rv, rvrs, actualLayout, intendedLayout, true)
+		}
 		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionTrue,
 			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
@@ -648,7 +752,7 @@ func computeTargetLayoutAction(
 				name, actualLayout, intendedLayout),
 		}
 
-	// P2 heal: correct diskful count but a tie-breaker deficit.
+	// P2 tie-breaker deficit: correct diskful count but a tie-breaker missing.
 	case actualD == intendedD && actualTB < intendedTB:
 		if countPendingTieBreakerCreations(rv, rvrs) >= intendedTB-actualTB {
 			// The replica exists but cannot be placed: that is the scheduler's final word for
@@ -672,6 +776,25 @@ func computeTargetLayoutAction(
 			status:  metav1.ConditionFalse,
 			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("creating tie-breaker replica: have %s, want %s", actualLayout, intendedLayout),
+		}
+
+	// P3 heal: a diskful copy is missing, and the tie-breakers are not in surplus. The replica is
+	// created BLIND — with no node and no storage — and the verdict on whether it can be placed is
+	// read back from the scheduler (computeDiskfulCreationPendingReport). Mirroring the scheduler's
+	// admissibility check here would mean re-implementing its whole phase pipeline (node readiness,
+	// volume-group readiness, occupancy, zoning, extender, capacity), which would drift apart from
+	// the original on its first change. That is the opposite choice from P1, which does mirror the
+	// DMTE guards — deliberately: those guards are cheap and live in the same package.
+	case actualD < intendedD && actualTB <= intendedTB:
+		if inFlightDiskful > 0 {
+			// The layouts differ here by construction, so they carry the progress themselves.
+			return targetLayoutAction{kind: layoutActionNone},
+				computeDiskfulCreationPendingReport(rv, rvrs, actualLayout, intendedLayout, false)
+		}
+		return targetLayoutAction{kind: layoutActionCreateDiskful}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("creating diskful replica: have %s, want %s", actualLayout, intendedLayout),
 		}
 
 	// Outside the whitelist: report honestly, take no action.
@@ -980,24 +1103,33 @@ func isRetypeToTieBreakerZoneQuorumSafe(
 }
 
 // computeActualPendingTieBreakerSchedulingFailure reports the scheduler's CURRENT verdict for
-// tie-breaker RVRs that exist but have not joined the datamesh yet. It returns a non-empty,
-// human-readable summary only when at least one of them carries a Scheduled=False condition whose
-// ObservedGeneration matches the RVR generation.
-//
-// A missing, Unknown or stale Scheduled condition is not a verdict — the scheduler simply has not
-// (re-)evaluated this replica yet, so convergence is still in progress. A tie-breaker RVR that is
-// being deleted is not a pending creation at all and is skipped (mirrors
-// countPendingTieBreakerCreations).
+// tie-breaker RVRs that exist but have not joined the datamesh yet (see
+// computeActualPendingSchedulingFailure for the verdict rule).
 func computeActualPendingTieBreakerSchedulingFailure(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) string {
+	return computeActualPendingSchedulingFailure(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return isTieBreakerCreationInFlight(rv, rvr)
+	})
+}
+
+// computeActualPendingSchedulingFailure reports the scheduler's CURRENT verdict for the replicas
+// inFlight selects, as a non-empty human-readable summary, or "" when it has not ruled against any
+// of them. Shared by the tie-breaker and the diskful patterns, which differ only in what counts as
+// in flight.
+//
+// Only a Scheduled=False whose ObservedGeneration matches the RVR generation is a verdict. A
+// missing, Unknown or stale Scheduled condition means the scheduler simply has not (re-)evaluated
+// this replica yet, so convergence is still in progress — which is also what keeps a placement the
+// resync limiter deferred (published as Unknown) out of CannotConverge.
+func computeActualPendingSchedulingFailure(
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	inFlight func(*v1alpha1.ReplicatedVolumeReplica) bool,
+) string {
 	var msgs []string
 	for _, rvr := range rvrs {
-		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
-			continue
-		}
-		if rv.Status.Datamesh.FindMemberByName(rvr.Name) != nil {
+		if !inFlight(rvr) {
 			continue
 		}
 		if !obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
@@ -1062,7 +1194,7 @@ func pendingRetypeToTieBreakerMemberNames(
 	var names []string
 	for i := range rv.Status.Datamesh.Members {
 		m := &rv.Status.Datamesh.Members[i]
-		if m.Type != v1alpha1.DatameshMemberTypeDiskful && m.Type != v1alpha1.DatameshMemberTypeLiminalDiskful {
+		if !isDiskfulLayoutMemberType(m.Type) {
 			continue
 		}
 		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
@@ -1076,20 +1208,198 @@ func pendingRetypeToTieBreakerMemberNames(
 // countPendingTieBreakerCreations counts TieBreaker RVRs that are not yet datamesh members
 // (created in a previous pass, still being scheduled / joining). Used to avoid creating a second
 // tie-breaker while the first is in flight.
-//
-// A tie-breaker RVR that is itself being deleted is not in flight towards membership — it is on
-// its way out and will never satisfy the deficit, so it does not hold back a new creation.
 func countPendingTieBreakerCreations(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) int {
 	count := 0
 	for _, rvr := range rvrs {
-		if rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker || rvr.DeletionTimestamp != nil {
-			continue
-		}
-		if rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil {
+		if isTieBreakerCreationInFlight(rv, rvr) {
 			count++
 		}
 	}
 	return count
+}
+
+// isTieBreakerCreationInFlight reports whether rvr is a tie-breaker on its way INTO the datamesh:
+// its spec asks for TieBreaker, it is not being deleted, and it is not a member yet.
+//
+// Defined over MEMBERSHIP, which the diskful counterpart deliberately is not — see
+// isDiskfulCreationInFlight for why the two formulas differ and must not be unified. A tie-breaker
+// RVR being deleted is not in flight at all: it is on its way out and will never satisfy the
+// deficit, so it must not hold back a new creation.
+func isTieBreakerCreationInFlight(
+	rv *v1alpha1.ReplicatedVolume,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) bool {
+	return rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker &&
+		rvr.DeletionTimestamp == nil &&
+		rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil
+}
+
+// pendingRetypeToDiskfulMemberNames returns the sorted names of members that are not diskful
+// voters while their RVR spec.type already asks for Diskful — the mirror image of
+// pendingRetypeToTieBreakerMemberNames.
+//
+// Two states land here: the vestibule of an add-diskful plan that raises quorum (the member enters
+// as Access before it becomes D∅), and a retype requested by hand. Convergence itself never
+// requests one, so this only ever reports.
+func pendingRetypeToDiskfulMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var names []string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if isDiskfulLayoutMemberType(m.Type) {
+			continue
+		}
+		if rvr := findRVRByName(rvrs, m.Name); rvr != nil && rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			names = append(names, m.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// countPendingDiskfulCreations counts the Diskful RVRs the layout does not count yet — the copies
+// in flight (see isDiskfulCreationInFlight). Used to keep convergence from issuing a second
+// creation for a deficit it is already working on.
+func countPendingDiskfulCreations(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) int {
+	count := 0
+	for _, rvr := range rvrs {
+		if isDiskfulCreationInFlight(rv, rvr) {
+			count++
+		}
+	}
+	return count
+}
+
+// isDiskfulCreationInFlight reports whether rvr is a diskful copy on its way INTO the layout: its
+// spec asks for Diskful, it is not being deleted, and the layout does not count it — either it has
+// no member at all, or its member type is neither Diskful nor LiminalDiskful.
+//
+// Defined over the LAYOUT, not over membership. "Not a member" — the formula the tie-breaker
+// pattern uses — is wrong here: the vestibule of a quorum-raising add-diskful plan IS a member
+// (as Access) while the layout still does not count it, and reading it as idle costs the volume a
+// copy too many. A replica being deleted is not in flight at all: it will never satisfy the
+// deficit, so it must not hold back the heal either.
+func isDiskfulCreationInFlight(
+	rv *v1alpha1.ReplicatedVolume,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+) bool {
+	if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful || rvr.DeletionTimestamp != nil {
+		return false
+	}
+	m := rv.Status.Datamesh.FindMemberByName(rvr.Name)
+	return m == nil || !isDiskfulLayoutMemberType(m.Type)
+}
+
+// computeDiskfulCreationPendingReport reports a diskful copy that is already in flight, and is the
+// single place that classifies what the volume is waiting for:
+//
+//	the scheduler cannot place it (a CURRENT Scheduled=False) → CannotConverge, a human is needed
+//	the resync limiter deferred it (Scheduled=Unknown/WaitingForResyncSlot) → Converging, and the
+//	  message says so: the reason is right (a queued slot IS progress) but "creation pending" alone
+//	  would read as a scheduler that cannot place the copy
+//	anything else (no condition, stale, Scheduled=True, waiting to join) → Converging
+//
+// layoutMatchesIntended selects the message for the reverted-configuration case, where the copy is
+// in flight while the counts already match: "have 2D+1TB, want 2D+1TB" says nothing, so the
+// replica is named instead (mirrors the same branch of step 3 of the decision order).
+func computeDiskfulCreationPendingReport(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	actualLayout, intendedLayout string,
+	layoutMatchesIntended bool,
+) membershipLayoutConvergedReport {
+	if failure := computeActualPendingDiskfulSchedulingFailure(rv, rvrs); failure != "" {
+		return membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+			message: fmt.Sprintf("cannot place diskful replica (have %s, want %s): %s",
+				actualLayout, intendedLayout, failure),
+		}
+	}
+	if waiting := computeActualPendingDiskfulResyncSlotWait(rv, rvrs); waiting != "" {
+		return membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("diskful replica %s is waiting for a free resync slot: have %s, want %s",
+				waiting, actualLayout, intendedLayout),
+		}
+	}
+	if layoutMatchesIntended {
+		return membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf(
+				"diskful replica creation pending on %s: the layout already matches the intended one (%s); "+
+					"likely a reverted configuration change, and the replica is not removed automatically",
+				pendingDiskfulCreationNames(rv, rvrs), actualLayout),
+		}
+	}
+	return membershipLayoutConvergedReport{
+		status:  metav1.ConditionFalse,
+		reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		message: fmt.Sprintf("diskful replica creation pending: have %s, want %s", actualLayout, intendedLayout),
+	}
+}
+
+// pendingDiskfulCreationNames returns the sorted names of the diskful copies in flight, joined for
+// a condition message. Only used where the layout arithmetic carries no information.
+func pendingDiskfulCreationNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) string {
+	var names []string
+	for _, rvr := range rvrs {
+		if isDiskfulCreationInFlight(rv, rvr) {
+			names = append(names, rvr.Name)
+		}
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}
+
+// computeActualPendingDiskfulSchedulingFailure reports the scheduler's CURRENT verdict for diskful
+// copies in flight (see computeActualPendingSchedulingFailure for the verdict rule).
+func computeActualPendingDiskfulSchedulingFailure(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) string {
+	return computeActualPendingSchedulingFailure(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return isDiskfulCreationInFlight(rv, rvr)
+	})
+}
+
+// computeActualPendingDiskfulResyncSlotWait returns the names of the diskful copies in flight whose
+// placement the resync limiter has deferred, or "" when none is waiting. The limiter publishes the
+// wait as Scheduled=Unknown/WaitingForResyncSlot, which is deliberately not a verdict, so the
+// condition reason stays Converging and only the message changes. Because the pattern is gated on
+// the limiter being on, this is the state every early user meets first.
+func computeActualPendingDiskfulResyncSlotWait(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) string {
+	var names []string
+	for _, rvr := range rvrs {
+		if !isDiskfulCreationInFlight(rv, rvr) {
+			continue
+		}
+		if !obju.StatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType).
+			StatusEqual(metav1.ConditionUnknown).
+			ReasonEqual(v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot).
+			ObservedGenerationCurrent().Eval() {
+			continue
+		}
+		names = append(names, rvr.Name)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}
+
+// isDiskfulLayoutMemberType reports whether a member of this type is counted as a diskful voter by
+// the layout (see computeActualLayout): a data-bearing voter, or one whose disk is not attached yet.
+func isDiskfulLayoutMemberType(t v1alpha1.DatameshMemberType) bool {
+	return t == v1alpha1.DatameshMemberTypeDiskful || t == v1alpha1.DatameshMemberTypeLiminalDiskful
 }
 
 // findRVRByName returns the RVR with the given name, or nil if absent.
@@ -1732,10 +2042,10 @@ func (r *Reconciler) reconcileLayoutStatus(
 // Access and ShadowDiskful (and their liminal variant) members are not part of the layout.
 func computeActualLayout(rv *v1alpha1.ReplicatedVolume) (diskful, tiebreakers int) {
 	for i := range rv.Status.Datamesh.Members {
-		switch rv.Status.Datamesh.Members[i].Type {
-		case v1alpha1.DatameshMemberTypeDiskful, v1alpha1.DatameshMemberTypeLiminalDiskful:
+		switch t := rv.Status.Datamesh.Members[i].Type; {
+		case isDiskfulLayoutMemberType(t):
 			diskful++
-		case v1alpha1.DatameshMemberTypeTieBreaker:
+		case t == v1alpha1.DatameshMemberTypeTieBreaker:
 			tiebreakers++
 		}
 	}

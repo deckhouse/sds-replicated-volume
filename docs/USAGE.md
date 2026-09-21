@@ -202,9 +202,26 @@ Waiting volumes are counted in `status.volumes.staleConfiguration` of the class,
 
 **Limitations.**
 
-- There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `MembershipLayoutConverged=False/TransitionUnsupported` and performs no action — it requires manual intervention.
+- There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `MembershipLayoutConverged=False/TransitionUnsupported` and performs no action until you intervene. The blocker is the *removal*, not the addition: r2 keeps a tie-breaker that r3 does not ask for, and the control plane never removes a replica. **Delete the tie-breaker replica** — with an odd diskful count no tie-breaker is required, so the datamesh releases it — and the missing third copy is then added automatically. Doing it the other way round (adding the copy first) also works but keeps the volume in `TransitionUnsupported` for the whole migration. (A volume that merely *lost* a diskful replica is a different case and needs no manual step at all: see below.)
 - Reverting the edit while a volume is still migrating does not cancel a retype that is already in flight, and such a volume never reports `Converged` again on its own. Depending on the timing the volume ends up either at `2D+1TB` against the intended `3D` (`MembershipLayoutConverged=False/TransitionUnsupported`), or with a replica whose `spec.type` is stuck at `TieBreaker` while the layout still reads `3D` (`MembershipLayoutConverged=False/Converging`, with the affected replica named in the condition message). No data is lost in either case. In the second case, restore the replica with a single patch that sets `spec.type` back to `Diskful` and re-adds its backing-volume fields (`spec.lvmVolumeGroupName`, and `spec.lvmVolumeGroupThinPoolName` for a thin pool) with the values from `status.datamesh.members` of the volume.
 - `eligibleNodesConflictResolutionStrategy.rollingRepair.maxParallel` is accepted but not implemented: repairing volumes that ended up on non-eligible nodes is not throttled. This is a different parameter from the configuration rollout `maxParallel` above, which is enforced.
+
+#### Recovering a lost replica
+
+A volume that lost a diskful replica — the node was removed, the replica was force-removed, or the member left the datamesh for any other reason — repairs itself. The control plane creates a replacement `ReplicatedVolumeReplica`, the scheduler places it, the datamesh joins it and the data is resynchronized. No manual step is involved, and the sequence is the same whatever removed the member.
+
+While the repair runs, the volume reports its progress in `MembershipLayoutConverged`, for example `False/Converging: creating diskful replica: have 2D, want 3D`. The `D8ReplicatedVolumeLayoutDegraded` alert stays silent throughout: it fires on `TransitionUnsupported` and `CannotConverge` only.
+
+```shell
+kubectl get replicatedvolume <RV_NAME> -o jsonpath='{.status.membershipLayout} {range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{end}{"\n"}'
+```
+
+Two things to expect:
+
+- **One copy at a time.** A volume that lost two replicas is repaired over two rounds: the second replacement is created only once the first has joined. Capacity is not reserved in advance.
+- **Nowhere to place it.** If no eligible node can host the replica, the volume reports `False/CannotConverge` with the scheduler's own summary and the alert does fire — this is the case that needs a human. The replica already exists and is placed as soon as a node or capacity appears; nothing has to be created by hand.
+
+What is **not** repaired automatically, because the control plane never removes a replica or its data: a volume with more replicas than its configuration asks for, and a replica whose member is still in the datamesh but whose disk is gone (that is a replacement, not an addition).
 
 #### Deleting the ReplicatedStorageClass resource
 
