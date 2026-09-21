@@ -53,6 +53,12 @@ type Reconciler struct {
 	// resyncLimit is the per-node resync-end budget. Zero means the limiter is off — no budget is
 	// consulted and no replica ever waits for a resync slot.
 	resyncLimit syncbudget.Limit
+
+	// resyncReservations holds the ends of the transfers this process has committed but not yet
+	// observed — see resyncReservations. Without it the budget is blind to its own decisions for as
+	// long as a placement takes to come back through the watch and the agent takes to report the
+	// transfer itself.
+	resyncReservations *resyncReservations
 }
 
 func NewReconciler(
@@ -62,10 +68,11 @@ func NewReconciler(
 	extenderClient schext.Client,
 ) *Reconciler {
 	return &Reconciler{
-		cl:             cl,
-		log:            log,
-		scheme:         scheme,
-		extenderClient: extenderClient,
+		cl:                 cl,
+		log:                log,
+		scheme:             scheme,
+		extenderClient:     extenderClient,
+		resyncReservations: newResyncReservations(resyncReservationTTL, time.Now),
 	}
 }
 
@@ -238,6 +245,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				}
 				targetResyncBudget = &target
 				sctx.ResyncOccupancy = targetResyncBudget.occupancyAtAdmission
+				sctx.ResyncObservedOccupancy = targetResyncBudget.observedOccupancy
+				sctx.ResyncSenderNodes = targetResyncBudget.senderNodes
 			}
 
 			// The sending side is re-measured per replica: admission asked for room for one end on
@@ -434,6 +443,14 @@ type resyncBudgetDecision struct {
 	// admitted claim charged, so every replica placed against this decision loads exactly them.
 	// Empty in the same cases occupancyAtAdmission is nil.
 	senderNodes []string
+
+	// observedOccupancy is the "node → resync ends" map as the cluster reported it, before this
+	// process's own pending reservations were merged in and before the queue charged anything.
+	//
+	// It is what resyncReservations.reserve has to be measured against: occupancyAtAdmission
+	// already carries the reservations that existed when the decision was taken, and re-adding
+	// them at reservation time would count them twice. Nil whenever occupancyAtAdmission is.
+	observedOccupancy map[string]int
 }
 
 // reconcileResyncBudget decides whether rv may start filling replicas over the network now, and
@@ -533,9 +550,21 @@ func (r *Reconciler) reconcileResyncBudget(
 
 	syncbudget.SortQueue(queue)
 
+	// Every reservation gives up the half the listing now accounts for by itself: the receiving end
+	// as soon as the placement is visible, the sending end only once the transfer is reported, and
+	// both as soon as the replica stops owing data at all. Kept on past that, a reservation would
+	// charge its node a second time — or, for a replica gone from the listing for good, hold a node
+	// against nothing until the TTL ran out.
+	r.resyncReservations.observe(occupyingRVRs)
+
+	// The ends this process has already handed out but not yet seen are added to what the cluster
+	// reported, so that a node with a placement still in flight reads as occupied to the walk and
+	// to the receiving-node filter fed from it.
+	observedOccupancy := syncbudget.ComputeActualOccupancy(occupyingRVRs)
+
 	reportPass := syncbudget.RunPassForSubject(
 		queue,
-		syncbudget.ComputeActualOccupancy(occupyingRVRs),
+		r.resyncReservations.mergedInto(observedOccupancy),
 		r.resyncLimit,
 		rv.Name,
 	)
@@ -554,6 +583,7 @@ func (r *Reconciler) reconcileResyncBudget(
 	return resyncBudgetDecision{
 		occupancyAtAdmission: reportPass.SubjectOccupancy,
 		senderNodes:          slices.Sorted(maps.Keys(actualClaim.NeededEnds)),
+		observedOccupancy:    observedOccupancy,
 	}, rf.Continue()
 }
 
@@ -879,11 +909,38 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary)
 	}
 
+	// Both ends of the transfer this placement is about to start, claimed together before anything
+	// is written or narrowed. Neither gate above can settle them: the sending side was admitted
+	// against an occupancy snapshot taken when this reconciliation began, and the receiving node was
+	// picked from the same snapshot, so every node another worker has committed a transfer on since
+	// is missing from both. This is the point where that is settled, once, for the nodes actually
+	// used — and the only point at which the sending and the receiving node are judged together.
+	//
+	// Losing the race is a wait, not a failure, and it is reported as the filter reports one: the
+	// re-check comes round again on the requeue, by which time the winner's placement is visible.
+	reservedReceivingEnd := false
+	if isDiskful && unplaced && sctx.ResyncOccupancy != nil {
+		if !r.resyncReservations.reserve(
+			rvr.Name, best.Node.NodeName, sctx.ResyncSenderNodes, r.resyncLimit, sctx.ResyncObservedOccupancy,
+		) {
+			logger.V(2).Info("a node of this transfer lost its last resync end while the replica was being scheduled",
+				"receivingNode", best.Node.NodeName, "senderNodes", sctx.ResyncSenderNodes)
+			return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot,
+				resyncSlotWaitMessage).
+				Merge(rf.ContinueAndRequeueAfter(resyncSlotRequeueInterval))
+		}
+		reservedReceivingEnd = true
+	}
+
 	if isDiskful {
 		if err := r.extenderClient.NarrowReservation(rf.Ctx(), reservationID, 60*time.Second, schext.LVMVolumeGroup{
 			LVGName:      best.LVGName(),
 			ThinPoolName: best.ThinPoolName(),
 		}); err != nil {
+			if reservedReceivingEnd {
+				r.resyncReservations.release(rvr.Name)
+			}
 			return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonExtenderUnavailable,
 				"Scheduling is temporarily unavailable: failed to confirm capacity reservation").
@@ -893,6 +950,11 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 
 	outcome = r.reconcileRVRPlacement(rf.Ctx(), rvr, best)
 	if outcome.ShouldReturn() {
+		// A node on the replica is what says it was placed, here as in Reconcile. Without one
+		// nothing took the end, and holding it would idle a node until the TTL ran out.
+		if reservedReceivingEnd && rvr.Spec.NodeName == "" {
+			r.resyncReservations.release(rvr.Name)
+		}
 		return outcome
 	}
 
@@ -975,6 +1037,17 @@ type schedulingContext struct {
 	// it places replicas, so that later replicas of the same volume see the load the earlier ones
 	// created. The map is owned by this context.
 	ResyncOccupancy map[string]int
+
+	// ResyncObservedOccupancy is the same map as the cluster reported it — see
+	// resyncBudgetDecision.observedOccupancy. Only the reservation of a transfer's ends reads it,
+	// and it is nil exactly when ResyncOccupancy is. Not charged as replicas are placed: a placement
+	// becomes a reservation instead, which is what the reservation is measured against.
+	ResyncObservedOccupancy map[string]int
+
+	// ResyncSenderNodes are the nodes a replica of this volume reads its data from — see
+	// resyncBudgetDecision.senderNodes. Every placement loads them alongside the node it lands on,
+	// so the reservation has to take them together. Empty exactly when ResyncOccupancy is nil.
+	ResyncSenderNodes []string
 
 	// NodeLoad maps an eligible node to the replicas already placed on it, counted
 	// across all volumes. It breaks ties between candidates of equal score, so that

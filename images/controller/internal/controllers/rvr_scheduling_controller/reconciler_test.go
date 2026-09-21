@@ -19,6 +19,7 @@ package rvrschedulingcontroller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -4182,6 +4183,237 @@ var _ = Describe("Reconciler", func() {
 
 			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
 				"both receiving nodes owe data to a volume that is not in the queue")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("keeps two volumes off one receiving node while a placement is still in flight", func() {
+			// The burst at the start of a wave. Admission reserves only the sending half of a
+			// transfer: NeededEnds is keyed by sender nodes alone, and RunPassForSubject charges
+			// nothing for the node that will receive. The receiving node is picked afterwards, by
+			// the pipeline, and the only record of that choice is the nodeName patch itself — so
+			// until that patch reaches the informer cache, every other worker reads the node as
+			// free.
+			//
+			// Two volumes, each short one copy, each with its sender on a different node and one
+			// node left to receive on — and it is the same node. They are reconciled one after the
+			// other with the first placement hidden from the second's occupancy reading, which is
+			// what a worker running concurrently would see. The budget allows one end per node, so
+			// only the first transfer may start.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			// Placed already, so it only narrows this volume's choice to node-c: a tie-breaker
+			// carries no data and occupies no resync end.
+			tb := newRVR(2, v1alpha1.ReplicaTypeTieBreaker)
+			tb.Spec.NodeName = "node-b"
+			tb.Spec.LVMVolumeGroupName = "vg-b"
+
+			// rv-peer is the same shape mirrored: its data sits on node-b, its tie-breaker holds
+			// node-a, and node-c is the only node left for its missing copy.
+			peer := newRV(defaultConfig())
+			peer.Name = "rv-peer"
+			peer.Status.DatameshRevision = 1
+			peer.Status.EffectiveLayout.UpToDateVoters = 2
+			peer.Status.Datamesh.Members = []v1alpha1.DatameshMember{{
+				Name:     "rv-peer-0",
+				Type:     v1alpha1.DatameshMemberTypeDiskful,
+				NodeName: "node-b",
+			}}
+
+			peerSender := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-peer-0"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-peer",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-b",
+					LVMVolumeGroupName:   "vg-b",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+						State: v1alpha1.DiskStateUpToDate,
+					},
+				},
+			}
+			peerNewD := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-peer-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-peer",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			peerTB := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-peer-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-peer",
+					Type:                 v1alpha1.ReplicaTypeTieBreaker,
+					NodeName:             "node-a",
+					LVMVolumeGroupName:   "vg-a",
+				},
+			}
+
+			// The name of the replica the second pass must not see in the occupancy listing: the
+			// nodeName patch is written, but the cache the other worker reads still predates it.
+			var staleOccupancy string
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, tb, peer, peerSender, peerNewD, peerTB).
+				WithStatusSubresource(sender, newD, tb, peerSender, peerNewD, peerTB).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(
+						ctx context.Context,
+						c client.WithWatch,
+						list client.ObjectList,
+						opts ...client.ListOption,
+					) error {
+						if err := c.List(ctx, list, opts...); err != nil {
+							return err
+						}
+						if staleOccupancy == "" {
+							return nil
+						}
+						o := &client.ListOptions{}
+						o.ApplyOptions(opts)
+						if o.FieldSelector == nil || !strings.Contains(o.FieldSelector.String(),
+							indexes.IndexFieldRVRByResyncEndsOccupancy) {
+							return nil
+						}
+						rvrs, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList)
+						if !ok {
+							return nil
+						}
+						rvrs.Items = slices.DeleteFunc(rvrs.Items,
+							func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
+								return rvr.Name == staleOccupancy
+							})
+						return nil
+					},
+				}).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			// The worker that gets there first takes the one receiving end node-c has.
+			_, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: peer.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getUpdatedRVR(ctx, cl, peerNewD).Spec.NodeName).To(Equal("node-c"),
+				"node-c is the only node rv-peer's missing copy can land on")
+
+			staleOccupancy = peerNewD.Name
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: testRVName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"node-c is already receiving rv-peer's copy, and one end per node leaves no room")
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
+		})
+
+		It("keeps a volume from receiving on a node another volume is about to send from", func() {
+			// The other half of the same burst, and the one the receiving-end ledger alone could
+			// not stop. A node is loaded by the transfers it feeds exactly as much as by the ones
+			// it takes, but nothing occupies a sender until the agent reports the transfer — and
+			// admission charges sender nodes only for the claims ahead of the subject in the queue.
+			// So the volume at the head of the queue reads a node that a volume behind it has
+			// already committed to reading from as free, and receives its whole copy there.
+			//
+			// rv-zeta sorts after rv-test and is reconciled first: by the time rv-test comes up,
+			// the transfer feeding rv-zeta is committed and reading off node-c, which is the only
+			// node rv-test's own missing copy could land on.
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			// Placed already, so it only narrows rv-test's choice to node-c.
+			tb := newRVR(2, v1alpha1.ReplicaTypeTieBreaker)
+			tb.Spec.NodeName = "node-b"
+			tb.Spec.LVMVolumeGroupName = "vg-b"
+
+			// rv-zeta holds its data on node-c and its tie-breaker on node-a, so node-b is the only
+			// node its missing copy can land on — and node-c is what that copy will be read from.
+			peer := newRV(defaultConfig())
+			peer.Name = "rv-zeta"
+			peer.Status.DatameshRevision = 1
+			peer.Status.EffectiveLayout.UpToDateVoters = 2
+			peer.Status.Datamesh.Members = []v1alpha1.DatameshMember{{
+				Name:     "rv-zeta-0",
+				Type:     v1alpha1.DatameshMemberTypeDiskful,
+				NodeName: "node-c",
+			}}
+
+			peerSender := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-zeta-0"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-zeta",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-c",
+					LVMVolumeGroupName:   "vg-c",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+						State: v1alpha1.DiskStateUpToDate,
+					},
+				},
+			}
+			peerNewD := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-zeta-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-zeta",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			peerTB := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-zeta-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-zeta",
+					Type:                 v1alpha1.ReplicaTypeTieBreaker,
+					NodeName:             "node-a",
+					LVMVolumeGroupName:   "vg-a",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, tb, peer, peerSender, peerNewD, peerTB).
+				WithStatusSubresource(sender, newD, tb, peerSender, peerNewD, peerTB).
+				Build()
+			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
+			rec.resyncLimit = resyncEndsPerNode
+
+			// rv-zeta commits its transfer: it lands on node-b and will read off node-c.
+			_, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: peer.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getUpdatedRVR(ctx, cl, peerNewD).Spec.NodeName).To(Equal("node-b"),
+				"node-b is the only node rv-zeta's missing copy can land on")
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: testRVName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
+				"node-c is already feeding rv-zeta's copy, and one end per node leaves no room")
 			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
 		})

@@ -82,6 +82,15 @@ func OccupiesEnds(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	return rvr.Spec.NodeName != "" && occupiedEnds(rvr) > 0
 }
 
+// ReportsResync reports whether the agent sees rvr in a transfer right now.
+//
+// It is how a caller tells a transfer that has really started from one that is merely owed: the
+// occupancy map takes the larger of the two signals and so cannot tell them apart, while anything
+// standing in for a transfer until it is observed has to know when to stop.
+func ReportsResync(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	return reportedResyncEnds(rvr) > 0
+}
+
 // occupiedEnds is how many resync ends rvr carries on its node.
 //
 // The two signals are combined by taking the largest, not the sum: they describe the same transfer
