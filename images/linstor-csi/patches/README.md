@@ -64,3 +64,10 @@ dropped: the Kubernetes set that `004` now brings in already resolves `oauth2` w
 that version, so the patch no longer had a line to change and would only fail to apply.
 
 Bump golang.org/x/net, golang.org/x/text, golang.org/x/sys and google.golang.org/grpc to versions without known vulnerabilities.
+
+### 008-fix-cve-grpc.patch
+
+Raises `google.golang.org/grpc` v1.82.1 -> **v1.83.2** for **CVE-2026-84304** and
+**CVE-2026-84303** (fixed in 1.83.1) and **CVE-2026-84445** (fixed in 1.83.2), the
+Trivy findings against the built `linstor-csi` binary. Applied after 007;
+`go.mod` / `go.sum` only.
