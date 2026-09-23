@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -32,7 +33,7 @@ var _ = Describe("nodePredicates", func() {
 	var preds []func(event.TypedUpdateEvent[client.Object]) bool
 
 	BeforeEach(func() {
-		predicates := nodePredicates()
+		predicates := nodePredicates(nil)
 		preds = make([]func(event.TypedUpdateEvent[client.Object]) bool, 0)
 		for _, p := range predicates {
 			if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok {
@@ -226,9 +227,60 @@ var _ = Describe("nodePredicates", func() {
 		})
 	})
 
+	Describe("UpdateFunc with dataNodeSelector", func() {
+		var selPreds []func(event.TypedUpdateEvent[client.Object]) bool
+
+		BeforeEach(func() {
+			selPreds = nil
+			for _, p := range nodePredicates(labels.Set{"node-role.deckhouse.io/storage": ""}) {
+				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.UpdateFunc != nil {
+					selPreds = append(selPreds, fp.UpdateFunc)
+				}
+			}
+			Expect(selPreds).NotTo(BeEmpty())
+		})
+
+		updateEvent := func(oldLabels, newLabels map[string]string) event.TypedUpdateEvent[client.Object] {
+			return event.TypedUpdateEvent[client.Object]{
+				ObjectOld: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: oldLabels}},
+				ObjectNew: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: newLabels}},
+			}
+		}
+
+		It("returns true when node starts matching selector", func() {
+			e := updateEvent(
+				map[string]string{},
+				map[string]string{"node-role.deckhouse.io/storage": ""},
+			)
+			for _, pred := range selPreds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when node stops matching selector", func() {
+			e := updateEvent(
+				map[string]string{"node-role.deckhouse.io/storage": ""},
+				map[string]string{},
+			)
+			for _, pred := range selPreds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns false when unrelated labels change and selector match is unchanged", func() {
+			e := updateEvent(
+				map[string]string{"node-role.deckhouse.io/storage": "", "foo": "a"},
+				map[string]string{"node-role.deckhouse.io/storage": "", "foo": "b"},
+			)
+			for _, pred := range selPreds {
+				Expect(pred(e)).To(BeFalse())
+			}
+		})
+	})
+
 	Describe("DeleteFunc", func() {
 		It("returns false always", func() {
-			predicates := nodePredicates()
+			predicates := nodePredicates(nil)
 			for _, p := range predicates {
 				if fp, ok := p.(predicate.TypedFuncs[client.Object]); ok && fp.DeleteFunc != nil {
 					node := &corev1.Node{

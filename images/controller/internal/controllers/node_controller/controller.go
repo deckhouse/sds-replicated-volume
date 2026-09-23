@@ -31,21 +31,28 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
 
 // NodeControllerName is the controller name for node_controller.
 const NodeControllerName = "node-controller"
 
 func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+	dataNodeSelector := cfg.DataNodeSelector()
+
 	cl := mgr.GetClient()
 
-	rec := NewReconciler(cl)
+	rec := NewReconciler(cl, dataNodeSelector)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(NodeControllerName).
 		// This controller reconciles individual Node objects.
 		// It also watches RSP and DRBDResource events.
-		For(&corev1.Node{}, builder.WithPredicates(nodePredicates()...)).
+		For(&corev1.Node{}, builder.WithPredicates(nodePredicates(dataNodeSelector)...)).
 		Watches(
 			&v1alpha1.ReplicatedStoragePool{},
 			rspEventHandler(),

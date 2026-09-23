@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -32,6 +33,9 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
+
+// nonMatchingDataNodeSelector selects no test node, so label decisions depend only on RSP/DRBD state.
+var nonMatchingDataNodeSelector = labels.Set{"test.deckhouse.io/data-node": "true"}
 
 func TestNodeController(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -60,7 +64,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "non-existent-node"},
@@ -82,7 +86,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -110,7 +114,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -140,7 +144,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -174,7 +178,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -206,7 +210,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -242,7 +246,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -275,7 +279,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -312,7 +316,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -354,7 +358,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, rsp1, rsp2),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -388,7 +392,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbd1, drbd2),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -426,7 +430,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource, rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -460,7 +464,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, drbdResource),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -488,7 +492,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: "node-1"},
@@ -529,7 +533,7 @@ var _ = Describe("Reconciler", func() {
 					fake.NewClientBuilder().WithScheme(scheme).WithObjects(node1, node2, rsp),
 				),
 			).Build()
-			rec = NewReconciler(cl)
+			rec = NewReconciler(cl, nonMatchingDataNodeSelector)
 
 			// Reconcile only node-1
 			result, err := rec.Reconcile(context.Background(), reconcile.Request{
@@ -547,6 +551,117 @@ var _ = Describe("Reconciler", func() {
 			var updatedNode2 corev1.Node
 			Expect(cl.Get(context.Background(), client.ObjectKey{Name: "node-2"}, &updatedNode2)).To(Succeed())
 			Expect(updatedNode2.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+		})
+	})
+
+	Describe("Reconcile with dataNodeSelector", func() {
+		dataNodeSelector := labels.Set{"node-role.deckhouse.io/storage": ""}
+
+		buildClient := func(objs ...client.Object) client.WithWatch {
+			return testhelpers.WithDRBDResourceByNodeNameIndex(
+				testhelpers.WithRSPByEligibleNodeNameIndex(
+					fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...),
+				),
+			).Build()
+		}
+
+		reconcileNode := func(name string) corev1.Node {
+			result, err := rec.Reconcile(context.Background(), reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			var node corev1.Node
+			Expect(cl.Get(context.Background(), client.ObjectKey{Name: name}, &node)).To(Succeed())
+			return node
+		}
+
+		It("adds label to node matching selector on a clean cluster (no RSP, no DRBD)", func() {
+			cl = buildClient(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "node-1",
+					Labels: map[string]string{"node-role.deckhouse.io/storage": ""},
+				},
+			})
+			rec = NewReconciler(cl, dataNodeSelector)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("keeps manually set label on node matching selector", func() {
+			cl = buildClient(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						"node-role.deckhouse.io/storage": "",
+						v1alpha1.AgentNodeLabelKey:       "",
+					},
+				},
+			})
+			rec = NewReconciler(cl, dataNodeSelector)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("normalizes non-empty label value on node matching selector", func() {
+			cl = buildClient(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-1",
+					Labels: map[string]string{
+						"node-role.deckhouse.io/storage": "",
+						v1alpha1.AgentNodeLabelKey:       "true",
+					},
+				},
+			})
+			rec = NewReconciler(cl, dataNodeSelector)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("keeps label on node outside selector that has DRBDResource", func() {
+			cl = buildClient(
+				&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{v1alpha1.AgentNodeLabelKey: ""},
+					},
+				},
+				&v1alpha1.DRBDResource{
+					ObjectMeta: metav1.ObjectMeta{Name: "drbd-1"},
+					Spec:       v1alpha1.DRBDResourceSpec{NodeName: "node-1"},
+				},
+			)
+			rec = NewReconciler(cl, dataNodeSelector)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
+		})
+
+		It("removes label from node outside selector without RSP and DRBD", func() {
+			cl = buildClient(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "node-1",
+					Labels: map[string]string{v1alpha1.AgentNodeLabelKey: ""},
+				},
+			})
+			rec = NewReconciler(cl, dataNodeSelector)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).NotTo(HaveKey(v1alpha1.AgentNodeLabelKey))
+		})
+
+		It("adds label to any node when selector is empty", func() {
+			cl = buildClient(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			})
+			rec = NewReconciler(cl, nil)
+
+			node := reconcileNode("node-1")
+			Expect(node.Labels).To(HaveKeyWithValue(v1alpha1.AgentNodeLabelKey, ""))
 		})
 	})
 })

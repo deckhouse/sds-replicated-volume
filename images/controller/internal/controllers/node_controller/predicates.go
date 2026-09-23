@@ -17,6 +17,7 @@ limitations under the License.
 package nodecontroller
 
 import (
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -27,17 +28,28 @@ import (
 // nodePredicates returns predicates for Node events.
 // Reacts to:
 //   - Create: always
-//   - Update: only if AgentNodeLabelKey presence/absence changed
+//   - Update: only if AgentNodeLabelKey presence/absence/value changed,
+//     or the node started/stopped matching the data-node selector
 //   - Delete: never
-func nodePredicates() []predicate.Predicate {
+//
+// dataNodeSelector is a validated label set; a nil/empty set matches all nodes.
+func nodePredicates(dataNodeSelector labels.Set) []predicate.Predicate {
+	sel := labels.SelectorFromValidatedSet(dataNodeSelector)
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-				// React if AgentNodeLabelKey presence, absence, or value changed.
-				oldVal, oldHas := e.ObjectOld.GetLabels()[v1alpha1.AgentNodeLabelKey]
-				newVal, newHas := e.ObjectNew.GetLabels()[v1alpha1.AgentNodeLabelKey]
+				oldLabels := e.ObjectOld.GetLabels()
+				newLabels := e.ObjectNew.GetLabels()
 
-				return oldHas != newHas || oldVal != newVal
+				// React if AgentNodeLabelKey presence, absence, or value changed.
+				oldVal, oldHas := oldLabels[v1alpha1.AgentNodeLabelKey]
+				newVal, newHas := newLabels[v1alpha1.AgentNodeLabelKey]
+				if oldHas != newHas || oldVal != newVal {
+					return true
+				}
+
+				// React if the node entered or left the data-node selector.
+				return sel.Matches(labels.Set(oldLabels)) != sel.Matches(labels.Set(newLabels))
 			},
 			DeleteFunc: func(_ event.TypedDeleteEvent[client.Object]) bool {
 				// Node deletions are not interesting for this controller.

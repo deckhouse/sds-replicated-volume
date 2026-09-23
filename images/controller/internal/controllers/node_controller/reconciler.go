@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -37,6 +38,10 @@ import (
 
 type Reconciler struct {
 	cl client.Client
+	// dataNodeSelector is the module-wide data-node selector (dataNodes.nodeSelector).
+	// Nodes matching it get the agent label unconditionally, which bootstraps the agent
+	// (and the sds-node-configurator agent) on a clean cluster before any RSP exists.
+	dataNodeSelector labels.Selector
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
@@ -49,8 +54,13 @@ var (
 	rawPatchRemoveAgentLabel = []byte(`{"metadata":{"labels":{"` + v1alpha1.AgentNodeLabelKey + `":null}}}`)
 )
 
-func NewReconciler(cl client.Client) *Reconciler {
-	return &Reconciler{cl: cl}
+// NewReconciler creates a Reconciler.
+// dataNodeSelector is a validated label set; a nil/empty set matches all nodes.
+func NewReconciler(cl client.Client, dataNodeSelector labels.Set) *Reconciler {
+	return &Reconciler{
+		cl:               cl,
+		dataNodeSelector: labels.SelectorFromValidatedSet(dataNodeSelector),
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -61,6 +71,7 @@ func NewReconciler(cl client.Client) *Reconciler {
 //
 // Reconciles a single Node by checking if it should have the AgentNodeLabelKey.
 // A node should have the label if:
+//   - it matches the module-wide dataNodes.nodeSelector, OR
 //   - it is in at least one RSP's eligibleNodes, OR
 //   - it has at least one DRBDResource (to prevent orphaning DRBD resources)
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -69,34 +80,44 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	nodeName := req.Name
 
 	// Check current label state (cheap, uses UnsafeDisableDeepCopy).
-	nodeExists, hasLabel, labelValueCorrect, err := r.getNodeAgentLabelPresence(rf.Ctx(), nodeName)
+	presence, err := r.getNodeAgentLabelPresence(rf.Ctx(), nodeName)
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
-	if !nodeExists {
+	if !presence.exists {
 		// Node was deleted, nothing to do.
 		return rf.Done().ToCtrl()
 	}
 
-	// Check if node has any DRBDResources.
-	drbdCount, err := r.getNumberOfDRBDResourcesByNode(rf.Ctx(), nodeName)
-	if err != nil {
-		return rf.Fail(err).ToCtrl()
-	}
+	// A node selected by dataNodes.nodeSelector needs the label regardless of RSP/DRBD state,
+	// so the index lookups are skipped for it.
+	shouldHaveLabel := presence.matchesDataNodeSelector
+	if !shouldHaveLabel {
+		var drbdCount, rspCount int
 
-	// Check if node is in any RSP's eligibleNodes.
-	rspCount, err := r.getNumberOfRSPByEligibleNode(rf.Ctx(), nodeName)
-	if err != nil {
-		return rf.Fail(err).ToCtrl()
-	}
+		// Check if node has any DRBDResources.
+		drbdCount, err = r.getNumberOfDRBDResourcesByNode(rf.Ctx(), nodeName)
+		if err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
 
-	// Node should have label if it has any DRBDResource OR is in any RSP's eligibleNodes.
-	shouldHaveLabel := drbdCount > 0 || rspCount > 0
+		// Check if node is in any RSP's eligibleNodes.
+		// RSP eligibility is a subset of dataNodeSelector, so this only matters while RSP status
+		// still lists a node that has just left the selector (selector narrowed or node relabeled):
+		// the label is kept until rsp_controller drops the node from eligibleNodes.
+		rspCount, err = r.getNumberOfRSPByEligibleNode(rf.Ctx(), nodeName)
+		if err != nil {
+			return rf.Fail(err).ToCtrl()
+		}
+
+		// Node should have label if it has any DRBDResource OR is in any RSP's eligibleNodes.
+		shouldHaveLabel = drbdCount > 0 || rspCount > 0
+	}
 
 	// Check if node is already in sync:
 	// - should have label AND label present with correct (empty) value, OR
 	// - should not have label AND label absent.
-	isInSync := (shouldHaveLabel && labelValueCorrect) || (!shouldHaveLabel && !hasLabel)
+	isInSync := (shouldHaveLabel && presence.labelValueCorrect) || (!shouldHaveLabel && !presence.hasLabel)
 	if isInSync {
 		return rf.Done().ToCtrl()
 	}
@@ -127,21 +148,35 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // Single-call I/O helper categories
 //
 
+// nodeAgentLabelPresence is the part of a Node observed by getNodeAgentLabelPresence.
+type nodeAgentLabelPresence struct {
+	exists                  bool
+	hasLabel                bool
+	labelValueCorrect       bool
+	matchesDataNodeSelector bool
+}
+
 // getNodeAgentLabelPresence checks if a node exists, whether it has the AgentNodeLabelKey,
-// and whether the label value is the canonical empty string.
-// Uses UnsafeDisableDeepCopy for performance since we only need to read the label.
-// Returns (exists, hasLabel, labelValueCorrect, err).
-func (r *Reconciler) getNodeAgentLabelPresence(ctx context.Context, name string) (bool, bool, bool, error) {
+// whether the label value is the canonical empty string, and whether the node matches
+// the data-node selector.
+// Uses UnsafeDisableDeepCopy for performance: node labels are evaluated here and never
+// leave the helper, so the shared cache object is not exposed to callers.
+// A missing node is not an error: it yields a zero value with exists == false.
+func (r *Reconciler) getNodeAgentLabelPresence(ctx context.Context, name string) (nodeAgentLabelPresence, error) {
 	var unsafeNode corev1.Node
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &unsafeNode, client.UnsafeDisableDeepCopy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, false, false, nil
+			return nodeAgentLabelPresence{}, nil
 		}
-		return false, false, false, err
+		return nodeAgentLabelPresence{}, err
 	}
 	hasLabel := obju.HasLabel(&unsafeNode, v1alpha1.AgentNodeLabelKey)
-	labelValueCorrect := hasLabel && unsafeNode.Labels[v1alpha1.AgentNodeLabelKey] == ""
-	return true, hasLabel, labelValueCorrect, nil
+	return nodeAgentLabelPresence{
+		exists:                  true,
+		hasLabel:                hasLabel,
+		labelValueCorrect:       hasLabel && unsafeNode.Labels[v1alpha1.AgentNodeLabelKey] == "",
+		matchesDataNodeSelector: r.dataNodeSelector.Matches(labels.Set(unsafeNode.Labels)),
+	}, nil
 }
 
 // getNumberOfDRBDResourcesByNode returns the count of DRBDResource objects on the specified node.
