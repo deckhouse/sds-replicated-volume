@@ -59,7 +59,7 @@ properties:
           it requires "get" on deployments/prometheus-metrics for csi-controller.
       controllerMetricsPort:
         type: integer
-        default: 4272
+        default: 8082
         description: |
           The port the controller serves its metrics on, bound on 127.0.0.1: the only
           thing that reaches it is the kube-rbac-proxy of the same pod.

@@ -198,7 +198,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "snapshotterTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "resizerTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "extraCreateMetadataEnabled" true }}
-{{- $_ := set $csiControllerConfig "livenessProbePort" 4261 }}
 {{- $_ := set $csiControllerConfig "additionalControllerArgs" (include "csi_controller_args" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
@@ -226,7 +225,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "provisionerWorkers" "20" }}
 {{- $_ := set $csiControllerConfig "attacherWorkers" "50" }}
 {{- $_ := set $csiControllerConfig "extraCreateMetadataEnabled" true }}
-{{- $_ := set $csiControllerConfig "livenessProbePort" 4261 }}
 {{- $_ := set $csiControllerConfig "additionalControllerArgs" (include "csi_controller_args" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}

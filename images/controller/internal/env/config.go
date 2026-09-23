@@ -40,12 +40,16 @@ const (
 	// An unset value means DefaultResyncSlotsPerNode; 0 switches the limit off entirely.
 	ResyncSlotsPerNodeEnvVar = "RESYNC_SLOTS_PER_NODE"
 
-	// defaults are different for each app, do not merge them
-	DefaultHealthProbeBindAddress = ":4271"
+	// defaults are different for each app, do not merge them.
+	// The controller runs in the pod network, so these ports hold nothing on the
+	// host; they stay outside 4200-4299, which is where the modules' host-network
+	// ports live (docs/documentation/_data/deckhouse-ports.yml in deckhouse).
+	// 8080 is taken in the pod by the kube-rbac-proxy.
+	DefaultHealthProbeBindAddress = ":8081"
 	// Loopback, like the agent: the kube-rbac-proxy of the same pod is what
 	// publishes this endpoint, and a wildcard bind would answer unauthenticated
 	// on the pod IP.
-	DefaultMetricsBindAddress = "127.0.0.1:4272"
+	DefaultMetricsBindAddress = "127.0.0.1:8082"
 
 	// DefaultResyncSlotsPerNode is the resync-end budget assumed for a node when
 	// RESYNC_SLOTS_PER_NODE is not set. Four: the limiter is on by default, because the
