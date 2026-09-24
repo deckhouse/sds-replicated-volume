@@ -178,6 +178,46 @@ var _ = Describe("rvPredicates", func() {
 			}
 		})
 
+		It("returns true when Spec.Maintenance changes", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Maintenance: v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
+		It("returns true when Spec.Maintenance is cleared", func() {
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Maintenance: v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns false when DatameshRevision unchanged", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},

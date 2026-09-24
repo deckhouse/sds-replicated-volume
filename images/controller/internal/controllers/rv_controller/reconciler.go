@@ -95,6 +95,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "listing ReplicatedVolumeReplicas").ToCtrl()
 	}
 
+	// Maintenance: an operator asked us to leave this volume alone. Placed after the children are
+	// loaded and BEFORE the deletion branch on purpose — deletion handling is one of the actions
+	// the pause stops, and no evaluation order may let it slip past. The paused path is a
+	// reconcile step of its own rather than an early return, because the observational layer it
+	// still runs has to be persisted by a status patch of its own.
+	if rv.IsUnderMaintenance() {
+		return r.reconcileMaintenance(rf.Ctx(), rv, rvrs, rvas).ToCtrl()
+	}
+
 	// Handle deletion: force-cleanup children, then remove our finalizer from RV.
 	//
 	// rvShouldNotExist returns true only when:
@@ -134,6 +143,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	base := rv.DeepCopy()
+
+	// Remove the UnderMaintenance condition on the first pass after spec.maintenance is cleared.
+	// applyUnderMaintenanceCond is the single writer of the condition and is called from both
+	// paths; a volume with the field set never reaches this line, so here it only ever removes.
+	outcome = outcome.ReportChangedIf(applyUnderMaintenanceCond(rv))
 
 	// Derive rv.Status.Configuration from the appropriate source (RSC or ManualConfiguration).
 	// Called here only for initial set (config is nil). During normal operation,
@@ -275,6 +289,86 @@ func (r *Reconciler) reconcileOrphanedRVRs(
 	}
 
 	return r.reconcileRVRFinalizers(rf.Ctx(), nil, rvrs)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: maintenance
+//
+
+// reconcileMaintenance is the whole of what the controller does to a volume whose
+// spec.maintenance is set: it reports the pause and republishes the health aggregated from the
+// replicas, then stops. Everything else the controller would do — deletion handling and the
+// volume's own finalizer, the metadata reconcile, configuration derivation, the preparatory
+// datamesh steps, formation, normal operation with its membership, attachment and resize planning
+// and every datamesh transition, layout status, the Configured and placement conditions, and the
+// replica and attachment finalizer steps — does not run, and the status each of them owns freezes
+// at its last published value rather than being cleared (the convention the deletion branch
+// already uses for Resilient, AttachedReady and Configured).
+//
+// The data-plane conditions are the only observational layer, and that is the whole list: their
+// inputs are the replicas' own status, which the replica controller and the agent keep
+// maintaining — this iteration stops neither. Why the placement conditions and the metrics are
+// NOT on that list is in the Maintenance section of README.md.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileMaintenance(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "maintenance")
+	defer rf.OnEnd(&outcome)
+
+	base := rv.DeepCopy()
+
+	changed := applyUnderMaintenanceCond(rv)
+
+	// Ready, Resilient and AttachedReady: the health aggregated from the replicas, which is what
+	// the operator watches to see whether the volume recovers on its own.
+	dataPlaneOutcome := r.reconcileDataPlaneConditions(rf.Ctx(), rv, rvrs, rvas)
+	if dataPlaneOutcome.Error() != nil {
+		return dataPlaneOutcome
+	}
+	changed = changed || dataPlaneOutcome.DidChange()
+
+	if changed {
+		if err := r.patchRVStatus(rf.Ctx(), rv, base); err != nil {
+			return rf.Failf(err, "publishing maintenance status")
+		}
+	}
+
+	// A terminal outcome is propagated only AFTER the status has been persisted. Returning it
+	// first would drop the observational layer along with the condition — the exact early-return
+	// hazard this path carries its own status patch to avoid.
+	if dataPlaneOutcome.ShouldReturn() {
+		return dataPlaneOutcome
+	}
+
+	// We're done. Don't continue further reconciliation.
+	return rf.Done().ReportChangedIf(changed)
+}
+
+// applyUnderMaintenanceCond brings the UnderMaintenance condition in line with spec.maintenance
+// and is the SINGLE writer of that condition. It is presence-based: the condition is set while
+// the field is set, carrying the mode as its reason, and removed when the field is cleared.
+//
+// Both the paused path and the normal path call it; the normal-path call is the one that removes
+// the condition on the first pass after the field is cleared.
+func applyUnderMaintenanceCond(rv *v1alpha1.ReplicatedVolume) bool {
+	if !rv.IsUnderMaintenance() {
+		return obju.RemoveStatusCondition(rv, v1alpha1.ReplicatedVolumeCondUnderMaintenanceType)
+	}
+	// The reason names the mode. There is exactly one reason per mode and the CRD enum admits
+	// exactly one mode, so a new mode must bring its own reason constant with it.
+	return obju.SetStatusCondition(rv, metav1.Condition{
+		Type:   v1alpha1.ReplicatedVolumeCondUnderMaintenanceType,
+		Status: metav1.ConditionTrue,
+		Reason: v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation,
+		Message: fmt.Sprintf(
+			"Every volume controller action is stopped by spec.maintenance=%s; "+
+				"the volume will not finish deleting until it is cleared", rv.Spec.Maintenance),
+	})
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

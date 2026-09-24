@@ -102,6 +102,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// Maintenance: propagate the volume's pause down to the DRBD resource, then stop.
+	//
+	// The propagation runs BEFORE the gate on purpose. A frozen controller writes nothing, so the
+	// pause has to be the one thing that still writes itself down; running it on every pass is
+	// also what lifts the pause from the DRBD resource on the first pass after the volume's field
+	// is cleared.
+	//
+	// The gate is placed before reconcileMetadata so that the replica's finalizer is one of the
+	// frozen steps, matching the full stop the volume's spec.maintenance promises: a replica of a
+	// paused volume does not finish deleting either.
+	maintenanceOutcome := r.reconcileDRBDRMaintenance(rf.Ctx(), rv, drbdr)
+	if maintenanceOutcome.ShouldReturn() {
+		return maintenanceOutcome.ToCtrl()
+	}
+
+	if rv != nil && rv.IsUnderMaintenance() {
+		return maintenanceOutcome.
+			Merge(r.reconcileMaintenance(rf.Ctx(), rvr, rv, drbdr, llvs, rspView)).
+			ToCtrl()
+	}
+
 	if rvr != nil {
 		// Reconcile the RVR metadata (finalizers and labels).
 		outcome := r.reconcileMetadata(rf.Ctx(), rvr, rv, llvs, drbdr)
@@ -133,47 +154,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if rvr != nil {
-		// compute agentReady and drbdrConfigurationPending
-		drbdConfiguredCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
-		var agentReady, drbdrConfigurationPending bool
-		if drbdConfiguredCond != nil {
-			agentReady = drbdConfiguredCond.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady
-			drbdrConfigurationPending = drbdConfiguredCond.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration
-		}
-
-		// Find datamesh and datamesh member for this RVR.
-		var datamesh *v1alpha1.ReplicatedVolumeDatamesh
-		var datameshMember *v1alpha1.DatameshMember
-		if rv != nil {
-			datamesh = &rv.Status.Datamesh
-			datameshMember = datamesh.FindMemberByName(rvr.Name)
-		}
-
-		// Ensure RVR status fields reflect the current DRBDR state.
-		eo := flow.MergeEnsures(
-			// Ensure status fields.
-			ensureStatusAddressesAndType(rf.Ctx(), rvr, drbdr),
-			ensureStatusSize(rf.Ctx(), rvr, drbdr),
-			ensureStatusAttachment(rf.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
-			ensureStatusPeers(rf.Ctx(), rvr, drbdr, datamesh),
-			ensureStatusBackingVolume(rf.Ctx(), rvr, drbdr, llvs),
-			ensureStatusQuorum(rf.Ctx(), rvr, drbdr),
-			// Latches the observed quorum; must follow ensureStatusQuorum.
-			ensureStatusInitialQuorumReachedAt(rf.Ctx(), rvr),
-
-			// Ensure conditions.
-			ensureConditionAttached(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-			ensureConditionFullyConnected(rf.Ctx(), rvr, drbdr, datamesh, agentReady),
-			ensureConditionBackingVolumeUpToDate(rf.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-			ensureConditionReady(rf.Ctx(), rvr, rv, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
-			ensureConditionSatisfyEligibleNodes(rf.Ctx(), rvr, rv, rspView),
-
-			// Ensure datamesh pending transition and configured condition.
-			ensureStatusDatameshRequestAndConfiguredCond(rf.Ctx(), rvr, rv, rspView),
-
-			// Ensure phase and message (computed from all conditions above).
-			ensureStatusPhaseAndMessage(rf.Ctx(), rvr),
-		)
+		eo := ensureStatusObserved(rf.Ctx(), rvr, rv, drbdr, llvs, rspView, computeAgentView(rvr))
 		if eo.Error() != nil {
 			return rf.Failf(eo.Error(), "ensuring status").ToCtrl()
 		}
@@ -200,6 +181,232 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	return outcome.ToCtrl()
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Helpers: Reconcile (non-I/O)
+//
+
+// ensureStatusObserved brings the whole of the replica's `.status` in line with what has been
+// observed: the DRBD resource the agent reports on, the volume's datamesh, the backing volumes
+// and the storage pool eligibility. It decides nothing about the cluster and writes nothing
+// outside the replica's status subresource.
+//
+// It is shared by the two paths that publish that status: the normal flow, and the maintenance
+// flow, which runs this step and nothing else. That sharing is the point — a paused replica must
+// keep reporting, because the volume controller aggregates Ready, Resilient and AttachedReady
+// from exactly this status and a frozen replica status would make that aggregate silently stale.
+func ensureStatusObserved(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
+	drbdr *v1alpha1.DRBDResource,
+	llvs []snc.LVMLogicalVolume,
+	rspView *rspEligibilityView,
+	agent agentView,
+) (outcome flow.EnsureOutcome) {
+	ef := flow.BeginEnsure(ctx, "status-observed")
+	defer ef.OnEnd(&outcome)
+
+	agentReady, drbdrConfigurationPending := agent.ready, agent.configurationPending
+
+	// Find datamesh and datamesh member for this RVR.
+	var datamesh *v1alpha1.ReplicatedVolumeDatamesh
+	var datameshMember *v1alpha1.DatameshMember
+	if rv != nil {
+		datamesh = &rv.Status.Datamesh
+		datameshMember = datamesh.FindMemberByName(rvr.Name)
+	}
+
+	// Ensure RVR status fields reflect the current DRBDR state.
+	return flow.MergeEnsures(
+		// Ensure status fields.
+		ensureStatusAddressesAndType(ef.Ctx(), rvr, drbdr),
+		ensureStatusSize(ef.Ctx(), rvr, drbdr),
+		ensureStatusAttachment(ef.Ctx(), rvr, drbdr, agentReady, drbdrConfigurationPending),
+		ensureStatusPeers(ef.Ctx(), rvr, drbdr, datamesh),
+		ensureStatusBackingVolume(ef.Ctx(), rvr, drbdr, llvs),
+		ensureStatusQuorum(ef.Ctx(), rvr, drbdr),
+		// Latches the observed quorum; must follow ensureStatusQuorum.
+		ensureStatusInitialQuorumReachedAt(ef.Ctx(), rvr),
+
+		// Ensure conditions.
+		ensureConditionAttached(ef.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+		ensureConditionFullyConnected(ef.Ctx(), rvr, drbdr, datamesh, agentReady),
+		ensureConditionBackingVolumeUpToDate(ef.Ctx(), rvr, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+		ensureConditionReady(ef.Ctx(), rvr, rv, drbdr, datameshMember, agentReady, drbdrConfigurationPending),
+		ensureConditionSatisfyEligibleNodes(ef.Ctx(), rvr, rv, rspView),
+
+		// Ensure datamesh pending transition and configured condition.
+		ensureStatusDatameshRequestAndConfiguredCond(ef.Ctx(), rvr, rv, rspView),
+
+		// Ensure phase and message (computed from all conditions above).
+		ensureStatusPhaseAndMessage(ef.Ctx(), rvr),
+	)
+}
+
+// agentView is what the status layer knows about the agent serving this replica's node.
+type agentView struct {
+	// ready reports that an agent is running and ready on the node.
+	ready bool
+	// configurationPending reports that a DRBD configuration change has been handed to the agent
+	// and not acknowledged yet.
+	configurationPending bool
+}
+
+// computeAgentView reads the view back out of the DRBDConfigured condition, which the DRBD
+// resource step writes from the live agent readiness earlier in the same pass.
+//
+// The read-back is only as fresh as that step. On a path that does not run it — the maintenance
+// path — the caller MUST refresh `ready` from the cluster, or a pre-pause "the agent is fine"
+// verdict would outlive the agent itself.
+func computeAgentView(rvr *v1alpha1.ReplicatedVolumeReplica) agentView {
+	cond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType)
+	if cond == nil {
+		return agentView{}
+	}
+
+	return agentView{
+		ready:                cond.Reason != v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonAgentNotReady,
+		configurationPending: cond.Reason == v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonApplyingConfiguration,
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: DRBD resource maintenance
+//
+
+// reconcileDRBDRMaintenance propagates the owning volume's pause down to this replica's DRBD
+// resource, and is the only step that still writes while the volume is paused.
+//
+// The field it writes has two writers: an operator pausing a single DRBD resource by hand, and
+// this controller propagating a paused volume. They are told apart by the value. This controller
+// writes MaintenanceModeNoResourceReconciliationByVolume only into an empty field and clears only
+// that same value back out, so a hand-set pause is never overwritten while the volume is paused
+// and never lifted when the volume resumes.
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileDRBDRMaintenance(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	drbdr *v1alpha1.DRBDResource,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "drbdr-maintenance")
+	defer rf.OnEnd(&outcome)
+
+	if drbdr == nil {
+		return rf.Continue()
+	}
+
+	targetMaintenance := computeTargetDRBDRMaintenance(rv, drbdr)
+	if isDRBDRMaintenanceInSync(drbdr, targetMaintenance) {
+		return rf.Continue()
+	}
+
+	base := drbdr.DeepCopy()
+	applyDRBDRMaintenance(drbdr, targetMaintenance)
+	if err := r.patchDRBDR(rf.Ctx(), drbdr, base); err != nil {
+		return rf.Failf(err, "patching maintenance on DRBDResource %s", drbdr.Name)
+	}
+
+	return rf.Continue().ReportChanged()
+}
+
+// computeTargetDRBDRMaintenance returns the mode `.spec.maintenance` of the DRBD resource should
+// hold, which is the current value whenever this controller has no business touching the field.
+func computeTargetDRBDRMaintenance(rv *v1alpha1.ReplicatedVolume, drbdr *v1alpha1.DRBDResource) v1alpha1.MaintenanceMode {
+	// Any mode other than our own is an operator's pause: leave it exactly as it is.
+	if drbdr.Spec.Maintenance != "" &&
+		drbdr.Spec.Maintenance != v1alpha1.MaintenanceModeNoResourceReconciliationByVolume {
+		return drbdr.Spec.Maintenance
+	}
+
+	// A volume we cannot read is treated as not paused, the same way the gate in Reconcile treats
+	// it. Anything else would freeze the DRBD resource while the replica controller keeps running
+	// — the one combination neither level is designed for.
+	if rv == nil || !rv.IsUnderMaintenance() {
+		return ""
+	}
+
+	return v1alpha1.MaintenanceModeNoResourceReconciliationByVolume
+}
+
+func isDRBDRMaintenanceInSync(drbdr *v1alpha1.DRBDResource, target v1alpha1.MaintenanceMode) bool {
+	return drbdr.Spec.Maintenance == target
+}
+
+func applyDRBDRMaintenance(drbdr *v1alpha1.DRBDResource, target v1alpha1.MaintenanceMode) {
+	drbdr.Spec.Maintenance = target
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: maintenance
+//
+
+// reconcileMaintenance is the whole of what the controller does to a replica whose volume is
+// paused through rv.spec.maintenance: it republishes the replica's observed status, and stops.
+//
+// Everything the controller would otherwise do to the replica — its finalizer and labels, the
+// backing volume, and the DRBD resource spec derived from the datamesh — does not run. Deletion
+// handling is one of those actions, so a replica of a paused volume does not finish deleting
+// either, and the status each frozen step owns keeps its last published value rather than being
+// cleared.
+//
+// What does keep running is the status this controller only observes. The agent still reports
+// DRBD state, because a DRBD resource's own maintenance mode pauses actions and not reporting,
+// and the volume controller aggregates Ready, Resilient and AttachedReady from the replica status
+// this step publishes. Freezing it too would leave the operator who paused the volume with no way
+// to see what the volume is doing — the opposite of why a volume gets paused.
+//
+// Metrics are deliberately not on that list: they describe the controller's own work, and under a
+// pause there is none. This mirrors the volume controller's maintenance path.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileMaintenance(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
+	drbdr *v1alpha1.DRBDResource,
+	llvs []snc.LVMLogicalVolume,
+	rspView *rspEligibilityView,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "maintenance")
+	defer rf.OnEnd(&outcome)
+
+	// No replica to report on: the pause has already been propagated by the caller, and there is
+	// nothing else this path may touch.
+	if rvr == nil {
+		return rf.Done()
+	}
+
+	// The DRBDConfigured condition this view is normally read back from is written by the DRBD
+	// resource step, which this path freezes. Readiness is therefore taken from the cluster
+	// instead: a pre-pause verdict would keep reporting a healthy agent long after it died, and
+	// the volume controller's AttachedReady is aggregated from exactly these conditions.
+	agent := computeAgentView(rvr)
+	if rvr.Spec.NodeName != "" {
+		agentReady, err := r.getAgentReady(rf.Ctx(), rvr.Spec.NodeName)
+		if err != nil {
+			return rf.Failf(err, "getting agent readiness for %s", rvr.Spec.NodeName)
+		}
+		agent.ready = agentReady
+	}
+
+	base := rvr.DeepCopy()
+
+	eo := ensureStatusObserved(rf.Ctx(), rvr, rv, drbdr, llvs, rspView, agent)
+	if eo.Error() != nil {
+		return rf.Failf(eo.Error(), "ensuring status")
+	}
+
+	if eo.DidChange() {
+		if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
+			return rf.Failf(err, "publishing maintenance status")
+		}
+	}
+
+	// We're done. Don't continue further reconciliation.
+	return rf.Done().ReportChangedIf(eo.DidChange())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -66,6 +66,7 @@ func drbdrPredicates() []predicate.Predicate {
 // - DatameshRevision changes (membership, datamesh size, etc.)
 // - Spec.Size changes (for eager LLV resize before datamesh transition)
 // - Spec.ReplicatedStorageClassName changes (for labels)
+// - Spec.Maintenance changes (the volume's pause is propagated to the DRBDResource)
 // - DatameshReplicaRequests message changes (for condition message enrichment)
 func rvPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
@@ -92,6 +93,13 @@ func rvPredicates() []predicate.Predicate {
 
 				// React to Spec.ReplicatedStorageClassName change (for labels).
 				if oldRV.Spec.ReplicatedStorageClassName != newRV.Spec.ReplicatedStorageClassName {
+					return true
+				}
+
+				// React to Spec.Maintenance change: entering the pause has to reach the DRBDResource,
+				// and leaving it has to lift the pause from there. Nothing else wakes this controller
+				// for either edge — the volume controller is frozen and writes no status to watch.
+				if oldRV.Spec.Maintenance != newRV.Spec.Maintenance {
 					return true
 				}
 

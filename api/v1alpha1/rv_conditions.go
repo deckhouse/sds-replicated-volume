@@ -140,3 +140,22 @@ const (
 	ReplicatedVolumeCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled" // Some replicas are not scheduled yet.
 	ReplicatedVolumeCondScheduledReasonSchedulingInProgress = "SchedulingInProgress" // Scheduling is still in progress.
 )
+
+const (
+	// ReplicatedVolumeCondUnderMaintenanceType indicates that reconciliation of the volume is
+	// paused by an operator through spec.maintenance: no action is taken on it at all — no
+	// membership or layout decision, no datamesh transition, no replica or attachment change, no
+	// configuration derivation and no deletion handling.
+	//
+	// The condition is presence-based: it is present exactly while the field is set and is
+	// removed when the field is cleared. Absence is the normal state of a volume.
+	//
+	// While it is present the authoritative parts of the status (the datamesh, the
+	// configuration, layout convergence) are frozen at their last values and must not be reasoned
+	// from; health aggregated from the replicas (Ready, Resilient, AttachedReady) keeps being
+	// published. A paused volume also does not finish deleting.
+	//
+	// The reason names the mode that is in effect.
+	ReplicatedVolumeCondUnderMaintenanceType                           = "UnderMaintenance"
+	ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation = "NoResourceReconciliation" // Every action on this volume is stopped.
+)

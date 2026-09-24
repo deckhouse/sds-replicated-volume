@@ -131,7 +131,7 @@ In stage 4, temporary conversion `ReplicatedStoragePool` objects may be created 
 | `ReplicatedStoragePool` (`linstor-auto-*`) | stage 1 | one per LINSTOR pool; persists |
 | `ReplicatedStoragePool` (conversion) | stage 4 | temporary, labeled `migration-conversion-rsp=true`; deleted after RSC conversion |
 | `LVMLogicalVolume` | stage 1 | per diskful replica |
-| `DRBDResource` | stage 1 | per replica; created in maintenance mode, cleared in stage 2 |
+| `DRBDResource` | stage 1 | per replica; created in maintenance mode (`NoResourceReconciliation`), cleared in stage 2. Stage 2 clears only that mode: the replica controller uses a mode of its own on the same field to carry a paused volume's pause down, and clearing it here would resume a resource the volume still wants frozen |
 | `ReplicatedVolumeReplica` | stage 1 | per replica |
 | `ReplicatedVolume` | stage 1 | `maxAttachments=2`, starts in Manual; switched to Auto in stage 4 if PV exists |
 | `ReplicatedVolumeAttachment` | stage 1 | for resources with matching `VolumeAttachment` |

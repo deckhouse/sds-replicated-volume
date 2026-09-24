@@ -68,6 +68,14 @@ Reconcile (root) [Pure orchestration]
 ├── getLLVs
 ├── getRV
 ├── getRSPEligibilityView (RSP type, eligible node data)
+├── reconcileDRBDRMaintenance [Target-state driven] ← runs before the maintenance gate
+│   ├── computeTargetDRBDRMaintenance
+│   ├── isDRBDRMaintenanceInSync
+│   ├── applyDRBDRMaintenance
+│   └── patchDRBDR
+├── reconcileMaintenance [In-place reconciliation] ← only when the volume is paused; ends the pass
+│   ├── ensureStatusObserved
+│   └── patchRVRStatus
 ├── reconcileMetadata [Target-state driven]
 │   ├── isRVRMetadataInSync
 │   ├── applyRVRMetadata (finalizer + labels)
@@ -173,6 +181,67 @@ flowchart TD
     DmPendingAndCond --> Patch[Patch RVR status]
     Patch --> EndNode([Done])
 ```
+
+## Maintenance
+
+A replica has no stop switch of its own. It is paused with its volume: while `rv.spec.maintenance`
+holds a mode, this controller performs no action on that volume's replicas, and
+`reconcileMaintenance` is the whole of the pass.
+
+The gate sits in the root `Reconcile` before `reconcileMetadata`, so the replica's finalizer is one
+of the frozen steps. A replica deleted while its volume is paused therefore stays in `Terminating`
+until the volume resumes — the same full stop `rv.spec.maintenance` promises for the volume itself,
+and for the same reason.
+
+| | |
+|---|---|
+| **Still maintained** | The replica status observed from the DRBD resource: addresses, size, peers, backing volume, quorum, and every condition derived from them |
+| **Frozen** | The finalizer and labels, the backing volume (LLV), the DRBD resource spec derived from the datamesh, deletion, and the metrics |
+
+Reporting keeps running because the volume controller aggregates its `Ready`, `Resilient` and
+`AttachedReady` from exactly this status, and the agent keeps reporting DRBD state for a paused
+resource. A replica whose status froze would make the volume's health silently stale — the opposite
+of why a volume gets paused.
+
+One input of that status needs care. On the normal path, agent readiness is read back out of the
+`DRBDConfigured` condition, which `reconcileDRBDResource` has just written from the live pod state
+earlier in the same pass. That step is frozen here, so the paused path refreshes readiness from the
+cluster itself (`getAgentReady`) before publishing. Reading the frozen condition instead would let a
+pre-pause "the agent is fine" verdict outlive the agent: the pod could die mid-pause and every
+condition derived from it would keep reporting health, all the way up to the volume's
+`AttachedReady`.
+
+### Carrying the pause down to the DRBD resource
+
+`reconcileDRBDRMaintenance` is the step that propagates the pause, and it is the only thing this
+controller still writes while the volume is paused. It runs **before** the gate, because a frozen
+controller writes nothing and the pause has to be the one thing that still writes itself down.
+Running on every pass is also what lifts the pause again on the first pass after the volume's field
+is cleared.
+
+`drbdr.spec.maintenance` has two writers, told apart by the value:
+
+| Value | Written by | Cleared by |
+|-------|-----------|------------|
+| `NoResourceReconciliation` | An operator, by hand; also the LINSTOR migrator | The same, never this controller |
+| `NoResourceReconciliationByVolume` | This controller, while the owning volume is paused | This controller, when the volume resumes |
+
+The rule that keeps them apart is: write only into an empty field, clear only your own value. A
+hand-set pause is therefore never overwritten while the volume is paused, and never lifted when the
+volume resumes.
+
+Every consumer of the field asks `drbdr.IsUnderMaintenance()` rather than comparing against one
+mode, so any value pauses everything the pause is supposed to pause. Comparing against a single mode
+is the bug this shape is designed to prevent: the `DRBDResourceOperation` reconciler in the agent
+also honours the field, and a new value that only the DRBD reconciler knew about would silently
+leave operations running.
+
+Both edges need waking, and both halves of the watch have to agree for that to happen:
+`rvPredicates` lets a maintenance-only update through, and `rvEventHandler.Update` turns it into one
+request per replica of the volume. A predicate without the matching handler branch passes the event
+and enqueues nothing — the pause is then never carried down, and, worse, never lifted. Nothing else
+would wake this controller for either edge: the volume controller is frozen under the pause and
+publishes no status change to watch.
 
 ## Conditions
 

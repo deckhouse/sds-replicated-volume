@@ -31,6 +31,10 @@ spec:
     - jsonPath: .status.size
       name: Size
       type: string
+    - jsonPath: .status.conditions[?(@.type=='UnderMaintenance')].status
+      name: Maintenance
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -93,6 +97,29 @@ spec:
                 enum:
                 - Auto
                 - Manual
+                type: string
+              maintenance:
+                description: |-
+                  Maintenance pauses reconciliation of this volume. While it is set, no action is taken on
+                  the volume at all: no membership or layout decision, no datamesh transition, no replica or
+                  attachment change, no configuration derivation and no deletion handling. Reconciliation of
+                  every other volume is unaffected, and this volume keeps serving I/O.
+
+                  The pause cascades: the replicas of a paused volume stop being acted on too, and their DRBD
+                  resources are paused through their own spec.maintenance for as long as this field is set. A
+                  DRBD resource paused by hand is left exactly as it is, and is not resumed when this field is
+                  cleared. Reporting is not part of what the cascade stops at any level.
+
+                  Health aggregated from the replicas (Ready, Resilient, AttachedReady) keeps being
+                  published; the authoritative parts of the status — the datamesh, the configuration, layout
+                  convergence — freeze at their last values. The pause is reported by the UnderMaintenance
+                  condition.
+
+                  A paused volume does not finish deleting: deletion handling is one of the paused actions,
+                  so the finalizer is not released and the volume — and with it the PVC — remains Terminating
+                  until the field is cleared.
+                enum:
+                - NoResourceReconciliation
                 type: string
               manualConfiguration:
                 description: |-

@@ -161,6 +161,47 @@ var _ = Describe("rvEventHandler", func() {
 		})
 	})
 
+	Describe("Update with Spec.Maintenance change", func() {
+		// The predicate lets a maintenance-only edit through, but only this handler turns it into
+		// work: without a branch here the pause is never carried down to any DRBDResource, and —
+		// worse — never lifted again.
+		maintenanceUpdate := func(oldMode, newMode v1alpha1.MaintenanceMode) {
+			GinkgoHelper()
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{Maintenance: oldMode},
+				Status:     v1alpha1.ReplicatedVolumeStatus{DatameshRevision: 1},
+			}
+			newRV := oldRV.DeepCopy()
+			newRV.Spec.Maintenance = newMode
+
+			rvr0 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-1"},
+			}
+
+			cl := testhelpers.WithRVRByReplicatedVolumeNameIndex(
+				fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(newRV, rvr0),
+			).Build()
+
+			handler := newRVEventHandler(cl).(*rvEventHandler)
+			handler.Update(context.Background(), event.UpdateEvent{ObjectOld: oldRV, ObjectNew: newRV}, queue)
+
+			Expect(queue.items).To(HaveLen(1))
+			Expect(queue.items[0].Name).To(Equal("rv-1-0"))
+		}
+
+		It("enqueues all RVRs when the volume is paused", func() {
+			maintenanceUpdate("", v1alpha1.MaintenanceModeNoResourceReconciliation)
+		})
+
+		It("enqueues all RVRs when the volume resumes", func() {
+			maintenanceUpdate(v1alpha1.MaintenanceModeNoResourceReconciliation, "")
+		})
+	})
+
 	Describe("Update with Spec.Size change", func() {
 		It("enqueues all RVRs when Spec.Size changes", func() {
 			oldRV := &v1alpha1.ReplicatedVolume{

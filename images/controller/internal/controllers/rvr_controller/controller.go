@@ -129,6 +129,13 @@ func (h *rvEventHandler) Update(ctx context.Context, e event.UpdateEvent, q work
 		h.enqueueAllRVRs(ctx, newRV.Name, q)
 		return
 	}
+	if oldRV.Spec.Maintenance != newRV.Spec.Maintenance {
+		// Spec.Maintenance changed — every replica has to carry the pause down to its own
+		// DRBDResource, or lift it again. Nothing else enqueues them for either edge: the volume
+		// controller is frozen under the pause and publishes no status change to watch.
+		h.enqueueAllRVRs(ctx, newRV.Name, q)
+		return
+	}
 	if oldRV.Status.DatameshRevision != newRV.Status.DatameshRevision && oldRV.Status.DatameshRevision == 0 {
 		// Initial setup — enqueue ALL RVRs.
 		h.enqueueAllRVRs(ctx, newRV.Name, q)

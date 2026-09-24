@@ -31,6 +31,7 @@ import (
 // +kubebuilder:printcolumn:name="Resilient",type=string,JSONPath=".status.conditions[?(@.type=='Resilient')].reason"
 // +kubebuilder:printcolumn:name="Layout",type=string,JSONPath=".status.membershipLayout"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".status.size"
+// +kubebuilder:printcolumn:name="Maintenance",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='UnderMaintenance')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="AttachedReady",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='AttachedReady')].reason"
 // +kubebuilder:printcolumn:name="Converged",type=string,priority=1,JSONPath=".status.conditions[?(@.type=='MembershipLayoutConverged')].status"
@@ -64,6 +65,10 @@ func (rv *ReplicatedVolume) GetStatusConditions() []metav1.Condition { return rv
 func (rv *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
 	rv.Status.Conditions = conditions
 }
+
+// IsUnderMaintenance reports whether `.spec.maintenance` holds a mode. The empty string is not a
+// permitted value of the enum, so "unset" and "the zero value" coincide.
+func (rv *ReplicatedVolume) IsUnderMaintenance() bool { return rv.Spec.Maintenance != "" }
 
 // Auto mode requires RSC name, forbids manualConfiguration:
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName) && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
@@ -111,6 +116,28 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:default=1
 	// +optional
 	MaxAttachments *byte `json:"maxAttachments,omitempty"`
+
+	// Maintenance pauses reconciliation of this volume. While it is set, no action is taken on
+	// the volume at all: no membership or layout decision, no datamesh transition, no replica or
+	// attachment change, no configuration derivation and no deletion handling. Reconciliation of
+	// every other volume is unaffected, and this volume keeps serving I/O.
+	//
+	// The pause cascades: the replicas of a paused volume stop being acted on too, and their DRBD
+	// resources are paused through their own spec.maintenance for as long as this field is set. A
+	// DRBD resource paused by hand is left exactly as it is, and is not resumed when this field is
+	// cleared. Reporting is not part of what the cascade stops at any level.
+	//
+	// Health aggregated from the replicas (Ready, Resilient, AttachedReady) keeps being
+	// published; the authoritative parts of the status — the datamesh, the configuration, layout
+	// convergence — freeze at their last values. The pause is reported by the UnderMaintenance
+	// condition.
+	//
+	// A paused volume does not finish deleting: deletion handling is one of the paused actions,
+	// so the finalizer is not released and the volume — and with it the PVC — remains Terminating
+	// until the field is cleared.
+	// +kubebuilder:validation:Enum=NoResourceReconciliation
+	// +optional
+	Maintenance MaintenanceMode `json:"maintenance,omitempty"`
 }
 
 // ReplicatedVolumeConfigurationMode enumerates possible values for ReplicatedVolume spec.configurationMode field.

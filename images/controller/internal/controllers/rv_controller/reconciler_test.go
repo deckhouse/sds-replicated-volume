@@ -1437,6 +1437,533 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
+	Describe("Maintenance", func() {
+		It("takes no action on a paused volume", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// No finalizer, no configuration derived from the storage class.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeFalse())
+			Expect(updated.Status.Configuration).To(BeNil())
+
+			// The replica is untouched: not deleted, no finalizer added.
+			var rvrList v1alpha1.ReplicatedVolumeReplicaList
+			Expect(cl.List(ctx, &rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(1))
+			Expect(obju.HasFinalizer(&rvrList.Items[0], v1alpha1.RVControllerFinalizer)).To(BeFalse())
+		})
+
+		It("takes those same actions on the same volume when it is not paused", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(updated.Status.Configuration).NotTo(BeNil())
+		})
+
+		It("keeps publishing the data-plane conditions while paused", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessLocal,
+						ReplicatedStoragePoolName: "test-pool",
+					},
+					EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+						FailuresToTolerate:              ptr.To(int8(0)),
+						GuaranteedMinimumDataRedundancy: ptr.To(int8(0)),
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Attached: true},
+						},
+					},
+					// Stale: the replica below reports a failed attachment.
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedVolumeCondAttachedReadyType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedVolumeCondAttachedReadyReasonAttachedReady,
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+							Status:             metav1.ConditionFalse,
+							Reason:             v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rva, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr, rva).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// The observational layer survived the gate and was persisted.
+			attachedReady := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondAttachedReadyType)
+			Expect(attachedReady).NotTo(BeNil())
+			Expect(attachedReady.Status).To(Equal(metav1.ConditionFalse))
+			Expect(attachedReady.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondAttachedReadyReasonAttachmentFailed))
+
+			ready := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondReadyType)
+			Expect(ready).NotTo(BeNil())
+			Expect(ready.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondReadyReasonAttachmentNotReady))
+
+			// The authoritative status froze: no layout, configuration or membership verdict.
+			Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
+			Expect(updated.Status.MembershipLayout).To(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)).To(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfiguredType)).To(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType)).To(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondScheduledType)).To(BeNil())
+		})
+
+		It("writes those same authoritative status fields on the same volume when it is not paused", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision: 1,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:                  v1alpha1.TopologyIgnored,
+						VolumeAccess:              v1alpha1.VolumeAccessLocal,
+						ReplicatedStoragePoolName: "test-pool",
+					},
+					EffectiveLayout: v1alpha1.ReplicatedVolumeEffectiveLayout{
+						FailuresToTolerate:              ptr.To(int8(0)),
+						GuaranteedMinimumDataRedundancy: ptr.To(int8(0)),
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1", Attached: true},
+						},
+					},
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+							Status:             metav1.ConditionFalse,
+							Reason:             v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachmentFailed,
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rva, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr, rva).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+
+			// Exactly the fields the paused twin above proved frozen.
+			Expect(updated.Status.MembershipLayout).NotTo(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)).NotTo(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondConfiguredType)).NotTo(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType)).NotTo(BeNil())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondScheduledType)).NotTo(BeNil())
+		})
+
+		It("reports the pause through the UnderMaintenance condition and removes it when the field is cleared", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			cond := obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondUnderMaintenanceType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation))
+
+			// Clearing the field is the only step needed to end maintenance.
+			updated.Spec.Maintenance = ""
+			Expect(cl.Update(ctx, &updated)).To(Succeed())
+
+			_, err = rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.GetStatusCondition(&updated, v1alpha1.ReplicatedVolumeCondUnderMaintenanceType)).To(BeNil())
+		})
+
+		It("resumes the frozen steps after the field is cleared", func(ctx SpecContext) {
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.Configuration).To(BeNil())
+
+			updated.Spec.Maintenance = ""
+			Expect(cl.Update(ctx, &updated)).To(Succeed())
+
+			_, err = rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(updated.Status.Configuration).NotTo(BeNil())
+		})
+
+		It("does not progress deletion of a paused volume", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+						},
+					},
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeAttachmentStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rva, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr, rva).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			// The volume keeps our finalizer and stays Terminating.
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(obju.HasFinalizer(&updated, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(updated.Status.Datamesh.Members).To(HaveLen(1))
+
+			// The replica is not force-deleted.
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updatedRVR)).To(Succeed())
+			Expect(updatedRVR.DeletionTimestamp).To(BeNil())
+			Expect(obju.HasFinalizer(&updatedRVR, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+
+			// The attachment is untouched too: no finalizer added, conditions not rewritten.
+			var updatedRVA v1alpha1.ReplicatedVolumeAttachment
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updatedRVA)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedRVA, v1alpha1.RVControllerFinalizer)).To(BeFalse())
+			attached := obju.GetStatusCondition(&updatedRVA, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
+			Expect(attached).NotTo(BeNil())
+			Expect(attached.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
+		})
+
+		It("progresses deletion of the same volume when it is not paused", func(ctx SpecContext) {
+			now := metav1.Now()
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rv-1",
+					DeletionTimestamp: &now,
+					Finalizers:        []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rvr-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+						},
+					},
+				},
+			}
+
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rvr-1",
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-1",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-1",
+					LVMVolumeGroupName:   "lvg-1",
+				},
+			}
+
+			rva := &v1alpha1.ReplicatedVolumeAttachment{
+				ObjectMeta: metav1.ObjectMeta{Name: "rva-1"},
+				Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+					ReplicatedVolumeName: "rv-1",
+					NodeName:             "node-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeAttachmentStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1alpha1.ReplicatedVolumeAttachmentCondAttachedType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached,
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rvr, rva, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(rv, rvr, rva).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedRVR v1alpha1.ReplicatedVolumeReplica
+			err = cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updatedRVR)
+			Expect(apierrors.IsNotFound(err) || updatedRVR.DeletionTimestamp != nil).To(BeTrue(),
+				"RVR should be deleted or have DeletionTimestamp")
+
+			// Exactly what the paused twin above proved untouched.
+			var updatedRVA v1alpha1.ReplicatedVolumeAttachment
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), &updatedRVA)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedRVA, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			attached := obju.GetStatusCondition(&updatedRVA, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
+			Expect(attached).NotTo(BeNil())
+			Expect(attached.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume))
+		})
+
+		It("leaves another volume reconciling normally", func(ctx SpecContext) {
+			paused := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+					Maintenance:                v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+
+			other := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-2"},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+			}
+
+			cl := newClientBuilder(scheme).
+				WithObjects(paused, other, newRSCWithConfiguration("rsc-1"), newTestRSP("test-pool")).
+				WithStatusSubresource(paused, other).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(paused))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = rec.Reconcile(ctx, RequestFor(other))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedPaused v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(paused), &updatedPaused)).To(Succeed())
+			Expect(updatedPaused.Status.Configuration).To(BeNil())
+
+			var updatedOther v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(other), &updatedOther)).To(Succeed())
+			Expect(obju.HasFinalizer(&updatedOther, v1alpha1.RVControllerFinalizer)).To(BeTrue())
+			Expect(updatedOther.Status.Configuration).NotTo(BeNil())
+		})
+	})
+
 	Describe("Formation", func() {
 		It("returns error for invalid formation step", func(ctx SpecContext) {
 			rsc := newRSCWithConfiguration("rsc-1")

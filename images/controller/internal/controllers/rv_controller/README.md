@@ -69,6 +69,11 @@ Reconcile (root) [Pure orchestration]
 ├── getRV
 ├── rv == nil → getRVAs → reconcileOrphanedRVAs (reconcileRVAWaiting + reconcileRVAMetadata)
 ├── getRSC, getRVAs, getRVRsSorted
+├── rv.spec.maintenance != "" →
+│   └── reconcileMaintenance [In-place reconciliation] (the whole pass; before the deletion branch)
+│       ├── applyUnderMaintenanceCond (UnderMaintenance condition; SINGLE writer)
+│       ├── reconcileDataPlaneConditions (Ready + Resilient + AttachedReady — the only live status)
+│       └── patchRVStatus
 ├── rvShouldNotExist (DeletionTimestamp + no other finalizers + no attached + no Detach transitions) →
 │   ├── reconcileDeletion [In-place reconciliation] ← details
 │   │   ├── reconcileRVAWaiting ("ReplicatedVolume is terminating")
@@ -85,6 +90,7 @@ Reconcile (root) [Pure orchestration]
 │   ├── isRVMetadataInSync
 │   ├── applyRVMetadata (finalizer + labels)
 │   └── patchRV
+├── applyUnderMaintenanceCond (removes the condition on the first pass after the field is cleared)
 ├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
 ├── ensureDatameshReplicaRequests ← details
 ├── ensureStatusSize (min usable size from diskful member RVRs)
@@ -252,6 +258,109 @@ re-derivations left are the independent cross-checks in the e2e selftests
 (`pkg/framework/selftest/layout_test.go` and `pkg/framework/selftest/emulate_preexisting_test.go`),
 which recompute the expected layout by hand to validate the real cluster state against
 `ExpectedReplicas()` rather than to reuse the formula.
+
+## Maintenance
+
+`rv.spec.maintenance` is a per-volume stop switch. While it holds a mode, this controller performs
+no action on that volume at all — `reconcileMaintenance` is the whole of the pass — and every other
+volume in the cluster keeps reconciling normally. The gate sits in the root `Reconcile` after the
+children are loaded and **before** the deletion branch, so no evaluation order can let deletion slip
+past it.
+
+It is not an early return. The root reconcile takes one status patch base partway through and issues
+one status patch at the very end; returning before that point would drop the observational layer with
+everything else. The paused path is therefore a reconcile step of its own, with its own patch base
+and its own status patch.
+
+The mode is the shared `MaintenanceMode`, the same type the DRBD resource's field of the same name
+uses, but the two fields admit different values and name different scopes: on the DRBD resource the
+mode freezes DRBD operations only (the agent keeps adding its finalizer, allocating addresses,
+releasing backing volume finalizers and reporting state), here it freezes everything this controller
+does. Each field declares its own enum marker, so the scope of a value is always read together with
+the field it sits on.
+
+### What you can still trust, and what is frozen
+
+| | |
+|---|---|
+| **Still maintained** | `Ready`, `Resilient`, `AttachedReady` — the health aggregated from the replicas |
+| **Frozen at its last value** | `status.datamesh` and every transition, `status.configuration`, `status.membershipLayout` and `MembershipLayoutConverged`, `Configured`, `ConfigurationReady`, `Scheduled`, `SatisfyEligibleNodes` and the violations behind it, `status.size`, the datamesh replica requests |
+
+The data-plane conditions are the observational layer, and that is the whole list: their inputs are
+the replicas' own status, which the replica controller and the agent keep publishing even for a
+paused volume — the cascade described below stops their *actions*, never their reporting. The placement conditions are treated as authoritative despite also being
+derived from replica verdicts, because `SatisfyEligibleNodes` is a judgement about compliance with
+the volume's configuration and the configuration is frozen; publishing a compliance verdict against
+a frozen configuration is exactly the stale status the split exists to prevent. Metrics need no
+explicit gate: their inputs are the frozen datamesh and formation state, so they are no-ops.
+
+Nothing is *cleared* on entry — the frozen status keeps its last published value, the same convention
+the deletion branch already uses for `Resilient`, `AttachedReady` and `Configured`.
+
+### A paused volume does not finish deleting
+
+Deletion handling is one of the frozen steps, so the controller's finalizer is never removed while
+the volume is paused: the RV — and with it the PVC — stays in `Terminating` until `spec.maintenance`
+is cleared. **This is intended behaviour for a full stop, not a defect.** If you meet an RV stuck in
+`Terminating`, check `spec.maintenance` and the `UnderMaintenance` condition before looking anywhere
+else.
+
+Also frozen with it: the volume's own finalizer and labels, the replica and attachment finalizer
+steps. Nothing the operator is inspecting is finalized out from under them.
+
+**The one exception — a volume paused before it was ever reconciled.** The finalizer is added by the
+metadata reconcile, which is itself one of the frozen steps, so a volume created with
+`spec.maintenance` already set never acquires one. Nothing then holds it: if its PVC is deleted it
+disappears at once, with no cleanup of its replicas — the opposite of the hold described above. The
+normal case is unaffected, because a volume that has reconciled even once already carries the
+finalizer and the pause merely prevents its removal. So: let a volume reconcile once before pausing
+it, and do not pause at creation time if you are relying on the hold.
+
+### Entering and leaving
+
+```sh
+# Pause:
+kubectl patch rv <name> --type=merge -p '{"spec":{"maintenance":"NoResourceReconciliation"}}'
+# Resume (the only step needed):
+kubectl patch rv <name> --type=merge -p '{"spec":{"maintenance":null}}'
+# See which volumes are paused (Maintenance is a priority=1 column):
+kubectl get rv -o wide
+```
+
+Setting or clearing the field bumps `metadata.generation`, and the RV predicate already enqueues on
+generation changes, so the pause takes effect and lifts on the next pass without any predicate of its
+own. Clearing the field is the only step needed to resume: the next pass runs the full normal flow
+and removes the `UnderMaintenance` condition.
+
+### How far down the pause reaches
+
+The pause is not confined to this controller: it cascades to the replicas and to their DRBD
+resources, so that no level of the stack keeps acting on a volume the operator asked to be left
+alone.
+
+| Level | What stops | What keeps running |
+|-------|-----------|--------------------|
+| Volume (this controller) | Everything, deletion included | Ready, Resilient, AttachedReady |
+| Replica (`rvr_controller`) | Finalizer and labels, backing volume, DRBD resource spec, deletion | The replica status observed from the DRBD resource |
+| DRBD resource (agent) | Every DRBD action, and `DRBDResourceOperation`s are failed rather than queued | The state the agent reports |
+
+The replica controller is the one that carries the pause downwards: on every pass it writes
+`NoResourceReconciliationByVolume` into `drbdr.spec.maintenance` of each replica of a paused volume,
+and clears that value again when the volume resumes. That step runs *before* the replica
+controller's own maintenance gate, because a frozen controller writes nothing and the pause has to
+be the one thing that still writes itself down.
+
+An operator who has paused a single DRBD resource by hand uses a different value of the same field,
+`NoResourceReconciliation`. The two never collide: the controller writes its own value only into an
+empty field and clears only its own value back out, so a hand-set pause survives both the volume
+being paused and the volume resuming.
+
+Reporting is deliberately *not* part of what the cascade stops, at any level. The whole reason to
+pause a volume is to look at it, and this controller's Ready, Resilient and AttachedReady are
+aggregated from the replica status, which is in turn observed from what the agent reports. Freezing
+either would leave the operator watching a stale picture of the volume they just paused.
+
+A paused volume keeps serving I/O.
 
 ## Conditions
 
@@ -714,6 +823,31 @@ collapse into one zone?" is asked against the zones the volume could have used, 
 did. It is taken from status rather than `spec.zones`, because `spec.zones` is only a node selector
 (an empty one admits every zone), so a pool can legitimately span zones it never declared, and the
 storage class validates TransZonal against the zones of the eligible nodes for the same reason.
+
+### UnderMaintenance
+
+Indicates that an operator has paused this volume through `spec.maintenance`. Set by
+`applyUnderMaintenanceCond`, which is the **single writer** of this condition and is called from
+both the paused path and the normal path.
+
+| Status | Reason | When |
+|--------|--------|------|
+| — | (absent) | `spec.maintenance` is unset — the normal state of a volume |
+| True | NoResourceReconciliation | `spec.maintenance=NoResourceReconciliation`: every action of this controller on this volume is stopped |
+
+The condition is presence-based rather than `True`/`False`: absence as the normal state keeps the
+`Maintenance` print column empty for every volume that is not paused, and presence-as-signal is
+already established on this object (`Configured` is absent for a volume without a configuration).
+The reason names the mode, one reason per mode.
+
+The normal-path call is the one that removes it: on the first pass after the field is cleared the
+volume no longer enters the paused path, and the same helper deletes the condition.
+
+Its print column is a **default** one, unlike the other condition-derived columns on this object,
+which are priority-gated. That is deliberate: on pause `Ready` freezes, so a hidden pause is exactly
+the failure mode where an operator reads a stale `Ready` and concludes the volume is fine.
+
+See [Maintenance](#maintenance) for what freezes and what keeps updating.
 
 ### Layout convergence (`reconcileLayoutConvergence`)
 

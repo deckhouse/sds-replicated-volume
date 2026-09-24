@@ -244,7 +244,10 @@ func findFormationAdoptTransition(rv *srvv1alpha1.ReplicatedVolume) *srvv1alpha1
 }
 
 func (m *Migrator) clearDRBDRMaintenanceIfSet(ctx context.Context, drbdr *srvv1alpha1.DRBDResource) error {
-	if drbdr.Spec.Maintenance == "" {
+	// Clear only the mode stage 1 set. The field is shared with the replica controller, which
+	// pauses a resource with a mode of its own while the owning volume is paused; clearing that
+	// one here would resume a resource the volume still wants frozen.
+	if drbdr.Spec.Maintenance != srvv1alpha1.MaintenanceModeNoResourceReconciliation {
 		return nil
 	}
 	old := drbdr.DeepCopy()

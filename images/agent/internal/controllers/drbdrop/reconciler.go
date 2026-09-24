@@ -100,7 +100,7 @@ func (r *OperationReconciler) reconcileCreateNewUUID(ctx context.Context, op *v1
 		return rf.Done()
 	}
 
-	if drbdr.Spec.Maintenance == v1alpha1.MaintenanceModeNoResourceReconciliation {
+	if drbdr.IsUnderMaintenance() {
 		if err := r.failOperationAndPatch(ctx, op, "DRBD resource is in maintenance mode"); err != nil {
 			return rf.Fail(err)
 		}

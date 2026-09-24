@@ -1362,6 +1362,59 @@ var _ = Describe("createLLV", func() {
 // Integration tests (Reconciler)
 //
 
+var _ = Describe("computeTargetDRBDRMaintenance", func() {
+	pausedRV := func() *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			Spec: v1alpha1.ReplicatedVolumeSpec{
+				Maintenance: v1alpha1.MaintenanceModeNoResourceReconciliation,
+			},
+		}
+	}
+
+	drbdrWith := func(mode v1alpha1.MaintenanceMode) *v1alpha1.DRBDResource {
+		return &v1alpha1.DRBDResource{Spec: v1alpha1.DRBDResourceSpec{Maintenance: mode}}
+	}
+
+	It("propagates the pause into an untouched field", func() {
+		Expect(computeTargetDRBDRMaintenance(pausedRV(), drbdrWith(""))).
+			To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume))
+	})
+
+	It("keeps its own mode while the volume stays paused", func() {
+		drbdr := drbdrWith(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume)
+		Expect(computeTargetDRBDRMaintenance(pausedRV(), drbdr)).
+			To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume))
+	})
+
+	It("clears its own mode when the volume resumes", func() {
+		drbdr := drbdrWith(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume)
+		Expect(computeTargetDRBDRMaintenance(&v1alpha1.ReplicatedVolume{}, drbdr)).
+			To(BeEmpty())
+	})
+
+	It("clears its own mode when the volume cannot be read", func() {
+		drbdr := drbdrWith(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume)
+		Expect(computeTargetDRBDRMaintenance(nil, drbdr)).To(BeEmpty())
+	})
+
+	It("does not overwrite an operator's pause while the volume is paused", func() {
+		drbdr := drbdrWith(v1alpha1.MaintenanceModeNoResourceReconciliation)
+		Expect(computeTargetDRBDRMaintenance(pausedRV(), drbdr)).
+			To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliation))
+	})
+
+	It("does not lift an operator's pause when the volume resumes", func() {
+		drbdr := drbdrWith(v1alpha1.MaintenanceModeNoResourceReconciliation)
+		Expect(computeTargetDRBDRMaintenance(&v1alpha1.ReplicatedVolume{}, drbdr)).
+			To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliation))
+	})
+
+	It("leaves an unpaused resource of an unpaused volume alone", func() {
+		Expect(computeTargetDRBDRMaintenance(&v1alpha1.ReplicatedVolume{}, drbdrWith(""))).
+			To(BeEmpty())
+	})
+})
+
 var _ = Describe("Reconciler", func() {
 	var (
 		scheme *runtime.Scheme
@@ -4207,5 +4260,217 @@ var _ = Describe("deleteLLV", func() {
 		err := rec.deleteLLV(ctx, llv)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(deleteCalled).To(BeTrue(), "delete should be called for LLV without DeletionTimestamp")
+	})
+})
+
+var _ = Describe("Reconcile of a replica whose volume is under maintenance", func() {
+	const (
+		rvName  = "rv-m"
+		rvrName = "rv-m-0"
+		nodeA   = "node-1"
+	)
+
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+		cl     client.Client
+		rec    *Reconciler
+	)
+
+	// build wires a client around the given RV maintenance mode, RVR finalizers and DRBDR
+	// maintenance mode, which is everything these tests vary.
+	build := func(rvMode v1alpha1.MaintenanceMode, rvrFinalizers []string, drbdrMode v1alpha1.MaintenanceMode) {
+		GinkgoHelper()
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: rvName},
+			Spec:       v1alpha1.ReplicatedVolumeSpec{Maintenance: rvMode},
+			Status: v1alpha1.ReplicatedVolumeStatus{
+				DatameshRevision: 1,
+				Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+					Size:               resource.MustParse("1Gi"),
+					SystemNetworkNames: []string{"Internal"},
+					Members: []v1alpha1.DatameshMember{
+						{Name: rvrName, Type: v1alpha1.DatameshMemberTypeAccess, NodeName: nodeA},
+					},
+				},
+			},
+		}
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: rvrName, UID: "uid-m", Finalizers: rvrFinalizers},
+			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+				ReplicatedVolumeName: rvName,
+				Type:                 v1alpha1.ReplicaTypeAccess,
+				NodeName:             nodeA,
+			},
+		}
+		drbdr := &v1alpha1.DRBDResource{
+			ObjectMeta: metav1.ObjectMeta{Name: rvrName},
+			Spec: v1alpha1.DRBDResourceSpec{
+				NodeName:    nodeA,
+				Type:        v1alpha1.DRBDResourceTypeDiskless,
+				Maintenance: drbdrMode,
+			},
+		}
+
+		// The node is only reached on the resumed path, where the normal flow runs.
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeA},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{
+					{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+				},
+			},
+		}
+
+		cl = testhelpers.WithLLVByRVROwnerIndex(
+			fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rv, rvr, drbdr, node).
+				WithStatusSubresource(rv, rvr, drbdr).
+				WithIndex(&corev1.Pod{}, indexes.IndexFieldPodByNodeName, func(obj client.Object) []string {
+					pod := obj.(*corev1.Pod)
+					if pod.Spec.NodeName == "" {
+						return nil
+					}
+					return []string{pod.Spec.NodeName}
+				}),
+		).Build()
+		rec = NewReconciler(cl, scheme, logr.Discard(), "d8-sds-replicated-volume")
+	}
+
+	reconcileOnce := func() {
+		GinkgoHelper()
+		_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: rvrName}})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	getDRBDRMaintenance := func() v1alpha1.MaintenanceMode {
+		GinkgoHelper()
+		var got v1alpha1.DRBDResource
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &got)).To(Succeed())
+		return got.Spec.Maintenance
+	}
+
+	getRVR := func() *v1alpha1.ReplicatedVolumeReplica {
+		GinkgoHelper()
+		var got v1alpha1.ReplicatedVolumeReplica
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, &got)).To(Succeed())
+		return &got
+	}
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(snc.AddToScheme(scheme)).To(Succeed())
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
+	})
+
+	It("propagates the pause to the DRBDResource", func() {
+		build(v1alpha1.MaintenanceModeNoResourceReconciliation, nil, "")
+
+		reconcileOnce()
+
+		Expect(getDRBDRMaintenance()).To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliationByVolume))
+	})
+
+	It("does not overwrite an operator's own pause on the DRBDResource", func() {
+		build(
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+			nil,
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+		)
+
+		reconcileOnce()
+
+		Expect(getDRBDRMaintenance()).To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliation))
+	})
+
+	It("lifts its own pause from the DRBDResource when the volume resumes", func() {
+		build(
+			"",
+			[]string{v1alpha1.RVRControllerFinalizer},
+			v1alpha1.MaintenanceModeNoResourceReconciliationByVolume,
+		)
+
+		reconcileOnce()
+
+		Expect(getDRBDRMaintenance()).To(BeEmpty())
+	})
+
+	It("does not lift an operator's pause when the volume resumes", func() {
+		build(
+			"",
+			[]string{v1alpha1.RVRControllerFinalizer},
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+		)
+
+		reconcileOnce()
+
+		Expect(getDRBDRMaintenance()).To(Equal(v1alpha1.MaintenanceModeNoResourceReconciliation))
+	})
+
+	It("freezes the replica metadata, so a paused replica never acquires the finalizer", func() {
+		build(v1alpha1.MaintenanceModeNoResourceReconciliation, nil, "")
+
+		reconcileOnce()
+
+		Expect(obju.HasFinalizer(getRVR(), v1alpha1.RVRControllerFinalizer)).To(BeFalse())
+	})
+
+	It("does not release the finalizer of a replica deleted while the volume is paused", func() {
+		build(
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+			[]string{v1alpha1.RVRControllerFinalizer},
+			"",
+		)
+		Expect(cl.Delete(ctx, getRVR())).To(Succeed())
+
+		reconcileOnce()
+
+		rvr := getRVR()
+		Expect(rvr.DeletionTimestamp).NotTo(BeNil())
+		Expect(obju.HasFinalizer(rvr, v1alpha1.RVRControllerFinalizer)).To(BeTrue())
+	})
+
+	It("reports an agent that died during the pause, rather than the pre-pause verdict", func() {
+		build(
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+			[]string{v1alpha1.RVRControllerFinalizer},
+			"",
+		)
+
+		// A pre-pause verdict saying the agent is fine. It is read back from this condition on
+		// the normal path, where the DRBD resource step has just refreshed it; the paused path
+		// freezes that step, so a stale "fine" here would outlive the agent itself. No ready
+		// agent pod exists in this fixture.
+		rvr := getRVR()
+		rvr.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+			LastTransitionTime: metav1.Now(),
+		}}
+		Expect(cl.Status().Update(ctx, rvr)).To(Succeed())
+
+		reconcileOnce()
+
+		cond := obju.GetStatusCondition(getRVR(), v1alpha1.ReplicatedVolumeReplicaCondReadyType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondReadyReasonAgentNotReady))
+	})
+
+	It("keeps publishing the replica status while the volume is paused", func() {
+		build(
+			v1alpha1.MaintenanceModeNoResourceReconciliation,
+			[]string{v1alpha1.RVRControllerFinalizer},
+			"",
+		)
+
+		reconcileOnce()
+
+		// The observational layer is the whole point of the paused path: the volume
+		// controller aggregates its Ready/Resilient/AttachedReady from this status.
+		Expect(getRVR().Status.Conditions).NotTo(BeEmpty())
 	})
 })

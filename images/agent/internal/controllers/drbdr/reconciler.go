@@ -157,7 +157,7 @@ func (r *Reconciler) reconcileDRBDR(
 	rf := flow.BeginReconcile(ctx, "drbdr", "name", drbdr.Name)
 	defer rf.OnEnd(&outcome)
 
-	maintenanceMode := drbdr.Spec.Maintenance == v1alpha1.MaintenanceModeNoResourceReconciliation
+	maintenanceMode := drbdr.IsUnderMaintenance()
 
 	// Phase 1: Rename the on-node resource to its canonical name. Maintenance
 	// skips the rename; later phases still resolve the old name via

@@ -17,7 +17,15 @@ limitations under the License.
 package migrator
 
 import (
+	"context"
+	"log/slog"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -162,5 +170,60 @@ func TestFindFormationAdoptTransition(t *testing.T) {
 	}
 	if tr.PlanID != formationPlanAdopt {
 		t.Fatalf("PlanID = %q", tr.PlanID)
+	}
+}
+
+func TestClearDRBDRMaintenanceIfSet(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode srvv1alpha1.MaintenanceMode
+		want srvv1alpha1.MaintenanceMode
+	}{
+		{
+			name: "clears the mode stage 1 set",
+			mode: srvv1alpha1.MaintenanceModeNoResourceReconciliation,
+			want: "",
+		},
+		{
+			name: "leaves a pause propagated from the volume alone",
+			mode: srvv1alpha1.MaintenanceModeNoResourceReconciliationByVolume,
+			want: srvv1alpha1.MaintenanceModeNoResourceReconciliationByVolume,
+		},
+		{
+			name: "leaves an unpaused resource alone",
+			mode: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			drbdr := &srvv1alpha1.DRBDResource{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+				Spec:       srvv1alpha1.DRBDResourceSpec{Maintenance: tt.mode},
+			}
+
+			scheme := runtime.NewScheme()
+			_ = clientgoscheme.AddToScheme(scheme)
+			_ = srvv1alpha1.AddToScheme(scheme)
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(drbdr).Build()
+
+			m := &Migrator{client: cl, log: slog.Default()}
+			if err := m.clearDRBDRMaintenanceIfSet(context.Background(), drbdr); err != nil {
+				t.Fatalf("clearDRBDRMaintenanceIfSet() error = %v", err)
+			}
+
+			got := &srvv1alpha1.DRBDResource{}
+			if err := cl.Get(context.Background(), types.NamespacedName{Name: "rvr-1"}, got); err != nil {
+				t.Fatalf("get DRBDResource: %v", err)
+			}
+			if got.Spec.Maintenance != tt.want {
+				t.Fatalf("maintenance = %q, want %q", got.Spec.Maintenance, tt.want)
+			}
+		})
 	}
 }

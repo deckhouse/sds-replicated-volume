@@ -85,10 +85,17 @@ spec:
                 minLength: 1
                 type: string
               maintenance:
-                description: Maintenance mode - when set, reconciliation is paused
-                  but status is still updated
+                description: |-
+                  Maintenance mode - when set, reconciliation is paused but status is still updated.
+
+                  The field has two writers, told apart by the value. NoResourceReconciliation is an
+                  operator's own pause and is never written or cleared by a controller.
+                  NoResourceReconciliationByVolume is written by the replica controller while the owning
+                  ReplicatedVolume is paused through its own spec.maintenance, and cleared by the same
+                  controller when the volume resumes; it MUST NOT be set by hand.
                 enum:
                 - NoResourceReconciliation
+                - NoResourceReconciliationByVolume
                 type: string
               nodeID:
                 maximum: 31

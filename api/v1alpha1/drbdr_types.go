@@ -63,6 +63,11 @@ func (d *DRBDResource) SetStatusConditions(conditions []metav1.Condition) {
 	d.Status.Conditions = conditions
 }
 
+// IsUnderMaintenance reports whether `.spec.maintenance` holds a mode. Any mode pauses
+// reconciliation; the value only says who paused it, which is why every consumer of the pause
+// MUST ask this question rather than compare against one mode of its own choosing.
+func (d *DRBDResource) IsUnderMaintenance() bool { return d.Spec.Maintenance != "" }
+
 // +kubebuilder:object:generate=true
 type DRBDResourceSpec struct {
 	// +kubebuilder:validation:MinLength=1
@@ -141,19 +146,17 @@ type DRBDResourceSpec struct {
 	// +optional
 	Peers []DRBDResourcePeer `json:"peers,omitempty"`
 
-	// Maintenance mode - when set, reconciliation is paused but status is still updated
-	// +kubebuilder:validation:Enum=NoResourceReconciliation
+	// Maintenance mode - when set, reconciliation is paused but status is still updated.
+	//
+	// The field has two writers, told apart by the value. NoResourceReconciliation is an
+	// operator's own pause and is never written or cleared by a controller.
+	// NoResourceReconciliationByVolume is written by the replica controller while the owning
+	// ReplicatedVolume is paused through its own spec.maintenance, and cleared by the same
+	// controller when the volume resumes; it MUST NOT be set by hand.
+	// +kubebuilder:validation:Enum=NoResourceReconciliation;NoResourceReconciliationByVolume
 	// +optional
 	Maintenance MaintenanceMode `json:"maintenance,omitempty"`
 }
-
-// MaintenanceMode represents the maintenance mode of a DRBD resource.
-type MaintenanceMode string
-
-const (
-	// MaintenanceModeNoResourceReconciliation pauses reconciliation but status is still updated.
-	MaintenanceModeNoResourceReconciliation MaintenanceMode = "NoResourceReconciliation"
-)
 
 // +kubebuilder:object:generate=true
 type DRBDResourcePeer struct {

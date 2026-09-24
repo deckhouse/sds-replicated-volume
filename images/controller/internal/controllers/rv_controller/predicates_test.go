@@ -66,6 +66,34 @@ var _ = Describe("rvPredicates", func() {
 			}
 		})
 
+		It("returns true when only spec.maintenance changes", func() {
+			// Writing or clearing a spec field bumps the generation, so both entering and leaving
+			// maintenance wake the controller without a predicate of their own.
+			oldRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+				},
+			}
+			newRV := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 2,
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Maintenance: v1alpha1.MaintenanceModeNoResourceReconciliation,
+				},
+			}
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRV,
+				ObjectNew: newRV,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns true when DeletionTimestamp appears", func() {
 			now := metav1.Now()
 			oldRV := &v1alpha1.ReplicatedVolume{
