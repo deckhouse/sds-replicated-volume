@@ -32,7 +32,15 @@ NS="d8-sds-replicated-volume"
 SNC_NS="d8-sds-node-configurator"
 RV_LABEL_KEY="sds-replicated-volume.deckhouse.io/replicated-volume"
 DRBD_NAME_PREFIX="sdsrv-"
-NSENTER_BIN="/opt/deckhouse/sds/bin/nsenter.static"
+# sds-node-configurator's nsenter, which every on-host command below runs
+# through. Two releases moved it: the ".static" suffix was dropped, and then the
+# module's node tree moved from /opt/deckhouse/sds to /var/lib/deckhouse/sds.
+# nsenter_on_node probes these in order, newest layout first.
+NSENTER_CANDIDATES=(
+	"/var/lib/deckhouse/sds/bin/nsenter"
+	"/opt/deckhouse/sds/bin/nsenter"
+	"/opt/deckhouse/sds/bin/nsenter.static"
+)
 NSENTER_ARGS="-t 1 -m -u -i -n -p --"
 
 LOG_TAIL_LINES=1000
@@ -205,6 +213,27 @@ snc_pod_on_node() {
 		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 
+# Print the nsenter path present in the given sds-node-configurator pod, or an
+# empty string. nsenter ships inside the image, so presence is probed by running
+# it. Answers are cached per pod: this is called once per collected command.
+declare -A NSENTER_BIN_CACHE=()
+resolve_nsenter_bin() {
+	local pod="$1" candidate
+	if [[ -n "${NSENTER_BIN_CACHE[$pod]:-}" ]]; then
+		echo "${NSENTER_BIN_CACHE[$pod]}"
+		return 0
+	fi
+	for candidate in "${NSENTER_CANDIDATES[@]}"; do
+		if kubectl -n "$SNC_NS" exec "$pod" -c sds-node-configurator-agent -- \
+			"$candidate" --version >/dev/null 2>&1; then
+			NSENTER_BIN_CACHE[$pod]="$candidate"
+			echo "$candidate"
+			return 0
+		fi
+	done
+	return 0
+}
+
 # Execute a command on the host via sds-node-configurator + nsenter.
 # Usage: nsenter_on_node <node> <cmd...>
 nsenter_on_node() {
@@ -216,8 +245,14 @@ nsenter_on_node() {
 		echo "(sds-node-configurator pod not found on node $node)"
 		return 0
 	fi
+	local nsenter_bin
+	nsenter_bin=$(resolve_nsenter_bin "$pod")
+	if [[ -z "$nsenter_bin" ]]; then
+		echo "(no nsenter found in pod $pod, tried ${NSENTER_CANDIDATES[*]})"
+		return 0
+	fi
 	kubectl -n "$SNC_NS" exec "$pod" -c sds-node-configurator-agent -- \
-		"$NSENTER_BIN" $NSENTER_ARGS "$@" 2>&1 || true
+		"$nsenter_bin" $NSENTER_ARGS "$@" 2>&1 || true
 }
 
 # Execute drbdsetup in the agent pod on a given node.

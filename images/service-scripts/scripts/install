@@ -14,6 +14,15 @@
 # limitations under the License.
 
 set -Eeo pipefail
-mkdir -p /opt/deckhouse/sbin
-cp -f evict.sh /opt/deckhouse/sbin
-cp -f replicas_manager.sh /opt/deckhouse/sbin
+mkdir -p /var/lib/deckhouse/sbin
+cp -f evict.sh /var/lib/deckhouse/sbin
+cp -f replicas_manager.sh /var/lib/deckhouse/sbin
+
+# These scripts used to be installed in /opt/deckhouse/sbin. Remove the copies an
+# earlier version left there, after the new ones are in place, so a node upgraded
+# in place does not end up carrying two versions of a script an operator runs by
+# hand -- the old one would go stale silently and an old runbook would keep
+# finding it. The directory goes with a plain rmdir: it holds nothing else, and
+# the -f above already tolerates its absence on a fresh node.
+rm -f /opt/deckhouse/sbin/evict.sh /opt/deckhouse/sbin/replicas_manager.sh
+rmdir /opt/deckhouse/sbin 2>/dev/null || true

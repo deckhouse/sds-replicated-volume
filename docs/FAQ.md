@@ -236,7 +236,7 @@ It checks the availability of the LINSTOR controller, identifies faulty or corru
 To check the existence of the `replicas_manager.sh` script, run the following command on any master node:
 
    ```shell
-   ls -l /opt/deckhouse/sbin/replicas_manager.sh
+   ls -l /var/lib/deckhouse/sbin/replicas_manager.sh
    ```
 
 Upon execution, the script performs the following actions:
@@ -275,7 +275,7 @@ Before proceeding with the eviction, the following steps must be performed:
 1. Check existence of `evict.sh` script on any master node:
 
    ```shell
-   ls -l /opt/deckhouse/sbin/evict.sh
+   ls -l /var/lib/deckhouse/sbin/evict.sh
    ```
 
 2. Fix all faulty resources in the cluster. Run the following command to filter them:
@@ -295,7 +295,7 @@ Before proceeding with the eviction, the following steps must be performed:
 Run the `evict.sh` script on any master node in interactive mode by specifying the delete mode `--delete-node`:
 
 ```shell
-/opt/deckhouse/sbin/evict.sh --delete-node
+/var/lib/deckhouse/sbin/evict.sh --delete-node
 ```
 
 To run the `evict.sh` script in non-interactive mode, you need to add the `--non-interactive` flag when invoking it, as well as the name of the node from which you want to evict the resources. In this mode, the script will execute all actions without asking for user confirmation.
@@ -303,7 +303,7 @@ To run the `evict.sh` script in non-interactive mode, you need to add the `--non
 Example invocation:
 
 ```shell
-/opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
+/var/lib/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
 ### Example of removing resources from a node without removing the node itself
@@ -311,7 +311,7 @@ Example invocation:
 1. Run the `evict.sh` script on any master node in interactive mode (`--delete-resources-only`):
 
    ```shell
-   /opt/deckhouse/sbin/evict.sh --delete-resources-only
+   /var/lib/deckhouse/sbin/evict.sh --delete-resources-only
    ```
 
    To run the `evict.sh` script in non-interactive mode, add the `--non-interactive` flag followed by the name of the node to evict the resources from. In this mode, the script will perform all the necessary actions automatically (no user confirmation is required).
@@ -319,7 +319,7 @@ Example invocation:
    Example:
 
    ```shell
-   /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
+   /var/lib/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
    ```
 
    > **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.

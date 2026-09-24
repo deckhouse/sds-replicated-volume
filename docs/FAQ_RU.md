@@ -254,7 +254,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 Чтобы проверить существование скрипта `replicas_manager.sh`, выполните команду на любом из master-узлов:
 
    ```shell
-   ls -l /opt/deckhouse/sbin/replicas_manager.sh
+   ls -l /var/lib/deckhouse/sbin/replicas_manager.sh
    ```
 
 После запуска скрипт выполняет следующие действия:
@@ -293,7 +293,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 1. Проверьте существование скрипта `evict.sh` на любом из master-узлов:
 
    ```shell
-   ls -l /opt/deckhouse/sbin/evict.sh
+   ls -l /var/lib/deckhouse/sbin/evict.sh
    ```
 
 2. Исправьте все ошибочные ресурсы в кластере. Чтобы найти их, выполните следующую команду:
@@ -313,7 +313,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 Запустите скрипт `evict.sh` на любом из master-узлов в интерактивном режиме, указав режим удаления `--delete-node`:
 
 ```shell
-/opt/deckhouse/sbin/evict.sh --delete-node
+/var/lib/deckhouse/sbin/evict.sh --delete-node
 ```
 
 Для запуска скрипта `evict.sh` в неинтерактивном режиме необходимо добавить флаг `--non-interactive` при его вызове, а также имя узла, с которого необходимо вытеснить ресурсы. В этом режиме скрипт выполнит все действия без запроса подтверждения от пользователя.
@@ -321,7 +321,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 Пример вызова:
 
 ```shell
-/opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
+/var/lib/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
 ### Пример удаления ресурсов с узла без удаления самого узла
@@ -329,7 +329,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
 1. Запустите скрипт `evict.sh` на любом из master-узлов в интерактивном режиме, указав режим удаления `--delete-resources-only`:
 
    ```shell
-   /opt/deckhouse/sbin/evict.sh --delete-resources-only
+   /var/lib/deckhouse/sbin/evict.sh --delete-resources-only
    ```
 
    Для запуска скрипта `evict.sh` в неинтерактивном режиме необходимо добавить флаг `--non-interactive` при его вызове, а также имя узла, с которого необходимо вытеснить ресурсы. В этом режиме скрипт выполнит все действия без запроса подтверждения от пользователя.
@@ -337,7 +337,7 @@ ConsistencyAndAvailability - Максимально надёжный режим 
    Пример вызова:
 
    ```shell
-   /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
+   /var/lib/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
    ```
 
    > **Важно.** После завершения работы скрипта узел в Kubernetes останется в статусе *SchedulingDisabled*, а в LINSTOR у данного узла будет выставлен параметр *AutoplaceTarget=false*, что запретит его планировщику создавать на этом узле ресурсы.

@@ -106,7 +106,7 @@ Enabling the `sds-node-configurator` module:
    
    If you need to remove module resources from a node without removing the node itself from the cluster, you must:
    
-   1. Manually run the [data eviction script](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself) `/opt/deckhouse/sbin/evict.sh` with the `--delete-resources-only` parameter on any of the master nodes.
+   1. Manually run the [data eviction script](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself) `/var/lib/deckhouse/sbin/evict.sh` with the `--delete-resources-only` parameter on any of the master nodes.
    1. After data eviction, remove the labels from the node and remove the node from LINSTOR:
       ```shell
       export NODE_NAME=<node-name>
