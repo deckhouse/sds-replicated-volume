@@ -1,0 +1,34 @@
+date: "2026-09-24"
+
+summary: "A volume that loses a diskful copy now heals by itself under a resync limit that is on by default, a single volume can be paused without stopping the controller, and the Go binaries are rebuilt against patched `grpc` and `x/crypto`."
+
+highlights:
+  - "Layout convergence re-creates a lost diskful copy of a `ReplicatedVolume` by itself instead of stopping at `TransitionUnsupported` and waiting for a replica to be created by hand."
+  - "`resyncSlotsPerNode` is on by default (4), so a node going away does not start every resync of the volumes it held at once."
+  - "`spec.maintenance: NoResourceReconciliation` on a `ReplicatedVolume` pauses reconciliation of that volume, its replicas and its DRBD resources while every other volume keeps reconciling."
+
+new_features:
+  - "`ReplicatedVolume` has `spec.maintenance`. With `NoResourceReconciliation`, the controller takes no action on the volume: no membership or layout decision, no replica or attachment change, no configuration derivation and no deletion handling. The pause cascades to the volume's replicas and their DRBD resources; a DRBD resource paused by hand is left as it is. `Ready`, `Resilient` and `AttachedReady` keep being published, the rest of the status freezes, and the pause is reported by the `UnderMaintenance` condition and the `Maintenance` column of `kubectl get replicatedvolume -o wide`. A paused volume does not finish deleting: it and its PVC stay `Terminating` until the field is cleared."
+  - "A `ReplicatedVolume` whose layout has fewer diskful copies than intended gets the missing copy created and resynced automatically, for example r1 → r2, r1 → r3, or a copy lost with its node. Changes that need a replica removed are still not made automatically: shrinking the copy count, replacing a copy whose member is alive, and r2 → r3 while a surplus tie-breaker is present — delete the tie-breaker, and the copy is then healed. When the copy cannot be placed, the volume reports `CannotConverge` with the scheduler's reason."
+
+improvements:
+  - "The `resyncSlotsPerNode` default changes from 0 (no limit) to 4, so the healing load after a node failure is bounded. A value set explicitly in the module config is kept; 0 still switches the limit off."
+  - "The controller's health probe and loopback metrics move from ports 4271 and 4272 to 8081 and 127.0.0.1:8082, and the CSI controller's livenessprobe no longer uses port 4261. These ports belong to the 4200–4299 range reserved for modules that listen on the host network, and neither Pod runs there. The Pods are restarted by the update."
+
+fixes:
+  - "With the resync limiter on, several volumes could choose the same node to receive or send a resync at once, because a placement stayed invisible to other workers until it came back through the watch; the limit per node was exceeded at the start of every wave. Both ends of a transfer are now reserved before the placement is written and released as soon as the replica stops owing data."
+  - "On a new cluster, the node label `storage.deckhouse.io/sds-replicated-volume-node` was set only on nodes already eligible for a `ReplicatedStoragePool`. That label is what brings up the `sds-node-configurator` agent, which creates the `BlockDevice` resources an `LVMVolumeGroup` is built from, so no pool could get eligible nodes in the first place. Nodes matching `dataNodes.nodeSelector` now get the label directly."
+
+security:
+  - "`google.golang.org/grpc` is raised from v1.82.1 to v1.83.2 in the CSI driver, `linstor-csi`, `linstor-affinity-controller` and `linstor-scheduler-extender`, closing CVE-2026-84303, CVE-2026-84304 and CVE-2026-84445."
+  - "`golang.org/x/crypto` is raised from v0.53.0 to v0.57.0 in the module's hooks (`go-hooks`) and `linstor-scheduler-extender`, closing CVE-2026-56854 (authentication bypass by source address in `x/crypto/ssh`), CVE-2026-56855 and CVE-2026-78662."
+
+breaking:
+  - "`evict.sh` and `replicas_manager.sh` are installed in `/var/lib/deckhouse/sbin` instead of `/opt/deckhouse/sbin`, and the old copies are removed from nodes. Runbooks and scripts that call them by the old path have to use the new one."
+
+upgrade_notes:
+  - "Nothing has to be done by hand. After the update, the node configuration moves `evict.sh` and `replicas_manager.sh` to `/var/lib/deckhouse/sbin`; update any runbook that calls `/opt/deckhouse/sbin/evict.sh`."
+  - "If `resyncSlotsPerNode` was not set, the limit of 4 applies after the update, and volumes that were short of a diskful copy start healing within that limit. To keep resyncs unlimited, set `resyncSlotsPerNode: 0`."
+
+docs:
+  - "The usage guide describes recovering a lost replica, which no longer needs a manual step, and the `D8ReplicatedVolumeLayoutDegraded` alert no longer walks through creating a replica by hand."
