@@ -16,28 +16,41 @@
 
 # run from repository root with: 'bash hack/generate_code.sh'
 set -euo pipefail
+# Both generators are pinned in hack/tools/go.mod and built into a temporary
+# directory.
+#
+# controller-gen used to be run as `go run -mod=mod ...@v0.19` from inside api/,
+# which resolved to whatever v0.19.x was current, wrote the tool's dependencies
+# into api/go.sum and then needed a `go mod tidy` to take them back out again.
+#
+# deepcopy-gen used to be run as `go run k8s.io/code-generator/...` from inside
+# api/, where it is not a dependency at all: the package resolved only because
+# some other member of go.work happens to require k8s.io/code-generator, so the
+# version generating zz_generated.deepcopy.go was whatever an unrelated module
+# pinned. Generated code has to come from a version this repository chose.
+TOOLS_DIR="$(mktemp -d)"
+trap 'rm -rf "${TOOLS_DIR}"' EXIT
+GOWORK=off go -C hack/tools build -o "${TOOLS_DIR}" \
+    sigs.k8s.io/controller-tools/cmd/controller-gen \
+    k8s.io/code-generator/cmd/deepcopy-gen
+
 cd api
 
-# crds
-# Run controller-gen without pinning it into this module's go.mod.
-# Force module mode to allow updating go.sum for tool dependencies when needed.
-go run -mod=mod sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19 \
-    object:headerFile=../hack/boilerplate.txt \
-    crd paths=./v1alpha1 output:crd:dir=../crds \
-    paths=./v1alpha1
-
-go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
+"${TOOLS_DIR}/deepcopy-gen" -v 2 \
     --output-file zz_generated.deepcopy.go \
     --go-header-file ../hack/boilerplate.txt \
     ./linstor
 
-# remove development dependencies
-go mod tidy -go=1.26.5
-
-# validate generated CRDs (CEL cost budget, schema correctness)
-go run ../hack/validate-crds.go ../crds
+"${TOOLS_DIR}/controller-gen" object:headerFile=../hack/boilerplate.txt paths=./v1alpha1
 
 cd ..
+
+# The CRD manifests are rendered and then enriched; that pair lives in its own
+# script because the shared .crds_generated_check CI job runs it by name.
+./hack/generate_crds.sh
+
+# validate generated CRDs (CEL cost budget, schema correctness)
+(cd api && go run ../hack/validate-crds.go ../crds)
 
 # generate mocks and any other go:generate targets across all modules
 ./hack/for-each-mod go generate ./...

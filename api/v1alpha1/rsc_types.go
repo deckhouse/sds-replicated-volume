@@ -229,6 +229,12 @@ type ReplicatedStorageClassSpec struct {
 	// before validating admission, and the legacy control-plane webhook (validateLegacySpecFields)
 	// rejects an RSC that has any of these set — so a schema default would break RSC on every legacy
 	// installation. Revisit once the legacy control plane is removed.
+	//
+	// Kept detached from the doc comment below by a blank line on purpose: a
+	// comment touching the field is its doc comment, which controller-gen renders
+	// into the CRD description and the documentation site. This note is for
+	// whoever edits these fields, not for a user reading the API reference.
+
 	// SystemNetworkNames specifies network names used for DRBD replication traffic.
 	// At least one network name must be specified. Each name is limited to 64 characters.
 	//
