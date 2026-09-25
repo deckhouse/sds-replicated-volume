@@ -77,36 +77,6 @@ spec:
             type: object
           spec:
             description: |-
-              Legacy replication validations (only fire when replication is set):
-
-              FTT/GMDR mutual exclusivity with replication:
-
-              FTT and GMDR must be specified together:
-
-              Valid FTT/GMDR combinations: |FTT - GMDR| <= 1:
-
-              FTT=0, GMDR=0 requires topology Ignored:
-
-              TransZonal zone count validations for FTT/GMDR:
-
-              Immutable spec fields (transition rules; evaluated on update only):
-              the conservative r3->r2 migration matrix permits changing only replication,
-              failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
-              eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
-              creation. These CEL rules guard the scalar/enum and bounded-list fields. The unbounded
-              structured fields (storage, nodeLabelSelector) are guarded by the update webhook
-              (images/webhooks/handlers/rscValidator.go) instead of CEL, because a CEL equality
-              comparison over their unbounded list/map would risk the per-expression CEL cost budget
-              and cause the apiserver to reject the whole CRD at install time.
-
-              topology, volumeAccess and zones are strictly immutable (never touched by the
-              controller). reclaimPolicy is deliberately MUTABLE: changing it is a supported operation —
-              rsc_controller reacts by recreating the Kubernetes StorageClass with the new policy (a
-              StorageClass itself is immutable, so recreate is the mechanism; covered by the SC
-              lifecycle e2e). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
-              controller fills them from nil to their default (rsc_controller applySpecDefaults), so the
-              rules must permit that initial nil->value transition while still rejecting later changes.
-
               Defines a Kubernetes Storage class configuration.
 
               > Most fields are immutable after creation. Only the replication settings
@@ -314,8 +284,6 @@ spec:
 
                       > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
                       as specified in the Type field.
-                      is replaced with selectors, revisit the key. Currently using name only because
-                      thinPoolName is optional and cannot be a listMapKey without a default value.
                     items:
                       properties:
                         name:
@@ -372,9 +340,6 @@ spec:
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
-
-                  Custom network support requires NetworkNode watch implementation in the controller.
-                  When multi-network support is implemented, raise MaxItems to 10.
                 items:
                   type: string
                 maxItems: 1

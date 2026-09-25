@@ -39,8 +39,20 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              ReplicatedStorageClassSpec   `json:"spec"`
-	Status            ReplicatedStorageClassStatus `json:"status,omitempty"`
+
+	// The reference text of spec lives here, not on ReplicatedStorageClassSpec:
+	// the comment on that type is interleaved with the CEL markers and their
+	// rationale, and controller-gen renders all of its prose.
+
+	// Defines a Kubernetes Storage class configuration.
+	//
+	// > Most fields are immutable after creation. Only the replication settings
+	// > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
+	// > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
+	// > reclaimPolicy (the StorageClass is recreated with the new policy) can be
+	// > changed on an existing resource; all other fields are rejected on update.
+	Spec   ReplicatedStorageClassSpec   `json:"spec"`
+	Status ReplicatedStorageClassStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -115,14 +127,6 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // +kubebuilder:validation:XValidation:rule="has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones)",message="spec.zones is immutable"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy) && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)",message="spec.eligibleNodesPolicy is immutable once set"
-//
-// Defines a Kubernetes Storage class configuration.
-//
-// > Most fields are immutable after creation. Only the replication settings
-// > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
-// > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
-// > reclaimPolicy (the StorageClass is recreated with the new policy) can be
-// > changed on an existing resource; all other fields are rejected on update.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
 	// StoragePool is the name of a ReplicatedStoragePool resource.
@@ -235,12 +239,12 @@ type ReplicatedStorageClassSpec struct {
 	// into the CRD description and the documentation site. This note is for
 	// whoever edits these fields, not for a user reading the API reference.
 
-	// SystemNetworkNames specifies network names used for DRBD replication traffic.
-	// At least one network name must be specified. Each name is limited to 64 characters.
-	//
 	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
 	// Custom network support requires NetworkNode watch implementation in the controller.
 	// When multi-network support is implemented, raise MaxItems to 10.
+
+	// SystemNetworkNames specifies network names used for DRBD replication traffic.
+	// At least one network name must be specified. Each name is limited to 64 characters.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}
@@ -272,14 +276,16 @@ type ReplicatedStorageClassStorage struct {
 	// - LVMThin (for Thin)
 	// +kubebuilder:validation:Enum=LVM;LVMThin
 	Type ReplicatedStoragePoolType `json:"type"`
+
+	// TODO(thinpool-object): When ThinPool becomes a separate API object and LVMVolumeGroups
+	// is replaced with selectors, revisit the key. Currently using name only because
+	// thinPoolName is optional and cannot be a listMapKey without a default value.
+
 	// LVMVolumeGroups is an array of LVMVolumeGroup resource names whose Volume Groups/Thin-pools
 	// will be used to allocate the required space.
 	//
 	// > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick)
 	// as specified in the Type field.
-	// TODO(thinpool-object): When ThinPool becomes a separate API object and LVMVolumeGroups
-	// is replaced with selectors, revisit the key. Currently using name only because
-	// thinPoolName is optional and cannot be a listMapKey without a default value.
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=name

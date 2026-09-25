@@ -173,9 +173,6 @@ spec:
                 description: |-
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
-
-                  Custom network support requires NetworkNode watch implementation in the controller.
-                  When multi-network support is implemented, raise MaxItems to 10.
                 items:
                   type: string
                 maxItems: 1

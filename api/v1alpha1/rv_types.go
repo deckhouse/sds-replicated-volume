@@ -43,6 +43,11 @@ type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
+	// The reference text of spec lives here: the comment on ReplicatedVolumeSpec
+	// labels the CEL markers between which it sits, and controller-gen renders
+	// all of its prose.
+
+	// Desired state of the replicated volume.
 	Spec   ReplicatedVolumeSpec   `json:"spec"`
 	Status ReplicatedVolumeStatus `json:"status,omitempty"`
 }

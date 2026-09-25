@@ -103,12 +103,12 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:XValidation:rule="!has(self.matchExpressions) || self.matchExpressions.all(e, (e.operator in ['Exists', 'DoesNotExist']) ? (!has(e.values) || size(e.values) == 0) : (has(e.values) && size(e.values) > 0))",message="matchExpressions[].values must be empty for Exists/DoesNotExist operators, non-empty for In/NotIn"
 	// +optional
 	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
-	// SystemNetworkNames specifies network names used for DRBD replication traffic.
-	// At least one network name must be specified. Each name is limited to 64 characters.
-	//
 	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
 	// Custom network support requires NetworkNode watch implementation in the controller.
 	// When multi-network support is implemented, raise MaxItems to 10.
+
+	// SystemNetworkNames specifies network names used for DRBD replication traffic.
+	// At least one network name must be specified. Each name is limited to 64 characters.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:Items={type=string,maxLength=64}

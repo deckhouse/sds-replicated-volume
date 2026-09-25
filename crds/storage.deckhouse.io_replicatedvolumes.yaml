@@ -84,9 +84,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              Auto mode requires RSC name, forbids manualConfiguration:
-              Manual mode requires manualConfiguration, forbids RSC name:
+            description: Desired state of the replicated volume.
             properties:
               configurationMode:
                 default: Auto
