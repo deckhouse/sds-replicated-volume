@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	"github.com/deckhouse/sds-common-lib/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/oldcontroller/config"
@@ -871,6 +872,88 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass).NotTo(BeNil())
 		Expect(storageClass.Name).To(Equal(testName))
 		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
+	})
+
+	It("ReconcileReplicatedStorageClass_StorageClass_created_before_fsOpts_Recreates_StorageClass_with_fsOpts", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNamespaceConst,
+				Name:      testName,
+			},
+		}
+
+		err := cl.Create(ctx, &replicatedSC)
+		if err == nil {
+			defer func() {
+				if err := cl.Delete(ctx, &replicatedSC); err != nil {
+					fmt.Println(err)
+				}
+			}()
+		}
+		Expect(err).NotTo(HaveOccurred())
+
+		virtualizationEnabled := false
+		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		delete(oldSC.Parameters, controller.StorageClassParamFSOptsKey)
+		err = controller.CreateStorageClass(ctx, cl, oldSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		resources, err := getTestAPIStorageClasses(ctx, cl)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resources[testName].Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
+
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamFSOptsKey, "-m0"))
+	})
+
+	It("ReconcileReplicatedStorageClass_ext4_reserve_annotation_changed_Recreates_StorageClass_with_new_fsOpts", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNamespaceConst,
+				Name:      testName,
+			},
+		}
+
+		virtualizationEnabled := false
+		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		err := controller.CreateStorageClass(ctx, cl, oldSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC.Annotations = map[string]string{fsreserve.AnnotationKey: "5"}
+		err = cl.Create(ctx, &replicatedSC)
+		if err == nil {
+			defer func() {
+				if err := cl.Delete(ctx, &replicatedSC); err != nil {
+					fmt.Println(err)
+				}
+			}()
+		}
+		Expect(err).NotTo(HaveOccurred())
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		resources, err := getTestAPIStorageClasses(ctx, cl)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resources[testName].Status.Phase).To(Equal(srv.ReplicatedStorageClassPhaseReady))
+
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamFSOptsKey, "-m5"))
 	})
 
 	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_equal_Returns_true", func() {

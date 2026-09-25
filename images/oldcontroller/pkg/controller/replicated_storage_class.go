@@ -739,10 +739,15 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	// We can recreate StorageClass only if the following parameters are not equal.
 	// If other parameters are not equal, we can't recreate StorageClass and
 	// users must delete ReplicatedStorageClass resource and create it again manually.
+	// fsOpts is among them: a StorageClass created before fsOpts was introduced
+	// lacks it, and the ext4 reserve annotation may change it at any time. It is
+	// read only when a volume is formatted, so existing volumes are unaffected.
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(newSCCopy.Parameters, StorageClassParamFSOptsKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(oldSCCopy.Parameters, StorageClassParamFSOptsKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 
