@@ -6,8 +6,102 @@ spec:
           description: |
             Интерфейс управления StorageСlass для CSI-драйвера replicated.csi.storage.deckhouse.io. Ручное создание StorageClass для данного драйвера запрещено.
           properties:
+            apiVersion:
+              description: |
+                APIVersion определяет версию схемы представления данного объекта.
+                Серверы должны преобразовывать распознанные версии схем к последнему внутреннему формату и могут отклонять нераспознанные значения.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources).
+            kind:
+              description: |
+                Строковое значение, определяющее, какой REST-ресурс представляет данный объект.
+                Серверы могут определить его по эндпоинту, в который клиент отправляет запрос.
+                Это значение нельзя изменить.
+                Используется формат CamelCase.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds).
             spec:
+              description: |
+                Определяет конфигурацию Kubernetes StorageClass.
+
+                > Большинство полей неизменяемы после создания. У существующего ресурса можно изменить только параметры репликации (replication, failuresToTolerate, guaranteedMinimumDataRedundancy), configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy и reclaimPolicy (StorageClass при этом пересоздаётся с новой политикой); изменение всех остальных полей при обновлении отклоняется.
               properties:
+                configurationRolloutStrategy:
+                  description: |
+                    Определяет, как изменения конфигурации применяются к существующим томам.
+                    Если не задано, контроллер подставляет значение по умолчанию (RollingUpdate, maxParallel=5).
+                  properties:
+                    rollingUpdate:
+                      description: |
+                        Параметры стратегии RollingUpdate.
+                        Обязательно, если type равен RollingUpdate.
+                      properties:
+                        maxParallel:
+                          description: |
+                            Максимальное число томов, на которые конфигурация раскатывается одновременно.
+                    type:
+                      description: |
+                        Тип стратегии раскатки.
+                eligibleNodesConflictResolutionStrategy:
+                  description: |
+                    Определяет, как контроллер обрабатывает тома, у которых есть конфликты с допустимыми узлами (eligible nodes).
+                    Если не задано, контроллер подставляет значение по умолчанию (RollingRepair, maxParallel=5).
+                  properties:
+                    rollingRepair:
+                      description: |
+                        Параметры стратегии разрешения конфликтов RollingRepair.
+                        Обязательно, если type равен RollingRepair.
+                      properties:
+                        maxParallel:
+                          description: |
+                            Максимальное число томов, исправляемых одновременно.
+                    type:
+                      description: |
+                        Тип стратегии разрешения конфликтов.
+                eligibleNodesPolicy:
+                  description: |
+                    Определяет политики управления допустимыми узлами (eligible nodes).
+                    Если не задано, контроллер подставляет значение по умолчанию (notReadyGracePeriod=10m).
+                  properties:
+                    notReadyGracePeriod:
+                      description: |
+                        Время ожидания перед исключением неготового (not ready) узла из списка допустимых узлов.
+                failuresToTolerate:
+                  description: |
+                    FailuresToTolerate (FTT) задаёт, сколько отказов произвольных узлов том может перенести, оставаясь доступным для ввода-вывода.
+                    Нельзя задавать одновременно с Replication.
+                    Задаётся только вместе с GuaranteedMinimumDataRedundancy.
+                    Допустимый диапазон: 0–2. Допустимые сочетания: |FTT - GMDR| <= 1.
+                guaranteedMinimumDataRedundancy:
+                  description: |
+                    GuaranteedMinimumDataRedundancy (GMDR) задаёт минимальное число дополнительных копий данных, поддерживаемых, пока том обслуживает ввод-вывод. GMDR=0 означает, что система может работать с единственной копией данных в деградированном режиме (как зеркало RAID-1 после отказа одного диска). GMDR=1 означает, что во время ввода-вывода всегда поддерживаются как минимум 2 копии.
+                    Нельзя задавать одновременно с Replication.
+                    Задаётся только вместе с FailuresToTolerate.
+                    Допустимый диапазон: 0–2. Допустимые сочетания: |FTT - GMDR| <= 1.
+                nodeLabelSelector:
+                  description: |
+                    Отбирает узлы, допустимые для участия в DRBD.
+                    Только узлы, соответствующие этому селектору, могут хранить данные, предоставлять доступ к тому или размещать реплику-арбитр (tiebreaker).
+                    Если не задан, кандидатами являются все узлы.
+                  properties:
+                    matchExpressions:
+                      description: |
+                        matchExpressions — список требований селектора лейблов. Требования объединяются по логическому И.
+                      items:
+                        description: |
+                          Требование селектора лейблов — селектор, содержащий значения, ключ и оператор, который связывает ключ со значениями.
+                        properties:
+                          key:
+                            description: |
+                              key — ключ лейбла, к которому применяется селектор.
+                          operator:
+                            description: |
+                              operator задаёт отношение ключа к набору значений.
+                              Допустимые операторы: In, NotIn, Exists и DoesNotExist.
+                          values:
+                            description: |
+                              values — массив строковых значений. Если оператор — In или NotIn, массив values не должен быть пустым. Если оператор — Exists или DoesNotExist, массив values должен быть пустым. При strategic merge patch этот массив заменяется целиком.
+                    matchLabels:
+                      description: |
+                        matchLabels — словарь пар {key,value}. Одна пара {key,value} в словаре matchLabels эквивалентна элементу matchExpressions, у которого поле key равно "key", оператор — "In", а массив values содержит только "value". Требования объединяются по логическому И.
                 storagePool:
                   description: |
                     Имя Storage Pool в бэкенде LINSTOR.
@@ -27,6 +121,33 @@ spec:
                     
                     > Обратите внимание, что режимом репликации по умолчанию является 'ConsistencyAndAvailability'.
                     > Это поле можно изменять у существующего ресурса — так выполняется миграция томов между layout'ами (например r3→r2 сменой 'ConsistencyAndAvailability' на 'Availability'). Изменение применяется сразу ко всем томам класса; обратной автоматической миграции (в сторону большего числа реплик) нет.
+                storage:
+                  description: |
+                    Конфигурация бэкенда хранения для этого StorageClass.
+                    Задаёт тип томов (LVM или LVMThin) и ресурсы LVMVolumeGroup, которые будут использоваться для выделения места под тома.
+                  properties:
+                    lvmVolumeGroups:
+                      description: |
+                        Массив имён ресурсов LVMVolumeGroup, Volume Group'ы/Thin-pool'ы которых будут использованы для выделения требуемого места.
+
+                        > Обратите внимание, что каждый ресурс LVMVolumeGroup обязан иметь тот же тип (Thin/Thick), что указан в поле Type.
+                      items:
+                        properties:
+                          name:
+                            description: |
+                              Имя выбранного ресурса LVMVolumeGroup.
+                          thinPoolName:
+                            description: |
+                              Имя выбранного Thin-pool.
+                    type:
+                      description: |
+                        Определяет тип томов. Может быть:
+                        - LVM (для Thick-томов)
+                        - LVMThin (для Thin-томов)
+                systemNetworkNames:
+                  description: |
+                    Имена сетей, используемых для трафика репликации DRBD.
+                    Необходимо указать хотя бы одно имя сети. Длина каждого имени ограничена 64 символами.
                 volumeAccess:
                   description: |
                     Режим доступа к данным. Может быть:
@@ -60,12 +181,98 @@ spec:
                     > Обратите внимание, что данный параметр является обязательным, если выбрана топология TransZonal.
                     > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
             status:
+              description: |
+                Отображает текущую информацию о StorageClass.
               properties:
+                conditions:
+                  items:
+                    description: |
+                      Condition содержит сведения об одном аспекте текущего состояния данного ресурса API.
+                    properties:
+                      lastTransitionTime:
+                        description: |
+                          Время последнего перехода условия из одного статуса в другой.
+                          Обычно это момент изменения самого условия. Если он неизвестен, допускается использовать время изменения поля API.
+                      message:
+                        description: |
+                          Человекочитаемое сообщение с подробностями о переходе.
+                          Может быть пустой строкой.
+                      observedGeneration:
+                        description: |
+                          Значение `.metadata.generation`, на основе которого было установлено условие.
+                          Например, если `.metadata.generation` сейчас равно 12, а `.status.conditions[x].observedGeneration` — 9, условие устарело относительно текущего состояния экземпляра.
+                      reason:
+                        description: |
+                          Программный идентификатор причины последнего перехода условия.
+                          Поставщики конкретных типов условий могут определять ожидаемые значения этого поля и их смысл, а также то, считаются ли эти значения гарантированной частью API.
+                          Значение должно быть строкой в формате CamelCase.
+                          Поле не может быть пустым.
+                      status:
+                        description: |
+                          Статус условия: `True`, `False` или `Unknown`.
+                      type:
+                        description: |
+                          Тип условия в формате CamelCase или `foo.example.com/CamelCase`.
+                configuration:
+                  description: |
+                    Итоговая конфигурация, которой должны соответствовать тома.
+                  properties:
+                    failuresToTolerate:
+                      description: |
+                        Итоговое значение FTT.
+                    guaranteedMinimumDataRedundancy:
+                      description: |
+                        Итоговое значение GMDR.
+                    replicatedStoragePoolName:
+                      description: |
+                        Имя ресурса ReplicatedStoragePool.
+                    topology:
+                      description: |
+                        Итоговая настройка топологии.
+                    volumeAccess:
+                      description: |
+                        Итоговый режим доступа к тому.
+                configurationGeneration:
+                  description: |
+                    Поколение (generation) RSC, при котором конфигурация была принята.
+                message:
+                  description: |
+                    Человекочитаемое описание текущей фазы.
                 phase:
                   description: |
                     Общее текущее состояние StorageClass. Может быть: 
                     - Failed (если контроллер получил некорректную конфигурацию ресурса или возникли ошибки в процессе выполнения операции)
                     - Created (если StorageClass создан успешно)
-                reason:
+                storagePoolBasedOnGeneration:
                   description: |
-                    Дополнительная информация о текущем состоянии StorageClass.
+                    Поколение RSC, при котором было вычислено значение storagePoolName.
+                storagePoolEligibleNodesRevision:
+                  description: |
+                    Отслеживает значение eligibleNodesRevision у RSP для обнаружения изменений.
+                storagePoolName:
+                  description: |
+                    Вычисленное имя ReplicatedStoragePool для этого RSC.
+                    Формат: auto-rsp-<fnv128-hex>. Несколько RSC с одинаковыми параметрами хранения используют одно и то же значение StoragePoolName.
+                volumes:
+                  description: |
+                    Сводная статистика по томам.
+                    Присутствует всегда (может иметь total=0).
+                  properties:
+                    aligned:
+                      description: |
+                        Число томов, конфигурация которых соответствует StorageClass.
+                    inConflictWithEligibleNodes:
+                      description: |
+                        Число томов, у которых есть реплики на недопустимых узлах.
+                    pendingObservation:
+                      description: |
+                        Число томов, которые ещё не увидели текущую конфигурацию RSC или текущий список допустимых узлов.
+                    staleConfiguration:
+                      description: |
+                        Число томов с устаревшей конфигурацией.
+                    total:
+                      description: |
+                        Общее число томов.
+                    usedStoragePoolNames:
+                      description: |
+                        Отсортированный список имён пулов хранения, используемых томами в данный момент.

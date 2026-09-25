@@ -6,7 +6,21 @@ spec:
           description: |
             ReplicatedVolume описывает реплицируемый том: его размер, способ конфигурации (из ReplicatedStorageClass или заданный вручную) и наблюдаемое состояние репликации (datamesh, реплики, кворум, подключения).
           properties:
+            apiVersion:
+              description: |
+                APIVersion определяет версию схемы представления данного объекта.
+                Серверы должны преобразовывать распознанные версии схем к последнему внутреннему формату и могут отклонять нераспознанные значения.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources).
+            kind:
+              description: |
+                Строковое значение, определяющее, какой REST-ресурс представляет данный объект.
+                Серверы могут определить его по эндпоинту, в который клиент отправляет запрос.
+                Это значение нельзя изменить.
+                Используется формат CamelCase.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds).
             spec:
+              description: |
+                Желаемое состояние реплицируемого тома.
               properties:
                 configurationMode:
                   description: |
@@ -71,6 +85,34 @@ spec:
                 conditions:
                   description: |
                     Условия, отражающие текущее состояние тома.
+                  items:
+                    description: |
+                      Condition содержит сведения об одном аспекте текущего состояния данного ресурса API.
+                    properties:
+                      lastTransitionTime:
+                        description: |
+                          Время последнего перехода условия из одного статуса в другой.
+                          Обычно это момент изменения самого условия. Если он неизвестен, допускается использовать время изменения поля API.
+                      message:
+                        description: |
+                          Человекочитаемое сообщение с подробностями о переходе.
+                          Может быть пустой строкой.
+                      observedGeneration:
+                        description: |
+                          Значение `.metadata.generation`, на основе которого было установлено условие.
+                          Например, если `.metadata.generation` сейчас равно 12, а `.status.conditions[x].observedGeneration` — 9, условие устарело относительно текущего состояния экземпляра.
+                      reason:
+                        description: |
+                          Программный идентификатор причины последнего перехода условия.
+                          Поставщики конкретных типов условий могут определять ожидаемые значения этого поля и их смысл, а также то, считаются ли эти значения гарантированной частью API.
+                          Значение должно быть строкой в формате CamelCase.
+                          Поле не может быть пустым.
+                      status:
+                        description: |
+                          Статус условия: `True`, `False` или `Unknown`.
+                      type:
+                        description: |
+                          Тип условия в формате CamelCase или `foo.example.com/CamelCase`.
                 configuration:
                   description: |
                     Снимок желаемой конфигурации тома.
@@ -104,6 +146,8 @@ spec:
                       description: |
                         Список участников (реплик) datamesh.
                       items:
+                        description: |
+                          Участник datamesh.
                         properties:
                           addresses:
                             description: |
@@ -154,6 +198,8 @@ spec:
                   description: |
                     Список ожидающих обработки запросов на изменение членства, поступивших от реплик.
                   items:
+                    description: |
+                      Ожидающий обработки запрос на членство от одной реплики.
                     properties:
                       firstObservedAt:
                         description: |
@@ -187,6 +233,9 @@ spec:
                   description: |
                     Список активных переходов (transitions) datamesh. Каждый переход имеет упорядоченный список шагов, объявляемых при создании и выполняемых последовательно.
                   items:
+                    description: |
+                      Активный переход datamesh.
+                      У каждого перехода есть упорядоченный список шагов, которые объявляются при создании и выполняются последовательно. Время начала перехода — steps[0].startedAt.
                     properties:
                       fromReplicaType:
                         description: |
@@ -210,6 +259,8 @@ spec:
                         description: |
                           Упорядоченный список шагов перехода. Шаги выполняются последовательно — активным одновременно может быть только один шаг.
                         items:
+                          description: |
+                            Один шаг в рамках перехода.
                           properties:
                             completedAt:
                               description: |
@@ -273,6 +324,8 @@ spec:
                   description: |
                     Список реплик, размещённых на узлах, не удовлетворяющих ограничениям подходящих (eligible) узлов.
                   items:
+                    description: |
+                      Описывает реплику, размещённую на недопустимом узле.
                     properties:
                       nodeName:
                         description: |
@@ -283,6 +336,10 @@ spec:
                       replicaName:
                         description: |
                           Имя ресурса ReplicatedVolumeReplica.
+                membershipLayout:
+                  description: |
+                    Краткое человекочитаемое представление фактической раскладки datamesh (голосующие реплики с диском и TieBreaker'ы), например "3D" или "2D+1TB". Вычисляется по участникам datamesh; формат свободный (не перечисление). Соответствует ли раскладка целевой, показывает условие MembershipLayoutConverged.
+                    Не задано (отсутствует), пока раскладка ещё не вычислена: во время формирования контроллер раскладку не сообщает вовсе. Пустая строка никогда не публикуется.
                 size:
                   description: |
                     Фактическая полезная ёмкость тома в байтах. Не задаётся, когда у тома нет готовых реплик.

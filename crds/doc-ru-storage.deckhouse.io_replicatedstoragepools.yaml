@@ -6,8 +6,30 @@ spec:
           description: |
             Интерфейс для управления Storage Pool в бэкенде LINSTOR. 
           properties:
+            apiVersion:
+              description: |
+                APIVersion определяет версию схемы представления данного объекта.
+                Серверы должны преобразовывать распознанные версии схем к последнему внутреннему формату и могут отклонять нераспознанные значения.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources).
+            kind:
+              description: |
+                Строковое значение, определяющее, какой REST-ресурс представляет данный объект.
+                Серверы могут определить его по эндпоинту, в который клиент отправляет запрос.
+                Это значение нельзя изменить.
+                Используется формат CamelCase.
+                Подробнее [в документации](https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds).
             spec:
+              description: |
+                Определяет желаемые правила для Storage-pool'ов LINSTOR.
               properties:
+                eligibleNodesPolicy:
+                  description: |
+                    Определяет политики управления допустимыми узлами (eligible nodes).
+                    Присутствует всегда, со значениями по умолчанию.
+                  properties:
+                    notReadyGracePeriod:
+                      description: |
+                        Время ожидания перед исключением неготового (not ready) узла из списка допустимых узлов.
                 type:
                   description: |
                     Определяет тип Volume'ов. Может быть: 
@@ -26,14 +48,130 @@ spec:
                       thinPoolName:
                         description: |
                           Имя выбранного Thin-pool в рамках указанного LVMVolumeGroup. Обязательное поле если вы создаёте ReplicatedStoragePool с типом LVMThin.
+                nodeLabelSelector:
+                  description: |
+                    Отбирает узлы, допустимые для участия в пуле хранения.
+                    Хранить данные могут только узлы, соответствующие этому селектору.
+                    Если не задан, кандидатами являются все узлы с подходящими LVMVolumeGroup.
+                  properties:
+                    matchExpressions:
+                      description: |
+                        matchExpressions — список требований селектора лейблов. Требования объединяются по логическому И.
+                      items:
+                        description: |
+                          Требование селектора лейблов — селектор, содержащий значения, ключ и оператор, который связывает ключ со значениями.
+                        properties:
+                          key:
+                            description: |
+                              key — ключ лейбла, к которому применяется селектор.
+                          operator:
+                            description: |
+                              operator задаёт отношение ключа к набору значений.
+                              Допустимые операторы: In, NotIn, Exists и DoesNotExist.
+                          values:
+                            description: |
+                              values — массив строковых значений. Если оператор — In или NotIn, массив values не должен быть пустым. Если оператор — Exists или DoesNotExist, массив values должен быть пустым. При strategic merge patch этот массив заменяется целиком.
+                    matchLabels:
+                      description: |
+                        matchLabels — словарь пар {key,value}. Одна пара {key,value} в словаре matchLabels эквивалентна элементу matchExpressions, у которого поле key равно "key", оператор — "In", а массив values содержит только "value". Требования объединяются по логическому И.
+                systemNetworkNames:
+                  description: |
+                    Имена сетей, используемых для трафика репликации DRBD.
+                    Необходимо указать хотя бы одно имя сети. Длина каждого имени ограничена 64 символами.
+                zones:
+                  description: |
+                    Массив зон, в которых должны реплицироваться тома Storage pool.
             status:
+              description: |
+                Отображает текущую информацию о состоянии пула хранения LINSTOR.
               properties:
+                conditions:
+                  items:
+                    description: |
+                      Condition содержит сведения об одном аспекте текущего состояния данного ресурса API.
+                    properties:
+                      lastTransitionTime:
+                        description: |
+                          Время последнего перехода условия из одного статуса в другой.
+                          Обычно это момент изменения самого условия. Если он неизвестен, допускается использовать время изменения поля API.
+                      message:
+                        description: |
+                          Человекочитаемое сообщение с подробностями о переходе.
+                          Может быть пустой строкой.
+                      observedGeneration:
+                        description: |
+                          Значение `.metadata.generation`, на основе которого было установлено условие.
+                          Например, если `.metadata.generation` сейчас равно 12, а `.status.conditions[x].observedGeneration` — 9, условие устарело относительно текущего состояния экземпляра.
+                      reason:
+                        description: |
+                          Программный идентификатор причины последнего перехода условия.
+                          Поставщики конкретных типов условий могут определять ожидаемые значения этого поля и их смысл, а также то, считаются ли эти значения гарантированной частью API.
+                          Значение должно быть строкой в формате CamelCase.
+                          Поле не может быть пустым.
+                      status:
+                        description: |
+                          Статус условия: `True`, `False` или `Unknown`.
+                      type:
+                        description: |
+                          Тип условия в формате CamelCase или `foo.example.com/CamelCase`.
+                eligibleNodes:
+                  description: |
+                    Список узлов, допустимых для этого пула хранения.
+                  items:
+                    description: |
+                      Узел, допустимый для размещения томов этого пула хранения.
+                    properties:
+                      agentReady:
+                        description: |
+                          Готов ли агент sds-replicated-volume на этом узле.
+                      lvmVolumeGroups:
+                        description: |
+                          Список групп томов LVM, доступных на этом узле.
+                        items:
+                          description: |
+                            Группа томов LVM на допустимом узле.
+                          properties:
+                            name:
+                              description: |
+                                Имя ресурса LVMVolumeGroup.
+                            ready:
+                              description: |
+                                Готова ли LVMVolumeGroup (и её thin pool, если применимо).
+                            thinPoolName:
+                              description: |
+                                Имя thin pool (для пулов хранения LVMThin).
+                            unschedulable:
+                              description: |
+                                Запрещено ли новым томам использовать эту группу томов.
+                      nodeName:
+                        description: |
+                          Имя узла Kubernetes.
+                      nodeReady:
+                        description: |
+                          Готов ли узел Kubernetes.
+                      unschedulable:
+                        description: |
+                          Запрещено ли размещать новые тома на этом узле.
+                      zoneName:
+                        description: |
+                          Зона, к которой относится этот узел.
+                eligibleNodesRevision:
+                  description: |
+                    Увеличивается при изменении списка допустимых узлов.
+                message:
+                  description: |
+                    Человекочитаемое описание текущей фазы.
+                    Дублирует сообщение условия Ready.
                 phase:
                   description: |
                     Текущее состояние ReplicatedStoragePool-ресурса. Может быть:
                     - Completed (если контроллер получил корректную конфигурацию ресурса и конфигурация Storage-pool'ов в LINSTOR обновлена)
                     - Updating (если контроллер получил корректную конфигурацию ресурса и конфигурация Storage-pool'ов в LINSTOR обновляется)
                     - Failed (если контроллер получил некорректную конфигурацию ресурса или во время операции возникла ошибка)
-                reason:
+                usedBy:
                   description: |
-                    Дополнительная информация о текущем состоянии ресурса.
+                    Отслеживает, какие ресурсы используют этот пул хранения.
+                  properties:
+                    replicatedStorageClassNames:
+                      description: |
+                        Список имён RSC, использующих этот пул хранения.
