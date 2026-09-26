@@ -37,6 +37,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          Describes the mapping between a lower block device on a node and the upper block device
+          created over it. The agent uses it to manage the device-mapper device on top of the lower
+          device on a particular node.
         properties:
           apiVersion:
             description: |-
@@ -58,6 +62,10 @@ spec:
           spec:
             properties:
               lowerDevicePath:
+                description: |-
+                  Path to the lower block device on the node.
+
+                  > Important: this field is immutable and cannot be changed after the resource is created.
                 maxLength: 4096
                 minLength: 1
                 type: string
@@ -65,6 +73,10 @@ spec:
                 - message: lowerDevicePath is immutable
                   rule: self == oldSelf
               nodeName:
+                description: |-
+                  Name of the node the device is on.
+
+                  > Important: this field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -78,6 +90,7 @@ spec:
           status:
             properties:
               conditions:
+                description: Conditions reflecting the current state of the resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -137,9 +150,11 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               openCount:
+                description: Number of current opens (users) of the upper block device.
                 format: int32
                 type: integer
               upperDevicePath:
+                description: Path to the upper (created) block device on the node.
                 maxLength: 4096
                 type: string
             type: object

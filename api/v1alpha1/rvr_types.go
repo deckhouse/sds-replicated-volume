@@ -132,6 +132,9 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []*ReplicatedVolumeR
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful'",message="lvmVolumeGroupName can only be set for Diskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type ReplicatedVolumeReplicaSpec struct {
+	// Name of the ReplicatedVolume the replica belongs to.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=120
@@ -139,6 +142,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
+	// Name of the node the replica is placed on.
+	//
+	// > Important: this field is immutable once set.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -203,6 +209,7 @@ func (t ReplicaType) String() string {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
+	// Conditions reflecting the current state of the replica.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -218,6 +225,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// Network addresses of the replica used for DRBD connections.
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional

@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Manages DRBD operations at the level of a cluster node. The resource is created to run a
+// maintenance operation on a particular node; the agent on that node performs the operation and
+// reports the result in the status.
+//
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -49,6 +53,9 @@ func (o *DRBDNodeOperation) GetStatusPhase() string {
 
 // +kubebuilder:object:generate=true
 type DRBDNodeOperationSpec struct {
+	// Name of the node the operation runs on.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -66,13 +73,16 @@ type DRBDNodeOperationStatus struct {
 	// +optional
 	Phase DRBDOperationPhase `json:"phase,omitempty"`
 
+	// Additional human-readable message about the current state of the operation.
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// Time the operation started.
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
+	// Time the operation completed.
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }

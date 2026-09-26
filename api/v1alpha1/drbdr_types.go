@@ -21,6 +21,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Low-level representation of a DRBD resource on a particular cluster node. The agent manages it;
+// it describes the desired and the actual configuration of the DRBD device, its peers and its
+// replication. It is not meant to be created or edited by hand.
+//
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -70,6 +74,7 @@ func (d *DRBDResource) IsUnderMaintenance() bool { return d.Spec.Maintenance != 
 
 // +kubebuilder:object:generate=true
 type DRBDResourceSpec struct {
+	// Actual name of the DRBD resource on the node.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
@@ -81,12 +86,16 @@ type DRBDResourceSpec struct {
 	// +optional
 	State DRBDResourceState `json:"state,omitempty"`
 
+	// Name of the node the DRBD resource is on.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
 
+	// Names of the system networks used for DRBD connections.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=10
@@ -94,11 +103,13 @@ type DRBDResourceSpec struct {
 	// +listType=set
 	SystemNetworks []string `json:"systemNetworks"`
 
+	// Number of votes required for quorum.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=32
 	// +optional
 	Quorum byte `json:"quorum,omitempty"`
 
+	// Minimum redundancy (number of up-to-date replicas) required to keep quorum.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=32
 	// +optional
@@ -113,6 +124,7 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:default=Secondary
 	Role DRBDRole `json:"role,omitempty"`
 
+	// Allow two Primary roles at the same time (dual-primary mode).
 	// +kubebuilder:default=false
 	// +optional
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
@@ -134,12 +146,16 @@ type DRBDResourceSpec struct {
 	// +optional
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
 
+	// Numeric identifier of the node in DRBD (0 to 31).
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeID is immutable"
 	NodeID uint8 `json:"nodeID"`
 
+	// Peers (neighbouring nodes) the DRBD resource replicates with.
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=31
@@ -172,10 +188,12 @@ type DRBDResourcePeer struct {
 	// +optional
 	Type DRBDResourceType `json:"type,omitempty"`
 
+	// Allow reading data from this peer.
 	// +kubebuilder:default=true
 	// +optional
 	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
 
+	// Numeric identifier of the peer in DRBD (0 to 31).
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
@@ -187,6 +205,7 @@ type DRBDResourcePeer struct {
 	// +optional
 	Protocol DRBDProtocol `json:"protocol,omitempty"`
 
+	// Shared secret that authenticates the connection with the peer.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
 	SharedSecret string `json:"sharedSecret,omitempty"`
@@ -195,10 +214,12 @@ type DRBDResourcePeer struct {
 	// +optional
 	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
 
+	// Pause synchronization with this peer.
 	// +kubebuilder:default=false
 	// +optional
 	PauseSync bool `json:"pauseSync,omitempty"`
 
+	// Network paths to the peer.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=10
@@ -214,6 +235,7 @@ type DRBDResourcePath struct {
 	// +kubebuilder:validation:MaxLength=64
 	SystemNetworkName string `json:"systemNetworkName"`
 
+	// Network address (IPv4 and port) to connect to the peer at.
 	// +kubebuilder:validation:Required
 	Address DRBDAddress `json:"address"`
 }
@@ -257,15 +279,18 @@ type DRBDResourceStatus struct {
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
 
+	// Network addresses the DRBD resource actually uses.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="addresses[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Addresses []DRBDResourceAddressStatus `json:"addresses,omitempty"`
 
+	// Configuration of the DRBD resource currently in effect (actually applied).
 	// +optional
 	ActiveConfiguration *DRBDResourceActiveConfiguration `json:"activeConfiguration,omitempty"`
 
+	// Actual state of the peers of the DRBD resource.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.nodeID == y.nodeID))",message="peers[].nodeID must be unique"
 	// +kubebuilder:validation:MaxItems=31
 	// +listType=atomic
@@ -275,6 +300,7 @@ type DRBDResourceStatus struct {
 	// +optional
 	DiskState DiskState `json:"diskState,omitempty"`
 
+	// Whether the DRBD resource has quorum.
 	// +optional
 	Quorum *bool `json:"quorum,omitempty"`
 
@@ -288,6 +314,7 @@ type DRBDResourceStatus struct {
 	// +optional
 	DeviceUUID string `json:"deviceUUID,omitempty"`
 
+	// Conditions reflecting the current state of the DRBD resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -306,9 +333,11 @@ type DRBDResourceAddressStatus struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourceActiveConfiguration struct {
+	// Number of votes required for quorum in the active configuration.
 	// +optional
 	Quorum *byte `json:"quorum,omitempty"`
 
+	// Minimum redundancy in the active configuration.
 	// +optional
 	QuorumMinimumRedundancy *byte `json:"quorumMinimumRedundancy,omitempty"`
 
@@ -320,9 +349,12 @@ type DRBDResourceActiveConfiguration struct {
 	// +optional
 	Role DRBDRole `json:"role,omitempty"`
 
+	// Whether dual-primary mode is allowed in the active configuration.
 	// +optional
 	AllowTwoPrimaries *bool `json:"allowTwoPrimaries,omitempty"`
 
+	// Whether the disk is non-voting, that is, does not take part in the quorum vote, in the
+	// active configuration.
 	// +optional
 	NonVoting *bool `json:"nonVoting,omitempty"`
 
@@ -352,6 +384,7 @@ type DRBDResourceActiveConfiguration struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourcePeerStatus struct {
+	// Name of the peer node.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -365,17 +398,20 @@ type DRBDResourcePeerStatus struct {
 	// +optional
 	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
 
+	// Numeric identifier of the peer in DRBD.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=31
 	NodeID uint `json:"nodeID"`
 
+	// Actual network paths to the peer.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.systemNetworkName == y.systemNetworkName))",message="paths[].systemNetworkName must be unique"
 	// +kubebuilder:validation:MaxItems=10
 	// +listType=atomic
 	// +optional
 	Paths []DRBDResourcePathStatus `json:"paths,omitempty"`
 
+	// State of the connection with the peer.
 	// +optional
 	ConnectionState ConnectionState `json:"connectionState,omitempty"`
 
@@ -394,14 +430,17 @@ type DRBDResourcePeerStatus struct {
 
 // +kubebuilder:object:generate=true
 type DRBDResourcePathStatus struct {
+	// Name of the system network of this path.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	SystemNetworkName string `json:"systemNetworkName"`
 
+	// Network address (IPv4 and port) of the connection with the peer.
 	// +kubebuilder:validation:Required
 	Address DRBDAddress `json:"address"`
 
+	// Whether the connection over this path is established.
 	// +optional
 	Established bool `json:"established,omitempty"`
 }

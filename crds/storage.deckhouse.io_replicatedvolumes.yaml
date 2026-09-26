@@ -65,6 +65,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          ReplicatedVolume describes a replicated volume: its size, how it is configured (from a
+          ReplicatedStorageClass or set by hand) and the observed state of its replication (datamesh,
+          replicas, quorum, attachments).
         properties:
           apiVersion:
             description: |-
@@ -200,6 +204,7 @@ spec:
                 anyOf:
                 - type: integer
                 - type: string
+                description: Requested size of the volume.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
@@ -221,6 +226,7 @@ spec:
           status:
             properties:
               actuallyAttachedTo:
+                description: Nodes the volume is actually attached to at the moment.
                 items:
                   type: string
                 maxItems: 2
@@ -241,6 +247,7 @@ spec:
                 minimum: 0
                 type: integer
               conditions:
+                description: Conditions reflecting the current state of the volume.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

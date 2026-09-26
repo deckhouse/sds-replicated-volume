@@ -21,6 +21,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ReplicatedVolume describes a replicated volume: its size, how it is configured (from a
+// ReplicatedStorageClass or set by hand) and the observed state of its replication (datamesh,
+// replicas, quorum, attachments).
+//
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -81,6 +85,7 @@ func (rv *ReplicatedVolume) IsUnderMaintenance() bool { return rv.Spec.Maintenan
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName) == 0))",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
+	// Requested size of the volume.
 	// +kubebuilder:validation:Required
 	//	+kubebuilder:validation:XValidation:rule="quantity(string(self)).isGreaterThan(quantity('0'))",message="size must be greater than 0"
 	Size resource.Quantity `json:"size"`
@@ -235,6 +240,7 @@ func TieBreakersForDiskful(diskful, ftt int) int {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
+	// Conditions reflecting the current state of the volume.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -246,6 +252,8 @@ type ReplicatedVolumeStatus struct {
 	Size *resource.Quantity `json:"size,omitempty"`
 
 	// TODO: Remove this field. It is no longer used (except for CSI driver, which will use RVA objects instead).
+
+	// Nodes the volume is actually attached to at the moment.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="actuallyAttachedTo must be unique"
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}

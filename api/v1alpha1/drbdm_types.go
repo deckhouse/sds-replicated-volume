@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Describes the mapping between a lower block device on a node and the upper block device
+// created over it. The agent uses it to manage the device-mapper device on top of the lower
+// device on a particular node.
+//
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -62,12 +66,18 @@ type DRBDMapperList struct {
 
 // +kubebuilder:object:generate=true
 type DRBDMapperSpec struct {
+	// Name of the node the device is on.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
 
+	// Path to the lower block device on the node.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=4096
@@ -77,13 +87,16 @@ type DRBDMapperSpec struct {
 
 // +kubebuilder:object:generate=true
 type DRBDMapperStatus struct {
+	// Path to the upper (created) block device on the node.
 	// +kubebuilder:validation:MaxLength=4096
 	// +optional
 	UpperDevicePath string `json:"upperDevicePath,omitempty"`
 
+	// Number of current opens (users) of the upper block device.
 	// +optional
 	OpenCount int32 `json:"openCount,omitempty"`
 
+	// Conditions reflecting the current state of the resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

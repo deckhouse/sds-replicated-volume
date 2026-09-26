@@ -37,6 +37,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          Manages operations on a DRBD resource on a particular cluster node. The resource is created to
+          run a maintenance operation on a DRBD resource; the agent on the given node performs the operation
+          and reports the result in the status.
         properties:
           apiVersion:
             description: |-
@@ -63,9 +67,15 @@ spec:
                 properties:
                   clearBitmap:
                     default: false
+                    description: Clear the bitmap when creating the new UUID (the
+                      volume is considered fully synchronized).
                     type: boolean
                   forceResync:
                     default: false
+                    description: |-
+                      Force a resynchronization after creating the new UUID.
+
+                      > Note that 'clearBitmap' and 'forceResync' are mutually exclusive.
                     type: boolean
                 type: object
                 x-kubernetes-validations:
@@ -74,6 +84,10 @@ spec:
                 - message: clearBitmap and forceResync are mutually exclusive
                   rule: '!(self.clearBitmap && self.forceResync)'
               drbdResourceName:
+                description: |-
+                  Name of the DRBD resource the operation is performed on.
+
+                  > Important: this field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
@@ -113,15 +127,19 @@ spec:
           status:
             properties:
               completedAt:
+                description: Time the operation completed.
                 format: date-time
                 type: string
               message:
+                description: Additional human-readable message about the current state
+                  of the operation.
                 maxLength: 1024
                 type: string
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
                 type: string
               startedAt:
+                description: Time the operation started.
                 format: date-time
                 type: string
             type: object

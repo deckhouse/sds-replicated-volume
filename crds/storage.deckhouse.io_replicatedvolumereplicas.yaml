@@ -81,6 +81,10 @@ spec:
                   LVMThin storage pools).
                 type: string
               nodeName:
+                description: |-
+                  Name of the node the replica is placed on.
+
+                  > Important: this field is immutable once set.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -88,6 +92,10 @@ spec:
                 - message: nodeName is immutable once set
                   rule: size(oldSelf) == 0 || self == oldSelf
               replicatedVolumeName:
+                description: |-
+                  Name of the ReplicatedVolume the replica belongs to.
+
+                  > Important: this field is immutable and cannot be changed after the resource is created.
                 maxLength: 120
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
@@ -121,6 +129,7 @@ spec:
           status:
             properties:
               addresses:
+                description: Network addresses of the replica used for DRBD connections.
                 items:
                   properties:
                     address:
@@ -200,6 +209,7 @@ spec:
                     type: string
                 type: object
               conditions:
+                description: Conditions reflecting the current state of the replica.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

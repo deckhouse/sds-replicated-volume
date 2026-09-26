@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Manages operations on a DRBD resource on a particular cluster node. The resource is created to
+// run a maintenance operation on a DRBD resource; the agent on the given node performs the operation
+// and reports the result in the status.
+//
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
@@ -54,6 +58,9 @@ type DRBDResourceOperationSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
 
+	// Name of the DRBD resource the operation is performed on.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -76,9 +83,13 @@ type DRBDResourceOperationSpec struct {
 //
 //	+kubebuilder:validation:XValidation:rule="!(self.clearBitmap && self.forceResync)",message="clearBitmap and forceResync are mutually exclusive"
 type CreateNewUUIDParams struct {
+	// Clear the bitmap when creating the new UUID (the volume is considered fully synchronized).
 	// +kubebuilder:default=false
 	// +optional
 	ClearBitmap bool `json:"clearBitmap,omitempty"`
+	// Force a resynchronization after creating the new UUID.
+	//
+	// > Note that 'clearBitmap' and 'forceResync' are mutually exclusive.
 	// +kubebuilder:default=false
 	// +optional
 	ForceResync bool `json:"forceResync,omitempty"`
@@ -89,13 +100,16 @@ type DRBDResourceOperationStatus struct {
 	// +optional
 	Phase DRBDOperationPhase `json:"phase,omitempty"`
 
+	// Additional human-readable message about the current state of the operation.
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// Time the operation started.
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 
+	// Time the operation completed.
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }

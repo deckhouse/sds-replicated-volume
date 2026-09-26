@@ -34,6 +34,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          Manages DRBD operations at the level of a cluster node. The resource is created to run a
+          maintenance operation on a particular node; the agent on that node performs the operation and
+          reports the result in the status.
         properties:
           apiVersion:
             description: |-
@@ -55,6 +59,10 @@ spec:
           spec:
             properties:
               nodeName:
+                description: |-
+                  Name of the node the operation runs on.
+
+                  > Important: this field is immutable and cannot be changed after the resource is created.
                 maxLength: 253
                 minLength: 1
                 type: string
@@ -77,15 +85,19 @@ spec:
           status:
             properties:
               completedAt:
+                description: Time the operation completed.
                 format: date-time
                 type: string
               message:
+                description: Additional human-readable message about the current state
+                  of the operation.
                 maxLength: 1024
                 type: string
               phase:
                 description: DRBDOperationPhase represents the phase of a DRBD operation.
                 type: string
               startedAt:
+                description: Time the operation started.
                 format: date-time
                 type: string
             type: object

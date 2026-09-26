@@ -77,6 +77,9 @@ func (rva *ReplicatedVolumeAttachment) GetStatusPhase() string { return string(r
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentSpec struct {
+	// Name of the ReplicatedVolume to attach to the node.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=127
@@ -84,6 +87,9 @@ type ReplicatedVolumeAttachmentSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
+	// Name of the node the volume is to be attached to.
+	//
+	// > Important: this field is immutable and cannot be changed after the resource is created.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -93,6 +99,7 @@ type ReplicatedVolumeAttachmentSpec struct {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentStatus struct {
+	// Conditions reflecting the current state of the volume attachment.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
