@@ -13,7 +13,8 @@
 # Images Digest: a files with all image digests to be able to use them in helm templates of a module
 ---
 image: images-digests
-from: {{ index $.Images "builder/alpine" }}
+from: {{ index $.Images "builder/distroless" }}
+final: false
 import:
   - from: {{ index $.Images "jq" }}
     add: /usr/bin/jq

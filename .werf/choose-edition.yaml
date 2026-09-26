@@ -1,7 +1,7 @@
 ---
 image: choose-edition
-from: {{ index $.Images "builder/golang-alt" }}
-fromCacheVersion: {{ div .Commit.Date.Unix (mul 60 60 24 30) }}
+from: {{ index $.Images "builder/distroless" }}
+final: false
 
 git:
   - add: /openapi
@@ -12,5 +12,5 @@ git:
 shell:
   setup:
     - cd /openapi
-    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -fv values_ce.yaml values.yaml; fi
+    - if [ "{{ .MODULE_EDITION }}" = "ce" ]; then cp -fv values_ce.yaml values.yaml; fi
     - rm -rf values_*.yaml
