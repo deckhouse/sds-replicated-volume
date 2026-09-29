@@ -38,6 +38,11 @@ shell:
     - cd /usr/src/app/hooks/go
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
   beforeSetup:
+    {{- /* The credentials live in the environment of one stage's shell only (see
+           "auth for private go modules"), and the module cache is a tmp_dir mount
+           that the next stage does not see: the build below downloads the modules
+           again, so it needs the credentials of its own. */}}
+    {{- include "auth for private go modules" . | nindent 4 }}
     - |
       cd /usr/src/app/hooks/go;
       CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;
