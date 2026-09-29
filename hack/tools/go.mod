@@ -24,8 +24,7 @@
 // fleet is its own change, and it has to move every module at once.
 module sds-replicated-volume-codegen-tools
 
-go 1.27.0
-
+go 1.27.1
 tool (
 	github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher
 	k8s.io/code-generator/cmd/deepcopy-gen
