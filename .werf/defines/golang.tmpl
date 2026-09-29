@@ -6,6 +6,11 @@
   to: /root/go/pkg
 - from: tmp_dir
   to: /root/.cache/go-build
+{{- /* The netrc of "auth for private go modules". A tmp_dir mount is not part of
+       the stage, so the token written there never reaches a layer of the stages
+       repository. */}}
+- from: tmp_dir
+  to: /run/go-private-auth
 {{- end }}
 
 {{- /* Credentials for the private fox Go modules.
@@ -70,8 +75,17 @@
     # umask left set here would reach the `go build` and the `chmod` that follow and strip the group and
     # other bits off the produced binary, which then cannot be executed by the non-root user the
     # workloads run as. Only the netrc needs to be private.
-    ( umask 077; printf 'machine github.com login gitlab-ci-token password %s\n' "${GO_PRIVATE_TOKEN}" > "${HOME}/.netrc" )
-    git config --global url."https://gitlab-ci-token:${GO_PRIVATE_TOKEN}@github.com/".insteadOf "https://github.com/"
+    #
+    # Nothing that holds the token may land in the stage: its layer is pushed to
+    # the stages repository, and anyone who can pull from it could read a netrc or
+    # a gitconfig left under $HOME. So the netrc goes to a tmp_dir mount (see
+    # "mount points for golang builds") that Go reads through NETRC, and git gets
+    # the insteadOf rule from the environment instead of ~/.gitconfig.
+    ( umask 077; printf 'machine github.com login gitlab-ci-token password %s\n' "${GO_PRIVATE_TOKEN}" > /run/go-private-auth/netrc )
+    export NETRC=/run/go-private-auth/netrc
+    export GIT_CONFIG_COUNT=1
+    export GIT_CONFIG_KEY_0="url.https://gitlab-ci-token:${GO_PRIVATE_TOKEN}@github.com/.insteadOf"
+    export GIT_CONFIG_VALUE_0="https://github.com/"
   else
     echo "GO_PRIVATE_TOKEN is empty: modules under ${GOPRIVATE} cannot be fetched"
   fi

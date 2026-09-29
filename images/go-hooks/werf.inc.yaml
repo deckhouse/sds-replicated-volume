@@ -24,6 +24,8 @@ git:
 mount:
 - fromPath: ~/go-pkg-cache
   to: /go/pkg
+- from: tmp_dir
+  to: /run/go-private-auth
 
 secrets:
 - id: GOPROXY

@@ -100,6 +100,8 @@ import:
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+  - from: tmp_dir
+    to: /run/go-private-auth
 secrets:
 {{ include "secret for private go modules" . }}
 
