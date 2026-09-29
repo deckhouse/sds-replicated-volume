@@ -87,18 +87,6 @@ spec:
       exit 0
     fi
 
-    # DRBD requires the kernel sources to be installed.
-    # Install actual kernel headers. It can be different from current kernel version!
-    # So further we check, if we need new kernel version. It is altlinux feature.
-    apt-get update
-    apt-get -y install kernel-headers-modules-std-def
-
-    if [ ! -e "/lib/modules/$kernel_version_in_use/build" ]; then
-      update-kernel -y
-      bb-flag-set reboot
-      exit 0
-    fi
-
     current_version_regex='{{ include "drbd_current_version_regex" . }}'
     desired_version={{ include "drbd_desired_version" . | quote }}
 
@@ -137,6 +125,21 @@ spec:
         bb-log-info "Desired drbd version is already loaded, nothing to do"
         exit 0
       fi
+    fi
+
+    # The headers are needed only to build DRBD, so they are asked for only once
+    # the check above has found no desired DRBD loaded: a node
+    # that already runs it has no business waiting on its repositories.
+    # DRBD requires the kernel sources to be installed.
+    # Install actual kernel headers. It can be different from current kernel version!
+    # So further we check, if we need new kernel version. It is altlinux feature.
+    apt-get update
+    apt-get -y install kernel-headers-modules-std-def
+
+    if [ ! -e "/lib/modules/$kernel_version_in_use/build" ]; then
+      update-kernel -y
+      bb-flag-set reboot
+      exit 0
     fi
 
     apt-get update

@@ -87,22 +87,6 @@ spec:
       exit 0
     fi
 
-    # DRBD requires the kernel sources to be installed.
-    # Install actual kernel headers
-    #   kernel                --> kernel-devel
-    #   kernel-core           --> kernel-devel
-    #   kernel-modules-core   --> kernel-devel
-    #   kernel-lt             --> kernel-lt-devel
-    #   kernel-lt-core        --> kernel-lt-devel
-    package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
-    bb-dnf-install "${package_name}-${kernel_version_in_use}"
-
-    # Remove unused kernel-headers
-    packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
-    if [ -n "$packages_to_remove" ]; then
-      bb-dnf-remove $packages_to_remove
-    fi
-
     current_version_regex='{{ include "drbd_current_version_regex" . }}'
     desired_version={{ include "drbd_desired_version" . | quote }}
 
@@ -141,6 +125,25 @@ spec:
         bb-log-info "Desired drbd version is already loaded, nothing to do"
         exit 0
       fi
+    fi
+
+    # The headers are needed only to build DRBD, so they are asked for only once
+    # the check above has found no desired DRBD loaded: a node
+    # that already runs it has no business waiting on its repositories.
+    # DRBD requires the kernel sources to be installed.
+    # Install actual kernel headers
+    #   kernel                --> kernel-devel
+    #   kernel-core           --> kernel-devel
+    #   kernel-modules-core   --> kernel-devel
+    #   kernel-lt             --> kernel-lt-devel
+    #   kernel-lt-core        --> kernel-lt-devel
+    package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
+    bb-dnf-install "${package_name}-${kernel_version_in_use}"
+
+    # Remove unused kernel-headers
+    packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
+    if [ -n "$packages_to_remove" ]; then
+      bb-dnf-remove $packages_to_remove
     fi
 
     bb-dnf-install make gcc bind-utils patch mokutil

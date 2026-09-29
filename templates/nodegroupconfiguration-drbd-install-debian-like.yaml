@@ -87,19 +87,6 @@ spec:
       exit 0
     fi
 
-    # DRBD requires the kernel sources to be installed.
-    # Install actual kernel headers
-    bb-apt-install "linux-headers-${kernel_version_in_use}"
-
-    # Remove unused kernel-headers
-    kernel_version_pattern="$(echo "$kernel_version_in_use" | sed -r 's/([0-9\.-]+)-([^0-9]+)$/^linux-headers-(\1|\1-\2)$/')"
-    packages_to_remove="$(
-      dpkg-query -S '/lib/modules/*/build' | awk -F: '{print $1}' | grep -Ev "$kernel_version_pattern" || true
-    )"
-    if [ -n "$packages_to_remove" ]; then
-      bb-apt-remove $packages_to_remove
-    fi
-
     current_version_regex='{{ include "drbd_current_version_regex" . }}'
     desired_version={{ include "drbd_desired_version" . | quote }}
 
@@ -138,6 +125,22 @@ spec:
         bb-log-info "Desired drbd version is already loaded, nothing to do"
         exit 0
       fi
+    fi
+
+    # The headers are needed only to build DRBD, so they are asked for only once
+    # the check above has found no desired DRBD loaded: a node
+    # that already runs it has no business waiting on its repositories.
+    # DRBD requires the kernel sources to be installed.
+    # Install actual kernel headers
+    bb-apt-install "linux-headers-${kernel_version_in_use}"
+
+    # Remove unused kernel-headers
+    kernel_version_pattern="$(echo "$kernel_version_in_use" | sed -r 's/([0-9\.-]+)-([^0-9]+)$/^linux-headers-(\1|\1-\2)$/')"
+    packages_to_remove="$(
+      dpkg-query -S '/lib/modules/*/build' | awk -F: '{print $1}' | grep -Ev "$kernel_version_pattern" || true
+    )"
+    if [ -n "$packages_to_remove" ]; then
+      bb-apt-remove $packages_to_remove
     fi
 
     # Check, if we need gcc version 12
