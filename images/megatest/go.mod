@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/megatest
 
 go 1.27.1
-
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
