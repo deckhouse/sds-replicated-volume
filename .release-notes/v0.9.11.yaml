@@ -1,0 +1,20 @@
+date: "2026-10-01"
+
+summary: "A `ReplicatedStorageClass` created before v0.9.8 no longer goes to `InvalidConfiguration` after the upgrade, nodes that already run the right DRBD version stop installing kernel headers on every bashible run, and the API reference is described in full in both languages."
+
+highlights:
+  - "The legacy controller recreates a StorageClass whose only difference from the desired one is `replicated.csi.storage.deckhouse.io/fsOpts`, so a `ReplicatedStorageClass` created by an earlier version, or one whose `storage.deckhouse.io/ext4-reserved-percent` annotation changes, no longer ends up in the `InvalidConfiguration` phase."
+  - "The DRBD NodeGroupConfiguration installs kernel headers only when it is about to build DRBD; on ALT Linux it no longer updates the kernel and requests a reboot of a node whose DRBD is already up to date."
+  - "Every field of the module's CRDs has an English description in the reference, the Russian reference is complete, and developer notes no longer show up in the descriptions of `ReplicatedStorageClass` and `ReplicatedVolume`."
+
+fixes:
+  - "Since v0.9.8 the legacy controller always writes `replicated.csi.storage.deckhouse.io/fsOpts` into the StorageClass it generates, but did not count it among the parameters a recreate may change. Every StorageClass created by an earlier version therefore compared as a non-recreatable difference, and its `ReplicatedStorageClass` went to the `InvalidConfiguration` phase after the upgrade; changing the `storage.deckhouse.io/ext4-reserved-percent` annotation was refused the same way. The StorageClass is now recreated instead. `fsOpts` is read only when a volume is formatted, so existing volumes are not affected. Applies to the legacy (LINSTOR) control plane."
+  - "The DRBD NodeGroupConfiguration (Debian-, CentOS- and ALT Linux-like distributions) installed the headers of the running kernel, and removed the others, before checking whether the desired DRBD version was already loaded. Every bashible run on such a node asked the distribution repositories for a package it did not need and failed on a node without access to them; on ALT Linux, headers newer than the running kernel made it update the kernel and request a reboot. The headers are now installed only on a node that is about to build DRBD."
+
+security:
+  - "Go dependencies flagged by the vulnerability scan are raised in the agent, the controller, the legacy controller, the webhooks, `linstor-drbd-wait` and `linstor-migrator`: `golang.org/x/net` v0.56.0 → v0.58.0, `golang.org/x/sys` v0.46.0 → v0.47.0, `golang.org/x/text` v0.39.0 → v0.41.0, and, in the controller and the webhooks, `go.opentelemetry.io/otel` v1.37.0 → v1.41.0 and `github.com/google/cel-go` v0.26.0 → v0.29.0."
+
+docs:
+  - "Sixty CRD fields that had no English description in the reference now have one: the top level of `DRBDMapper`, `DRBDNodeOperation`, `DRBDResourceOperation`, `DRBDResource` and `ReplicatedVolume`, most `DRBDResource` fields, and the node and volume names, sizes, addresses and conditions of the `ReplicatedVolume*` resources. The Russian description of `status.activeConfiguration.nonVoting` of `DRBDResource` is corrected: the field is `true` when the disk does not take part in the quorum vote."
+  - "The Russian reference covers all CRDs of the module: 147 descriptions are added, including `apiVersion`, `kind` and the condition fields, and the translations of `status.reason` of `ReplicatedStorageClass` and `ReplicatedStoragePool` move to `status.message`, the field the schema actually has."
+  - "The description of `spec` of `ReplicatedStorageClass` no longer opens with about thirty lines of CEL validation notes, `spec` of `ReplicatedVolume` gets the description \"Desired state of the replicated volume\" instead of CEL rule labels, and `systemNetworkNames` and `lvmVolumeGroups` no longer end with internal TODO notes. Only the descriptions change; the schema is the same."
