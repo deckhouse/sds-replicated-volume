@@ -268,11 +268,11 @@ Indicates whether the replica's placement is complete for its type (see [Schedul
 ## Resync Budget
 
 A Diskful replica that has no node yet receives the whole volume over the network once it is
-placed. `RESYNC_SLOTS_PER_NODE` (`4` by default; `0` means no limit) caps how many such transfers a
+placed. A fixed budget of `4` (the `resyncSlotsPerNode` constant in `controller.go`) caps how many such transfers a
 node may take part in at once, counted in *resync ends* — a transfer between two nodes occupies one
 end on each. The decision itself lives in `internal/syncbudget`, a pure package holding no state.
 
-With the limiter switched on the budget reads twice, both times through an index: the volumes that
+The budget reads twice, both times through an index: the volumes that
 could claim a slot, and the replicas carrying resync ends. Each volume the first read returns then
 costs one more read for its own replicas, because whether a member holds usable data is recorded on
 the replica while the member entry says only where it sits — so the fan-out is one read per volume

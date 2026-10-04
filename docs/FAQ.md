@@ -54,11 +54,10 @@ There are three replication modes in total:
 
 By default, the `ConsistencyAndAvailability` mode is used when creating a `ReplicatedStorageClass`. It can be specified as follows:  
 
-```shell
+```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStorageClass
 metadata:
-  generation: 2
   name: test-rsc
 spec:
   reclaimPolicy: Delete
@@ -122,29 +121,35 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 ## How to expand ReplicatedStoragePool to new cluster node?
 
-To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
+The `spec.lvmVolumeGroups` list of an existing ReplicatedStoragePool cannot be edited in place: the change is rejected with the `Value is immutable` error. To add a new LVM Volume Group to the pool, recreate the resource with the extended list. Deleting a ReplicatedStoragePool does not affect its Storage Pools in LINSTOR, the volumes or the ReplicatedStorageClasses that use the pool.
 
 1. Create new LVMVolumeGroup with [sds-node-configurator](/modules/sds-node-configurator/resources.html#creating-an-lvmvolumegroup-resource)
 
-1. Add the new Volume Group to the existing ReplicatedStoragePool by editing the resource:
+1. Look at the current resource:
 
    ```shell
-   kubectl edit replicatedstoragepool your-pool-name
+   kubectl get replicatedstoragepool your-pool-name -o yaml
    ```
 
-   Add the new Volume Group to the `spec.lvmVolumeGroups` section:
+1. Prepare a manifest with the same `metadata.name` and `spec.type` and the extended `spec.lvmVolumeGroups` list:
 
    ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: your-pool-name
    spec:
+     type: LVM
      lvmVolumeGroups:
      - name: existing-vg-name
      - name: new-vg-name  # Add this line
    ```
 
-1. For LVMThin pools, additionally specify the thin pool name:
+   For LVMThin pools, additionally specify the thin pool name for every Volume Group:
 
    ```yaml
    spec:
+     type: LVMThin
      lvmVolumeGroups:
      - name: existing-vg-name
        thinPoolName: existing-thin-pool
@@ -152,15 +157,21 @@ To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow the
        thinPoolName: new-thin-pool  # Add this line
    ```
 
-1. Save the changes. The controller will automatically create a Storage Pool in LINSTOR for the new Volume Group and add it to the existing ReplicatedStoragePool.
-
-1. Check the expansion status:
+1. Delete the resource and create it again right away from the prepared manifest:
 
    ```shell
-   kubectl get replicatedstoragepool your-pool-name -o yaml
+   kubectl delete replicatedstoragepool your-pool-name
+   kubectl apply -f your-pool-name.yaml
    ```
 
-   Information about the new Volume Group should be displayed in the status.
+   While the resource is absent, the StorageClasses of the pool may get the `storage.deckhouse.io/nonOperational-not-enough-nodes-in-zones` label; it is removed once the resource is created again.
+
+1. Check that the resource is `Ready` and the Storage Pool is present on the new node:
+
+   ```shell
+   kubectl get replicatedstoragepool your-pool-name
+   kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor storage-pool list -s your-pool-name
+   ```
 
 ## How to increase the DRBD device limit or change the ports used by DRBD clusters to communicate?
 
@@ -415,81 +426,17 @@ dmesg | grep 'Remote failed to finish a request within'
 
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
-### Diagnosing DRBD out-of-sync data or lost quorum (new control plane)
-
-This section applies to clusters running the new control plane of `sds-replicated-volume` (its own controller, without LINSTOR). In this mode there is no LINSTOR client: DRBD resources are managed directly with `drbdsetup`, and the per-node agent runs in the `agent` DaemonSet (label `app=agent`). The `agent` container is distroless — it has no shell, so the `drbd*` binaries are invoked directly (`exec ... -- drbdsetup ...`, not `-- bash`).
-
-The DRBD alerts (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdDeviceIsNotConnected`) carry two useful labels:
-
-- `name` — the DRBD resource name; use it as the `<resource>` argument below;
-- `conn_name` — the affected peer connection, shown as `peer-N`, where `N` is the peer node-id used by `drbdsetup` (confirm it in `drbdsetup status --verbose`, which prints `peer-N node-id:X`).
-
-All commands below use `d8 k` as the kubectl entry point.
-
-#### Inspect a resource
-
-Find the `agent` Pod on the node and print the resource status (replace `<node>` and `<resource>`):
-
-```shell
-POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<node> -l app=agent -o name)
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --verbose --statistics
-```
-
-Note: `drbdadm status <resource>` does not work here (the new control plane does not write `/etc/drbd.d/*.res` files), always use `drbdsetup`.
-
-#### Restore a lost quorum (`D8DrbdDeviceHasNoQuorum`)
-
-A diskless Primary suspends its I/O when it loses quorum. A common cause is a diskful replica stuck resyncing near completion (`replication:SyncTarget` with `out-of-sync`/`received` not moving, sometimes a corrupt `done:` value far above 100%), so too few replicas are `UpToDate`.
-
-Reconnect the stalled peer connection on the stalled (`Inconsistent`) node to restart the resync. `<peer-node-id>` is the node-id of the up-to-date source:
-
-```shell
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
-```
-
-The connection re-establishes automatically. When a second replica reaches `UpToDate`, quorum is restored and the Primary resumes I/O (`drbdsetup status <resource>` shows `quorum:yes`, `blocked:no`).
-
-This is safe: the up-to-date source is untouched, an `Inconsistent` replica does not count toward quorum, and the Primary I/O is already suspended, so reconnecting introduces no new disruption and cannot lose data.
-
-#### Clear out-of-sync data (`D8DrbdPeerDeviceIsOutOfSync`)
-
-When both ends of a connection are `UpToDate` but residual `out-of-sync` bytes stay frozen, DRBD will not resync them on its own (matching generation UUIDs mean no resync is triggered). Reconnecting the peer forces a bitmap-based resync of exactly those extents:
-
-```shell
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
-# out-of-sync should become 0:
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --statistics
-```
-
-If a small residual persists:
-
-1. Run an online verification of that connection (reads both disks and reconciles matching/differing blocks):
-
-   ```shell
-   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup verify <resource> <peer-node-id> 0
-   ```
-
-2. If it still persists and the peer disk is `UpToDate`, fully re-mirror the peer copy. On the peer node (the one named by `conn_name`), invalidate its local copy — it becomes `Inconsistent` and does a full resync from an up-to-date replica. Quorum is held by the remaining up-to-date replicas during the resync:
-
-   ```shell
-   PEER_POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<peer-node> -l app=agent -o name)
-   MIN=$(d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup status <peer-resource> --verbose | grep -oE 'minor:[0-9]+' | head -1 | cut -d: -f2)
-   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup invalidate $MIN
-   ```
-
-**Phantom counter.** If, after a full re-mirror, a Primary still reports a tiny `out-of-sync` toward a peer whose data was just re-read bit-for-bit, this is a stale accounting artifact on the Primary side, not a real divergence — the data on all replicas is identical. Reconnect, verify and re-mirror will not clear it, it resets only on a disruptive action (a failover or a reboot of the Primary node). For a live volume it is safe to leave it until the next maintenance window.
-
 ## I deleted a ReplicatedStoragePool resource, but its Storage Pool in the backend is still there. Is that expected?
 
 Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the ReplicatedStoragePool resource.
 
 ## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
-Partly. Most `spec` fields are immutable after creation, and updates to them are rejected with an error that names the field. The replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), the `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy` fields and `reclaimPolicy` (the StorageClass is recreated with the new policy) **can** be changed on an existing resource. Editing `replication` is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); see the "Updating the ReplicatedStorageClass resource" section of the usage guide. All other fields (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, and so on) remain immutable — to change them, recreate the resource.
+Yes, this is the expected behavior. Changing the `spec` of an existing ReplicatedStorageClass is not supported: most fields are rejected on update, and changes to `replication` and `reclaimPolicy`, while accepted by the API, switch the resource to the `InvalidConfiguration` phase and leave its StorageClass unchanged. Revert the change to bring the resource back to `Ready`, or recreate the resource to apply a new configuration.
 
 ## Deleting a ReplicatedStorageClass resource does not delete its child StorageClass in Kubernetes. What can I do?
 
-The child StorageClass is only deleted if the status of the ReplicatedStorageClass resource is `Created`. Otherwise, you will need to either restore the ReplicatedStorageClass resource to a working state or delete the StorageClass yourself.
+The child StorageClass is only deleted if the status of the ReplicatedStorageClass resource is `Ready`. Otherwise, you will need to either restore the ReplicatedStorageClass resource to a working state or delete the StorageClass yourself.
 
 ## An error occurred while creating a Storage Pool or StorageClass, but the entity was created anyway. Is that acceptable?
 
@@ -772,7 +719,7 @@ You can read more about working with ReplicatedStorageClass resources [in the do
 
 ### Migrating to ReplicatedStoragePool
 
-The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/resources.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, refer to the [module usage documentation](./usage.html).
+The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Ready`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/resources.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, refer to the [module usage documentation](./usage.html).
 
 ## Migrating from sds-drbd module to sds-replicated-volume
 
@@ -944,16 +891,17 @@ kubectl -n d8-sds-replicated-volume rollout restart daemonset
 
 Nothing, by default: a volume of this module is formatted with `-m 0`, so the whole volume is available to the workload.
 
-Where the classic 5% ext4 reserve is wanted — for example to keep a filesystem writable for a privileged process after a workload has filled it — annotate the `ReplicatedStorageClass` with the percentage to reserve:
+Where the classic 5% ext4 reserve is wanted — for example to keep a filesystem writable for a privileged process after a workload has filled it — set the percentage to reserve in an annotation when creating the `ReplicatedStorageClass`:
 
-```shell
-d8 k annotate replicatedstorageclass <name> storage.deckhouse.io/ext4-reserved-percent=5
+```yaml
+metadata:
+  name: <name>
+  annotations:
+    storage.deckhouse.io/ext4-reserved-percent: "5"
 ```
 
-The value is a whole number of percent between 0 and 50; an invalid one is rejected by the validating webhook.
+The value is a whole number of percent between 0 and 50; an invalid one is rejected by the validating webhook. Only the ext filesystems keep blocks for the superuser, so the annotation is ignored for XFS volumes.
 
-The reserve applies only to volumes created after the annotation was set — filesystems that already exist keep the reserve they were created with. Only the ext filesystems keep blocks for the superuser, so the annotation is ignored for XFS volumes.
+Set the annotation when creating the resource: adding or changing it on an existing ReplicatedStorageClass switches the resource to the `InvalidConfiguration` phase and leaves its StorageClass unchanged; revert the change to bring the resource back to `Ready`.
 
-Changing the annotation makes the controller recreate the StorageClass, because `parameters` of an existing StorageClass are immutable in Kubernetes. Existing volumes and PVCs are not affected.
-
-On the legacy LINSTOR control plane the same annotation is honoured through the `FileSystem/MkfsParameters` property of the LINSTOR resource definition. The one exception there is the rescue path that formats a volume when LINSTOR did not: it always uses the module default of 0%, because the percentage does not reach it.
+The percentage is applied through the `FileSystem/MkfsParameters` property of the LINSTOR resource definition. The one exception is the rescue path that formats a volume when LINSTOR did not: it always uses the module default of 0%, because the percentage does not reach it.

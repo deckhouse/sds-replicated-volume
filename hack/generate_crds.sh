@@ -119,7 +119,57 @@ if [ ${#rendered_files[@]} -eq 0 ]; then
     exit 1
 fi
 
-echo "Installing the CRDs into crds/"
+# The module documentation is built from the manifests at the top of crds/, and
+# the new control plane has not been released yet, so only the CRDs the released
+# (LINSTOR-based) control plane serves are published there. Every other CRD goes
+# to crds/newcontrolplane/: Deckhouse still installs it into the cluster, but it
+# stays out of the docs. The list names what is public rather than what is
+# hidden, so a newly added kind cannot leak into the documentation by default.
+# Drop the split once the new control plane is released.
+old_control_plane_crds=(
+    storage.deckhouse.io_replicatedstorageclasses.yaml
+    storage.deckhouse.io_replicatedstoragepools.yaml
+)
+new_control_plane_dir="${root_dir}/crds/newcontrolplane"
+
+# A listed CRD that is no longer rendered means a kind was renamed or removed;
+# failing here keeps the list from silently going stale.
+for name in "${old_control_plane_crds[@]}"; do
+    if [ ! -f "${render_dir}/${name}" ]; then
+        echo "error: ${name} is listed in old_control_plane_crds but was not rendered" >&2
+        exit 1
+    fi
+done
+
+echo "Installing the CRDs into crds/ and crds/newcontrolplane/"
+mkdir -p "${new_control_plane_dir}"
 for rendered in "${rendered_files[@]}"; do
-    cp "${rendered}" "${root_dir}/crds/$(basename "${rendered}")"
+    name=$(basename "${rendered}")
+    target_dir="${new_control_plane_dir}"
+    for public in "${old_control_plane_crds[@]}"; do
+        if [ "${name}" = "${public}" ]; then
+            target_dir="${root_dir}/crds"
+            break
+        fi
+    done
+    cp "${rendered}" "${target_dir}/${name}"
+done
+
+# The loop above places only the rendered manifests. A hand-written doc-ru-*.yaml
+# overlay for a hidden kind, or a copy left behind by a kind that moved out of the
+# list, would still be published from the top of crds/, so everything there has to
+# belong to a listed CRD.
+for manifest in "${root_dir}"/crds/*.yaml; do
+    name=$(basename "${manifest}")
+    public=false
+    for listed in "${old_control_plane_crds[@]}"; do
+        if [ "${name#doc-ru-}" = "${listed}" ]; then
+            public=true
+            break
+        fi
+    done
+    if [ "${public}" = false ]; then
+        echo "error: crds/${name} is not in old_control_plane_crds; move it to crds/newcontrolplane/" >&2
+        exit 1
+    fi
 done

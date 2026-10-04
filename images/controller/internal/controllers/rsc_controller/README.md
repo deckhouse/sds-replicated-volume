@@ -172,7 +172,7 @@ mutually exclusive.
 
 **The rollout budget and the resync limiter are unrelated budgets, and they do compose.**
 `rollingUpdate.maxParallel` bounds how many volumes of this class may carry a configuration that
-has not converged yet; the resync-slot limiter (`resyncSlotsPerNode`, enforced by
+has not converged yet; the resync-slot limiter (a fixed `4` per node, enforced by
 `rvr_scheduling_controller`) bounds how many resync ends a single *node* carries at a time. Neither
 one is expressed in the other's units, and neither knows about the other: a volume can hold a
 rollout slot for as long as its replica waits for a resync slot, and a node can be at its resync

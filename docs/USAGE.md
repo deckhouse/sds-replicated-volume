@@ -67,12 +67,8 @@ The `sds-replicated-volume-controller` will then process the `ReplicatedStorageP
 
 #### Updating the ReplicatedStoragePool resource
 
-You can add new LVMVolumeGroups to the `spec.lvmVolumeGroups` list (effectively adding new nodes to the Storage Pool).
+The `spec` of the ReplicatedStoragePool resource cannot be changed after creation. To add LVMVolumeGroups (nodes) to the Storage Pool, recreate the resource with the extended `spec.lvmVolumeGroups` list: deleting the resource does not affect the `Storage Pool` in the backend. The procedure is described [in the FAQ](./faq.html#how-to-expand-replicatedstoragepool-to-new-cluster-node).
 
-The `sds-replicated-volume-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the backend. The results of this operation will also be reflected in the `status` field of the `ReplicatedStoragePool` resource.
-
-> Note that the `spec.type` field of the ReplicatedStoragePool resource is **immutable**.
->
 > The controller does not respond to changes made by the user in the `status` field of the resource.
 
 #### Deleting the ReplicatedStoragePool resource
@@ -82,7 +78,7 @@ Currently, the `sds-replicated-volume-controller` does not handle the deletion o
 > Deleting a resource does not affect the `Storage Pool` created for it in the backend.
 If the user recreates the deleted resource with the same name and configuration, the controller will detect that the corresponding `Storage Pools` are already created, so no changes will be made.
 
-The `status.phase` field of the created resource will be set to `Created`.
+The `status.phase` field of the created resource will be set to `Ready`.
 
 ### Using ReplicatedStorageClass resources
 
@@ -98,6 +94,7 @@ kind: ReplicatedStorageClass
 metadata:
   name: haclass
 spec:
+  replication: ConsistencyAndAvailability
   storagePool: storage-pool-name
   volumeAccess: Local
   reclaimPolicy: Delete
@@ -108,7 +105,7 @@ spec:
   - zone-c
 ```
 
-The `replication` parameter is omitted since it is set to `ConsistencyAndAvailability` by default, which is consistent with high redundancy requirements.
+The `replication` parameter is set to `ConsistencyAndAvailability`, which is consistent with high redundancy requirements. The parameter is optional and an unset value is treated as `ConsistencyAndAvailability`, but setting it explicitly is recommended.
 
 Below is an example of a resource for creating a StorageClass with allowed access to data over the network and no redundancy in a cluster where there are no zones (e.g., it is a good fit for testing environments):
 
@@ -131,104 +128,20 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that most fields of the `spec` section of the ReplicatedStorageClass resource are **immutable** after creation. Only the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy` and `reclaimPolicy` (the StorageClass is recreated with the new policy) can be changed on an existing resource; changing any other field (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, etc.) is rejected on update.
+> Please note that the `spec` fields of the ReplicatedStorageClass resource cannot be changed after creation.
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
 #### Updating the ReplicatedStorageClass resource
 
-Most `spec` fields are immutable after creation, and any attempt to change one is rejected with an error naming the field; changing such a field (for example `storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`) requires recreating the resource. The replication settings and `reclaimPolicy` are mutable: editing `replication` enables the r3→r2 migration below, and editing `reclaimPolicy` makes the module recreate the StorageClass with the new policy.
-
-##### Migrating volumes from three replicas (r3) to two replicas + tie-breaker (r2)
-
-Editing `spec.replication` of an existing ReplicatedStorageClass changes the intended layout of **all** volumes of that class at once. To migrate from `ConsistencyAndAvailability` (three data replicas, layout `3D`) to `Availability` (two data replicas plus a diskless tie-breaker, layout `2D+1TB`):
-
-1. Edit the class:
-
-   ```shell
-   kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"replication":"Availability"}}'
-   ```
-
-2. The controller migrates each volume in place: one diskful replica is retyped into a tie-breaker (no full resync, no data movement) and its logical volume is released. Watch progress per volume via the `LAYOUT` and `CONVERGED` print columns (`CONVERGED` needs `-o wide`):
-
-   ```shell
-   kubectl get replicatedvolume -o wide
-   kubectl get replicatedvolume <RV_NAME> -o jsonpath='{.status.membershipLayout} {range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}{end}{"\n"}'
-   ```
-
-   A volume is migrated when `MembershipLayoutConverged` is `True/Converged` and `status.membershipLayout` is `2D+1TB`.
-
-3. Watch the class-wide rollout via the `ConfigurationRolledOut` condition and the `status.volumes` counters:
-
-   ```shell
-   kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.volumes}{"\n"}'
-   ```
-
-   The rollout is complete when `ConfigurationRolledOut` is `True`, which happens exactly when `status.volumes.pendingObservation` and `status.volumes.staleConfiguration` are both `0`.
-
-   Do not wait for `aligned` to reach `total`. Only volumes that take their configuration from the class participate in the rollout; a volume switched to `spec.configurationMode: Manual` carries its own configuration, so the class neither rolls anything out to it nor waits for it. Such volumes are still counted in `total`, and the class therefore completes the rollout with `aligned` below `total`.
-
-**Requirements.** The `2D+1TB` layout needs a node for the tie-breaker in addition to the two diskful nodes: at least 3 nodes for `Ignored` topology, at least 3 zones for `TransZonal`, or at least 3 nodes in the volume's zone for `Zonal`. These match the `3D` requirements, so r3→r2 does not raise them.
-
-**Limiting the rollout to new volumes.** By default (`configurationRolloutStrategy.type: RollingUpdate`) a configuration edit applies to every volume of the class. Set the strategy to `NewVolumesOnly` to apply it to newly created volumes only:
-
-```shell
-kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"configurationRolloutStrategy":{"type":"NewVolumesOnly","rollingUpdate":null}}}'
-```
-
-Volumes that already have a configuration then keep it. Such a volume observes the new configuration (so the class is not stuck waiting for it) but does not apply it, and reports:
-
-```shell
-kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationReady")]}{.status}/{.reason}: {.message}{end}{"\n"}'
-# False/NewerConfigurationHeld: ... has a newer configuration (generation N); the volume keeps its configuration (generation M) ...
-```
-
-Held volumes are counted in `status.volumes.staleConfiguration` of the class, and `ConfigurationRolledOut` becomes `False/ConfigurationRolloutDisabled`. The hold is deliberate and persists even if the held configuration later stops matching the cluster: to release a volume, switch the strategy back to `RollingUpdate` (all held volumes roll out through the normal path) or recreate the volume. Switching from `RollingUpdate` to `NewVolumesOnly` never rolls anything back — configuration already applied stays applied.
-
-**Throttling the rollout.** Under `RollingUpdate`, `configurationRolloutStrategy.rollingUpdate.maxParallel` (default `5`) caps how many volumes of the class migrate at the same time:
-
-```shell
-kubectl patch replicatedstorageclass <RSC_NAME> --type=merge -p '{"spec":{"configurationRolloutStrategy":{"type":"RollingUpdate","rollingUpdate":{"maxParallel":2}}}}'
-```
-
-The volumes that still need the new configuration are ordered by name, and the leading ones fill the free slots — all of them at once, so with `maxParallel: 2` the first two migrate in parallel. A slot frees up when its volume reports `MembershipLayoutConverged=True/Converged`, and the next name in the order takes it. The ones still waiting keep their own configuration and report:
-
-```shell
-kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationReady")]}{.status}/{.reason}: {.message}{end}{"\n"}'
-# False/ConfigurationRolloutInProgress: ... rolls its configuration (generation N) out to at most 2 volume(s) at a time ...
-```
-
-Waiting volumes are counted in `status.volumes.staleConfiguration` of the class, so `ConfigurationRolledOut` stays `False/ConfigurationRolloutInProgress` until the whole class has migrated. Lowering `maxParallel` does not stop volumes that are already migrating — it only keeps new ones from joining. A volume that can never converge on the new configuration (see the limitations below) holds its slot indefinitely, and that is the point of the parameter: it bounds how many volumes a bad edit reaches, not only how fast a good one spreads.
-
-**Limitations.**
-
-- There is no automatic reverse path: editing `replication` back toward more replicas (r2→r3) is reported on each volume as `MembershipLayoutConverged=False/TransitionUnsupported` and performs no action until you intervene. The blocker is the *removal*, not the addition: r2 keeps a tie-breaker that r3 does not ask for, and the control plane never removes a replica. **Delete the tie-breaker replica** — with an odd diskful count no tie-breaker is required, so the datamesh releases it — and the missing third copy is then added automatically. Doing it the other way round (adding the copy first) also works but keeps the volume in `TransitionUnsupported` for the whole migration. (A volume that merely *lost* a diskful replica is a different case and needs no manual step at all: see below.)
-- Reverting the edit while a volume is still migrating does not cancel a retype that is already in flight, and such a volume never reports `Converged` again on its own. Depending on the timing the volume ends up either at `2D+1TB` against the intended `3D` (`MembershipLayoutConverged=False/TransitionUnsupported`), or with a replica whose `spec.type` is stuck at `TieBreaker` while the layout still reads `3D` (`MembershipLayoutConverged=False/Converging`, with the affected replica named in the condition message). No data is lost in either case. In the second case, restore the replica with a single patch that sets `spec.type` back to `Diskful` and re-adds its backing-volume fields (`spec.lvmVolumeGroupName`, and `spec.lvmVolumeGroupThinPoolName` for a thin pool) with the values from `status.datamesh.members` of the volume.
-- `eligibleNodesConflictResolutionStrategy.rollingRepair.maxParallel` is accepted but not implemented: repairing volumes that ended up on non-eligible nodes is not throttled. This is a different parameter from the configuration rollout `maxParallel` above, which is enforced.
-
-#### Recovering a lost replica
-
-A volume that lost a diskful replica — the node was removed, the replica was force-removed, or the member left the datamesh for any other reason — repairs itself. The control plane creates a replacement `ReplicatedVolumeReplica`, the scheduler places it, the datamesh joins it and the data is resynchronized. No manual step is involved, and the sequence is the same whatever removed the member.
-
-While the repair runs, the volume reports its progress in `MembershipLayoutConverged`, for example `False/Converging: creating diskful replica: have 2D, want 3D`. The `D8ReplicatedVolumeLayoutDegraded` alert stays silent throughout: it fires on `TransitionUnsupported` and `CannotConverge` only.
-
-```shell
-kubectl get replicatedvolume <RV_NAME> -o jsonpath='{.status.membershipLayout} {range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{end}{"\n"}'
-```
-
-Two things to expect:
-
-- **One copy at a time.** A volume that lost two replicas is repaired over two rounds: the second replacement is created only once the first has joined. Capacity is not reserved in advance.
-- **Nowhere to place it.** If no eligible node can host the replica, the volume reports `False/CannotConverge` with the scheduler's own summary and the alert does fire — this is the case that needs a human. The replica already exists and is placed as soon as a node or capacity appears; nothing has to be created by hand.
-
-What is **not** repaired automatically, because the control plane never removes a replica or its data: a volume with more replicas than its configuration asks for, and a replica whose member is still in the datamesh but whose disk is gone (that is a replacement, not an addition).
+It is currently **not possible** to change configuration parameters of the StorageClass created via the ReplicatedStorageClass resource. Most `spec` fields are rejected on update. Changes to `replication` and `reclaimPolicy` are accepted by the API, but the resource switches to the `InvalidConfiguration` phase and its StorageClass is left unchanged; revert the change to bring the resource back to `Ready`. To apply a new configuration, recreate the resource.
 
 #### Deleting the ReplicatedStorageClass resource
 
 You can delete the StorageClass in Kubernetes by removing its`ReplicatedStorageClass resource.
 The`sds-replicated-volume-controller` will detect that the resource has been deleted and carry out all necessary operations to properly delete its associated StorageClass.
 
-> The `sds-replicated-volume-controller` will only delete the StorageClass associated with the resource if the `status.phase` field of the ReplicatedStorageClass resource is set to `Created`. Otherwise, the controller will only delete the ReplicatedStorageClass resource while its associated StorageClass will not be affected.
+> The `sds-replicated-volume-controller` will only delete the StorageClass associated with the resource if the `status.phase` field of the ReplicatedStorageClass resource is set to `Ready`. Otherwise, the controller will only delete the ReplicatedStorageClass resource while its associated StorageClass will not be affected.
 
 ## Additional features for applications
 

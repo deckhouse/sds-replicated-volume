@@ -55,8 +55,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ReplicatedStorageClass is a Kubernetes Custom Resource that defines
-          a configuration for a Kubernetes Storage class.
+        description: |-
+          ReplicatedStorageClass is the interface for managing StorageClasses of the replicated.csi.storage.deckhouse.io
+          CSI driver. Creating a StorageClass for this driver manually is prohibited.
         properties:
           apiVersion:
             description: |-
@@ -79,14 +80,19 @@ spec:
             description: |-
               Defines a Kubernetes Storage class configuration.
 
-              > Most fields are immutable after creation. Only the replication settings
-              > (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
+              > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
+              > most fields are rejected, and changes to replication or reclaimPolicy switch the
+              > resource to the InvalidConfiguration phase and leave its StorageClass unchanged.
+              > In the new control-plane most fields are immutable after creation as well, but the
+              > replication settings (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
               > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
-              > reclaimPolicy (the StorageClass is recreated with the new policy) can be
-              > changed on an existing resource; all other fields are rejected on update.
+              > reclaimPolicy (the StorageClass is recreated with the new policy) can be changed on an
+              > existing resource.
             properties:
               configurationRolloutStrategy:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   ConfigurationRolloutStrategy defines how configuration changes are applied to existing volumes.
                   When not specified, the controller fills the default (RollingUpdate, maxParallel=5).
                 properties:
@@ -122,6 +128,8 @@ spec:
                   rule: self.type == 'RollingUpdate' || !has(self.rollingUpdate)
               eligibleNodesConflictResolutionStrategy:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
                   When not specified, the controller fills the default (RollingRepair, maxParallel=5).
                 properties:
@@ -157,6 +165,8 @@ spec:
                   rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   When not specified, the controller fills the default (notReadyGracePeriod=10m).
                 properties:
@@ -171,6 +181,8 @@ spec:
                 type: object
               failuresToTolerate:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   FailuresToTolerate (FTT) specifies how many arbitrary node failures the volume
                   can tolerate while remaining available for IO.
                   Mutually exclusive with Replication.
@@ -181,6 +193,8 @@ spec:
                 type: integer
               guaranteedMinimumDataRedundancy:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   GuaranteedMinimumDataRedundancy (GMDR) specifies the minimum number of additional
                   data copies maintained while the volume is serving IO. GMDR=0 means the system may
                   operate with a single data copy in degraded mode (like a RAID-1 mirror after one
@@ -193,6 +207,8 @@ spec:
                 type: integer
               nodeLabelSelector:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   NodeLabelSelector filters nodes eligible for DRBD participation.
                   Only nodes matching this selector can store data, provide access, or host tiebreaker.
                   If not specified, all nodes are candidates.
@@ -242,29 +258,36 @@ spec:
                 x-kubernetes-map-type: atomic
               reclaimPolicy:
                 description: |-
-                  The storage class's reclaim policy. Might be:
-                  - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
-                  - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
+                  The reclaim policy of the StorageClass. Might be:
+                  - Delete (if the PersistentVolumeClaim is deleted, the PersistentVolume is deleted with it)
+                  - Retain (if the PersistentVolumeClaim is deleted, the PersistentVolume stays intact in the Released phase)
+
+                  > Changing the field is not supported in the LINSTOR control-plane: the resource switches
+                  > to the InvalidConfiguration phase. In the new control-plane the StorageClass is recreated
+                  > with the new policy.
                 enum:
                 - Delete
                 - Retain
                 type: string
               replication:
                 description: |-
-                  Deprecated: Use FailuresToTolerate and GuaranteedMinimumDataRedundancy instead.
-                  Mutually exclusive with FailuresToTolerate/GuaranteedMinimumDataRedundancy.
+                  Deprecated: in the new control-plane, use failuresToTolerate and
+                  guaranteedMinimumDataRedundancy instead; the field is mutually exclusive with them.
 
                   The Storage class's replication mode. Might be:
-                  - None — single replica, no replication. Requires topology to be 'Ignored'.
-                  - Availability — 2 replicas; can lose 1 node but may lose data redundancy in degraded mode.
-                  - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO.
-                  - ConsistencyAndAvailability — 3 replicas; can lose 1 node and keeps consistency.
+                  - None — replication is disabled; the data exists in a single copy.
+                  - Availability — the volume stays readable and writable even if one of its replicas becomes unavailable. The data is stored in two copies on different nodes. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss if the network connectivity between nodes is disrupted. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
+                  - Consistency — 2 replicas with consistency guarantees; requires both replicas for IO. Supported only in the new control-plane.
+                  - ConsistencyAndAvailability — the volume stays readable and writable even if one of its replicas becomes unavailable. The data is stored in three copies on different nodes. This mode protects against data loss when two nodes holding volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
 
-                  Mapping to failuresToTolerate/guaranteedMinimumDataRedundancy:
+                  Mapping to failuresToTolerate/guaranteedMinimumDataRedundancy (in the new control-plane):
                     None                       → failuresToTolerate=0, guaranteedMinimumDataRedundancy=0
                     Availability               → failuresToTolerate=1, guaranteedMinimumDataRedundancy=0
                     Consistency                → failuresToTolerate=0, guaranteedMinimumDataRedundancy=1
                     ConsistencyAndAvailability → failuresToTolerate=1, guaranteedMinimumDataRedundancy=1
+
+                  > Both in the new control-plane and in the LINSTOR control-plane an unset value is treated
+                  > as 'ConsistencyAndAvailability'; setting the field explicitly is recommended.
                 enum:
                 - None
                 - Availability
@@ -273,6 +296,8 @@ spec:
                 type: string
               storage:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   Storage defines the storage backend configuration for this storage class.
                   Specifies the type of volumes (LVM or LVMThin) and which LVMVolumeGroups
                   will be used to allocate space for volumes.
@@ -292,7 +317,9 @@ spec:
                           pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
                           type: string
                         thinPoolName:
-                          description: Selected Thin-pool name.
+                          description: |-
+                            The name of the selected Thin-pool within the LVMVolumeGroup. Required if the
+                            ReplicatedStoragePool type is LVMThin.
                           maxLength: 128
                           minLength: 1
                           pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$
@@ -328,16 +355,21 @@ spec:
                     || size(g.thinPoolName) == 0)
               storagePool:
                 description: |-
-                  StoragePool is the name of a ReplicatedStoragePool resource.
-                  This field cannot be added or changed, only removed.
+                  Deprecated: in the new control-plane, use storage instead.
 
-                  Deprecated: Use Storage instead.
+                  The name of the ReplicatedStoragePool resource, which is the Storage Pool in the LINSTOR
+                  backend the volumes are created in. Required in the LINSTOR control-plane.
+
+                  > The field cannot be added or changed after creation; removing it is possible only in
+                  > the new control-plane.
                 type: string
                 x-kubernetes-validations:
                 - message: StoragePool cannot be added or changed, only removed
                   rule: size(self) == 0 || self == oldSelf
               systemNetworkNames:
                 description: |-
+                  Only meaningful with the new control-plane.
+
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
                   At least one network name must be specified. Each name is limited to 64 characters.
                 items:
@@ -355,13 +387,17 @@ spec:
                   - TransZonal — replicas of the volumes will be created in different zones (one replica per zone).
                     To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
                   - Zonal — all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+                    Recommended when the latency between zones is high and/or the bandwidth is low.
                   - Ignored — the topology information will not be used to place replicas of the volumes.
                     The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
                     Required when replication is 'None'.
 
                   > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+                  > In the LINSTOR control-plane 'Zonal' and 'TransZonal' can be used only if there are zones in the cluster.
 
                   > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
+
+                  > The field is immutable after creation.
                 enum:
                 - TransZonal
                 - Zonal
@@ -370,15 +406,17 @@ spec:
               volumeAccess:
                 default: PreferablyLocal
                 description: |-
-                  The Storage class's volume access mode. Defines how pods access the volume. Might be:
-                  - Local — volume is accessed only from the node where a replica resides. Pod scheduling waits for consumer.
-                  - EventuallyLocal — volume can be accessed remotely, but a local replica will be created on the accessing node
-                    after some time. Pod scheduling waits for consumer.
-                  - PreferablyLocal — volume prefers local access but allows remote access if no local replica is available.
-                    Scheduler tries to place pods on nodes with replicas. Pod scheduling waits for consumer.
-                  - Any — volume can be accessed from any node. Most flexible mode with immediate volume binding.
+                  The volume access mode. Might be:
+                  - Local — pods cannot be created on nodes that have no local replica of the volume used by the pod.
+                  - EventuallyLocal — the volume is created right after the pod appears and is assigned a node. The pod's topology settings are taken into account on initial creation, and a local replica is created on the pod's node where possible. If the pod is created on a node without a local replica, it is attached to the existing replicas over the network, and after 30 minutes a local replica starts being created on that node, which copies all volume data over the network from the other replicas.
+                  - PreferablyLocal — the same as EventuallyLocal, except that a pod created on a node without a local replica stays attached to the replicas over the network permanently (no local replica is created on that node).
+                  - Any — the volume is created before the pod appears and can be placed on any available node regardless of the topology settings of the pod that will use it. A pod created on a node without a local replica stays attached to the replicas over the network permanently.
 
                   > Note that the default Volume Access mode is 'PreferablyLocal'.
+
+                  > With EventuallyLocal, PreferablyLocal and Any, access to the data over the network is allowed only within one zone: a pod cannot be created in a zone that has no replica of the volume.
+
+                  > The field is immutable after creation.
                 enum:
                 - Local
                 - EventuallyLocal
@@ -387,15 +425,15 @@ spec:
                 type: string
               zones:
                 description: |-
-                  Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
-                  the Storage class's name on the nodes which be actual used by the Storage class.
+                  The list of zones the StorageClass's volumes are replicated in. The controller puts a label
+                  with the StorageClass's name on the nodes where replicas of the volumes can be created.
 
-                  For TransZonal topology, the number of zones depends on replication mode:
-                  - Availability, ConsistencyAndAvailability: at least 3 zones required
-                  - Consistency: at least 2 zones required
-
-                  When replication is 'None', zones act as a node constraint
-                  limiting where the single replica can be placed.
+                  > Required with the TransZonal topology; with 'Availability' and 'ConsistencyAndAvailability'
+                  > replication exactly 3 zones must be specified.
+                  > In the LINSTOR control-plane the field can be set only with the TransZonal topology.
+                  > In the new control-plane, 'Consistency' replication requires at least 2 zones, and with
+                  > 'None' replication the zones limit where the single replica can be placed.
+                  > The field is immutable after creation.
                 items:
                   maxLength: 63
                   type: string

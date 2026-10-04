@@ -151,7 +151,9 @@ func ReconcileReplicatedStorageClassReplication(
 		log.Debug(fmt.Sprintf("ReplicatedStorageClass %s replication type %s", rsc.Name, rsc.Spec.Replication))
 		switch rsc.Spec.Replication {
 		case ReplicationNone:
-		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+		// An unset replication is ConsistencyAndAvailability: the CRD no longer defaults the
+		// field, and the StorageClass is built for it as ConsistencyAndAvailability already.
+		case ReplicationAvailability, ReplicationConsistencyAndAvailability, "":
 			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {
@@ -212,7 +214,12 @@ func ReconcileReplicatedStorageClassReplication(
 			log.Error(fmt.Sprintf("replication type validation failed for ReplicatedStorageClass %s", rsc.Name), logger.Err(err))
 
 			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalLabel)
+			continue
 		}
+
+		// The replication type is supported, so a label left from the time it was not (an unset
+		// replication used to be rejected) must go, or the StorageClass alert keeps firing.
+		removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalLabel)
 	}
 	log.Info("ends reconcile")
 }

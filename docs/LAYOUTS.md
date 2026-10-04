@@ -18,6 +18,7 @@ kind: ReplicatedStorageClass
 metadata:
   name: zonal-storage-class
 spec:
+  replication: ConsistencyAndAvailability
   storagePool: storage-pool-name
   volumeAccess: Local
   reclaimPolicy: Delete
@@ -55,6 +56,7 @@ kind: ReplicatedStorageClass
 metadata:
   name: trans-zonal-storage-class
 spec:
+  replication: ConsistencyAndAvailability
   storagePool: storage-pool-name
   volumeAccess: EventuallyLocal
   reclaimPolicy: Delete

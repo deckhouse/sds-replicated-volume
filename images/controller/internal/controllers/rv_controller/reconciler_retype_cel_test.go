@@ -35,10 +35,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// generatedRVRCRDPath points at the CRD produced by hack/generate_code.sh. It lives at the
-// repository root, outside every Go module, so it cannot be embedded with go:embed; the test
-// reads it at runtime (the sanctioned exception in go-tests.mdc).
-const generatedRVRCRDPath = "../../../../../crds/storage.deckhouse.io_replicatedvolumereplicas.yaml"
+// generatedRVRCRDPath points at the CRD produced by hack/generate_code.sh. The new control
+// plane CRDs are kept in crds/newcontrolplane/ (see hack/generate_crds.sh), outside every Go
+// module, so it cannot be embedded with go:embed; the test reads it at runtime (the sanctioned
+// exception in go-tests.mdc).
+const generatedRVRCRDPath = "../../../../../crds/newcontrolplane/storage.deckhouse.io_replicatedvolumereplicas.yaml"
 
 // loadRVRSpecCELValidator loads the generated ReplicatedVolumeReplica CRD, builds the structural
 // schema for .spec and returns a CEL validator for the spec-level rules — the very rules the

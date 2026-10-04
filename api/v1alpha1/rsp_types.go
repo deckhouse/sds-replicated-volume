@@ -79,15 +79,19 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:Enum=LVM;LVMThin
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Type ReplicatedStoragePoolType `json:"type"`
-	// An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
-	// the required space.
+	// The list of LVMVolumeGroup resources whose Volume Groups/Thin-pools are used to create
+	// Storage Pools in the LINSTOR backend.
 	//
-	// > Note that every LVMVolumeGroup resource has to have the same type Thin/Thick
-	// as it is in current resource's 'Spec.Type' field.
+	// > Note that every LVMVolumeGroup resource must have the same type (Thin/Thick) as specified
+	// > in the 'spec.type' field.
+	//
+	// > The field is immutable after creation; to add LVMVolumeGroups, recreate the resource.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MinItems=1
 	// +listType=atomic
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
+	// Only meaningful with the new control-plane.
+	//
 	// Array of zones the Storage pool's volumes should be replicated in.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MaxItems=10
@@ -95,6 +99,8 @@ type ReplicatedStoragePoolSpec struct {
 	// +listType=set
 	// +optional
 	Zones []string `json:"zones,omitempty"`
+	// Only meaningful with the new control-plane.
+	//
 	// NodeLabelSelector filters nodes eligible for storage pool participation.
 	// Only nodes matching this selector can store data.
 	// If not specified, all nodes with matching LVMVolumeGroups are candidates.
@@ -107,6 +113,8 @@ type ReplicatedStoragePoolSpec struct {
 	// Custom network support requires NetworkNode watch implementation in the controller.
 	// When multi-network support is implemented, raise MaxItems to 10.
 
+	// Only meaningful with the new control-plane.
+	//
 	// SystemNetworkNames specifies network names used for DRBD replication traffic.
 	// At least one network name must be specified. Each name is limited to 64 characters.
 	// +kubebuilder:validation:MinItems=1
@@ -116,6 +124,8 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:default:={"Internal"}
 	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`
+	// Only meaningful with the new control-plane.
+	//
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// Always present with defaults.
 	// +kubebuilder:default={notReadyGracePeriod: "10m"}
@@ -152,7 +162,8 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$`
 	Name string `json:"name"`
-	// Selected Thin-pool name.
+	// The name of the selected Thin-pool within the LVMVolumeGroup. Required if the
+	// ReplicatedStoragePool type is LVMThin.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$`

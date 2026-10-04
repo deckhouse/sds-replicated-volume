@@ -22,6 +22,7 @@ import (
 
 	client2 "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -933,6 +934,351 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
+		assert.False(t, exist)
+	})
+
+	t.Run("ReconcileReplicatedStorageClassReplication_replication_unset_topology_Ignored_enough_nodes_no_label_sc", func(t *testing.T) {
+		const (
+			noLabelNode1 = "no-label-node1"
+			noLabelNode2 = "no-label-node2"
+			noLabelNode3 = "no-label-node3"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
+		)
+
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode1,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode2,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode3,
+					},
+				},
+			},
+		}
+
+		spNodes := map[string][]v1.Node{
+			rspName: nodeList.Items,
+		}
+
+		rscs := map[string]srv.ReplicatedStorageClass{
+			rscName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rscName,
+				},
+				Spec: srv.ReplicatedStorageClassSpec{
+					Topology:    TopologyIgnored,
+					StoragePool: rspName,
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: rscName,
+			},
+		}
+
+		require.NoError(t, cl.Create(ctx, sc))
+		defer func() {
+			require.NoError(t, cl.Delete(ctx, sc))
+		}()
+
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
+
+		updatedSc := &storagev1.StorageClass{}
+		require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: rscName}, updatedSc))
+
+		_, exist := updatedSc.Labels[NonOperationalLabel]
+		assert.False(t, exist)
+		_, exist = updatedSc.Labels[NonOperationalByReplicasLabel]
+		assert.False(t, exist)
+	})
+
+	t.Run("ReconcileReplicatedStorageClassReplication_replication_unset_topology_Ignored_not_enough_nodes_label_sc", func(t *testing.T) {
+		const (
+			noLabelNode1 = "no-label-node1"
+			noLabelNode2 = "no-label-node2"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
+		)
+
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode1,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode2,
+					},
+				},
+			},
+		}
+
+		spNodes := map[string][]v1.Node{
+			rspName: nodeList.Items,
+		}
+
+		rscs := map[string]srv.ReplicatedStorageClass{
+			rscName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rscName,
+				},
+				Spec: srv.ReplicatedStorageClassSpec{
+					Topology:    TopologyIgnored,
+					StoragePool: rspName,
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: rscName,
+			},
+		}
+
+		require.NoError(t, cl.Create(ctx, sc))
+		defer func() {
+			require.NoError(t, cl.Delete(ctx, sc))
+		}()
+
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
+
+		updatedSc := &storagev1.StorageClass{}
+		require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: rscName}, updatedSc))
+
+		_, exist := updatedSc.Labels[NonOperationalLabel]
+		assert.False(t, exist)
+		_, exist = updatedSc.Labels[NonOperationalByReplicasLabel]
+		assert.True(t, exist)
+	})
+
+	t.Run("ReconcileReplicatedStorageClassReplication_replication_unset_topology_TransZonal_not_enough_nodes_label_sc", func(t *testing.T) {
+		const (
+			node1   = "node1"
+			node2   = "node2"
+			node3   = "node3"
+			zone1   = "test-zone1"
+			zone2   = "test-zone2"
+			zone3   = "test-zone3"
+			rscName = "rsc-test"
+			rspName = "rsp-test"
+		)
+
+		// zone3 has no nodes, so the trans-zonal quorum cannot be met.
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1,
+						Labels: map[string]string{
+							ZoneLabel: zone1,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2,
+						Labels: map[string]string{
+							ZoneLabel: zone2,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node3,
+						Labels: map[string]string{
+							ZoneLabel: zone2,
+						},
+					},
+				},
+			},
+		}
+
+		spNodes := map[string][]v1.Node{
+			rspName: nodeList.Items,
+		}
+
+		rscs := map[string]srv.ReplicatedStorageClass{
+			rscName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rscName,
+				},
+				Spec: srv.ReplicatedStorageClassSpec{
+					Zones:       []string{zone1, zone2, zone3},
+					Topology:    TopologyTransZonal,
+					StoragePool: rspName,
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: rscName,
+			},
+		}
+
+		require.NoError(t, cl.Create(ctx, sc))
+		defer func() {
+			require.NoError(t, cl.Delete(ctx, sc))
+		}()
+
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
+
+		updatedSc := &storagev1.StorageClass{}
+		require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: rscName}, updatedSc))
+
+		_, exist := updatedSc.Labels[NonOperationalLabel]
+		assert.False(t, exist)
+		_, exist = updatedSc.Labels[NonOperationalByReplicasLabel]
+		assert.True(t, exist)
+	})
+
+	t.Run("ReconcileReplicatedStorageClassReplication_replication_unsupported_keeps_non_operational_label_sc", func(t *testing.T) {
+		const (
+			node1   = "node1"
+			node2   = "node2"
+			node3   = "node3"
+			rscName = "rsc-test"
+			rspName = "rsp-test"
+		)
+
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node3,
+					},
+				},
+			},
+		}
+
+		spNodes := map[string][]v1.Node{
+			rspName: nodeList.Items,
+		}
+
+		rscs := map[string]srv.ReplicatedStorageClass{
+			rscName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rscName,
+				},
+				Spec: srv.ReplicatedStorageClassSpec{
+					Replication: "Unsupported",
+					Topology:    TopologyIgnored,
+					StoragePool: rspName,
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: rscName,
+			},
+		}
+
+		require.NoError(t, cl.Create(ctx, sc))
+		defer func() {
+			require.NoError(t, cl.Delete(ctx, sc))
+		}()
+
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
+
+		// The label set for the unsupported type must survive the same pass: the cleanup of
+		// NonOperationalLabel after the switch is meant for supported types only.
+		updatedSc := &storagev1.StorageClass{}
+		require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: rscName}, updatedSc))
+
+		assert.Equal(t, "true", updatedSc.Labels[NonOperationalLabel])
+	})
+
+	t.Run("ReconcileReplicatedStorageClassReplication_replication_unset_removes_non_operational_label_sc", func(t *testing.T) {
+		const (
+			noLabelNode1 = "no-label-node1"
+			noLabelNode2 = "no-label-node2"
+			noLabelNode3 = "no-label-node3"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
+		)
+
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode1,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode2,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: noLabelNode3,
+					},
+				},
+			},
+		}
+
+		spNodes := map[string][]v1.Node{
+			rspName: nodeList.Items,
+		}
+
+		rscs := map[string]srv.ReplicatedStorageClass{
+			rscName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rscName,
+				},
+				Spec: srv.ReplicatedStorageClassSpec{
+					Topology:    TopologyIgnored,
+					StoragePool: rspName,
+				},
+			},
+		}
+
+		// The label an earlier version put on the StorageClass of an RSC with an unset replication.
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: rscName,
+				Labels: map[string]string{
+					NonOperationalLabel: "true",
+				},
+			},
+		}
+
+		require.NoError(t, cl.Create(ctx, sc))
+		defer func() {
+			require.NoError(t, cl.Delete(ctx, sc))
+		}()
+
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
+
+		updatedSc := &storagev1.StorageClass{}
+		require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: rscName}, updatedSc))
+
+		_, exist := updatedSc.Labels[NonOperationalLabel]
 		assert.False(t, exist)
 	})
 

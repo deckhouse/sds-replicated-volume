@@ -261,7 +261,7 @@ EOF
 
 ```
 
-- Wait for the created `ReplicatedStoragePool` resource to become `Completed`:
+- Wait for the created `ReplicatedStoragePool` resource to become `Ready`:
 
 ```shell
 kubectl get rsp data -w
@@ -294,13 +294,14 @@ kind: ReplicatedStorageClass
 metadata:
   name: replicated-storage-class
 spec:
+  replication: ConsistencyAndAvailability
   storagePool: data # Here, specify the name of the ReplicatedStoragePool you created earlier
   reclaimPolicy: Delete
   topology: Ignored # - note that setting "ignored" means there should be no zones (nodes labeled topology.kubernetes.io/zone) in the cluster
 EOF
 ```
 
-- Wait for the created `ReplicatedStorageClass` resource to become `Created`:
+- Wait for the created `ReplicatedStorageClass` resource to become `Ready`:
 
 ```shell
 kubectl get rsc replicated-storage-class -w

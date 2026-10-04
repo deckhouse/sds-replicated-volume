@@ -39,6 +39,15 @@ import (
 // RVRSchedulingControllerName is the controller name for rvr-scheduling-controller.
 const RVRSchedulingControllerName = "rvr-scheduling-controller"
 
+// resyncSlotsPerNode is how many resync ends one node may carry at a time. It is fixed for now:
+// the module setting that used to tune it was removed until the way of configuring it is
+// reconsidered, so that clusters do not come to rely on it.
+//
+// Four, because the controller heals a lost diskful copy by itself, and a mass heal — a node gone,
+// every volume that lost a copy refilling at once — is exactly the load the limiter bounds. Four
+// ends let a node send and receive at the same time without saturating one interface.
+const resyncSlotsPerNode = 4
+
 func BuildController(mgr manager.Manager) error {
 	cfg, err := env.GetConfig()
 	if err != nil {
@@ -62,9 +71,9 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetScheme(),
 		extenderClient,
 	)
-	// Per-node resync-end budget, read at the wiring layer since syncbudget holds no configuration
+	// Per-node resync-end budget, set at the wiring layer since syncbudget holds no configuration
 	// of its own.
-	r.resyncLimit = syncbudget.Limit(cfg.ResyncSlotsPerNode())
+	r.resyncLimit = syncbudget.Limit(resyncSlotsPerNode)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVRSchedulingControllerName).

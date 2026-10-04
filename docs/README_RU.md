@@ -264,7 +264,7 @@ EOF
 
 ```
 
-- Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Completed`:
+- Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Ready`:
 
 ```shell
 kubectl get rsp data -w
@@ -297,13 +297,14 @@ kind: ReplicatedStorageClass
 metadata:
   name: replicated-storage-class
 spec:
+  replication: ConsistencyAndAvailability
   storagePool: data # Указываем имя ReplicatedStoragePool, созданного ранее
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
+- Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Ready`:
 
 ```shell
 kubectl get rsc replicated-storage-class -w

@@ -43,6 +43,7 @@ const (
 
 	// Replication types for ReplicatedStorageClass.
 	replicationAvailability               = "Availability"
+	replicationConsistency                = "Consistency"
 	replicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 )
 
@@ -188,6 +189,13 @@ func validateLegacySpecFields(rsc *srv.ReplicatedStorageClass) *kwhvalidating.Va
 		return &kwhvalidating.ValidatorResult{Valid: false,
 			Message: "failuresToTolerate/guaranteedMinimumDataRedundancy cannot be set for legacy control plane; use replication field instead"}
 	}
+	// The old controller has no StorageClass layout for Consistency: it would build a
+	// StorageClass without a replica count and then label it nonOperational.
+	//nolint:staticcheck // legacy Replication field check for legacy control plane
+	if spec.Replication == replicationConsistency {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "replication Consistency is not supported by legacy control plane"}
+	}
 	if spec.Storage != nil {
 		return &kwhvalidating.ValidatorResult{Valid: false,
 			Message: "spec.storage cannot be set for legacy control plane; use storagePool field instead"}
@@ -226,11 +234,16 @@ func validateLegacyControlPlaneTopology(rsc *srv.ReplicatedStorageClass, cluster
 				Message: "you must set at least one zone",
 			}
 		}
+		// An unset replication is ConsistencyAndAvailability, as in the old controller: the CRD
+		// no longer defaults the field.
 		//nolint:staticcheck // legacy Replication field check for legacy control plane topology validation
-		if (rsc.Spec.Replication == replicationAvailability || rsc.Spec.Replication == replicationConsistencyAndAvailability) && len(rsc.Spec.Zones) != 3 {
-			return &kwhvalidating.ValidatorResult{
-				Valid:   false,
-				Message: "with replication set to Availability or ConsistencyAndAvailability, three zones need to be specified",
+		switch rsc.Spec.Replication {
+		case replicationAvailability, replicationConsistencyAndAvailability, "":
+			if len(rsc.Spec.Zones) != 3 {
+				return &kwhvalidating.ValidatorResult{
+					Valid:   false,
+					Message: "with replication set to Availability or ConsistencyAndAvailability (the default), three zones need to be specified",
+				}
 			}
 		}
 		if len(clusterZoneList) == 0 {

@@ -24,6 +24,8 @@ spec:
               properties:
                 eligibleNodesPolicy:
                   description: |
+                    Имеет смысл только в новом control-plane.
+
                     Определяет политики управления допустимыми узлами (eligible nodes).
                     Присутствует всегда, со значениями по умолчанию.
                   properties:
@@ -39,7 +41,9 @@ spec:
                   description: |
                     Список LVMVolumeGroup-ресурсов, Volume Group'ы/Thin-pool'ы которых будут использованы для создания Storage-pool'ов в бэкенде LINSTOR.
 
-                    > Обратите внимание, что каждый LVMVolumeGroup-ресурс обязан иметь тот же тип (Thin/Thick), что указан в поле 'Spec.Type' текущего ресурса.
+                    > Обратите внимание, что каждый LVMVolumeGroup-ресурс обязан иметь тот же тип (Thin/Thick), что указан в поле 'spec.type'.
+
+                    > Поле неизменяемое после создания; чтобы добавить LVMVolumeGroup, пересоздайте ресурс.
                   items:
                     properties:
                       name:
@@ -50,6 +54,8 @@ spec:
                           Имя выбранного Thin-pool в рамках указанного LVMVolumeGroup. Обязательное поле если вы создаёте ReplicatedStoragePool с типом LVMThin.
                 nodeLabelSelector:
                   description: |
+                    Имеет смысл только в новом control-plane.
+
                     Отбирает узлы, допустимые для участия в пуле хранения.
                     Хранить данные могут только узлы, соответствующие этому селектору.
                     Если не задан, кандидатами являются все узлы с подходящими LVMVolumeGroup.
@@ -76,10 +82,14 @@ spec:
                         matchLabels — словарь пар {key,value}. Одна пара {key,value} в словаре matchLabels эквивалентна элементу matchExpressions, у которого поле key равно "key", оператор — "In", а массив values содержит только "value". Требования объединяются по логическому И.
                 systemNetworkNames:
                   description: |
+                    Имеет смысл только в новом control-plane.
+
                     Имена сетей, используемых для трафика репликации DRBD.
                     Необходимо указать хотя бы одно имя сети. Длина каждого имени ограничена 64 символами.
                 zones:
                   description: |
+                    Имеет смысл только в новом control-plane.
+
                     Массив зон, в которых должны реплицироваться тома Storage pool.
             status:
               description: |

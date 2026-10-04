@@ -51,6 +51,9 @@ cd ..
 
 # validate generated CRDs (CEL cost budget, schema correctness)
 (cd api && go run ../hack/validate-crds.go ../crds)
+# validate-crds does not descend into subdirectories; see hack/generate_crds.sh
+# for why the new control plane CRDs live apart
+(cd api && go run ../hack/validate-crds.go ../crds/newcontrolplane)
 
 # generate mocks and any other go:generate targets across all modules
 ./hack/for-each-mod go generate ./...

@@ -56,6 +56,21 @@ func Test_validateLegacySpecFields(t *testing.T) {
 			wantMessage: "failuresToTolerate/guaranteedMinimumDataRedundancy cannot be set for legacy control plane; use replication field instead",
 		},
 		{
+			name: "Consistency replication is rejected",
+			spec: srv.ReplicatedStorageClassSpec{
+				Replication: "Consistency", //nolint:staticcheck // SA1019: the validator exists to handle the deprecated Replication field
+			},
+			wantValid:   false,
+			wantMessage: "replication Consistency is not supported by legacy control plane",
+		},
+		{
+			name: "ConsistencyAndAvailability replication is valid",
+			spec: srv.ReplicatedStorageClassSpec{
+				Replication: "ConsistencyAndAvailability", //nolint:staticcheck // SA1019: the validator exists to handle the deprecated Replication field
+			},
+			wantValid: true,
+		},
+		{
 			name: "Storage set is rejected",
 			spec: srv.ReplicatedStorageClassSpec{
 				Storage: &srv.ReplicatedStorageClassStorage{
@@ -159,7 +174,7 @@ func Test_validateLegacyControlPlaneTopology(t *testing.T) {
 			zones:        []string{"a", "b"},
 			clusterZones: []string{"a", "b"},
 			wantValid:    false,
-			wantMessage:  "with replication set to Availability or ConsistencyAndAvailability, three zones need to be specified",
+			wantMessage:  "with replication set to Availability or ConsistencyAndAvailability (the default), three zones need to be specified",
 		},
 		{
 			name:         "TransZonal ConsistencyAndAvailability 3 zones",
@@ -176,7 +191,22 @@ func Test_validateLegacyControlPlaneTopology(t *testing.T) {
 			zones:        []string{"a"},
 			clusterZones: []string{"a"},
 			wantValid:    false,
-			wantMessage:  "with replication set to Availability or ConsistencyAndAvailability, three zones need to be specified",
+			wantMessage:  "with replication set to Availability or ConsistencyAndAvailability (the default), three zones need to be specified",
+		},
+		{
+			name:         "TransZonal unset replication 3 zones",
+			topology:     "TransZonal",
+			zones:        []string{"a", "b", "c"},
+			clusterZones: []string{"a", "b", "c"},
+			wantValid:    true,
+		},
+		{
+			name:         "TransZonal unset replication 4 zones rejected",
+			topology:     "TransZonal",
+			zones:        []string{"a", "b", "c", "d"},
+			clusterZones: []string{"a", "b", "c", "d"},
+			wantValid:    false,
+			wantMessage:  "with replication set to Availability or ConsistencyAndAvailability (the default), three zones need to be specified",
 		},
 		{
 			name:         "TransZonal Consistency 2 zones allowed",
