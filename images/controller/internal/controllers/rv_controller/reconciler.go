@@ -484,12 +484,18 @@ func makeDatameshSingleStepTransition(
 //     itself. Whatever removed the member — a graceful leave, a force-removal, a manual
 //     force-leave, the automatic cleanup of an orphan — is immaterial: the trigger is the missing
 //     member, not its cause.
+//   - P4 tie-breaker surplus (the second half of the upsize r2→r3): delete one TieBreaker replica
+//     once the copies match the configuration and every one of them is UpToDate. Deleting the RVR
+//     is the whole action — the replica controller turns it into a Leave request and the datamesh
+//     removes the member under its own guards.
 //
-// Safety invariant: convergence NEVER deletes a replica or its data. Shrinking the copy count,
-// replacing a copy whose member is still alive, and dropping a surplus tie-breaker therefore stay
-// manual. The invariant "convergence never creates a Diskful replica" was lifted deliberately: the
-// criterion that replaced it is the whitelist rule below — repeating the action must provably end
-// in the intended layout. The decision is a pure compute helper (computeTargetLayoutAction), reused
+// Safety invariant: convergence NEVER deletes a copy or its data. It DOES take away a tie-breaker
+// the configuration no longer asks for (P4): a tie-breaker holds no data, and its removal is
+// reversible — P2 creates one back the moment the configuration asks for it again. Shrinking the
+// copy count and replacing a copy whose member is still alive therefore stay manual. The older
+// invariant "convergence never creates a Diskful replica" was lifted deliberately: the criterion
+// that replaced it is the whitelist rule below — repeating the action must provably end in the
+// intended layout. The decision is a pure compute helper (computeTargetLayoutAction), reused
 // by the MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and
 // the action stay in agreement; convergence itself never writes the condition (single-writer
 // invariant) and therefore discards the report half of that decision.
@@ -582,6 +588,33 @@ func (r *Reconciler) reconcileLayoutConvergence(
 		rf.Log().Info("Converging layout: created replica", "type", replicaType, "rvr", rvr.Name)
 		return rf.ContinueAndRequeue()
 
+	// The only deletion convergence performs. Deleting the RVR is the whole action: the RV
+	// controller finalizer holds the object, the replica controller turns the deletion timestamp
+	// into a Leave request, the datamesh runs the tiebreaker/v1 removal plan under its guards, and
+	// the DRBD resource is torn down after the member has left. deleteRVR stamps the local copy, so
+	// the replacement step (which counts leaving tie-breakers) sees the departure on this very pass.
+	case layoutActionRemoveTieBreaker:
+		rvr := findRVRByName(*rvrs, targetAction.removeRVRName)
+		if rvr == nil {
+			// Candidate vanished between the decision and the action (stale cache). A race, not a
+			// failure — but the report of this pass names a replica that is already gone, so the
+			// recomputation is asked for explicitly instead of being left to the watch.
+			return rf.ContinueAndRequeue()
+		}
+		if err := r.deleteRVR(rf.Ctx(), rvr); err != nil {
+			if apierrors.IsConflict(err) {
+				// The name now belongs to a newer replica than the one in the cache (deleteRVR
+				// guards by UID). The same stale-cache race as above, and the object that holds the
+				// name — possibly a copy — must not be touched.
+				rf.Log().Info("Converging layout: surplus tie-breaker was replaced under the same name, requeuing",
+					"rvr", rvr.Name)
+				return rf.ContinueAndRequeue()
+			}
+			return rf.Failf(err, "deleting surplus TieBreaker RVR %s", rvr.Name)
+		}
+		rf.Log().Info("Converging layout: deleted surplus TieBreaker replica", "rvr", rvr.Name)
+		return rf.ContinueAndRequeue()
+
 	default: // layoutActionNone
 		return rf.Continue()
 	}
@@ -606,6 +639,8 @@ const (
 	layoutActionCreateTieBreaker
 	// layoutActionCreateDiskful creates a missing Diskful replica (P3 heal).
 	layoutActionCreateDiskful
+	// layoutActionRemoveTieBreaker deletes one surplus TieBreaker replica (P4).
+	layoutActionRemoveTieBreaker
 )
 
 // targetLayoutAction is the pure decision of what (if anything) layout convergence should do this
@@ -618,6 +653,9 @@ type targetLayoutAction struct {
 	kind layoutActionKind
 	// retypeRVRName is the RVR chosen for a P1 retype (set only for layoutActionRetypeToTieBreaker).
 	retypeRVRName string
+	// removeRVRName is the tie-breaker RVR chosen for a P4 removal (set only for
+	// layoutActionRemoveTieBreaker).
+	removeRVRName string
 }
 
 // membershipLayoutConvergedReport is the published MembershipLayoutConverged report describing the convergence
@@ -657,7 +695,7 @@ type membershipLayoutConvergedReport struct {
 //     otherwise the whitelist below. The in-flight term belongs here for the same reason steps
 //     3 and 4 precede the comparison — see "Diskful replicas in flight" below.
 //
-// Whitelist (only these three mismatches ever trigger an action; everything else is reported but
+// Whitelist (only these four mismatches ever trigger an action; everything else is reported but
 // never acted upon). The criterion for membership is that REPEATING the action provably ends in
 // the intended layout; it is also what explains P1's dead end below, which without it reads as
 // an unmotivated concession:
@@ -666,14 +704,19 @@ type membershipLayoutConvergedReport struct {
 //     an r2 config becomes 3D+1TB after one retype and is then reported TransitionUnsupported.
 //   - P2 tie-breaker deficit: actualD == intendedD && actualTB < intendedTB — create the missing
 //     tie-breaker.
-//   - P3 heal (diskful deficit): actualD < intendedD && actualTB <= intendedTB — create the
-//     missing diskful copy. A copy carries data, so this is the only pattern that actually heals
-//     a volume. The tie-breaker term is the criterion at work: with FEWER tie-breakers than
-//     intended (r1→r2, r1→r3) the copy goes first and P2 supplies the tie-breaker afterwards, so
-//     repetition arrives; with MORE than intended (upsize r2→r3) a surplus tie-breaker is left
-//     over and removing it is a deletion — a different invariant — so it stays terminal.
+//   - P3 heal (diskful deficit): actualD < intendedD — create the missing diskful copy. A copy
+//     carries data, so this is the only pattern that actually heals a volume. The tie-breaker
+//     count is deliberately NOT part of the condition: a copy deficit is healed by a copy
+//     whatever the tie-breakers are doing, and a surplus one left over afterwards is P4's job.
+//   - P4 tie-breaker surplus (upsize r2→r3): actualD == intendedD && actualTB > intendedTB —
+//     delete one tie-breaker replica, but only once every counted copy is UpToDate
+//     (computeTargetSurplusTieBreakerRemoval). A tie-breaker carries no data, so this is the one
+//     deletion convergence performs, and it is reversible by P2.
 //
-// The three patterns are mutually exclusive by the sign of the diskful deficit, so the order of
+// P3 and P4 compose into the upsize without either knowing about the other: 2D+1TB at an intended
+// 3D is a copy deficit, so P3 runs; once the copy has joined the counts level and P4 takes over;
+// while the copy resyncs P4 waits. The four patterns are mutually exclusive by the sign of the
+// diskful deficit and, at an equal one, by the sign of the tie-breaker deficit, so the order of
 // the case arms carries no meaning.
 //
 // Idempotency across the split-client cache is handled by counting in-flight work: a retype whose
@@ -872,14 +915,14 @@ func computeTargetLayoutAction(
 			message: fmt.Sprintf("creating tie-breaker replica: have %s, want %s", actualLayout, intendedLayout),
 		}
 
-	// P3 heal: a diskful copy is missing, and the tie-breakers are not in surplus. The replica is
-	// created BLIND — with no node and no storage — and the verdict on whether it can be placed is
-	// read back from the scheduler (computeDiskfulCreationPendingReport). Mirroring the scheduler's
-	// admissibility check here would mean re-implementing its whole phase pipeline (node readiness,
-	// volume-group readiness, occupancy, zoning, extender, capacity), which would drift apart from
-	// the original on its first change. That is the opposite choice from P1, which does mirror the
-	// DMTE guards — deliberately: those guards are cheap and live in the same package.
-	case actualD < intendedD && actualTB <= intendedTB:
+	// P3 heal: a diskful copy is missing. The replica is created BLIND — with no node and no
+	// storage — and the verdict on whether it can be placed is read back from the scheduler
+	// (computeDiskfulCreationPendingReport). Mirroring the scheduler's admissibility check here
+	// would mean re-implementing its whole phase pipeline (node readiness, volume-group readiness,
+	// occupancy, zoning, extender, capacity), which would drift apart from the original on its
+	// first change. That is the opposite choice from P1, which does mirror the DMTE guards —
+	// deliberately: those guards are cheap and live in the same package.
+	case actualD < intendedD:
 		if inFlightDiskful > 0 {
 			// The layouts differ here by construction, so they carry the progress themselves.
 			return targetLayoutAction{kind: layoutActionNone},
@@ -890,6 +933,15 @@ func computeTargetLayoutAction(
 			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("creating diskful replica: have %s, want %s", actualLayout, intendedLayout),
 		}
+
+	// P4 tie-breaker surplus: the copies match the configuration and a tie-breaker is left over.
+	// The one deletion convergence performs, and the second half of the upsize: it is gated on
+	// every counted copy being UpToDate, because until then the volume carries fewer copies of the
+	// data than the configuration asks for (see computeTargetSurplusTieBreakerRemoval).
+	case actualD == intendedD && actualTB > intendedTB:
+		return computeTargetSurplusTieBreakerRemoval(
+			rv, rvrs, rvas, intendedD, actualLayout, intendedLayout,
+		)
 
 	// Outside the whitelist: report honestly, take no action.
 	default:
@@ -926,11 +978,16 @@ func computeTargetLayoutAction(
 //	                                               for a free eligible node)
 //	old leaving, replacement joined the datamesh → Converging (the DMTE guard releases the old
 //	                                               one once the replacement is operational)
+//	old leaving, no replacement needed           → Converging (the departure alone settles the
+//	                                               layout, or leaves a surplus for P4 to pick up
+//	                                               on the pass after it)
 //	old gone                                     → not our business (the caller compares layouts)
 //
-// Scope: only the tie-breaker deficit created by the departure is handled. A wrong diskful count
-// (actualD != intendedD) or a genuine tie-breaker surplus is left to the caller, which reports it
-// honestly instead of piling a replacement on top of an unsupported layout.
+// Scope: every departure at a correct diskful count belongs here, including one that leaves a
+// tie-breaker surplus behind. That is deliberate rather than incidental: owning the whole
+// departure window is what keeps P4 from removing a second tie-breaker while the first is still
+// leaving, without P4 having to track departures of its own. A wrong diskful count
+// (actualD != intendedD) is left to the caller, which heals the copy first.
 func computeTargetTieBreakerReplacement(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -944,10 +1001,6 @@ func computeTargetTieBreakerReplacement(
 
 	// Tie-breakers that stay: the supply the intended layout can rely on.
 	availableTB := actualTB - len(leaving)
-	if availableTB > intendedTB {
-		// A surplus beyond the departure — outside this domain, report it honestly.
-		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
-	}
 
 	subject := fmt.Sprintf("tie-breaker %s is terminating", strings.Join(leaving, ", "))
 	if len(leaving) > 1 {
@@ -955,16 +1008,18 @@ func computeTargetTieBreakerReplacement(
 	}
 	layouts := fmt.Sprintf("have %s, want %s", actualLayout, intendedLayout)
 
-	if availableTB == intendedTB {
+	if availableTB >= intendedTB {
 		// The remaining tie-breakers already cover the intended layout — either a replacement
-		// joined the datamesh, or none is needed at all. Releasing the leaving member is the
-		// DMTE's decision (it waits until a replacement is operational), so there is nothing to
-		// do here but report progress.
+		// joined the datamesh, or none is needed at all, or one too many is left over. Releasing
+		// the leaving member is the DMTE's decision (it waits until a replacement is operational),
+		// so there is nothing to do here but report progress. Owning the surplus case too is what
+		// keeps P4 from removing a SECOND tie-breaker while the first one is still on its way out:
+		// the departure already reduces the count, and the next pass sees the result.
 		waiting := "waiting for it to leave the datamesh"
 		switch {
 		case len(leaving) > 1:
 			waiting = "waiting for them to leave the datamesh"
-		case intendedTB > 0:
+		case availableTB == intendedTB && intendedTB > 0:
 			waiting = "its replacement joined the datamesh, waiting for it to leave"
 		}
 		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
@@ -1024,6 +1079,180 @@ func deletingTieBreakerMemberNames(
 	}
 	slices.Sort(names)
 	return names
+}
+
+// computeTargetSurplusTieBreakerRemoval decides what convergence does about a tie-breaker surplus
+// at a correct diskful count (P4), and is the second half of the upsize r2→r3: P3 brings the copy
+// in, the counts level, and this step takes the tie-breaker the configuration no longer asks for
+// away. It produces the target and the MembershipLayoutConverged report as separate outputs, like
+// its caller.
+//
+// It is only reached with no tie-breaker leaving (computeTargetTieBreakerReplacement owns the whole
+// departure window at a correct diskful count) and with a genuine surplus.
+//
+// Removal is a deletion, and the safety invariant permits exactly this one: a tie-breaker holds no
+// data, and taking it away is reversible — P2 creates one back the moment the configuration asks
+// for it again. Removing a COPY stays outside the whitelist.
+//
+// Three gates stand before the action, and each of them reports Converging rather than
+// CannotConverge, because each is a state that resolves itself:
+//
+//   - UpToDate. The removal waits until every counted copy is UpToDate
+//     (status.effectiveLayout.upToDateVoters, the same count the resync limiter reads). Quorum does
+//     not ask for this — the datamesh guard guardTBSufficient releases the tie-breaker as soon as
+//     the voter count turns odd, which happens when the new copy JOINS, long before its resync ends
+//     — so without this gate the tie-breaker would be dropped from a volume carrying two copies of
+//     the data out of three. The gate lives here and not in the datamesh guards on purpose: it
+//     protects the automatic path only, and a human deleting a tie-breaker by hand keeps doing so
+//     under the quorum arithmetic alone.
+//   - An admissible candidate. An orphaned surplus tie-breaker (a member with no replica object)
+//     holds the whole pattern back — see selectSurplusTieBreakerCandidate.
+//   - Attachment. A tie-breaker the datamesh reports Attached (or whose node carries an active RVA)
+//     would have its Leave blocked by guardNotAttached. That is a transient state, so it is
+//     reported as Converging and waited out rather than called terminal.
+func computeTargetSurplusTieBreakerRemoval(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+	intendedD int,
+	actualLayout, intendedLayout string,
+) (targetLayoutAction, membershipLayoutConvergedReport) {
+	layouts := fmt.Sprintf("have %s, want %s", actualLayout, intendedLayout)
+
+	if upToDate := int(rv.Status.EffectiveLayout.UpToDateVoters); upToDate < intendedD {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf(
+				"waiting for the diskful copies to synchronize before removing a surplus tie-breaker "+
+					"(%d of %d UpToDate): %s", upToDate, intendedD, layouts),
+		}
+	}
+
+	name, waiting := selectSurplusTieBreakerCandidate(rv, rvrs)
+	if name == "" {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status:  metav1.ConditionFalse,
+			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("%s (%s)", waiting, layouts),
+		}
+	}
+
+	if m := rv.Status.Datamesh.FindMemberByName(name); m != nil && isMemberAttached(m, rvas) {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("surplus tie-breaker %s is attached: waiting for it to detach (%s)",
+				name, layouts),
+		}
+	}
+
+	return targetLayoutAction{
+		kind:          layoutActionRemoveTieBreaker,
+		removeRVRName: name,
+	}, membershipLayoutConvergedReport{
+		status:  metav1.ConditionFalse,
+		reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		message: fmt.Sprintf("removing surplus tie-breaker %s: %s", name, layouts),
+	}
+}
+
+// selectSurplusTieBreakerCandidate deterministically chooses the tie-breaker member P4 removes, or
+// returns ("", waiting) when none may be removed this pass (the waiting text feeds the Converging
+// message, mirroring selectRetypeCandidate's (name, reason)).
+//
+// Preference order:
+//  1. a tie-breaker that is not operational right now (datamesh.IsTieBreakerOperational — the very
+//     criterion guardTBSufficient and formation apply): the volume parts with the worst of them,
+//     not with an arbitrary one;
+//  2. otherwise the lexicographically last member name, the same arbitrary-but-stable rule
+//     selectRetypeCandidate uses.
+//
+// Determinism matters more than cleverness here: a repeated pass MUST pick the same candidate, or
+// convergence would delete tie-breakers in turn. Operationality is a LIVE property (revision,
+// DRBDConfigured, peer connections), so the ranking can move between passes while nothing has been
+// removed yet — the volume then parts with whichever tie-breaker is the worse one at the moment it
+// acts, which is the intent. It cannot cost a second removal: once one is deleted, the replacement
+// domain owns every pass until it has left, and by then the surplus is gone.
+//
+// A member with no replica object at all is an ORPHAN and never a candidate: the datamesh
+// force-removes it without any tie-breaker guard, and deleting a working one in parallel would take
+// the count below the intended one and hand it straight back to P2. One orphan therefore holds the
+// whole pattern back, which is what the first waiting text says.
+//
+// A tie-breaker whose RVR is already being deleted needs no place in the order either: the caller is
+// not reached while one is leaving (the replacement domain owns that window), which is exactly "a
+// removal already chosen by hand is the chosen candidate".
+func selectSurplusTieBreakerCandidate(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (name, waiting string) {
+	peers := computeActualTieBreakerPeers(rv, rvrs)
+
+	var orphans []string
+	var operational, notOperational string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		rvr := findRVRByName(rvrs, m.Name)
+		if rvr == nil {
+			orphans = append(orphans, m.Name)
+			continue
+		}
+		if ok, _ := datamesh.IsTieBreakerOperational(rvr, peers, rv.Status.DatameshRevision); !ok {
+			if m.Name > notOperational {
+				notOperational = m.Name
+			}
+			continue
+		}
+		if m.Name > operational {
+			operational = m.Name
+		}
+	}
+
+	if len(orphans) > 0 {
+		slices.Sort(orphans)
+		return "", fmt.Sprintf("tie-breaker %s has no replica: waiting for the datamesh to force-remove it",
+			strings.Join(orphans, ", "))
+	}
+	if notOperational != "" {
+		return notOperational, ""
+	}
+	if operational != "" {
+		return operational, ""
+	}
+	// Unreachable from the caller, which is only entered on a genuine tie-breaker surplus: with no
+	// orphans left, a surplus means at least one tie-breaker member carries a replica. Reported
+	// rather than asserted, so a future caller cannot turn it into a silently idle pass.
+	return "", "no tie-breaker replica to remove"
+}
+
+// computeActualTieBreakerPeers returns the peers a tie-breaker is expected to be connected to: the
+// data-bearing (full-mesh) members, resolved exactly as the datamesh engine resolves them. A member
+// whose replica object is missing stays in the list (nil RVR) so that its connection still has to be
+// confirmed by the tie-breaker's own fresh report.
+//
+// Shared by formation (computeActualTieBreakerReadiness) and by the P4 candidate selection, which
+// must ask "is this tie-breaker operational?" the way guardTBSufficient asks it.
+func computeActualTieBreakerPeers(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []datamesh.TieBreakerPeer {
+	peers := make([]datamesh.TieBreakerPeer, 0, len(rv.Status.Datamesh.Members))
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if !m.Type.ConnectsToAllPeers() {
+			continue
+		}
+		peers = append(peers, datamesh.TieBreakerPeer{
+			ID:   m.ID(),
+			Name: m.Name,
+			RVR:  findRVRByName(rvrs, m.Name),
+		})
+	}
+	return peers
 }
 
 // selectRetypeCandidate deterministically chooses the Diskful replica to retype into a
@@ -1261,10 +1490,11 @@ func applyRVRRetypeToTieBreaker(rvr *v1alpha1.ReplicatedVolumeReplica) {
 	rvr.Spec.LVMVolumeGroupThinPoolName = ""
 }
 
-// isMemberAttached reports whether the given diskful member is currently attached: either the
-// datamesh member is marked Attached (published / DRBD Primary) or an active (non-deleting) RVA
-// targets its node. Attached replicas are excluded as retype candidates to avoid disrupting
-// live I/O.
+// isMemberAttached reports whether the given member is currently attached: either the datamesh
+// member is marked Attached (published / DRBD Primary) or an active (non-deleting) RVA targets its
+// node. Attached replicas are excluded as retype candidates to avoid disrupting live I/O, and an
+// attached tie-breaker has its removal deferred (the datamesh guard guardNotAttached would block
+// the Leave anyway).
 func isMemberAttached(m *v1alpha1.DatameshMember, rvas []*v1alpha1.ReplicatedVolumeAttachment) bool {
 	if m.Attached {
 		return true
@@ -2884,11 +3114,20 @@ func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.Replicate
 	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
+// deleteRVR deletes the given ReplicatedVolumeReplica, guarded by its UID.
+//
+// An RVR name is the volume name plus the lowest free replica ID, so a name is reused as soon as
+// its replica is gone. The UID precondition makes the delete hit the very object the caller decided
+// about: a newer replica that took the name while the cache still shows the old one is answered
+// with Conflict instead of being deleted. Patches are protected the same way by the optimistic lock
+// (patchRVR); this is the delete-side counterpart. The resourceVersion is deliberately not part of
+// the precondition: replica status changes constantly, and a stale status says nothing about which
+// object a name refers to.
 func (r *Reconciler) deleteRVR(ctx context.Context, obj *v1alpha1.ReplicatedVolumeReplica) error {
 	if obj.DeletionTimestamp != nil {
 		return nil
 	}
-	if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj)); err != nil {
+	if err := client.IgnoreNotFound(r.cl.Delete(ctx, obj, client.Preconditions{UID: &obj.UID})); err != nil {
 		return err
 	}
 	obj.DeletionTimestamp = ptr.To(metav1.Now())

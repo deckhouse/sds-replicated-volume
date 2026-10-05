@@ -128,9 +128,14 @@ boundary, see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md).
   diskless, so this is a pure config update (voter status + q) that is safe
   in any application order. Then D∅→D re-attaches with a delta resync.
 
-- **qmr↑**: quorum minimum redundancy raised after the new D reaches
-  UpToDate. This is the last step — all replicas must confirm that enough
-  data copies exist before the protection level increases.
+- **qmr↑**: quorum minimum redundancy raised as the last step of the join, once
+  all replicas have confirmed the revision that added the new D. It is NOT
+  gated on that D reaching UpToDate — the raise is bounded by the number of
+  voters that already are (`computeCorrectQuorum`), so the protection level
+  never claims more copies of the data than exist. The one place that does wait
+  for UpToDate is the removal of a surplus TieBreaker in layout convergence,
+  which is a different question: not "may qmr go up" but "may the witness go
+  away".
 
 ### 2.2 RemoveReplica
 

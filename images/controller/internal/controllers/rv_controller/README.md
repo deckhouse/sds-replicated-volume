@@ -143,7 +143,7 @@ Reconcile (root) [Pure orchestration]
 │   │   └── patchRVAStatus
 │   ├── reconcileDeleteAccessReplicas [Pure orchestration] ← details
 │   └── reconcileLayoutConvergence [Target-state driven] (≤1 whitelisted action/pass; ContinueAndRequeue after acting)
-│       ├── computeTargetLayoutAction (pure decision: P1 retype D→TB / P2 create TB / P3 create D / none; also drives the condition)
+│       ├── computeTargetLayoutAction (pure decision: P1 retype D→TB / P2 create TB / P3 create D / P4 remove surplus TB / none; also drives the condition)
 │       │   ├── hasLayoutChangingTransition (classified by the transition's replica types, not by Group)
 │       │   ├── selectRetypeCandidate (exclude attached + gain-side zone placement + lose-side zone quorum; lexicographically last name)
 │       │   │   └── isRetypeToTieBreakerZoneQuorumSafe (mirrors guardZoneFTTPreservedForRetypeToTieBreaker)
@@ -151,13 +151,17 @@ Reconcile (root) [Pure orchestration]
 │       │   ├── pendingRetypeToDiskfulMemberNames (the other direction: vestibule / manual retype) / countPendingDiskfulCreations
 │       │   │   └── isDiskfulCreationInFlight (in flight = the LAYOUT does not count it, NOT "is not a member")
 │       │   ├── computeActualPendingTieBreakerSchedulingFailure (current Scheduled=False → CannotConverge)
+│       │   ├── computeTargetSurplusTieBreakerRemoval (P4: orphan → wait / copies not UpToDate → wait / attached → wait / remove)
+│       │   │   ├── orphanedTieBreakerMemberNames (a member without a replica is the datamesh's own force-removal)
+│       │   │   └── selectSurplusTieBreakerCandidate (non-operational first, then the lexicographically last name)
 │       │   ├── computeDiskfulCreationPendingReport (cannot place → CannotConverge / waiting for a resync slot → Converging)
 │       │   │   ├── computeActualPendingDiskfulSchedulingFailure (current Scheduled=False → the scheduler's summary)
 │       │   │   └── computeActualPendingDiskfulResyncSlotWait (Scheduled=Unknown/WaitingForResyncSlot → not a verdict)
 │       │   └── isMemberAttached
 │       ├── P1: base := rvr.DeepCopy(); applyRVRRetypeToTieBreaker (type=TieBreaker + clear LVG/ThinPool); patchRVR  (ChangeRole → DMTE drives it)
 │       ├── P2: newRVR(..., TieBreaker, "") → SetControllerRef → createRVR → insertRVRSorted; AlreadyExists → Info + requeue
-│       └── P3: newRVR(..., Diskful, "") → SetControllerRef → createRVR → insertRVRSorted; AlreadyExists → Info + requeue
+│       ├── P3: newRVR(..., Diskful, "") → SetControllerRef → createRVR → insertRVRSorted; AlreadyExists → Info + requeue
+│       └── P4: deleteRVR (the finalizer holds it; rvr_controller turns the deletion into a Leave and the datamesh removes the member)
 ├── reconcileLayoutStatus [In-place reconciliation] (status.membershipLayout + MembershipLayoutConverged condition; SINGLE writer)
 │   ├── computeActualLayout (Diskful+LiminalDiskful = D, TieBreaker = TB; Access/ShadowDiskful ignored)
 │   ├── computeLayoutReport → computeTargetLayoutAction (report reuses the convergence decision)
@@ -860,7 +864,7 @@ the `MembershipLayoutConverged` report describing that very action (`controller-
 `Continue*` vs `Done*` with requeue). Preconditions: configuration acknowledged, formation complete
 (guaranteed by the caller), RV not deleting, and no active layout-changing transition.
 
-Three whitelisted patterns (nothing else is ever acted upon). A mismatch earns a place in the
+Four whitelisted patterns (nothing else is ever acted upon). A mismatch earns a place in the
 whitelist only when **repeating the action provably ends in the intended layout** — the criterion
 that replaced the older invariant "convergence never creates a Diskful replica", and also the
 reason P1 stops where it does:
@@ -903,7 +907,7 @@ reason P1 stops where it does:
   (`computeActualPendingTieBreakerSchedulingFailure`); a missing, `Unknown` or stale `Scheduled`
   means the scheduler has simply not (re-)evaluated the replica yet → `Converging`. Once it becomes
   `Scheduled=True` the report goes back to `Converging`.
-- **P3 heal (diskful deficit)** — `actualD < intendedD && actualTB <= intendedTB`: create the
+- **P3 heal (diskful deficit)** — `actualD < intendedD`: create the
   missing diskful copy (`newRVR(..., Diskful, "")` → `SetControllerRef` → `createRVR` →
   `insertRVRSorted`). This is the only pattern that heals a volume, because only a copy holds data.
   It fires on the member going missing, whatever removed it — a graceful Leave, a
@@ -918,12 +922,13 @@ reason P1 stops where it does:
   first change. That is the opposite choice from P1 deliberately: the DMTE guards P1 mirrors are
   cheap and live in the same package.
 
-  The tie-breaker term is the whitelist criterion at work. With **fewer** tie-breakers than
-  intended (r1→r2, r1→r3, 3D → 4D+1TB) the copy goes in first and P2 supplies the tie-breaker on a
-  later pass, so repetition arrives at the intended layout. With **more** than intended (the upsize
-  r2→r3, or 4D+1TB → 5D) it does not: once the copies match, a surplus tie-breaker is left over,
-  and removing it is a deletion — a different invariant — so the mismatch stays
-  `TransitionUnsupported`.
+  The tie-breaker count is deliberately NOT part of the condition. A copy deficit is healed by a
+  copy whatever the tie-breakers are doing: with **fewer** tie-breakers than intended (r1→r2,
+  r1→r3, 3D → 4D+1TB) the copy goes in first and P2 supplies the tie-breaker on a later pass; with
+  **more** (the upsize r2→r3, or 4D+1TB → 5D) the copy goes in first and P4 takes the leftover
+  tie-breaker away. Either way repetition arrives at the intended layout, which is what the
+  whitelist criterion asks for. The condition used to carry `&& actualTB <= intendedTB`, and it
+  had to: without P4 the upsize would have healed the copy and then sat at `3D+1TB` forever.
 
   Report while the copy is on its way in: a **current** `Scheduled=False` yields `CannotConverge`
   with the scheduler's summary (`cannot place diskful replica (have 2D, want 3D): rv-1-2: no
@@ -932,11 +937,55 @@ reason P1 stops where it does:
   a queued slot is progress and `diskful replica creation pending` alone would read as a scheduler
   that cannot place the copy; anything else yields the plain `Converging`.
 
+- **P4 tie-breaker surplus** — `actualD == intendedD && actualTB > intendedTB`: delete one
+  tie-breaker replica (`deleteRVR`). The deletion is the whole action: the RV controller finalizer
+  holds the object, `rvr_controller` turns the deletion timestamp into a `Leave` request, the
+  datamesh runs the `tiebreaker/v1` removal plan under its own guards, the finalizer comes off once
+  the member has left and the DRBD resource on that node is torn down. Nothing new appears in that
+  chain — it is the path a hand-deleted tie-breaker has always taken.
+
+  This is the one deletion convergence performs, and the pattern that makes the upsize r2→r3 a
+  single operator action: P3 brings the third copy in, the counts level, P4 takes the witness the
+  configuration no longer asks for away. Neither pattern knows about the other. It is written over
+  a tie-breaker SURPLUS rather than over the special case "none is intended", so `2D+2TB` at an r2
+  class converges as well; splitting the two would mean two nearly identical whitelist entries.
+
+  Three gates stand before the action, all of them reporting `Converging` (never `CannotConverge`
+  — each is a state that resolves itself):
+  - **an orphaned tie-breaker** (a member with no replica object): the datamesh force-removes it
+    without any tie-breaker guard, and deleting a working one in parallel would take the count
+    below the intended one and hand it straight back to P2.
+  - **the copies are not all UpToDate** (`status.effectiveLayout.upToDateVoters < intendedD`, the
+    same count the resync limiter reads). Quorum does not ask for this: `guardTBSufficient`
+    releases the tie-breaker as soon as the voter count turns odd, which happens when the new copy
+    JOINS — long before its resync ends. Without the gate the witness would be dropped from a
+    volume carrying two copies of the data out of three. The gate lives here, not in the datamesh
+    guards, on purpose: it protects the AUTOMATIC path only, and a human deleting a tie-breaker by
+    hand keeps doing so under the quorum arithmetic alone.
+  - **the candidate is attached** (`member.Attached` or an active RVA on its node): `guardNotAttached`
+    would block the Leave. Transient, so it is waited out.
+
+  Candidate selection is deterministic — a repeated pass must pick the same tie-breaker, or
+  convergence would delete them in turn. A tie-breaker that is **not operational**
+  (`datamesh.IsTieBreakerOperational`, the criterion `guardTBSufficient` and formation apply) goes
+  first, so the volume parts with the worst of them; among equals the lexicographically last member
+  name wins, the same arbitrary-but-stable rule P1 uses. A tie-breaker already being deleted needs
+  no place in that order: while one is leaving, the replacement domain (step 4) owns the pass and
+  P4 is not reached at all — which is also what keeps convergence from removing a SECOND tie-breaker
+  while the first is on its way out, and from creating a replacement for one it removed itself.
+
 Ordering / whitelist notes: convergence runs **after** `ProcessTransitions`, so a transition just
-created this pass makes it a no-op. The three patterns are mutually exclusive by the sign of the
-diskful deficit, so the order of the case arms carries no meaning. P1 fills only the tie-breaker
-deficit — a 4D volume at an r2 config becomes 3D+1TB after one retype and is then reported
-`TransitionUnsupported` (the extra diskful voters are never removed).
+created this pass makes it a no-op. The four patterns are mutually exclusive by the sign of the
+diskful deficit and, at an equal one, by the sign of the tie-breaker deficit, so the order of the
+case arms carries no meaning. P1 fills only the tie-breaker deficit — a 4D volume at an r2 config
+becomes 3D+1TB after one retype and is then reported `TransitionUnsupported` (the extra diskful
+voters are never removed).
+
+**The whitelist boundary after P4.** Converging on their own: a copy deficit at any tie-breaker
+count; a tie-breaker deficit at a correct copy count; a tie-breaker surplus at a correct copy count;
+the r3→r2 retype. Staying `TransitionUnsupported`: any copy SURPLUS. `4D+1TB` at an r2 class still
+needs a person — P1 does not apply (there is no tie-breaker deficit), P4 does not (the copies do not
+match), and a copy is never deleted.
 
 Ordering against the tie-breaker replacement (step 4) is unchanged and settles a real collision:
 `computeTargetTieBreakerReplacement` declines while `actualD != intendedD`, so a volume that lost a
@@ -988,7 +1037,7 @@ replica. Two outcomes, depending on when the revert lands:
 
 | Branch | What happened | Resulting state | Recovery |
 |--------|---------------|-----------------|----------|
-| **A — the DMTE dispatched under the r2 configuration** | The lose-side guards passed (`D_min = FTT+GMDR+1 = 2` at r2), so the ChangeRole transition runs to completion | The retype finishes: `2D+1TB` against an intended `3D` → `TransitionUnsupported` (the layout alert fires) | Delete the tie-breaker RVR — with an odd diskful count no tie-breaker is required (`TB_min = 0`), so `guardTBSufficient` releases it. Once it has left, the layout is `2D` against an intended `3D`, which the diskful heal (P3) picks up, so the third copy is created for you. The reverse order (create the Diskful RVR first, then delete the tie-breaker) also works and was the only recipe before P3 existed, but it holds the volume in `TransitionUnsupported` throughout: at `2D+1TB` the surplus tie-breaker keeps P3 out |
+| **A — the DMTE dispatched under the r2 configuration** | The lose-side guards passed (`D_min = FTT+GMDR+1 = 2` at r2), so the ChangeRole transition runs to completion | The retype finishes: `2D+1TB` against an intended `3D` | Nothing. This is the upsize, and it converges on its own: P3 creates the third copy, and once every copy is UpToDate P4 removes the leftover tie-breaker. The volume reports `Converging` with the step it is on throughout |
 | **B — the configuration was already r3 at dispatch time** | `guardFTTPreserved` blocks the transition permanently (`D_min = FTT+GMDR+1 = 3`, voters = 3, so `3 <= 3`); the retype never runs and **no data is lost** — the guard did its job | Raw layout stays `3D` and matches the intended one, but the volume reports `Converging` **forever** | Undo the flip: patch the RVR back to `spec.type: Diskful` **together with** the backing-volume fields the retype cleared (`spec.lvmVolumeGroupName`, plus `spec.lvmVolumeGroupThinPoolName` on a thin pool), copying the values from the volume's datamesh member record, which still carries them |
 
 Both fields must go in the **same** patch as the type: the API rejects backing-volume fields on a
@@ -1028,12 +1077,18 @@ order). Two properties matter:
 | Replacement created, not a member yet | `Converging` |
 | Replacement carries a **current** `Scheduled=False` (no free eligible node) | `CannotConverge` with the scheduler's message; the old tie-breaker keeps working, the replacement RVR stays pending and is placed as soon as a node frees up |
 | Replacement joined the datamesh (operational or not) | `Converging`; releasing the old one is the guard's decision |
+| No replacement needed (the layout asks for fewer tie-breakers than stay behind) | `Converging`; the departure alone settles the layout, or leaves a surplus for P4 on the pass after it |
 | Old tie-breaker gone | `2D+1TB`, `Converged` |
+
+The last row is not incidental. At a correct diskful count this step owns the WHOLE departure
+window, surplus included, and that is what keeps P4 from removing a second tie-breaker while the
+first is still leaving — without P4 having to track departures of its own, and without convergence
+ever creating a replacement for a tie-breaker it removed itself.
 
 Out of scope on purpose: a member whose RVR is gone entirely is an **orphan**, force-removed by the
 datamesh without tie-breaker guards, and the plain P2 deficit then heals the layout — creating a
-replacement in parallel would race with that. A wrong diskful count or a genuine tie-breaker
-surplus is likewise reported honestly instead of being papered over with a new tie-breaker.
+replacement in parallel would race with that. A wrong diskful count is likewise left to the caller,
+which heals the copy first.
 
 If the cluster has no free eligible node the deletion simply waits (nothing else is blocked). To
 finish it, remove the finalizer from the terminating RVR: it becomes an orphan, is force-removed,
@@ -1056,14 +1111,16 @@ decision time, while the guard is evaluated at dispatch time.
 > the branch is not merged or released before it lands. Do not add a partial preflight/rollback
 > here — it would contradict the cache-only execution-record model of that contract.
 
-**Safety invariant:** convergence **never deletes a replica or its data** (freeing the retyped
+**Safety invariant:** convergence **never deletes a copy or its data** (freeing the retyped
 replica's LLV is the ordered redundancy reduction, handled by the generic backing-volume reconcile
-in rvr_controller once member *and* spec are TieBreaker). Lowering the copy count, replacing a copy
-whose member is alive, and dropping a surplus tie-breaker therefore stay manual. The older invariant
-"convergence never creates a Diskful replica" was lifted deliberately, under the whitelist
-criterion above. A race with
+in rvr_controller once member *and* spec are TieBreaker). It **does** take away a tie-breaker the
+configuration no longer asks for (P4): a tie-breaker carries no data, and its removal is reversible
+— P2 creates one back the moment the configuration asks for it again. Lowering the copy count and
+replacing a copy whose member is alive therefore stay manual. Both older invariants — "convergence
+never creates a Diskful replica" and "convergence never deletes a replica" — were lifted
+deliberately, under the whitelist criterion above. A race with
 manual RVR operations (a user retyping/creating a replica in parallel) can push the layout outside
-the whitelist (e.g. an extra tie-breaker) → `TransitionUnsupported`, and convergence safely
+the whitelist (an extra COPY) → `TransitionUnsupported`, and convergence safely
 stops; a manual creation that merely claims the replica id convergence picked is a benign race,
 because the id is chosen deterministically and the `AlreadyExists` converges on the next pass. Which volumes migrate is decided upstream, by the configuration rollout
 (`reconcileRVConfiguration`): under `NewVolumesOnly` a volume that already has a configuration
@@ -1071,7 +1128,11 @@ never sees the new layout at all, while under `RollingUpdate` at most `rollingUp
 volumes of the class carry it before it has converged — the ones still awaiting it are ordered by
 name and the leading ones take the free slots together, each slot freed only by a
 `MembershipLayoutConverged=True/Converged`. A layout no volume can converge on (this section's
-`TransitionUnsupported`) therefore reaches at most `maxParallel` volumes.
+`TransitionUnsupported`) therefore reaches at most `maxParallel` volumes. For the upsize r2→r3 the
+same rule sets the pace of a class-wide growth: a volume holds its slot for the whole of it — the
+copy is created, it waits for a resync slot, it resyncs, and only then does the tie-breaker leave —
+so `maxParallel` bounds how many volumes resync at once on top of whatever the resync limiter
+already allows per node.
 
 Migration monitoring:
 

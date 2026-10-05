@@ -1466,22 +1466,7 @@ func computeActualTieBreakerReadiness(
 		return noTieBreakers, ""
 	}
 
-	// Peers of a tie-breaker: the data-bearing (full-mesh) members. Taken from the datamesh
-	// members, exactly like the datamesh engine does — a member whose replica object is missing
-	// stays in the list (nil RVR) so that its connection still has to be confirmed by the
-	// tie-breaker's own fresh report.
-	peers := make([]datamesh.TieBreakerPeer, 0, len(rv.Status.Datamesh.Members))
-	for i := range rv.Status.Datamesh.Members {
-		m := &rv.Status.Datamesh.Members[i]
-		if !m.Type.ConnectsToAllPeers() {
-			continue
-		}
-		peers = append(peers, datamesh.TieBreakerPeer{
-			ID:   m.ID(),
-			Name: m.Name,
-			RVR:  findRVRByName(rvrs, m.Name),
-		})
-	}
+	peers := computeActualTieBreakerPeers(rv, rvrs)
 
 	var (
 		notReady    idset.IDSet

@@ -41,19 +41,18 @@ see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §6.
 The following capabilities are described in this documentation but **not yet
 implemented**. They are planned for the near term:
 
-- **Removing a replica during normal operation.** Convergence never deletes a
-  replica or its data, so three scenarios still need a manual step: lowering
-  the copy count (FTT or GMDR down), replacing a copy whose member is still
-  alive (a lost disk, or a storage pool migration), and a layout change whose
-  target needs **fewer** TieBreakers than the volume currently has (the upsize
-  r2→r3, or 4D+1TB → 5D). In that last one the manual step comes **first**: the
-  surplus TieBreaker blocks the diskful heal (see the whitelist condition in the
-  `rv_controller` README), so delete the TieBreaker replica and the missing copy
-  is then added automatically. To trigger the desired operation it is
-  sufficient to create a replica with the target type, change the type of an
-  existing one, or delete the surplus — the scheduler will assign the node and
-  storage, and the rest (datamesh membership, DRBD configuration, data
+- **Removing a COPY during normal operation.** Convergence never deletes a copy
+  or its data, so two scenarios still need a manual step: lowering the copy
+  count (FTT or GMDR down) and replacing a copy whose member is still alive (a
+  lost disk, or a storage pool migration). To trigger the desired operation it
+  is sufficient to create a replica with the target type, change the type of an
+  existing one, or delete the surplus one — the scheduler will assign the node
+  and storage, and the rest (datamesh membership, DRBD configuration, data
   synchronization) happens fully automatically.
+
+  A surplus **TieBreaker** is no longer one of them: convergence removes it
+  itself (see below), which is what makes the upsize r2→r3 a single edit of the
+  storage class.
 
   What **is** created automatically after formation:
 
@@ -73,16 +72,27 @@ implemented**. They are planned for the near term:
     automatic cleanup of an orphan. The replica is created without a node and
     without storage, the scheduler places it (throttled by the resync-slot
     limiter) and the add-diskful plan joins it (§6). This covers failure
-    recovery and the layout changes that need more diskful voters, except the
-    ones whose target layout needs fewer TieBreakers than the volume has (see
-    above — the surplus has to go first). A copy is
+    recovery and every layout change that needs more diskful voters, the upsize
+    r2→r3 included. A copy is
     added one at a time, so a deficit of two is closed over two passes; while
     one copy is on its way in, no second one is created.
 
+  What **is** removed automatically:
+
+  - **TieBreaker** replicas the configuration no longer asks for, by the same
+    loop. When the copies match the intended layout and a TieBreaker is left
+    over — the second half of the upsize r2→r3, or a second TieBreaker left
+    behind by manual operations — one TieBreaker replica is deleted and leaves
+    through the ordinary `RemoveReplica(TB)` plan under its usual guards. It
+    waits until every counted copy is UpToDate: the quorum arithmetic alone
+    would release the witness as soon as the new voter joins, long before its
+    resync ends. A TieBreaker carries no data, and the removal is reversible —
+    the loop creates one back the moment the configuration asks for it again.
+
   Convergence also **retypes** one Diskful into the missing TieBreaker on the
   r3→r2 path (3D → 2D+1TB) — a type change of an existing replica, not a new
-  one. It never deletes a replica or its data; a layout mismatch outside these
-  cases is reported as
+  one. It never deletes a copy or its data; a layout mismatch outside these
+  cases — in practice, a copy too many — is reported as
   `MembershipLayoutConverged=False/TransitionUnsupported` and waits for manual
   intervention. For the full decision order and the reported reasons, see the
   `rv_controller` README, "Layout convergence".

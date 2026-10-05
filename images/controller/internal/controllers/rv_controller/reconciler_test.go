@@ -4650,15 +4650,14 @@ var _ = Describe("reconcileLayoutStatus", func() {
 	})
 
 	It("sets status.membershipLayout and the MembershipLayoutConverged condition", func(ctx SpecContext) {
-		// The upsize r2→r3: a copy is missing and a tie-breaker is in surplus at once, so no
-		// pattern applies and the mismatch stays unsupported (a 2D deficit alone is healed).
-		rv := layoutRV(1, 1, layoutMembers(2, 1), false) // r3 config, actual 2D+1TB → unsupported
+		// A copy too many: convergence never removes a copy, so the mismatch stays unsupported.
+		rv := layoutRV(1, 1, layoutMembers(4, 1), false) // r3 config, actual 4D+1TB → unsupported
 		members := rv.Status.Datamesh.Members
 		outcome := rec.reconcileLayoutStatus(ctx, rv, layoutRVRs(members), nil)
 
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.DidChange()).To(BeTrue())
-		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("2D+1TB")))
+		Expect(rv.Status.MembershipLayout).To(Equal(ptr.To("4D+1TB")))
 
 		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
@@ -5066,13 +5065,16 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("tie-breaker creation pending: have 2D, want 2D+1TB"))
 	})
 
-	It("reports TransitionUnsupported outside the whitelist (2D+1TB at an r3 config, upsize)", func() {
-		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
+	It("reports TransitionUnsupported outside the whitelist (4D+1TB at an r2 config, a copy too many)", func() {
+		// The boundary after P4: a copy surplus is the one mismatch left that no pattern touches.
+		// P1 needs a tie-breaker deficit (there is none), P4 needs the copies to match, and a copy
+		// is never deleted — so this stays the layout that asks for a human.
+		rv, rvrs := convergenceFixture(0, 4, 1) // r2 config wants 2D+1TB, actual 4D+1TB
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
 		Expect(report.message).To(Equal(
-			"layout mismatch: have 2D+1TB, want 3D; automatic transition is not supported, manual intervention required"))
+			"layout mismatch: have 4D+1TB, want 2D+1TB; automatic transition is not supported, manual intervention required"))
 	})
 
 	// ── №9: the scheduler's verdict on a pending tie-breaker ──────────────────
@@ -5375,25 +5377,29 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(HavePrefix("retype to tie-breaker pending on rv-1-0:"))
 	})
 
-	It("replacement: a genuine tie-breaker surplus is still reported as unsupported", func() {
-		// 2D+3TB with one terminating leaves two tie-breakers for an r2 layout — beyond the
-		// replacement domain, so it is reported honestly instead of being papered over.
+	It("replacement: a surplus beyond the departure is awaited, not removed in parallel", func() {
+		// 2D+3TB with one terminating leaves two tie-breakers for an r2 layout. The departure
+		// already reduces the count, so the replacement step owns the pass and P4 does not take a
+		// second tie-breaker away on top of it; the leftover one goes on the pass after.
 		rv, rvrs := convergenceFixture(0, 2, 3)
 		markDeleting(rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2))
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(ContainSubstring("have 2D+3TB, want 2D+1TB"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal(
+			"tie-breaker rv-1-2 is terminating: waiting for it to leave the datamesh (have 2D+3TB, want 2D+1TB)"))
 	})
 
-	It("replacement: a wrong diskful count is reported honestly, not healed with a tie-breaker", func() {
+	It("replacement: a wrong diskful count heals the copy first, no replacement is created", func() {
+		// The copy deficit outranks the departure: data recovery ahead of quorum arithmetic.
 		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D
 		markDeleting(rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2))
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
+		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("creating diskful replica: have 2D+1TB, want 3D"))
 	})
 
 	It("4D at an r2 config: plans exactly one retype, then reports Unsupported at 3D+1TB", func() {
@@ -5459,15 +5465,23 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("creating diskful replica: have 1D, want 2D+1TB"))
 	})
 
-	It("refuses a copy deficit with a tie-breaker surplus (2D+1TB at an r3 config, upsize)", func() {
-		// Adding the copy would leave 3D+1TB, and taking the surplus tie-breaker away is a
-		// deletion — a different invariant. Repetition never reaches 3D, so it stays terminal.
+	It("heals a copy deficit with a tie-breaker surplus too (2D+1TB at an r3 config, upsize)", func() {
+		// The first half of the upsize. The tie-breaker count plays no part in the condition: a
+		// copy deficit is healed by a copy, and the tie-breaker left over once the copies match is
+		// P4's job. Repetition reaches 3D+1TB and then 3D.
 		rv, rvrs := convergenceFixture(1, 2, 1)
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 2D+1TB, want 3D; automatic transition is not supported, manual intervention required"))
+		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("creating diskful replica: have 2D+1TB, want 3D"))
+	})
+
+	It("heals a copy deficit at one copy and a tie-breaker (1D+1TB at an r3 config)", func() {
+		// A copy lost while the upsize was running: the same path, no separate recipe.
+		rv, rvrs := convergenceFixture(1, 1, 1)
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		Expect(report.message).To(Equal("creating diskful replica: have 1D+1TB, want 3D"))
 	})
 
 	It("does not issue a second copy while one is in flight (member absent)", func() {
@@ -5633,6 +5647,222 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
 		Expect(report.message).To(Equal("creating diskful replica: have 1D+1TB, want 2D+1TB"))
+	})
+
+	// ── P4: the surplus tie-breaker is removed (the second half of the upsize r2→r3) ──
+	//
+	// The copies match the configuration and a tie-breaker is left over. This is the one deletion
+	// convergence performs — a tie-breaker holds no data and P2 creates one back on demand — and it
+	// waits until every counted copy is UpToDate, because quorum arithmetic alone would release the
+	// tie-breaker the moment the new copy JOINS, long before its resync ends.
+
+	// upToDate publishes how many counted copies are UpToDate — status.effectiveLayout.upToDateVoters,
+	// the very count the resync limiter reads and P4's synchronisation gate reads back.
+	upToDate := func(rv *v1alpha1.ReplicatedVolume, n int) {
+		rv.Status.EffectiveLayout.UpToDateVoters = int8(n)
+	}
+
+	// makeTieBreakerOperational marks the named tie-breaker RVR as a WORKING one: it has applied the
+	// current datamesh revision, its DRBD is configured for its current spec, and it reports a
+	// Connected connection to every data-bearing peer (datamesh.IsTieBreakerOperational). Fixtures
+	// carry no status at all, so every tie-breaker starts out non-operational.
+	makeTieBreakerOperational := func(
+		rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica, name string,
+	) {
+		rvr := findRVRByName(rvrs, name)
+		Expect(rvr).NotTo(BeNil())
+		rvr.Generation = 1
+		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		rvr.Status.Conditions = []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+			ObservedGeneration: 1,
+		}}
+		rvr.Status.Peers = nil
+		for i := range rv.Status.Datamesh.Members {
+			m := &rv.Status.Datamesh.Members[i]
+			if !m.Type.ConnectsToAllPeers() {
+				continue
+			}
+			rvr.Status.Peers = append(rvr.Status.Peers, v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+				Name:            m.Name,
+				ConnectionState: v1alpha1.ConnectionStateConnected,
+			})
+		}
+	}
+
+	It("P4: removes the surplus tie-breaker once every copy is UpToDate (3D+1TB at an r3 config)", func() {
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		upToDate(rv, 3)
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRemoveTieBreaker))
+		Expect(action.removeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3)))
+		Expect(report.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal("removing surplus tie-breaker rv-1-3: have 3D+1TB, want 3D"))
+	})
+
+	It("P4: waits for the new copy to synchronize before taking the tie-breaker away", func() {
+		// The guard that quorum does not provide. With two copies of the data out of three the
+		// volume still needs the tie-breaker; releasing it here would trade redundancy for a
+		// layout that merely LOOKS right.
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		upToDate(rv, 2)
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal(
+			"waiting for the diskful copies to synchronize before removing a surplus tie-breaker " +
+				"(2 of 3 UpToDate): have 3D+1TB, want 3D"))
+	})
+
+	It("P4: removes a surplus tie-breaker at an unchanged configuration (2D+2TB at an r2 config)", func() {
+		// The pattern is written over a tie-breaker SURPLUS, not over the special case "none is
+		// intended", so a second tie-breaker left behind by manual operations converges too.
+		rv, rvrs := convergenceFixture(0, 2, 2)
+		upToDate(rv, 2)
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRemoveTieBreaker))
+		Expect(action.removeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3)))
+		Expect(report.message).To(Equal("removing surplus tie-breaker rv-1-3: have 2D+2TB, want 2D+1TB"))
+	})
+
+	It("P4: parts with a tie-breaker that is not operational before a working one", func() {
+		// rv-1-3 would win by name; it works, and rv-1-2 does not, so the volume keeps the better
+		// of the two.
+		rv, rvrs := convergenceFixture(0, 2, 2)
+		upToDate(rv, 2)
+		makeTieBreakerOperational(rv, rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3))
+
+		action, _ := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionRemoveTieBreaker))
+		Expect(action.removeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2)))
+	})
+
+	It("P4: picks the lexicographically last tie-breaker when they are alike", func() {
+		// Determinism is the point: a second pass must land on the same candidate, or convergence
+		// would delete tie-breakers in turn.
+		rv, rvrs := convergenceFixture(0, 2, 2)
+		upToDate(rv, 2)
+		makeTieBreakerOperational(rv, rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 2))
+		makeTieBreakerOperational(rv, rvrs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3))
+
+		first, _ := computeTargetLayoutAction(rv, rvrs, nil)
+		second, _ := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(first.removeRVRName).To(Equal(v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3)))
+		Expect(second.removeRVRName).To(Equal(first.removeRVRName))
+	})
+
+	It("P4: waits for an attached tie-breaker to detach instead of calling it terminal", func() {
+		// guardNotAttached would block the Leave. That is a transient state, and "a human is
+		// needed" would be the wrong thing to tell the operator about it.
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		upToDate(rv, 3)
+		rv.Status.Datamesh.Members[3].Attached = true
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal(
+			"surplus tie-breaker rv-1-3 is attached: waiting for it to detach (have 3D+1TB, want 3D)"))
+	})
+
+	It("P4: waits for an orphaned surplus tie-breaker to be force-removed", func() {
+		// A member without a replica object is force-removed by the datamesh on its own. Deleting
+		// a working tie-breaker in parallel would take the count below the intended one.
+		rv, rvrs := convergenceFixture(0, 2, 2)
+		upToDate(rv, 2)
+		rvrs = rvrs[:3] // rv-1-3's replica vanished with its node
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(Equal(
+			"tie-breaker rv-1-3 has no replica: waiting for the datamesh to force-remove it (have 2D+2TB, want 2D+1TB)"))
+	})
+
+	It("P4: does not take the tie-breaker away while the third copy cannot be placed", func() {
+		// The cost of getting this wrong is a volume LESS resilient than before the class was
+		// edited, so the composition is pinned explicitly: the removal is reachable only once the
+		// copies match, and here they never do.
+		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
+		upToDate(rv, 2)
+		rvrs = pendingDiskfulRVR(rvrs, 3, scheduledCond(metav1.ConditionFalse,
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
+			"no eligible node available", 3))
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+		Expect(report.message).To(Equal(
+			"cannot place diskful replica (have 2D+1TB, want 3D): rv-1-3: no eligible node available"))
+	})
+
+	It("P4: an active membership transition still wins over the removal", func() {
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		upToDate(rv, 3)
+		rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			ReplicaType: v1alpha1.ReplicaTypeDiskful,
+		}}
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.message).To(Equal("layout transition in progress: have 3D+1TB, want 3D"))
+	})
+
+	It("P4: a retype requested by hand still wins over the removal", func() {
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		upToDate(rv, 3)
+		rvrs[0].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.message).To(HavePrefix("retype to tie-breaker pending on rv-1-0:"))
+	})
+
+	It("the upsize r2→r3 walks 2D+1TB → 3D+1TB → 3D on its own", func() {
+		// The composition of P3 and P4, one pass per row. Neither pattern knows about the other:
+		// the copy deficit is a copy deficit, and the leftover tie-breaker is a surplus.
+		before, beforeRVRs := convergenceFixture(1, 2, 1)
+		upToDate(before, 2)
+		action, _ := computeTargetLayoutAction(before, beforeRVRs, nil)
+		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+
+		// The copy joined but is still resyncing.
+		joined, joinedRVRs := convergenceFixture(1, 3, 1)
+		upToDate(joined, 2)
+		action, report := computeTargetLayoutAction(joined, joinedRVRs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.message).To(ContainSubstring("waiting for the diskful copies to synchronize"))
+
+		// Resync finished → the tie-breaker goes.
+		synced, syncedRVRs := convergenceFixture(1, 3, 1)
+		upToDate(synced, 3)
+		action, _ = computeTargetLayoutAction(synced, syncedRVRs, nil)
+		Expect(action.kind).To(Equal(layoutActionRemoveTieBreaker))
+
+		// It is leaving — the replacement step owns the window and creates nothing.
+		leaving, leavingRVRs := convergenceFixture(1, 3, 1)
+		upToDate(leaving, 3)
+		markDeleting(leavingRVRs, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3))
+		action, report = computeTargetLayoutAction(leaving, leavingRVRs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.message).To(Equal(
+			"tie-breaker rv-1-3 is terminating: waiting for it to leave the datamesh (have 3D+1TB, want 3D)"))
+
+		// It left.
+		after, afterRVRs := convergenceFixture(1, 3, 0)
+		upToDate(after, 3)
+		action, report = computeTargetLayoutAction(after, afterRVRs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.message).To(Equal("layout converged: 3D"))
 	})
 
 	It("takes no action while a membership transition is already moving the layout", func() {
@@ -5933,20 +6163,19 @@ var _ = Describe("reconcileLayoutConvergence", func() {
 		Expect(live).To(Equal(1))
 	})
 
-	It("takes no action for a mismatch outside the whitelist (2D+1TB at an r3 config)", func(ctx SpecContext) {
-		// The upsize r2→r3: the copy deficit is real, but the tie-breaker is in surplus, and
-		// removing it is a deletion — a different invariant — so P3 does not apply either.
-		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
+	It("takes no action for a mismatch outside the whitelist (4D+1TB at an r2 config)", func(ctx SpecContext) {
+		// A copy too many: convergence never removes a copy, so nothing is touched.
+		rv, rvrs := convergenceFixture(0, 4, 1) // r2 config wants 2D+1TB, actual 4D+1TB
 		rec, fresh := buildRec(ctx, rvrs)
 
 		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.ShouldReturn()).To(BeFalse())
 		Expect(outcome.ToCtrl()).NotTo(Requeue())
-		Expect(fresh).To(HaveLen(3))
-		Expect(fresh[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
-		Expect(fresh[1].Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
-		Expect(fresh[2].Spec.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker))
+		Expect(fresh).To(HaveLen(5))
+		for _, rvr := range fresh {
+			Expect(rvr.DeletionTimestamp).To(BeNil())
+		}
 	})
 
 	// ── P3 heal: the diskful creation side ────────────────────────────────────
@@ -6026,6 +6255,134 @@ var _ = Describe("reconcileLayoutConvergence", func() {
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.ShouldReturn()).To(BeFalse()) // ContinueAndRequeue
 		Expect(outcome.ToCtrl()).To(Requeue())
+	})
+
+	// ── P4: the tie-breaker removal side ─────────────────────────────────────
+	//
+	// The Delete call is the whole action: the finalizer keeps the object, the replica controller
+	// turns the deletion timestamp into a Leave request, and the datamesh removes the member.
+
+	It("P4: deletes exactly the chosen tie-breaker and requeues without stopping the pass", func(ctx SpecContext) {
+		rv, rvrs := convergenceFixture(1, 3, 1) // r3 config wants 3D, actual 3D+1TB
+		rv.Status.EffectiveLayout.UpToDateVoters = 3
+		rec, fresh := buildRec(ctx, rvrs)
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		// ContinueAndRequeue: a terminal outcome would drop the MembershipLayoutConverged report
+		// computed in this very pass before the root Reconcile reaches its status patch.
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		Expect(outcome.ToCtrl()).To(Requeue())
+
+		// The local copy carries the departure, so the replacement step sees it on this very pass.
+		deleted := findRVRByName(fresh, v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3))
+		Expect(deleted).NotTo(BeNil())
+		Expect(deleted.DeletionTimestamp).NotTo(BeNil())
+
+		// The object survives its own deletion: the RV controller finalizer holds it until the
+		// member has left the datamesh. The copies are untouched.
+		var list v1alpha1.ReplicatedVolumeReplicaList
+		Expect(rec.cl.List(ctx, &list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(4))
+		for i := range list.Items {
+			rvr := &list.Items[i]
+			if rvr.Name == v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3) {
+				Expect(rvr.DeletionTimestamp).NotTo(BeNil())
+				continue
+			}
+			Expect(rvr.DeletionTimestamp).To(BeNil())
+		}
+	})
+
+	It("P4: does not delete a second tie-breaker while the first is leaving", func(ctx SpecContext) {
+		// Two passes over the same volume: the second one must find nothing to do, or the volume
+		// would be left with no tie-breaker where the configuration still asks for one.
+		rv, rvrs := convergenceFixture(0, 2, 2) // r2 config wants 2D+1TB, actual 2D+2TB
+		rv.Status.EffectiveLayout.UpToDateVoters = 2
+		rec, fresh := buildRec(ctx, rvrs)
+
+		Expect(rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil).Error()).NotTo(HaveOccurred())
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ToCtrl()).NotTo(Requeue())
+
+		var list v1alpha1.ReplicatedVolumeReplicaList
+		Expect(rec.cl.List(ctx, &list)).To(Succeed())
+		deleting := 0
+		for i := range list.Items {
+			if list.Items[i].DeletionTimestamp != nil {
+				deleting++
+			}
+		}
+		Expect(deleting).To(Equal(1))
+	})
+
+	It("P4: a candidate the API server no longer has is a race, not an error", func(ctx SpecContext) {
+		// The decision was made against a stale cache and the replica is already finalized.
+		// Deleting what is not there is not a failure: the next pass recomputes.
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		rv.Status.EffectiveLayout.UpToDateVoters = 3
+		rec, fresh := buildRec(ctx, rvrs, interceptor.Funcs{
+			Delete: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.DeleteOption) error {
+				return apierrors.NewNotFound(
+					schema.GroupResource{Group: v1alpha1.SchemeGroupVersion.Group, Resource: "replicatedvolumereplicas"},
+					obj.GetName(),
+				)
+			},
+		})
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		Expect(outcome.ToCtrl()).To(Requeue())
+	})
+
+	It("P4: a name taken by a newer replica is a race: the newer one is not deleted on a stale cache", func(ctx SpecContext) {
+		// The cache still shows the surplus tie-breaker, while the API server already holds a newer
+		// replica under the same name (the name is the first free replica ID, reused as soon as the
+		// old replica is gone). The delete carries the cached UID and is refused; the next pass
+		// decides again about the object that holds the name now.
+		rv, rvrs := convergenceFixture(1, 3, 1)
+		rv.Status.EffectiveLayout.UpToDateVoters = 3
+		tbName := v1alpha1.FormatReplicatedVolumeReplicaName("rv-1", 3)
+		rvrs[3].UID = "rv-1-3-newer"
+		rec, fresh := buildRec(ctx, rvrs, interceptor.Funcs{
+			// The fake client checks only the resourceVersion precondition; the UID one is checked
+			// here the way the API server checks it.
+			Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				var stored v1alpha1.ReplicatedVolumeReplica
+				if err := cl.Get(ctx, client.ObjectKeyFromObject(obj), &stored); err != nil {
+					return err
+				}
+				delOpts := client.DeleteOptions{}
+				delOpts.ApplyOptions(opts)
+				if p := delOpts.Preconditions; p != nil && p.UID != nil && *p.UID != stored.UID {
+					return apierrors.NewConflict(
+						schema.GroupResource{Group: v1alpha1.SchemeGroupVersion.Group, Resource: "replicatedvolumereplicas"},
+						obj.GetName(), errors.New("UID precondition failed"),
+					)
+				}
+				return cl.Delete(ctx, obj, opts...)
+			},
+		})
+		findRVRByName(fresh, tbName).UID = "rv-1-3-older" // the stale cache
+
+		outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+		Expect(outcome.Error()).NotTo(HaveOccurred())
+		Expect(outcome.ShouldReturn()).To(BeFalse())
+		Expect(outcome.ToCtrl()).To(Requeue())
+		Expect(findRVRByName(fresh, tbName).DeletionTimestamp).To(BeNil())
+
+		var stored v1alpha1.ReplicatedVolumeReplica
+		Expect(rec.cl.Get(ctx, client.ObjectKey{Name: tbName}, &stored)).To(Succeed())
+		Expect(stored.DeletionTimestamp).To(BeNil())
+
+		// The cache catches up: the pass now acts on the object that holds the name.
+		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil).Error()).NotTo(HaveOccurred())
+		Expect(rec.cl.Get(ctx, client.ObjectKey{Name: tbName}, &stored)).To(Succeed())
+		Expect(stored.DeletionTimestamp).NotTo(BeNil())
 	})
 
 	It("is a no-op when the RV is being deleted", func(ctx SpecContext) {

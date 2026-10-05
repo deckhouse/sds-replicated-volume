@@ -1252,16 +1252,17 @@ var _ = Describe("reconcileRVConfiguration rollout budget", func() {
 	})
 
 	It("limits the blast radius of a configuration no volume can converge on", func(ctx SpecContext) {
-		// The class is edited the wrong way round: every volume runs 2D+1TB and the new
-		// configuration asks for 3D, which convergence can never reach (it never creates a
-		// Diskful replica). The volumes that adopt it are stuck with it forever, so the budget is
-		// the only thing that keeps the damage down to two volumes out of four.
+		// The class is edited the wrong way round: every volume runs 4D+1TB and the new
+		// configuration asks for 3D, which convergence can never reach (it never removes a copy —
+		// P1 needs a tie-breaker deficit and P4 needs the copies to match). The volumes that adopt
+		// it are stuck with it forever, so the budget is the only thing that keeps the damage down
+		// to two volumes out of four.
 		rsc := newRolloutRSC(2, newConfiguration(), maxParallelStrategy(2))
 		rvs := make([]*v1alpha1.ReplicatedVolume, 0, 4)
 		names := make([]string, 0, 4)
 		for i := range 4 {
 			name := fmt.Sprintf("rv-%d", i)
-			rvs = append(rvs, withLayout(newRolloutRVNamed(name, r2Configuration(), 1, 1), 2, 1))
+			rvs = append(rvs, withLayout(newRolloutRVNamed(name, r2Configuration(), 1, 1), 4, 1))
 			names = append(names, name)
 		}
 		cl, rec := buildClass(rsc, rvs...)
