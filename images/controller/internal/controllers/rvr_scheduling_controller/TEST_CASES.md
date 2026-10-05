@@ -6,6 +6,10 @@ Non-obvious / non-trivial cases are marked with ⚡.
 
 The required Diskful count is D = FTT + GMDR + 1. TB = 1 if D is even and FTT = D/2, else 0.
 
+Cases with FTT or GMDR above 1 are engine only: admission is capped at FTT/GMDR ≤ 1
+(see the datamesh README, "TransZonal zone requirements"), so such configurations cannot
+be requested; the tests pin the scheduler engine for a future lift of the cap.
+
 ---
 
 ## Zonal Topology
@@ -53,19 +57,19 @@ The required Diskful count is D = FTT + GMDR + 1. TB = 1 if D is even and FTT = 
 6. **medium-2z: all nodes occupied — TB is not scheduled.**
    4 existing Diskful fill all 4 nodes across 2 zones. TieBreaker receives `Scheduled=False` / `SchedulingFailed`.
 
-7. ⚡ **FTT=2,GMDR=2: 5D across 3 zones — composite 2+2+1.**
+7. ⚡ **FTT=2,GMDR=2: 5D across 3 zones — composite 2+2+1 (engine only).**
    D=5 in 3 zones (2 nodes per zone). Round-robin distributes: all 3 zones used, max 2 replicas per zone.
 
-8. ⚡ **FTT=1,GMDR=2: 4D across 3 zones — composite 2+1+1.**
+8. ⚡ **FTT=2,GMDR=1: 4D of 4D+1TB across 3 zones — composite 2+1+1 (engine only).**
    D=4 in 3 zones (2 nodes per zone). Round-robin distributes: all 3 zones used, max 2 replicas per zone.
 
-9. ⚡ **FTT=1,GMDR=2: 4D+1TB across 3 zones — TB avoids zone with 2D.**
+9. ⚡ **FTT=2,GMDR=1: 4D+1TB across 3 zones — TB avoids zone with 2D (engine only).**
    D=4 pre-placed as 2+1+1. TB uses "fewest total replicas" → goes to a zone with 1D (not the zone with 2D).
 
-10. ⚡ **FTT=2,GMDR=1: 4D across 4 zones — pure 1+1+1+1.**
+10. ⚡ **FTT=1,GMDR=2: 4D across 4 zones — pure 1+1+1+1 (engine only).**
     D=4 in 4 zones (1 node per zone). Each zone gets exactly one replica.
 
-11. ⚡ **FTT=2,GMDR=2: 5D across 3 zones — existing 2+2, new D goes to empty zone.**
+11. ⚡ **FTT=2,GMDR=2: 5D across 3 zones — existing 2+2, new D goes to empty zone (engine only).**
     4D pre-placed as 2+2+0 (zone-a: 2, zone-b: 2, zone-c: 0). New D goes to zone-c.
 
 ---
@@ -323,22 +327,22 @@ penalty. D = FTT + GMDR + 1.
 6. ⚡ **FTT=0,GMDR=0 (D=1) — no penalty when zones have ≥1 node.**
    Both zones have ≥ 1 node → no penalty. Replica scheduled normally.
 
-7. ⚡ **FTT=1,GMDR=2 (D=4) — zone with 4 free nodes gets no penalty.**
+7. ⚡ **FTT=1,GMDR=2 (D=4) — zone with 4 free nodes gets no penalty (engine only).**
    zone-a: 4 nodes (≥ D=4 → no penalty), zone-b: 3 nodes (< 4 → penalty). All 4 replicas go to zone-a.
 
-8. ⚡ **FTT=1,GMDR=2 (D=4) — both zones too small → penalty, sticky locks.**
+8. ⚡ **FTT=1,GMDR=2 (D=4) — both zones too small → penalty, sticky locks (engine only).**
    zone-a: 2 nodes, zone-b: 3 nodes. Both < D=4 → both penalized. zone-b wins first placement (higher scores). Sticky locks to zone-b. 3 placed in zone-b, 1 fails (sticky restricts to full zone).
 
-9. ⚡ **FTT=2,GMDR=1 (D=4) — penalty pushes away from small zone.**
+9. ⚡ **FTT=2,GMDR=1 (D=4) — penalty pushes away from small zone (engine only).**
    zone-a: 2 nodes (score=10), zone-b: 4 nodes (score=5). zone-a penalized (2 < 4), zone-b not. All 4 go to zone-b despite lower individual scores.
 
-10. ⚡ **FTT=2,GMDR=2 (D=5) — zone with 5 free nodes gets no penalty.**
+10. ⚡ **FTT=2,GMDR=2 (D=5) — zone with 5 free nodes gets no penalty (engine only).**
     zone-a: 5 nodes (≥ D=5 → no penalty), zone-b: 3 nodes (< 5 → penalty). All 5 replicas go to zone-a.
 
-11. ⚡ **FTT=2,GMDR=2 (D=5) — partial schedule reduces remaining demand.**
+11. ⚡ **FTT=2,GMDR=2 (D=5) — partial schedule reduces remaining demand (engine only).**
     3 already scheduled in zone-a. remainingDemand=2. zone-a has 2 free nodes ≥ 2 → no penalty. Both new replicas placed.
 
-12. ⚡ **FTT=2,GMDR=2 (D=5) — no zone has 5 nodes → sticky limits.**
+12. ⚡ **FTT=2,GMDR=2 (D=5) — no zone has 5 nodes → sticky limits (engine only).**
     zone-a: 3 nodes, zone-b: 2 nodes. Both penalized. Sticky locks to zone-a (wins tiebreak). 3 placed in zone-a, 2 fail.
 
 ---

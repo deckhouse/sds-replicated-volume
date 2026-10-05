@@ -78,7 +78,7 @@ spec:
                     FailuresToTolerate (FTT) задаёт, сколько отказов произвольных узлов том может перенести, оставаясь доступным для ввода-вывода.
                     Нельзя задавать одновременно с Replication.
                     Задаётся только вместе с GuaranteedMinimumDataRedundancy.
-                    Допустимый диапазон: 0–2. Допустимые сочетания: |FTT - GMDR| <= 1.
+                    Допустимый диапазон: 0–1: в datamesh есть раскладки выше FTT=1/GMDR=1 (4D, 4D+1TB, 5D), но они не протестированы в DRBD, поэтому admission ограничен раскладками LINSTOR control-plane (None, Availability, ConsistencyAndAvailability) и режимом Consistency. Допустимые сочетания: |FTT - GMDR| <= 1.
                 guaranteedMinimumDataRedundancy:
                   description: |
                     Имеет смысл только в новом control-plane.
@@ -86,7 +86,7 @@ spec:
                     GuaranteedMinimumDataRedundancy (GMDR) задаёт минимальное число дополнительных копий данных, поддерживаемых, пока том обслуживает ввод-вывод. GMDR=0 означает, что система может работать с единственной копией данных в деградированном режиме (как зеркало RAID-1 после отказа одного диска). GMDR=1 означает, что во время ввода-вывода всегда поддерживаются как минимум 2 копии.
                     Нельзя задавать одновременно с Replication.
                     Задаётся только вместе с FailuresToTolerate.
-                    Допустимый диапазон: 0–2. Допустимые сочетания: |FTT - GMDR| <= 1.
+                    Допустимый диапазон: 0–1: раскладки выше FTT=1/GMDR=1 не протестированы в DRBD и не допускаются (см. failuresToTolerate). Допустимые сочетания: |FTT - GMDR| <= 1.
                 nodeLabelSelector:
                   description: |
                     Имеет смысл только в новом control-plane.
@@ -208,9 +208,16 @@ spec:
                   description: |
                     Список зон, в которых будут созданы реплики тома. Контроллер повесит лейбл с именем StorageClass на те узлы, на которых будет возможно создать реплики томов.
 
-                    > Обязательно при топологии TransZonal; для режимов репликации 'Availability' и 'ConsistencyAndAvailability' необходимо указать ровно 3 зоны.
-                    > В LINSTOR control-plane поле можно задать только при топологии TransZonal.
-                    > В новом control-plane режим репликации 'Consistency' требует не менее 2 зон, а при режиме 'None' зоны ограничивают узлы, на которых может быть размещена единственная реплика.
+                    > Обязательно при топологии TransZonal; число зон должно точно соответствовать
+                    > настройкам избыточности:
+                    > - failuresToTolerate=0, guaranteedMinimumDataRedundancy=1 (репликация 'Consistency'): ровно 2 зоны;
+                    > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=0 (репликация 'Availability'): ровно 3 зоны;
+                    > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=1 (репликация 'ConsistencyAndAvailability', по умолчанию): ровно 3 зоны.
+                    > В LINSTOR control-plane поле можно задать только при топологии TransZonal; для режимов
+                    > репликации 'Availability' и 'ConsistencyAndAvailability' необходимо указать ровно 3 зоны.
+                    > Режим репликации 'Consistency' в LINSTOR control-plane не поддерживается.
+                    > В новом control-plane при режиме 'None' зоны ограничивают узлы, на которых может
+                    > быть размещена единственная реплика.
                     > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
             status:
               description: |
@@ -252,9 +259,11 @@ spec:
                     failuresToTolerate:
                       description: |
                         Итоговое значение FTT.
+                        Admission ограничивает значение 1: в datamesh есть раскладки выше FTT=1/GMDR=1, но они не протестированы в DRBD (см. api/v1alpha1/rsc_types.go).
                     guaranteedMinimumDataRedundancy:
                       description: |
                         Итоговое значение GMDR.
+                        Admission ограничивает значение 1 (см. failuresToTolerate).
                     replicatedStoragePoolName:
                       description: |
                         Имя ресурса ReplicatedStoragePool.

@@ -82,11 +82,21 @@ func (rsc *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condi
 // GetStatusPhase returns .status.phase as a string.
 func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.Status.Phase) }
 
-// Legacy replication validations (only fire when replication is set):
+// The create/update rules below fall into three groups: common rules that hold on both
+// control planes, legacy control plane rules and new control plane rules. The CRD is shared
+// by both control planes and cannot see which one is installed, so the control plane is told
+// apart by spec.storage: the RSC webhook requires it on the new control plane and rejects it
+// on the legacy one (images/webhooks/handlers/rscValidator.go; on the legacy control plane
+// it runs as a sidecar of the legacy controller, see templates/oldcontroller/controller.yaml).
+// Legacy rules are therefore guarded by "has(self.storage) ||" and new control plane rules by
+// "!has(self.storage) ||".
+// The legacy control plane keeps its historical, looser zone rules untouched; the new control
+// plane requires the exact TransZonal zone counts its datamesh supports.
+//
+// Common rules (both control planes).
+//
+// Replication None has no replicas to distribute:
 // +kubebuilder:validation:XValidation:rule="!has(self.replication) || self.replication != 'None' || self.topology == 'Ignored'",message="Replication None requires topology Ignored (no replicas to distribute)."
-// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with Availability replication requires at least 3 zones (if specified)."
-// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 2",message="TransZonal topology with Consistency replication requires at least 2 zones (if specified)."
-// +kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || (has(self.replication) && self.replication != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with ConsistencyAndAvailability replication (default) requires at least 3 zones (if specified)."
 //
 // FTT/GMDR mutual exclusivity with replication:
 // +kubebuilder:validation:XValidation:rule="!(has(self.failuresToTolerate) || has(self.guaranteedMinimumDataRedundancy)) || !has(self.replication)",message="Cannot specify both replication and failuresToTolerate/guaranteedMinimumDataRedundancy."
@@ -100,14 +110,40 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // FTT=0, GMDR=0 requires topology Ignored:
 // +kubebuilder:validation:XValidation:rule="!(has(self.failuresToTolerate) && self.failuresToTolerate == 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology == 'Ignored'",message="failuresToTolerate=0 with guaranteedMinimumDataRedundancy=0 requires topology Ignored."
 //
-// TransZonal zone count validations for FTT/GMDR:
+// Legacy control plane rules (spec.storage is not set).
 //
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 0 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 2",message="TransZonal with FTT=0, GMDR=1 requires exactly 2 zones."
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=0 requires exactly 3 zones."
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=1 requires exactly 3 zones."
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones) == 3 || size(self.zones) == 5",message="TransZonal with FTT=1, GMDR=2 requires exactly 3 or 5 zones."
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 4",message="TransZonal with FTT=2, GMDR=1 requires exactly 4 zones."
-//	+kubebuilder:validation:XValidation:rule="self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones) == 3 || size(self.zones) == 5",message="TransZonal with FTT=2, GMDR=2 requires exactly 3 or 5 zones."
+// TransZonal lower bounds on the zone count per replication mode. An unset replication means
+// the ConsistencyAndAvailability default. The exact counts (and a non-empty zone list) are
+// enforced by the legacy webhook and the legacy controller, not here.
+// +kubebuilder:validation:XValidation:rule="has(self.storage) || self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with Availability replication requires at least 3 zones (if specified)."
+// +kubebuilder:validation:XValidation:rule="has(self.storage) || self.topology != 'TransZonal' || (has(self.replication) && self.replication != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones) == 0 || size(self.zones) >= 3",message="TransZonal topology with ConsistencyAndAvailability replication (default) requires at least 3 zones (if specified)."
+//
+// The legacy control plane never supported Consistency: the old controller has no
+// StorageClass layout for it (see images/oldcontroller). The legacy webhook rejects it
+// as well (rscValidator.go, validateLegacySpecFields); this rule rejects it at admission
+// for every topology instead of the TransZonal-only lower bound above.
+// +kubebuilder:validation:XValidation:rule="has(self.storage) || !has(self.replication) || self.replication != 'Consistency'",message="Replication Consistency is not supported by the legacy control plane (spec.storagePool); it requires the new control plane (spec.storage)."
+//
+// New control plane rules (spec.storage is set).
+//
+// TransZonal needs an explicit zone list: the replicas are distributed over exactly these
+// zones, and the per-layout zone counts below are checked against it.
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || (has(self.zones) && size(self.zones) > 0)",message="TransZonal topology requires zones to be specified."
+//
+// TransZonal zone counts. Each admitted FTT/GMDR layout (see the datamesh README,
+// "TransZonal zone requirements") fits either one replica per zone (pure) or a composite
+// distribution that survives the loss of any zone. The allowed counts MUST match
+// isTransZonalZoneCountValid in rv_controller. Admission is limited to FTT/GMDR <= 1
+// (see the field markers), so the higher layouts of the datamesh have no rules here.
+// The legacy replication modes map onto FTT/GMDR (see replicationToFTTGMDR), an unset
+// replication meaning the ConsistencyAndAvailability default. Emptiness of the zone
+// list is reported by the rule above only, hence the "size(self.zones) == 0 ||" guards.
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) == 2",message="TransZonal topology with Consistency replication requires exactly 2 zones."
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.replication) || self.replication != 'Availability' || !has(self.zones) || size(self.zones) == 0 || size(self.zones) == 3",message="TransZonal topology with Availability replication requires exactly 3 zones."
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || has(self.failuresToTolerate) || (has(self.replication) && self.replication != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones) == 0 || size(self.zones) == 3",message="TransZonal topology with ConsistencyAndAvailability replication (default) requires exactly 3 zones."
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 0 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 2",message="TransZonal with FTT=0, GMDR=1 requires exactly 2 zones."
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=0 requires exactly 3 zones."
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=1 requires exactly 3 zones."
 //
 // Immutable spec fields (transition rules; evaluated on update only):
 // the conservative r3->r2 migration matrix permits changing only replication,
@@ -184,9 +220,12 @@ type ReplicatedStorageClassSpec struct {
 	// can tolerate while remaining available for IO.
 	// Mutually exclusive with Replication.
 	// Must be specified together with GuaranteedMinimumDataRedundancy.
-	// Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+	// Valid range: 0-1: the datamesh has layouts above FTT=1/GMDR=1 (4D, 4D+1TB, 5D),
+	// but they are not tested in DRBD, so admission is limited to the layouts the
+	// LINSTOR control-plane shipped (None, Availability, ConsistencyAndAvailability)
+	// plus Consistency. Valid combinations: |FTT - GMDR| <= 1.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:validation:Maximum=1
 	// +optional
 	FailuresToTolerate *byte `json:"failuresToTolerate,omitempty"`
 	// Only meaningful with the new control-plane.
@@ -197,9 +236,11 @@ type ReplicatedStorageClassSpec struct {
 	// disk failure). GMDR=1 means at least 2 copies are always maintained during IO.
 	// Mutually exclusive with Replication.
 	// Must be specified together with FailuresToTolerate.
-	// Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
+	// Valid range: 0-1: layouts above FTT=1/GMDR=1 are not tested in DRBD and are not
+	// admitted (see failuresToTolerate).
+	// Valid combinations: |FTT - GMDR| <= 1.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:validation:Maximum=1
 	// +optional
 	GuaranteedMinimumDataRedundancy *byte `json:"guaranteedMinimumDataRedundancy,omitempty"`
 	// The volume access mode. Might be:
@@ -236,11 +277,16 @@ type ReplicatedStorageClassSpec struct {
 	// The list of zones the StorageClass's volumes are replicated in. The controller puts a label
 	// with the StorageClass's name on the nodes where replicas of the volumes can be created.
 	//
-	// > Required with the TransZonal topology; with 'Availability' and 'ConsistencyAndAvailability'
-	// > replication exactly 3 zones must be specified.
-	// > In the LINSTOR control-plane the field can be set only with the TransZonal topology.
-	// > In the new control-plane, 'Consistency' replication requires at least 2 zones, and with
-	// > 'None' replication the zones limit where the single replica can be placed.
+	// > Required with the TransZonal topology; the number of zones must be exactly
+	// > one of the values below, depending on the redundancy settings:
+	// > - failuresToTolerate=0, guaranteedMinimumDataRedundancy=1 (replication 'Consistency'): exactly 2 zones
+	// > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=0 (replication 'Availability'): exactly 3 zones
+	// > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=1 (replication 'ConsistencyAndAvailability', the default): exactly 3 zones
+	// > In the LINSTOR control-plane the field can be set only with the TransZonal topology;
+	// > with 'Availability' and 'ConsistencyAndAvailability' replication exactly 3 zones must
+	// > be specified. The 'Consistency' replication is not supported there.
+	// > In the new control-plane, with 'None' replication the zones limit where the single
+	// > replica can be placed.
 	// > The field is immutable after creation.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=63

@@ -420,16 +420,18 @@ Layout transitions change GMDR or FTT by exactly ±1 per step. See
 ### Transition graph
 
 ```
-(0,0) 1D ———GMDR——— 2D (1,0)
+(0,0) 1D ———GMDR——— 2D (0,1)
   |                    |
  FTT                  FTT
   |                    |
-(0,1) 2D+TB —GMDR— 3D (1,1) ———GMDR——— 4D (2,1)
+(1,0) 2D+TB —GMDR— 3D (1,1) ———GMDR——— 4D (1,2)
                        |                    |
                       FTT                  FTT
                        |                    |
-                 (1,2) 4D+TB ——GMDR—— 5D (2,2)
+                 (2,1) 4D+TB ——GMDR—— 5D (2,2)
 ```
+
+Tuples are `(FTT,GMDR)`, as in the README tables and the API fields.
 
 ### Ordering rules
 
@@ -666,8 +668,10 @@ with the D↔TB swap above.
 The available layouts form a linear chain:
 
 ```
-2D+1TB (0,1) ——GMDR—— 3D (1,1) ——FTT—— 4D+1TB (1,2) ——GMDR—— 5D (2,2)
+2D+1TB (1,0) ——GMDR—— 3D (1,1) ——FTT—— 4D+1TB (2,1) ——GMDR—— 5D (2,2)
 ```
+
+Tuples are `(FTT,GMDR)`, as in the README tables and the API fields.
 
 Each edge maps to a DM transition sequence from §4:
 

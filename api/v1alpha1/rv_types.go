@@ -180,12 +180,15 @@ type ReplicatedVolumeConfiguration struct {
 	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	Topology ReplicatedStorageClassTopology `json:"topology"`
 	// FailuresToTolerate is the resolved FTT value.
+	// Admission caps it at 1: the datamesh has layouts above FTT=1/GMDR=1, but they are
+	// not tested in DRBD (see api/v1alpha1/rsc_types.go).
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:validation:Maximum=1
 	FailuresToTolerate byte `json:"failuresToTolerate"`
 	// GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+	// Admission caps it at 1 (see failuresToTolerate).
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=2
+	// +kubebuilder:validation:Maximum=1
 	GuaranteedMinimumDataRedundancy byte `json:"guaranteedMinimumDataRedundancy"`
 	// VolumeAccess is the resolved volume access mode.
 	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any

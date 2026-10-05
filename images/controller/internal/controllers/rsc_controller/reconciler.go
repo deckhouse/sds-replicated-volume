@@ -300,10 +300,11 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 
 	// spec.storage is immutable once set (enforced by the update webhook). If it is already
 	// populated, never overwrite it: the webhook would reject the change and reconcile would
-	// spin in a fail-loop for legacy objects that carry both storagePool and storage (the RSC
-	// webhook is not registered in legacy installs, so that state is reachable). Keep the
-	// authoritative spec.storage and only drop the deprecated storagePool; when the two
-	// disagree, surface the conflict honestly instead of silently overwriting.
+	// spin in a fail-loop for legacy objects that carry both storagePool and storage (a legacy
+	// install admitted them before its RSC webhook started rejecting spec.storage, so that
+	// state is reachable). Keep the authoritative spec.storage and only drop the deprecated
+	// storagePool; when the two disagree, surface the conflict honestly instead of silently
+	// overwriting.
 	if rsc.Spec.Storage != nil {
 		conflict := !isStorageInSync(rsc, migratedStorage)
 
@@ -1201,7 +1202,13 @@ func validateEligibleNodes(
 
 	switch topology {
 	case v1alpha1.TopologyTransZonal:
-		minZones, minZonesWithDisks := computeTransZonalMinZones(ftt, gmdr)
+		minZones, minZonesWithDisks, ok := computeTransZonalMinZones(ftt, gmdr)
+		if !ok {
+			// Unreachable through admission (the spec caps FTT/GMDR at 1): RSCs created
+			// before the cap on dev stands land here; report them honestly instead of
+			// letting the reconciler panic-loop. Recovery is deleting the object.
+			return fmt.Errorf("FTT=%d, GMDR=%d is not a supported combination for TransZonal topology", ftt, gmdr)
+		}
 
 		if len(nodesByZone) < minZones {
 			return fmt.Errorf("FTT=%d, GMDR=%d with TransZonal topology requires at least %d zones, have %d",
@@ -1247,8 +1254,13 @@ func validateEligibleNodes(
 }
 
 // computeTransZonalMinZones returns the minimum total zones and minimum zones with disks
-// for a TransZonal layout with the given FTT/GMDR combination.
-// Only called for TransZonal topology (FTT=0,GMDR=0 is not TransZonal — CEL prevents it).
+// for a TransZonal layout with the given FTT/GMDR combination, and whether the
+// combination is supported at all. Only called for TransZonal topology (FTT=0,GMDR=0 is
+// not TransZonal — CEL prevents it).
+//
+// Admission caps FTT/GMDR at 1 (see api/v1alpha1/rsc_types.go), so the higher datamesh
+// layouts are unreachable through admission; ok=false covers them together with any
+// other unknown combination, which only pre-cap RSCs from dev stands can carry.
 //
 // Composite mode (multiple replicas per zone) allows fewer zones than pure zone
 // mode (1 replica per zone). The minimum values come from the zone distribution
@@ -1257,25 +1269,16 @@ func validateEligibleNodes(
 //	FTT=0, GMDR=1: 2D        → 2 zones, 2 with disks
 //	FTT=1, GMDR=0: 2D+1TB    → 3 zones, 2 with disks
 //	FTT=1, GMDR=1: 3D        → 3 zones, 3 with disks
-//	FTT=1, GMDR=2: 4D+1TB    → 3 zones, 3 with disks (composite 2D|1D+TB|1D)
-//	FTT=2, GMDR=1: 4D        → 4 zones, 4 with disks
-//	FTT=2, GMDR=2: 5D        → 3 zones, 3 with disks (composite 2D|2D|1D)
-func computeTransZonalMinZones(ftt, gmdr byte) (minZones, minZonesWithDisks int) {
+func computeTransZonalMinZones(ftt, gmdr byte) (minZones, minZonesWithDisks int, ok bool) {
 	switch {
 	case ftt == 0 && gmdr == 1:
-		return 2, 2
+		return 2, 2, true
 	case ftt == 1 && gmdr == 0:
-		return 3, 2
+		return 3, 2, true
 	case ftt == 1 && gmdr == 1:
-		return 3, 3
-	case ftt == 1 && gmdr == 2:
-		return 3, 3
-	case ftt == 2 && gmdr == 1:
-		return 4, 4
-	case ftt == 2 && gmdr == 2:
-		return 3, 3
+		return 3, 3, true
 	default:
-		panic(fmt.Sprintf("transZonalMinZones: unsupported FTT=%d, GMDR=%d combination", ftt, gmdr))
+		return 0, 0, false
 	}
 }
 

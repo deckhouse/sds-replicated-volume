@@ -264,16 +264,16 @@ partition can have both sides meet the quorum threshold.
 
 ### Valid combinations
 
-FTT and GMDR must satisfy |GMDR − FTT| ≤ 1, with both in {0, 1, 2}:
+FTT and GMDR must satisfy |FTT − GMDR| ≤ 1, with both in {0, 1, 2}:
 
-| GMDR | FTT | qmr | D | q | TB | Total nodes |
-|------|-----|-----|---|---|----|-------------|
+| FTT | GMDR | qmr | D | q | TB | Total nodes |
+|-----|------|-----|---|---|----|-------------|
 | 0 | 0 | 1 | 1 | 1 | 0 | 1 |
-| 0 | 1 | 1 | 2 | 2 | 1 | 3 |
-| 1 | 0 | 2 | 2 | 2 | 0 | 2 |
+| 0 | 1 | 2 | 2 | 2 | 0 | 2 |
+| 1 | 0 | 1 | 2 | 2 | 1 | 3 |
 | 1 | 1 | 2 | 3 | 2 | 0 | 3 |
-| 1 | 2 | 2 | 4 | 3 | 1 | 5 |
-| 2 | 1 | 3 | 4 | 3 | 0 | 4 |
+| 1 | 2 | 3 | 4 | 3 | 0 | 4 |
+| 2 | 1 | 2 | 4 | 3 | 1 | 5 |
 | 2 | 2 | 3 | 5 | 3 | 0 | 5 |
 
 ---
@@ -286,14 +286,14 @@ quorum settings.
 
 ### Layout summary
 
-| GMDR | FTT | Layout | q | qmr | D | TB | Total | Min copies during IO | Write latency |
-|------|-----|--------|---|-----|---|----|-------|----------------------|---------------|
+| FTT | GMDR | Layout | q | qmr | D | TB | Total | Min copies during IO | Write latency |
+|-----|------|--------|---|-----|---|----|-------|----------------------|---------------|
 | 0 | 0 | **1D** | 1 | 1 | 1 | 0 | 1 | 1 | 1 disk write |
-| 0 | 1 | **2D+1TB** | 2 | 1 | 2 | 1 | 3 | 1 | max 2 parallel |
-| 1 | 0 | **2D** | 2 | 2 | 2 | 0 | 2 | 2 | 2 parallel |
+| 0 | 1 | **2D** | 2 | 2 | 2 | 0 | 2 | 2 | 2 parallel |
+| 1 | 0 | **2D+1TB** | 2 | 1 | 2 | 1 | 3 | 1 | max 2 parallel |
 | 1 | 1 | **3D** | 2 | 2 | 3 | 0 | 3 | 2 | max 3 parallel |
-| 1 | 2 | **4D+1TB** | 3 | 2 | 4 | 1 | 5 | 2 | max 4 parallel |
-| 2 | 1 | **4D** | 3 | 3 | 4 | 0 | 4 | 3 | max 4 parallel |
+| 1 | 2 | **4D** | 3 | 3 | 4 | 0 | 4 | 3 | max 4 parallel |
+| 2 | 1 | **4D+1TB** | 3 | 2 | 4 | 1 | 5 | 2 | max 4 parallel |
 | 2 | 2 | **5D** | 3 | 3 | 5 | 0 | 5 | 3 | max 5 parallel |
 
 - **Min copies during IO**: the minimum number of disks holding all
@@ -305,23 +305,23 @@ quorum settings.
 
 | Use case | Recommended | Total | Why |
 |----------|-------------|-------|-----|
-| Development / ephemeral data | GMDR=0, FTT=0 (1D) | 1 | Single disk, no redundancy |
-| Production, availability-first | GMDR=0, FTT=1 (2D+1TB) | 3 | ≈ classic RAID1: 2 copies, stays available through 1 failure |
-| Production, data-safety-first | GMDR=1, FTT=0 (2D) | 2 | ≈ strict RAID1: writes only when both disks are up, always 2 copies |
-| Production, balanced | GMDR=1, FTT=1 (3D) | 3 | ≈ RAID1 + hot spare: always 2+ copies, tolerates 1 failure |
-| Production, high availability | GMDR=1, FTT=2 (4D+1TB) | 5 | ≈ 4-way mirror: always 2+ copies, tolerates 2 failures |
-| Mission-critical, data safety | GMDR=2, FTT=1 (4D) | 4 | ≈ strict 3-way mirror: always 3+ copies, tolerates 1 failure |
-| Mission-critical, full | GMDR=2, FTT=2 (5D) | 5 | ≈ 3-way mirror + spares: always 3+ copies, tolerates 2 failures |
+| Development / ephemeral data | FTT=0, GMDR=0 (1D) | 1 | Single disk, no redundancy |
+| Production, availability-first | FTT=1, GMDR=0 (2D+1TB) | 3 | ≈ classic RAID1: 2 copies, stays available through 1 failure |
+| Production, data-safety-first | FTT=0, GMDR=1 (2D) | 2 | ≈ strict RAID1: writes only when both disks are up, always 2 copies |
+| Production, balanced | FTT=1, GMDR=1 (3D) | 3 | ≈ RAID1 + hot spare: always 2+ copies, tolerates 1 failure |
+| Production, high availability | FTT=2, GMDR=1 (4D+1TB) | 5 | ≈ 4-way mirror: always 2+ copies, tolerates 2 failures |
+| Mission-critical, data safety | FTT=1, GMDR=2 (4D) | 4 | ≈ strict 3-way mirror: always 3+ copies, tolerates 1 failure |
+| Mission-critical, full | FTT=2, GMDR=2 (5D) | 5 | ≈ 3-way mirror + spares: always 3+ copies, tolerates 2 failures |
 
-### Understanding the GMDR / FTT trade-off
+### Understanding the FTT / GMDR trade-off
 
 FTT and GMDR are **independent axes** — neither must be ≤ or ≥ the other:
 
-- **GMDR > FTT** (e.g. 1, 0): system stops IO early (before any risk to data).
+- **FTT < GMDR** (e.g. FTT=0, GMDR=1): system stops IO early (before any risk to data).
   Maximum data safety, but more downtime.
-- **GMDR = FTT** (e.g. 1, 1): system stays available until the moment one more
+- **FTT = GMDR** (e.g. FTT=1, GMDR=1): system stays available until the moment one more
   failure would risk data. Balanced.
-- **GMDR < FTT** (e.g. 0, 1): system prioritizes availability — stays running
+- **FTT > GMDR** (e.g. FTT=1, GMDR=0): system prioritizes availability — stays running
   even when data redundancy has dropped to the last copy. Riskier for data,
   fewer outages.
 
@@ -391,15 +391,31 @@ layout and the number of available zones:
 
 ### TransZonal zone requirements
 
-| FTT | GMDR | Min zones | Failure domain |
-|-----|------|-----------|----------------|
-| 0 | 0 | 1 | — |
-| 0 | 1 | 2 | — |
-| 1 | 0 | 3 | zone |
-| 1 | 1 | 3 | zone |
-| 1 | 2 | 4 | zone |
-| 2 | 1 | 3 (composite) or 5 (pure) | composite or zone |
-| 2 | 2 | 3 (composite) or 5 (pure) | composite or zone |
+The zone count must be exactly one of the listed values: the RSC CEL rules
+(new control plane) and the controller (`isTransZonalZoneCountValid`) reject
+any other count. FTT=0, GMDR=0 (1D) has nothing to distribute and is not
+allowed with TransZonal.
+
+The listed counts are a support policy, not the limit of the placement guards:
+the guards alone would also accept some other counts (e.g. 4D+1TB or 5D over
+4 zones, 4D over 5 zones), but only the listed distributions are admitted and
+covered by tests. Widening the set is a separate change.
+
+Admission is additionally capped at FTT ≤ 1 and GMDR ≤ 1 (the field markers
+in api/v1alpha1/rsc_types.go and rv_types.go): the datamesh engine knows the
+layouts above this line — 4D, 4D+1TB, 5D in the table below and in the layout
+docs — but they are not tested in DRBD, so neither an RSC nor a manually
+configured RV can request them. The 4D, 4D+1TB and 5D rows are engine
+capability until that cap is lifted.
+
+| FTT | GMDR | Layout | Zones | Failure domain |
+|-----|------|--------|-------|----------------|
+| 0 | 1 | 2D | 2 | — |
+| 1 | 0 | 2D+1TB | 3 | zone |
+| 1 | 1 | 3D | 3 | zone |
+| 1 | 2 | 4D (engine only) | 4 | zone |
+| 2 | 1 | 4D+1TB (engine only) | 3 (composite) or 5 (pure) | composite or zone |
+| 2 | 2 | 5D (engine only) | 3 (composite) or 5 (pure) | composite or zone |
 
 **Composite constraints:**
 
@@ -407,7 +423,7 @@ layout and the number of available zones:
 - TB zone must have ≤ 1D (losing the TB zone should not also remove
   multiple voters).
 
-**Note:** 4D (GMDR=2, FTT=1) is **not available** in 3-zone TransZonal. With
+**Note:** 4D (FTT=1, GMDR=2) is **not available** in 3-zone TransZonal. With
 distribution 2+1+1, losing the 2D zone leaves 2D < qmr=3.
 
 For zone-aware replacement procedures and zone redistribution, see
@@ -419,18 +435,18 @@ For zone-aware replacement procedures and zone redistribution, see
 
 When the FTT or GMDR configuration changes, the datamesh transitions from the
 current layout to the new one. Layouts form a graph where each edge changes
-exactly one parameter by ±1:
+exactly one parameter by ±1 (tuples are `(FTT,GMDR)`):
 
 ```
-(0,0) 1D ———GMDR——— 2D (1,0)
+(0,0) 1D ———GMDR——— 2D (0,1)
   |                    |
  FTT                  FTT
   |                    |
-(0,1) 2D+TB —GMDR— 3D (1,1) ———GMDR——— 4D (2,1)
+(1,0) 2D+TB —GMDR— 3D (1,1) ———GMDR——— 4D (1,2)
                        |                    |
                       FTT                  FTT
                        |                    |
-                 (1,2) 4D+TB ——GMDR—— 5D (2,2)
+                 (2,1) 4D+TB ——GMDR—— 5D (2,2)
 ```
 
 Multi-step transitions (e.g., 1D → 5D) follow a path along the edges. At each

@@ -129,14 +129,18 @@ spec:
                   Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
                 properties:
                   failuresToTolerate:
-                    description: FailuresToTolerate is the resolved FTT value.
-                    maximum: 2
+                    description: |-
+                      FailuresToTolerate is the resolved FTT value.
+                      Admission caps it at 1: the datamesh has layouts above FTT=1/GMDR=1, but they are
+                      not tested in DRBD (see api/v1alpha1/rsc_types.go).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   guaranteedMinimumDataRedundancy:
-                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
-                      value.
-                    maximum: 2
+                    description: |-
+                      GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+                      Admission caps it at 1 (see failuresToTolerate).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   replicatedStoragePoolName:
@@ -311,14 +315,18 @@ spec:
                   this volume.
                 properties:
                   failuresToTolerate:
-                    description: FailuresToTolerate is the resolved FTT value.
-                    maximum: 2
+                    description: |-
+                      FailuresToTolerate is the resolved FTT value.
+                      Admission caps it at 1: the datamesh has layouts above FTT=1/GMDR=1, but they are
+                      not tested in DRBD (see api/v1alpha1/rsc_types.go).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   guaranteedMinimumDataRedundancy:
-                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
-                      value.
-                    maximum: 2
+                    description: |-
+                      GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+                      Admission caps it at 1 (see failuresToTolerate).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   replicatedStoragePoolName:

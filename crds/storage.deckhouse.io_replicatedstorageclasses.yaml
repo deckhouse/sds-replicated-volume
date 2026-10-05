@@ -187,8 +187,11 @@ spec:
                   can tolerate while remaining available for IO.
                   Mutually exclusive with Replication.
                   Must be specified together with GuaranteedMinimumDataRedundancy.
-                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
-                maximum: 2
+                  Valid range: 0-1: the datamesh has layouts above FTT=1/GMDR=1 (4D, 4D+1TB, 5D),
+                  but they are not tested in DRBD, so admission is limited to the layouts the
+                  LINSTOR control-plane shipped (None, Availability, ConsistencyAndAvailability)
+                  plus Consistency. Valid combinations: |FTT - GMDR| <= 1.
+                maximum: 1
                 minimum: 0
                 type: integer
               guaranteedMinimumDataRedundancy:
@@ -201,8 +204,10 @@ spec:
                   disk failure). GMDR=1 means at least 2 copies are always maintained during IO.
                   Mutually exclusive with Replication.
                   Must be specified together with FailuresToTolerate.
-                  Valid range: 0-2. Valid combinations: |FTT - GMDR| <= 1.
-                maximum: 2
+                  Valid range: 0-1: layouts above FTT=1/GMDR=1 are not tested in DRBD and are not
+                  admitted (see failuresToTolerate).
+                  Valid combinations: |FTT - GMDR| <= 1.
+                maximum: 1
                 minimum: 0
                 type: integer
               nodeLabelSelector:
@@ -428,11 +433,16 @@ spec:
                   The list of zones the StorageClass's volumes are replicated in. The controller puts a label
                   with the StorageClass's name on the nodes where replicas of the volumes can be created.
 
-                  > Required with the TransZonal topology; with 'Availability' and 'ConsistencyAndAvailability'
-                  > replication exactly 3 zones must be specified.
-                  > In the LINSTOR control-plane the field can be set only with the TransZonal topology.
-                  > In the new control-plane, 'Consistency' replication requires at least 2 zones, and with
-                  > 'None' replication the zones limit where the single replica can be placed.
+                  > Required with the TransZonal topology; the number of zones must be exactly
+                  > one of the values below, depending on the redundancy settings:
+                  > - failuresToTolerate=0, guaranteedMinimumDataRedundancy=1 (replication 'Consistency'): exactly 2 zones
+                  > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=0 (replication 'Availability'): exactly 3 zones
+                  > - failuresToTolerate=1, guaranteedMinimumDataRedundancy=1 (replication 'ConsistencyAndAvailability', the default): exactly 3 zones
+                  > In the LINSTOR control-plane the field can be set only with the TransZonal topology;
+                  > with 'Availability' and 'ConsistencyAndAvailability' replication exactly 3 zones must
+                  > be specified. The 'Consistency' replication is not supported there.
+                  > In the new control-plane, with 'None' replication the zones limit where the single
+                  > replica can be placed.
                   > The field is immutable after creation.
                 items:
                   maxLength: 63
@@ -449,21 +459,6 @@ spec:
                 distribute).
               rule: '!has(self.replication) || self.replication != ''None'' || self.topology
                 == ''Ignored'''
-            - message: TransZonal topology with Availability replication requires
-                at least 3 zones (if specified).
-              rule: self.topology != 'TransZonal' || !has(self.replication) || self.replication
-                != 'Availability' || !has(self.zones) || size(self.zones) == 0 ||
-                size(self.zones) >= 3
-            - message: TransZonal topology with Consistency replication requires at
-                least 2 zones (if specified).
-              rule: self.topology != 'TransZonal' || !has(self.replication) || self.replication
-                != 'Consistency' || !has(self.zones) || size(self.zones) == 0 || size(self.zones)
-                >= 2
-            - message: TransZonal topology with ConsistencyAndAvailability replication
-                (default) requires at least 3 zones (if specified).
-              rule: self.topology != 'TransZonal' || (has(self.replication) && self.replication
-                != 'ConsistencyAndAvailability') || !has(self.zones) || size(self.zones)
-                == 0 || size(self.zones) >= 3
             - message: Cannot specify both replication and failuresToTolerate/guaranteedMinimumDataRedundancy.
               rule: '!(has(self.failuresToTolerate) || has(self.guaranteedMinimumDataRedundancy))
                 || !has(self.replication)'
@@ -480,36 +475,54 @@ spec:
               rule: '!(has(self.failuresToTolerate) && self.failuresToTolerate ==
                 0 && self.guaranteedMinimumDataRedundancy == 0) || self.topology ==
                 ''Ignored'''
+            - message: TransZonal topology with Availability replication requires
+                at least 3 zones (if specified).
+              rule: has(self.storage) || self.topology != 'TransZonal' || !has(self.replication)
+                || self.replication != 'Availability' || !has(self.zones) || size(self.zones)
+                == 0 || size(self.zones) >= 3
+            - message: TransZonal topology with ConsistencyAndAvailability replication
+                (default) requires at least 3 zones (if specified).
+              rule: has(self.storage) || self.topology != 'TransZonal' || (has(self.replication)
+                && self.replication != 'ConsistencyAndAvailability') || !has(self.zones)
+                || size(self.zones) == 0 || size(self.zones) >= 3
+            - message: Replication Consistency is not supported by the legacy control
+                plane (spec.storagePool); it requires the new control plane (spec.storage).
+              rule: has(self.storage) || !has(self.replication) || self.replication
+                != 'Consistency'
+            - message: TransZonal topology requires zones to be specified.
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || (has(self.zones)
+                && size(self.zones) > 0)'
+            - message: TransZonal topology with Consistency replication requires exactly
+                2 zones.
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || !has(self.replication)
+                || self.replication != ''Consistency'' || !has(self.zones) || size(self.zones)
+                == 0 || size(self.zones) == 2'
+            - message: TransZonal topology with Availability replication requires
+                exactly 3 zones.
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || !has(self.replication)
+                || self.replication != ''Availability'' || !has(self.zones) || size(self.zones)
+                == 0 || size(self.zones) == 3'
+            - message: TransZonal topology with ConsistencyAndAvailability replication
+                (default) requires exactly 3 zones.
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || has(self.failuresToTolerate)
+                || (has(self.replication) && self.replication != ''ConsistencyAndAvailability'')
+                || !has(self.zones) || size(self.zones) == 0 || size(self.zones) ==
+                3'
             - message: TransZonal with FTT=0, GMDR=1 requires exactly 2 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || !has(self.failuresToTolerate)
                 || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
                 != 0 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
-                == 2
+                == 2'
             - message: TransZonal with FTT=1, GMDR=0 requires exactly 3 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || !has(self.failuresToTolerate)
                 || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
                 != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones)
-                == 3
+                == 3'
             - message: TransZonal with FTT=1, GMDR=1 requires exactly 3 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
+              rule: '!has(self.storage) || self.topology != ''TransZonal'' || !has(self.failuresToTolerate)
                 || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
                 != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
-                == 3
-            - message: TransZonal with FTT=1, GMDR=2 requires exactly 3 or 5 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
-                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
-                != 1 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones)
-                == 3 || size(self.zones) == 5
-            - message: TransZonal with FTT=2, GMDR=1 requires exactly 4 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
-                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
-                != 2 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
-                == 4
-            - message: TransZonal with FTT=2, GMDR=2 requires exactly 3 or 5 zones.
-              rule: self.topology != 'TransZonal' || !has(self.failuresToTolerate)
-                || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
-                != 2 || self.guaranteedMinimumDataRedundancy != 2 || size(self.zones)
-                == 3 || size(self.zones) == 5
+                == 3'
             - message: spec.topology is immutable
               rule: self.topology == oldSelf.topology
             - message: spec.volumeAccess is immutable
@@ -591,14 +604,18 @@ spec:
                   should align to.
                 properties:
                   failuresToTolerate:
-                    description: FailuresToTolerate is the resolved FTT value.
-                    maximum: 2
+                    description: |-
+                      FailuresToTolerate is the resolved FTT value.
+                      Admission caps it at 1: the datamesh has layouts above FTT=1/GMDR=1, but they are
+                      not tested in DRBD (see api/v1alpha1/rsc_types.go).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   guaranteedMinimumDataRedundancy:
-                    description: GuaranteedMinimumDataRedundancy is the resolved GMDR
-                      value.
-                    maximum: 2
+                    description: |-
+                      GuaranteedMinimumDataRedundancy is the resolved GMDR value.
+                      Admission caps it at 1 (see failuresToTolerate).
+                    maximum: 1
                     minimum: 0
                     type: integer
                   replicatedStoragePoolName:

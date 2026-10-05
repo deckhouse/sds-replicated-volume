@@ -646,6 +646,24 @@ var _ = Describe("validateEligibleNodes", func() {
 		})
 	})
 
+	Describe("Unsupported combination - TransZonal topology", func() {
+		It("reports an honest error for a pre-cap FTT/GMDR combination instead of panicking", func() {
+			// Admission caps FTT/GMDR at 1; only an RSC created before the cap can carry
+			// higher values. It must reconcile to an InsufficientEligibleNodes condition,
+			// not crash-loop the controller.
+			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-1", "zone-a", true),
+				makeNode("node-2", "zone-b", true),
+				makeNode("node-3", "zone-c", true),
+			}
+
+			err := validateEligibleNodes(nodes, v1alpha1.TopologyTransZonal, 2, 1)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("FTT=2, GMDR=1 is not a supported combination"))
+		})
+	})
+
 	Describe("Replication ConsistencyAndAvailability - Zonal topology", func() {
 		It("passes with per zone: 3 nodes with disks", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{

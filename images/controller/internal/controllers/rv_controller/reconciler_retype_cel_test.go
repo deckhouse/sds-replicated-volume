@@ -14,6 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// This file runs the CEL rules (x-kubernetes-validations) of the generated
+// ReplicatedVolumeReplica CRD against the RVR specs this package's reconciler writes on a
+// retype. The CRD sits in crds/ at the repository root, outside every Go module, so no
+// package can go:embed it and the test reads it from disk by a relative path; this package
+// was chosen as the home of the RVR CEL tests since rv_controller is the writer whose RVR
+// retype updates these rules guard.
+//
+// The tests validate the generated CRD, so run hack/generate_code.sh after changing the
+// kubebuilder markers in api/v1alpha1/rvr_types.go.
+
 package rvcontroller
 
 import (

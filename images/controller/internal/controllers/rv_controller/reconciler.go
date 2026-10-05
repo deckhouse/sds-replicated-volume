@@ -2015,26 +2015,43 @@ func computeTargetQuorum(rv *v1alpha1.ReplicatedVolume) (q, qmr byte) {
 	return q, qmr
 }
 
-// isTransZonalZoneCountValid checks whether the given zone count is valid for a TransZonal
-// layout with the specified FTT/GMDR combination. Valid zone counts match the RSC-level
-// CEL zone validation.
-func isTransZonalZoneCountValid(ftt, gmdr byte, zoneCount int) bool {
+// transZonalValidZoneCounts returns the zone counts a TransZonal layout with the given
+// FTT/GMDR combination supports. It is the single Go source of the "TransZonal zone
+// requirements" table of the datamesh README and MUST match the RSC-level CEL zone
+// validation (new control plane rules in api/v1alpha1/rsc_types.go); the cross-check
+// test pinning the two together is reconciler_zone_cel_consistency_test.go.
+// Admission caps FTT/GMDR at 1 (see the field markers in rsc_types.go), so the higher
+// datamesh layouts (4D, 4D+1TB, 5D) have no entries: they cannot be configured.
+func transZonalValidZoneCounts(ftt, gmdr byte) []int {
 	switch {
-	case ftt == 0 && gmdr == 1:
-		return zoneCount == 2
-	case ftt == 1 && gmdr == 0:
-		return zoneCount == 3
-	case ftt == 1 && gmdr == 1:
-		return zoneCount == 3
-	case ftt == 1 && gmdr == 2:
-		return zoneCount == 3 || zoneCount == 5
-	case ftt == 2 && gmdr == 1:
-		return zoneCount == 4
-	case ftt == 2 && gmdr == 2:
-		return zoneCount == 3 || zoneCount == 5
+	case ftt == 0 && gmdr == 1: // 2D: pure only.
+		return []int{2}
+	case ftt == 1 && gmdr == 0: // 2D+1TB: pure only.
+		return []int{3}
+	case ftt == 1 && gmdr == 1: // 3D: pure only.
+		return []int{3}
 	default:
-		return false // FTT=0,GMDR=0 is not TransZonal; unknown combos are invalid.
+		// Layouts above FTT=1/GMDR=1 are not admitted; unknown combos are invalid.
+		return nil
 	}
+}
+
+// isTransZonalZoneCountValid checks whether the given zone count is valid for a TransZonal
+// layout with the specified FTT/GMDR combination, i.e. whether the count is one of
+// transZonalValidZoneCounts(ftt, gmdr).
+func isTransZonalZoneCountValid(ftt, gmdr byte, zoneCount int) bool {
+	return slices.Contains(transZonalValidZoneCounts(ftt, gmdr), zoneCount)
+}
+
+// joinZoneCounts renders a valid zone count list for a condition message: "2",
+// "3 or 5", "3 or 4 or 5". An empty list renders as "" (the caller reports
+// unsupported combinations with its own message).
+func joinZoneCounts(counts []int) string {
+	strs := make([]string, 0, len(counts))
+	for _, c := range counts {
+		strs = append(strs, fmt.Sprintf("%d", c))
+	}
+	return strings.Join(strs, " or ")
 }
 
 // isRVMetadataInSync checks if the RV metadata (finalizer + labels) is in sync with the target state.
@@ -2229,10 +2246,20 @@ func (r *Reconciler) reconcileRVConfiguration(
 		}
 
 		if !isTransZonalZoneCountValid(intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount) {
+			// Name the allowed counts so the operator can tell a spec problem (wrong zone
+			// count for the layout) from an infrastructure one (a zone lost its nodes).
+			validCounts := transZonalValidZoneCounts(intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy)
+			msg := fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d requires exactly %s zones, RSP has %d zones",
+				intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy,
+				joinZoneCounts(validCounts), rspZoneCount)
+			if len(validCounts) == 0 {
+				// Unreachable with admitted specs (CEL rules out unsupported combos); kept
+				// honest for hand-edited or pre-existing objects.
+				msg = fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d is not a supported combination, RSP has %d zones",
+					intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount)
+			}
 			changed = applyConfigurationReadyCondFalse(rv,
-				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration,
-				fmt.Sprintf("TransZonal with FTT=%d, GMDR=%d requires a valid zone count, RSP has %d zones",
-					intended.FailuresToTolerate, intended.GuaranteedMinimumDataRedundancy, rspZoneCount))
+				v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration, msg)
 			return rf.Continue().ReportChangedIf(changed)
 		}
 	}

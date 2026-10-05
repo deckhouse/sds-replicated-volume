@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// The cases with FTT/GMDR above 1 exercise the scheduler engine beyond the admitted
+// domain (admission is capped at FTT/GMDR ≤ 1, see the datamesh README, "TransZonal
+// zone requirements"); they pin the round-robin, zone-penalty and sticky placement
+// logic for a future lift of the cap and bypass admission by constructing RV specs
+// directly. TEST_CASES.md marks the corresponding catalog entries as "engine only".
+
 package rvrschedulingcontroller
 
 import (
@@ -1104,10 +1110,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(maxInZone).To(Equal(2), "max 2 replicas per zone (composite 2+2+1)")
 		})
 
-		It("FTT=1,GMDR=2: 4D across 3 zones — composite 2+1+1", func() {
+		It("FTT=2,GMDR=1: 4D of 4D+1TB across 3 zones — composite 2+1+1", func() {
 			cfg := transZonalConfig()
-			cfg.FailuresToTolerate = 1
-			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=4, TB=1 (only the Diskful replicas are scheduled here)
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1154,10 +1160,10 @@ var _ = Describe("Reconciler", func() {
 			Expect(maxInZone).To(Equal(2), "max 2 replicas per zone (composite 2+1+1)")
 		})
 
-		It("FTT=1,GMDR=2: 4D+1TB across 3 zones — TB avoids zone with 2D", func() {
+		It("FTT=2,GMDR=1: 4D+1TB across 3 zones — TB avoids zone with 2D", func() {
 			cfg := transZonalConfig()
-			cfg.FailuresToTolerate = 1
-			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4, TB=1
+			cfg.FailuresToTolerate = 2
+			cfg.GuaranteedMinimumDataRedundancy = 1 // D=4, TB=1
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1203,10 +1209,10 @@ var _ = Describe("Reconciler", func() {
 				"TB should avoid zone-a (2D); got %s", updated.Spec.NodeName)
 		})
 
-		It("FTT=2,GMDR=1: 4D across 4 zones — pure 1+1+1+1", func() {
+		It("FTT=1,GMDR=2: 4D across 4 zones — pure 1+1+1+1", func() {
 			cfg := transZonalConfig()
-			cfg.FailuresToTolerate = 2
-			cfg.GuaranteedMinimumDataRedundancy = 1 // D=4
+			cfg.FailuresToTolerate = 1
+			cfg.GuaranteedMinimumDataRedundancy = 2 // D=4, TB=0
 			rv := newRV(cfg)
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{

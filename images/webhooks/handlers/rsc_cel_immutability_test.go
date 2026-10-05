@@ -14,6 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// This file tests the CEL rules (x-kubernetes-validations) of the generated
+// ReplicatedStorageClass CRD, not the webhook handlers of this package. It lives here only
+// because the CRD sits in crds/ at the repository root, outside every Go module, so no
+// package can go:embed it and the test reads it from disk by a relative path; this package
+// was chosen as the home of the RSC CEL tests since the RSC webhook enforces the rest of the
+// RSC admission rules.
+//
+// The tests validate the generated CRD, so run hack/generate_code.sh after changing the
+// kubebuilder markers in api/v1alpha1/rsc_types.go.
+
 package handlers
 
 import (

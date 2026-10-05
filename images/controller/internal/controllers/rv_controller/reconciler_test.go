@@ -3263,22 +3263,13 @@ var _ = Describe("isTransZonalZoneCountValid", func() {
 			{1, 1, 2, false},
 			{1, 1, 3, true},
 			{1, 1, 4, false},
-			// FTT=1, GMDR=2: 4D+1TB → 3 or 5 zones.
-			{1, 2, 2, false},
-			{1, 2, 3, true},
+			// Layouts above FTT=1/GMDR=1 are not admitted; the runtime check
+			// rejects them together with any other unknown combo.
 			{1, 2, 4, false},
-			{1, 2, 5, true},
-			{1, 2, 6, false},
-			// FTT=2, GMDR=1: 4D → exactly 4 zones.
 			{2, 1, 3, false},
-			{2, 1, 4, true},
 			{2, 1, 5, false},
-			// FTT=2, GMDR=2: 5D → 3 or 5 zones.
-			{2, 2, 2, false},
-			{2, 2, 3, true},
-			{2, 2, 4, false},
-			{2, 2, 5, true},
-			{2, 2, 6, false},
+			{2, 2, 3, false},
+			{2, 2, 5, false},
 		}
 		for _, tc := range cases {
 			result := isTransZonalZoneCountValid(tc.ftt, tc.gmdr, tc.zones)

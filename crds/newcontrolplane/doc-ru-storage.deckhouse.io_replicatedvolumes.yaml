@@ -48,9 +48,11 @@ spec:
                     failuresToTolerate:
                       description: |
                         Число одновременных отказов узлов, которые том должен переносить (FTT).
+                        Admission ограничивает значение 1: в datamesh есть раскладки выше FTT=1/GMDR=1, но они не протестированы в DRBD (см. api/v1alpha1/rsc_types.go).
                     guaranteedMinimumDataRedundancy:
                       description: |
                         Гарантированная минимальная избыточность данных (GMDR) — число копий данных, которое гарантированно сохраняется.
+                        Admission ограничивает значение 1 (см. failuresToTolerate).
                     replicatedStoragePoolName:
                       description: |
                         Имя ресурса ReplicatedStoragePool, из которого выделяется место под том.
@@ -120,9 +122,11 @@ spec:
                     failuresToTolerate:
                       description: |
                         Итоговое значение FTT (число переносимых отказов).
+                        Admission ограничивает значение 1: в datamesh есть раскладки выше FTT=1/GMDR=1, но они не протестированы в DRBD (см. api/v1alpha1/rsc_types.go).
                     guaranteedMinimumDataRedundancy:
                       description: |
                         Итоговое значение GMDR (гарантированная минимальная избыточность данных).
+                        Admission ограничивает значение 1 (см. failuresToTolerate).
                     replicatedStoragePoolName:
                       description: |
                         Имя ресурса ReplicatedStoragePool.
