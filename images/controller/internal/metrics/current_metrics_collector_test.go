@@ -17,18 +17,164 @@ limitations under the License.
 package metrics
 
 import (
+	"context"
+	"errors"
 	"os"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
+
+type currentMetricsManagerFake struct {
+	manager.Manager
+	added  manager.Runnable
+	addErr error
+}
+
+func (m *currentMetricsManagerFake) Add(runnable manager.Runnable) error {
+	m.added = runnable
+	return m.addErr
+}
+
+func (m *currentMetricsManagerFake) GetCache() cache.Cache { return nil }
+
+func (m *currentMetricsManagerFake) GetLogger() logr.Logger { return logr.Discard() }
+
+func TestAddCurrentMetricsCollectorAddsLeaderRunnable(t *testing.T) {
+	managerFake := &currentMetricsManagerFake{}
+
+	if err := AddCurrentMetricsCollector(managerFake); err != nil {
+		t.Fatalf("adding current metrics collector: %v", err)
+	}
+
+	runnable, ok := managerFake.added.(manager.LeaderElectionRunnable)
+	if !ok {
+		t.Fatalf("added runnable does not implement manager.LeaderElectionRunnable: %T", managerFake.added)
+	}
+	if !runnable.NeedLeaderElection() {
+		t.Fatal("current metrics collector runnable must require leader election")
+	}
+}
+
+func TestAddCurrentMetricsCollectorReturnsManagerError(t *testing.T) {
+	expectedErr := errors.New("add runnable")
+	managerFake := &currentMetricsManagerFake{addErr: expectedErr}
+
+	if err := AddCurrentMetricsCollector(managerFake); !errors.Is(err, expectedErr) {
+		t.Fatalf("expected manager.Add error %v, got %v", expectedErr, err)
+	}
+}
+
+// Every series this collector exports is a cluster-wide count read from a cache that each replica
+// keeps fully populated. Registering it outside leader election makes all replicas export the same
+// numbers under different instance labels, so dashboards and recording rules that aggregate across
+// instances report the replica count times the real value.
+func TestCurrentMetricsCollectorIsRegisteredOnLeaderOnly(t *testing.T) {
+	registerCount := atomic.Int32{}
+	registered := make(chan struct{}, 1)
+	runnable := &currentMetricsCollectorRunnable{
+		registerOnce: &sync.Once{},
+		register: func() {
+			registerCount.Add(1)
+			registered <- struct{}{}
+		},
+	}
+
+	if !runnable.NeedLeaderElection() {
+		t.Fatal("current metrics collector must be registered on the leader replica only")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan error, 1)
+	go func() {
+		started <- runnable.Start(ctx)
+	}()
+
+	select {
+	case <-registered:
+		if got := registerCount.Load(); got != 1 {
+			t.Fatalf("expected one collector registration, got %d", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("collector registration did not start")
+	}
+
+	select {
+	case <-started:
+		t.Fatal("runnable returned before its context was canceled")
+	default:
+	}
+
+	cancel()
+	if err := <-started; err != nil {
+		t.Fatalf("runnable returned an error: %v", err)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	started = make(chan error, 1)
+	go func() {
+		started <- runnable.Start(ctx)
+	}()
+	cancel()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("runnable did not stop after the second context was canceled")
+	}
+
+	if got := registerCount.Load(); got != 1 {
+		t.Fatalf("expected one collector registration after repeated start, got %d", got)
+	}
+}
+
+func TestCurrentMetricsCollectorExportsExpectedMetricFamilies(t *testing.T) {
+	collector := newCurrentMetricsCollector(nil, logr.Discard())
+	descriptions := make(chan *prometheus.Desc, 8)
+	collector.Describe(descriptions)
+	close(descriptions)
+
+	got := make([]string, 0, len(descriptions))
+	for description := range descriptions {
+		const prefix = "Desc{fqName: \""
+		text := description.String()
+		if !strings.HasPrefix(text, prefix) {
+			t.Fatalf("unexpected metric description: %q", text)
+		}
+		name := strings.TrimPrefix(text, prefix)
+		name, _, _ = strings.Cut(name, "\"")
+		got = append(got, name)
+	}
+
+	slices.Sort(got)
+	want := []string{
+		"sds_rv_auto_configuration_blocked",
+		"sds_rv_count",
+		"sds_rv_datamesh_active_transitions",
+		"sds_rv_membership_layout_converged",
+		"sds_rv_no_persistent_volume",
+		"sds_rva_count",
+		"sds_rvr_count",
+		"sds_rvr_deleting_count",
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("unexpected current metric families: got %v, want %v", got, want)
+	}
+}
 
 func TestCollectStorageClassNamesUsesUnknownForMissingLabels(t *testing.T) {
 	storageClasses := collectStorageClassNames(

@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -52,6 +53,9 @@ const (
 // and the unit test cross-checks the rule expression against this constant.
 const metricNameRVLayoutConverged = "sds_rv_membership_layout_converged"
 
+// Package-level guard: exactly one current metrics collector is registered per process.
+// The controller runs one manager per process; a second in-process manager would share the
+// collector registered by the first manager.
 var registerCurrentMetricsCollectorOnce sync.Once
 
 type currentMetricLabels2 struct {
@@ -65,11 +69,40 @@ type currentMetricLabels3 struct {
 	third  string
 }
 
-// RegisterCurrentMetricsCollector registers a custom Prometheus collector that
-// builds current metrics directly from the controller cache at scrape time.
-func RegisterCurrentMetricsCollector(reader client.Reader, log logr.Logger) {
-	registerCurrentMetricsCollectorOnce.Do(func() {
-		crmetrics.Registry.MustRegister(newCurrentMetricsCollector(reader, log))
+// currentMetricsCollectorRunnable registers the collector once this replica has won the leader
+// election. Every metric the collector exports describes cluster-wide state derived from the
+// manager cache, and that cache is fully populated on every replica, leader or not. Registering
+// the collector unconditionally would therefore make each replica export the same numbers under a
+// distinct instance label, and any aggregation across instances would multiply them by the replica
+// count (replicas match the master count, so typically by three).
+type currentMetricsCollectorRunnable struct {
+	registerOnce *sync.Once
+	register     func()
+}
+
+var _ manager.LeaderElectionRunnable = &currentMetricsCollectorRunnable{}
+
+func (r *currentMetricsCollectorRunnable) NeedLeaderElection() bool { return true }
+
+func (r *currentMetricsCollectorRunnable) Start(ctx context.Context) error {
+	r.registerOnce.Do(func() {
+		r.register()
+	})
+	// The collector has no loop of its own: it is driven by scrapes. Block anyway, because Runnable
+	// is documented to run until the manager context is closed.
+	<-ctx.Done()
+	return nil
+}
+
+// AddCurrentMetricsCollector schedules a custom Prometheus collector that builds current metrics
+// directly from the controller cache at scrape time. The collector is registered only on the
+// leader replica; see currentMetricsCollectorRunnable.
+func AddCurrentMetricsCollector(mgr manager.Manager) error {
+	return mgr.Add(&currentMetricsCollectorRunnable{
+		registerOnce: &registerCurrentMetricsCollectorOnce,
+		register: func() {
+			crmetrics.Registry.MustRegister(newCurrentMetricsCollector(mgr.GetCache(), mgr.GetLogger()))
+		},
 	})
 }
 

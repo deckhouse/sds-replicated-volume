@@ -52,7 +52,7 @@ for mod in $modules; do
     print_status "$YELLOW" "Testing $mod"
     total_modules=$((total_modules + 1))
 
-    if (cd "$mod" && go test -v ./...); then
+    if (cd "$mod" && go test -race -v ./...); then
         print_status "$GREEN" "✓ PASSED: $mod"
         passed_modules=$((passed_modules + 1))
     else

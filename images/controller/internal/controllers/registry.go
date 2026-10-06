@@ -47,7 +47,9 @@ func BuildAll(mgr manager.Manager) error {
 	if err := RegisterIndexes(mgr); err != nil {
 		return fmt.Errorf("building indexes: %w", err)
 	}
-	metrics.RegisterCurrentMetricsCollector(mgr.GetCache(), mgr.GetLogger())
+	if err := metrics.AddCurrentMetricsCollector(mgr); err != nil {
+		return fmt.Errorf("adding current metrics collector: %w", err)
+	}
 
 	type builder struct {
 		name  string
