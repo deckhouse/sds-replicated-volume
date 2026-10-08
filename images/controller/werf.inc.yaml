@@ -54,7 +54,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}
-from: {{ index $.Images "builder/distroless" }}
+from: {{ index $.Images "base/distroless" }}
 # An import is keyed on file content, not on mode: without this the pre-fix stage stays cached.
 fromCacheVersion: "1"
 

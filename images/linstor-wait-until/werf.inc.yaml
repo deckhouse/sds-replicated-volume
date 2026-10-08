@@ -39,7 +39,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
-from: {{ index $.Images "builder/distroless" }}
+from: {{ index $.Images "base/distroless" }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
