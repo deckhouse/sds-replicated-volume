@@ -75,7 +75,9 @@ spec:
         - --tarcache=/var/cache/spaas/tarballs
         - --certfile=/etc/spaas/certs/tls.crt
         - --keyfile=/etc/spaas/certs/tls.key
+        {{- if ge (include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | atoi) 3 }}
         - --debug
+        {{- end }}
         startupProbe:
           failureThreshold: 24
           httpGet:

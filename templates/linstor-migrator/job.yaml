@@ -56,7 +56,7 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
           - --log-level
-          - debug
+          - {{ index (list "error" "warn" "info" "debug" "debug") (include "helm_lib_module_controller_log_level" (list . "sdsReplicatedVolume") | atoi) }}
         {{- include "helm_lib_module_container_security_context_run_as_user_deckhouse_pss_restricted" . | nindent 8 }}
         volumeMounts:
           - name: deckhouse-tmp
