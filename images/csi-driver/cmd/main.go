@@ -93,14 +93,16 @@ func run() int {
 		return 1
 	}
 
-	http.HandleFunc("/healthz", healthHandler(log))
-	http.HandleFunc("/readyz", healthHandler(log))
-	go func() {
-		err = http.ListenAndServe(cfgParams.HealthProbeBindAddress, nil)
-		if err != nil {
-			log.Error("create probes", logger.Err(err))
-		}
-	}()
+	if cfgParams.MetricsBindAddress == "" {
+		http.HandleFunc("/healthz", healthHandler(log))
+		http.HandleFunc("/readyz", healthHandler(log))
+		go func() {
+			err = http.ListenAndServe(cfgParams.HealthProbeBindAddress, nil)
+			if err != nil {
+				log.Error("create probes", logger.Err(err))
+			}
+		}()
+	}
 
 	drv, err := driver.NewDriver(cfgParams.CsiAddress, cfgParams.DriverName, cfgParams.Address,
 		&cfgParams.NodeName, log, cl, cfgParams.MetricsBindAddress)

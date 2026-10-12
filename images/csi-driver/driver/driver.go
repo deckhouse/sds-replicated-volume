@@ -18,10 +18,8 @@ package driver //nolint:revive
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -30,6 +28,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	metricsstorage "github.com/deckhouse/deckhouse/pkg/metrics-storage"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,15 +66,18 @@ type Driver struct {
 	hostID            string
 	waitActionTimeout time.Duration
 
-	srv     *grpc.Server
-	httpSrv http.Server
-	log     logger.Logger
+	srv *grpc.Server
+	log logger.Logger
 
 	// metrics records what this driver serves. The zero value records nothing, so a
 	// process started without METRICS_BIND_ADDRESS pays for no bookkeeping and needs
 	// no nil check at the call site.
-	metrics       csimetrics.Recorder
-	metricsServer *monitoring.Server
+	metrics csimetrics.Recorder
+	// metricsStorage and metricsBindAddress are set together, from
+	// METRICS_BIND_ADDRESS. When they are, every HTTP endpoint of the driver is
+	// served on that one address and nothing listens on address.
+	metricsStorage     metricsstorage.Storage
+	metricsBindAddress string
 
 	readyMu      sync.Mutex // protects ready
 	ready        bool
@@ -125,7 +127,8 @@ func NewDriver(
 			return nil, fmt.Errorf("declare the CSI metrics: %w", err)
 		}
 		d.metrics = rec
-		d.metricsServer = monitoring.NewServer(metricsBindAddress, storage, log.Named("metrics"))
+		d.metricsStorage = storage
+		d.metricsBindAddress = metricsBindAddress
 	}
 
 	return d, nil
@@ -176,7 +179,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	// The recorder goes first so that it times the handler and the error logging
 	// together; with no metrics configured its interceptor is not installed at all.
 	interceptors := []grpc.UnaryServerInterceptor{errHandler}
-	if d.metricsServer != nil {
+	if d.metricsStorage != nil {
 		interceptors = append([]grpc.UnaryServerInterceptor{d.metrics.UnaryServerInterceptor()}, interceptors...)
 	}
 
@@ -185,28 +188,17 @@ func (d *Driver) Run(ctx context.Context) error {
 	csi.RegisterControllerServer(d.srv, d)
 	csi.RegisterNodeServer(d.srv, d)
 
-	httpListener, err := net.Listen("tcp", d.address)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %v", err)
+	httpAddr := d.address
+	if d.metricsBindAddress != "" {
+		httpAddr = d.metricsBindAddress
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	d.httpSrv = http.Server{
-		Handler: mux,
-	}
-
+	d.readyMu.Lock()
 	d.ready = true
-	d.log.Info(fmt.Sprintf("grpc_addr %s http_addr %s starting server", grpcAddr, d.address))
+	d.readyMu.Unlock()
+	d.log.Info(fmt.Sprintf("grpc_addr %s http_addr %s starting server", grpcAddr, httpAddr))
 
 	var eg errgroup.Group
-	eg.Go(func() error {
-		<-ctx.Done()
-		return d.httpSrv.Shutdown(context.Background()) // TODO: Should we use just ctx here?
-	})
 	eg.Go(func() error {
 		go func() {
 			<-ctx.Done()
@@ -218,16 +210,7 @@ func (d *Driver) Run(ctx context.Context) error {
 		}()
 		return d.srv.Serve(grpcListener)
 	})
-	eg.Go(func() error {
-		err := d.httpSrv.Serve(httpListener)
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	})
-	if d.metricsServer != nil {
-		eg.Go(func() error { return d.metricsServer.Start(ctx) })
-	}
+	eg.Go(func() error { return d.serveEndpoints(ctx, httpAddr) })
 
 	return eg.Wait()
 }
