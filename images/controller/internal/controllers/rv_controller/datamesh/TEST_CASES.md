@@ -231,7 +231,16 @@ Plan selection depends on three axes: voter parity (even/odd), ShadowDiskful fea
   1D existing. Step 1 applied: member created as Access (A vestibule). No LVG/ThinPool on member (A has no disk). 3 steps.
 
 - ⚡ **Step 1 confirmed → A→D∅+q↑: type=LiminalDiskful, BV set, q raised.**
-  FM (D) + subject (A) both at rev 6. Step 1 completed. Step 2 applied: type changed to LiminalDiskful, BV fields set from request, q raised (1→2 for 2 voters). Step 2 now active.
+  FM (D) + subject (A) both at rev 6, A reports the D as Connected. Step 1 completed. Step 2 applied: type changed to LiminalDiskful, BV fields set from request, q raised (1→2 for 2 voters). Step 2 now active.
+
+- ⚡ **Step 1 applied everywhere but A not connected → q stays, step 1 waits.**
+  3D + A at rev 6, no peer reports a connection. Step 1 stays active, A stays A, q stays 2: raising it now would count a voter the others cannot reach yet.
+
+- **Step 1: A connected to some FM members only → step 1 waits.**
+  A reports 2 of 3 FM members as Connected. Step 1 stays active, q stays 2.
+
+- **Step 1: connections reported by the FM side only → step 1 completes, q↑.**
+  A reports nothing, every FM member reports A as Connected. A connection counts when either side with a ready agent sees it: step 1 completes, q = 4/2+1 = 3.
 
 - **Step 2 confirmed → D∅→D.**
   All members confirmed. Step 2 completed. Step 3 applied: type=Diskful.
@@ -296,7 +305,7 @@ Plan selection depends on three axes: voter parity (even/odd), ShadowDiskful fea
 ### Additional
 
 - ⚡ **q formula for larger layout: 3D + add D → q=3.**
-  3D existing (odd). Join(D). Plan = diskful-q-up/v1. Step 1 (✦→A) applied: q NOT yet raised (A is non-voter, q stays 2). After step 1 confirmed → step 2 (A→D∅+q↑): 4 voters → q = 4/2+1 = 3.
+  3D existing (odd). Join(D). Plan = diskful-q-up/v1. Step 1 (✦→A) applied: q NOT yet raised (A is non-voter, q stays 2). After step 1 confirmed (revision and A's connections) → step 2 (A→D∅+q↑): 4 voters → q = 4/2+1 = 3.
 
 ---
 

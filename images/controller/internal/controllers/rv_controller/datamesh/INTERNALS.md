@@ -467,6 +467,7 @@ The confirm model is IDSet-based. Each confirm callback returns
 | `confirmSubjectOnlyLeaving` | {subject} | rev >= stepRevision OR rev == 0 | Star member removal within multi-step plans |
 | `confirmSubjectOnlyLeavingOrGone` | {subject} | rev >= stepRevision OR rev == 0 OR rvr == nil | Detach (node may die) |
 | `confirmFMPlusSubject` | FM ∪ {subject} | rev >= stepRevision | ✦→A, ✦→TB, A→TB, TB→A |
+| `confirmFMPlusSubjectConnected` | FM ∪ {subject} | rev >= stepRevision; subject: also Connected to every FM member | ✦→A of AddReplica(D) + q↑ |
 | `confirmFMPlusSubjectLeaving` | FM ∪ {subject} | rev >= stepRevision; subject: rev == 0 | A→✕, TB→✕ (final removal) |
 | `confirmAllMembers` | all members | rev >= stepRevision | ✦→D∅, ✦→sD∅, topology changes, qmr↑/↓ |
 | `confirmAllMembersLeaving` | all members ∪ {subject} | rev >= stepRevision; subject: rev == 0 | D∅→✕, sD∅→✕, sD→✕ |
@@ -505,7 +506,8 @@ reports the peer. Two `peerCheck` implementations: `peerConnected` (any connecti
 **Global q/qmr callbacks** (scope: GlobalApplyFunc, used via `asReplicaApply` in ReplicaStep):
 
 - `raiseQ`/`lowerQ` — increment/decrement `gctx.datamesh.quorum`.
-- `raiseQMR`/`lowerQMR` — increment/decrement `gctx.datamesh.quorumMinimumRedundancy`.
+- `raiseQMR` — increment `gctx.datamesh.quorumMinimumRedundancy` by 1 within the configured target and the UpToDate diskful count; otherwise a no-op (returns false).
+- `lowerQMR` — decrement `gctx.datamesh.quorumMinimumRedundancy`.
 - `setCorrectQ`/`setCorrectQMR` — compute from `computeCorrectQuorum` and set. Return false if already correct (no-op).
 
 **Baseline GMDR:**
@@ -637,13 +639,14 @@ voter failure/recovery).
 - Classify by member type: voters (D, D∅) and TBs.
 - **Ready agent**: `isAgentReady(rvr)` (DRBDConfigured reason != AgentNotReady) AND `rvr.Status.Quorum != nil`.
 - From ready agents: own `quorumTrue`, `diskUpToDate`, and peer observations (`peerConnected`, `peerUpToDate`).
+- `quorateSeesConnected`: peers reported Connected by a ready agent that itself has quorum. A voter's own `Quorum` lags behind the configuration (a member just made a voter at `A → D∅ + q↑` still carries its earlier `false`), while the quorate node it is connected to already counts it. Observers without quorum are not taken, or both halves of an even split would count each other.
 
 **Set algebra** for derived counts:
 
 ```
 staleVoters      = voters - ready
 staleTBs         = tbs - ready
-reachableVoters  = (voters ∩ quorumTrue) ∪ (staleVoters ∩ peerConnected)
+reachableVoters  = (voters ∩ (quorumTrue ∪ quorateSeesConnected)) ∪ (staleVoters ∩ peerConnected)
 upToDateVoters   = (voters ∩ diskUpToDate) ∪ (staleVoters ∩ peerUpToDate)
 reachableTBs     = (tbs ∩ quorumTrue) ∪ (staleTBs ∩ peerConnected)
 ```

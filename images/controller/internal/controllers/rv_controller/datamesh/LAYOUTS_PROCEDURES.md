@@ -54,7 +54,8 @@ Two vestibule types:
   volumes).
 - **sD vestibule** (requires Flant DRBD extension): the new member enters as
   ShadowDiskful and pre-syncs data invisibly. Then disk detaches (sD→sD∅),
-  converts to D∅ + q↑ (pure config change, safe in any application order),
+  converts to D∅ + q↑ (pure config change, safe in any order of application
+  across nodes),
   and re-attaches with only a **delta resync** (seconds). See
   [DRBD_MODEL.md](DRBD_MODEL.md) §6 for sD mechanics.
 
@@ -64,6 +65,14 @@ At every step: `q = floor(voters / 2) + 1`. With odd voters, majority is
 unambiguous. With even voters, the higher q prevents symmetric splits. When
 voter count changes, q is raised **before** adding a voter (odd→even) and
 lowered **after** removing a voter (even→odd).
+
+The rule is about what the controller publishes. Inside a node the agent
+applies a revision as several `drbdsetup` calls and orders the q change
+against the peer whose vote changes: q↑ goes before the new vote when the
+votes the node already counts cover the new q, and after it otherwise (the
+1 → 2 join, where q=2 before the vote would leave one vote of two); q↓ goes
+before the leaving peer loses its vote. See [TRANSITIONS.md](TRANSITIONS.md)
+§2.1 and §2.2.
 
 ### Old replica retention
 
@@ -448,8 +457,10 @@ Downgrade (2,2)→(0,0): 5D → 4D → 3D → 2D → 1D
 
 ### DM transition summary
 
-qmr changes are embedded within D transitions. No separate ChangeQuorum
-needed (see [TRANSITIONS.md](TRANSITIONS.md) §3).
+qmr changes are embedded within D transitions. A separate ChangeQuorum runs
+only when the embedded qmr↑ of a join is a no-op because too few copies are
+UpToDate yet (the first join of 1D → 3D); it makes the raise once the resync
+ends (see [TRANSITIONS.md](TRANSITIONS.md) §3).
 
 | # | Edge | Upgrade DM sequence | Downgrade DM sequence |
 |---|------|--------------------|-----------------------|
@@ -476,8 +487,10 @@ Changes: D 1↔2, q 1↔2, qmr 1↔2.
 | — | — | — | **D**(#0) | 1 | 1 | 0 | 0 | 0 |
 | 1 | AddReplica(D) + q↑ + qmr↑ | Voter | 2**D** | 2 | 2 | 1 | 1 | 0 |
 
-Single transition with embedded qmr↑ as the last step. qmr rises after the
-new D is UpToDate (quorum check: 2 ≥ 2 ✓).
+Single transition with embedded qmr↑ as the last step. qmr may rise only once
+the new D is UpToDate (quorum check: 2 ≥ 2 ✓); the step runs right after the
+disk attach, while the new D is still resyncing, so it is a no-op there and a
+ChangeQuorum makes the raise when the resync ends.
 
 **Constraint**: min(source, target) = GMDR≥0, FTT≥0. After: GMDR=1 ≥ 0 ✓,
 FTT=0 ≥ 0 ✓. ✓

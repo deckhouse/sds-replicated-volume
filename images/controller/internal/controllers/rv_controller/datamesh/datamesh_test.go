@@ -164,7 +164,8 @@ func settleEffectiveLayout(
 
 // runSettleLoop runs ProcessTransitions iteratively until stable.
 // simulate is called between iterations to advance RVR state; if nil,
-// simulateRevisionBump is used (sufficient for all membership confirms).
+// simulateWithPeers is used: a healthy agent both applies the revision and
+// connects its peers, and some membership confirms check the connections.
 // check is called after each ProcessTransitions call; if nil, no per-step
 // checks are performed.
 func runSettleLoop(
@@ -177,7 +178,7 @@ func runSettleLoop(
 	check func(*v1alpha1.ReplicatedVolume, int),
 ) {
 	if simulate == nil {
-		simulate = simulateRevisionBump
+		simulate = simulateWithPeers
 	}
 	const maxIter = 50
 	for i := range maxIter {
@@ -197,16 +198,39 @@ func runSettleLoop(
 }
 
 // simulateRevisionBump bumps DatameshRevision on all RVRs to match the
-// current rv.Status.DatameshRevision. Sufficient for all membership confirms
-// (they only check revision).
+// current rv.Status.DatameshRevision, without touching peer connections.
+// Sufficient for confirms that check the revision only; the ✦→A step of the
+// odd→even diskful join also checks connections (simulateWithPeers).
 func simulateRevisionBump(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 	for _, rvr := range rvrs {
 		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
 	}
 }
 
+// simulateWithPeersAndResync is simulateWithPeers with an instant resync:
+// every member whose disk is attached reports its backing volume UpToDate. It
+// is for tests about membership rather than about how long a resync takes —
+// the qmr raise that ends a diskful join waits for UpToDate copies, and a
+// harness that never finishes a resync would never see it.
+func simulateWithPeersAndResync(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
+	simulateWithPeers(rv, rvrs)
+	for _, m := range rv.Status.Datamesh.Members {
+		if !m.Type.HasBackingVolume() {
+			continue
+		}
+		for _, rvr := range rvrs {
+			if rvr.Name == m.Name {
+				rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+					State: v1alpha1.DiskStateUpToDate,
+				}
+			}
+		}
+	}
+}
+
 // simulateWithPeers bumps revision and sets all peers as Connected.
-// Needed for confirms that check peer connectivity (e.g., confirmAllConnected).
+// Needed for confirms that check peer connectivity (e.g., confirmAllConnected,
+// confirmFMPlusSubjectConnected).
 func simulateWithPeers(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 	for _, rvr := range rvrs {
 		rvr.Status.DatameshRevision = rv.Status.DatameshRevision

@@ -430,3 +430,44 @@ var _ = Describe("integration: quorum invariants", func() {
 		})
 	}
 })
+
+// The qmr raise that ends a diskful join was an unconditional qmr++. On the
+// first join of the r1 -> r3 growth (1D -> 2D at GMDR=1) it demanded two
+// UpToDate copies while the new one was still resyncing, and DRBD suspends I/O
+// on every replica until the resync ends. The raise now waits for the copies.
+var _ = Describe("integration: qmr raise waits for the resync", func() {
+	It("joins the copy at the old qmr and raises it once the copy is UpToDate", func() {
+		rv, rsp, rvrs := setupLayout(layout1D)
+		rv.Status.Configuration.FailuresToTolerate = layout2D.ftt
+		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = layout2D.gmdr
+		joining := mkRVR("rv-1-1", "node-1", 0)
+		rvrs = append(rvrs, joining)
+		rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
+			mkJoinRequestD("rv-1-1"),
+		}
+
+		qmrBackedByCopies := func(rv *v1alpha1.ReplicatedVolume, iteration int) {
+			assertSafetyInvariants(rv, iteration)
+			var upToDate int
+			for _, rvr := range rvrs {
+				if rvr.Status.BackingVolume != nil && rvr.Status.BackingVolume.State == v1alpha1.DiskStateUpToDate {
+					upToDate++
+				}
+			}
+			ExpectWithOffset(1, int(rv.Status.Datamesh.QuorumMinimumRedundancy)).To(BeNumerically("<=", upToDate),
+				"iteration %d: qmr=%d with %d UpToDate copies", iteration, rv.Status.Datamesh.QuorumMinimumRedundancy, upToDate)
+		}
+
+		By("joining while the new copy is still resyncing")
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, qmrBackedByCopies)
+		rv.Status.DatameshReplicaRequests = nil
+		assertQuorum(rv, 2, 1, "after the join, the copy still resyncing")
+
+		By("the resync ends: ChangeQuorum makes the raise the join skipped")
+		joining.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			State: v1alpha1.DiskStateUpToDate,
+		}
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, nil, qmrBackedByCopies)
+		assertQuorum(rv, 2, 2, "after the resync")
+	})
+})

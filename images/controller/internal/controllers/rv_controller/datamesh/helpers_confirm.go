@@ -72,11 +72,35 @@ func confirmSubjectOnlyLeavingOrGone(_ *globalContext, rctx *ReplicaContext, ste
 
 // confirmFMPlusSubject checks confirmation for FM + subject steps.
 // MustConfirm = fullMeshMemberIDs ∪ {subject}.
-// Used by: ✦→A, ✦→TB, A→TB, TB→A.
+// Used by: ✦→A (except the odd→even diskful join, see
+// confirmFMPlusSubjectConnected), ✦→TB, A→TB, TB→A.
 func confirmFMPlusSubject(gctx *globalContext, rctx *ReplicaContext, stepRevision int64) dmte.ConfirmResult {
 	mustConfirm := fullMeshMemberIDs(gctx).Union(idset.Of(rctx.ID()))
 	confirmed := confirmedReplicas(gctx, stepRevision).Intersect(mustConfirm)
 	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
+}
+
+// confirmFMPlusSubjectConnected checks confirmation for FM + subject steps that
+// must leave the subject connected before the plan goes on.
+// MustConfirm = fullMeshMemberIDs ∪ {subject}.
+// Confirmed = FM members with rev >= stepRevision, plus the subject once its rev
+// >= stepRevision AND its connections to every FM member are verified (at least
+// one side with a ready agent reports Connected).
+//
+// A revision only proves that the agents applied the configuration, not that
+// DRBD connected (see IsTieBreakerOperational). The A vestibule of the odd→even
+// diskful join exists to establish those connections while the quorum is
+// unaffected: the next step raises q, and a q raised before the new voter is
+// connected drops the quorum of the existing voters.
+// Used by: ✦→A of diskful-q-up/v1 and diskful-q-up-qmr-up/v1.
+func confirmFMPlusSubjectConnected(gctx *globalContext, rctx *ReplicaContext, stepRevision int64) dmte.ConfirmResult {
+	res := confirmFMPlusSubject(gctx, rctx, stepRevision)
+	if res.Confirmed.Contains(rctx.ID()) &&
+		(rctx.member == nil ||
+			!allConnectionsOfMemberVerified(gctx, rctx, stepRevision, allMemberIDs(gctx), fullMeshMemberIDs(gctx), peerConnected)) {
+		res.Confirmed.Remove(rctx.ID())
+	}
+	return res
 }
 
 // confirmFMPlusSubjectLeaving checks confirmation for FM + subject leaving steps.

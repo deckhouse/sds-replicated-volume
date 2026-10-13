@@ -24,6 +24,10 @@ limitations under the License.
 // Safe changes (no new version needed):
 //   - Guards, confirm, DisplayName, diagnostics, OnComplete
 //
+// Recorded exceptions (apply changed, version kept; the reason is at the
+// callback):
+//   - raiseQMR, the qmr↑ step of the *-qmr-up/v1 plans.
+//
 // To introduce a new version: keep the old version registered (settle-only),
 // register the new version, update the dispatcher to yield the new PlanID.
 
@@ -119,7 +123,7 @@ func registerDiskfulPlans(
 		Steps(
 			mrStep("✦ → A",
 				createMember(v1alpha1.DatameshMemberTypeAccess),
-				confirmFMPlusSubject,
+				confirmFMPlusSubjectConnected,
 			),
 			mrStep("A → D∅ + q↑",
 				dmte.ComposeReplicaApply(
@@ -148,7 +152,7 @@ func registerDiskfulPlans(
 		Steps(
 			mrStep("✦ → A",
 				createMember(v1alpha1.DatameshMemberTypeAccess),
-				confirmFMPlusSubject,
+				confirmFMPlusSubjectConnected,
 			),
 			mrStep("A → D∅ + q↑",
 				dmte.ComposeReplicaApply(

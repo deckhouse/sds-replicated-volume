@@ -30,6 +30,7 @@ package datamesh
 
 import (
 	"fmt"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -37,13 +38,17 @@ import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
-// removeRVR removes an RVR by name from the slice (simulates dead node).
+// removeRVR removes an RVR by name from the slice (simulates dead node). The
+// survivors lose their connection to it too: a peer entry still reporting the
+// dead replica as Connected would make guardMemberUnreachable block its
+// ForceRemove.
 func removeRVR(rvrs *[]*v1alpha1.ReplicatedVolumeReplica, name string) {
-	for i, rvr := range *rvrs {
-		if rvr.Name == name {
-			*rvrs = append((*rvrs)[:i], (*rvrs)[i+1:]...)
-			return
-		}
+	*rvrs = slices.DeleteFunc(*rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+		return rvr.Name == name
+	})
+	for _, rvr := range *rvrs {
+		rvr.Status.Peers = slices.DeleteFunc(rvr.Status.Peers,
+			func(p v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus) bool { return p.Name == name })
 	}
 }
 

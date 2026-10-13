@@ -147,10 +147,36 @@ var _ = Describe("raiseQ / lowerQ", func() {
 })
 
 var _ = Describe("raiseQMR / lowerQMR", func() {
-	It("raiseQMR increments qmr", func() {
-		gctx := &globalContext{datamesh: datameshContext{quorumMinimumRedundancy: 1}}
-		raiseQMR(gctx)
+	It("raiseQMR increments qmr when the copies to back it are UpToDate", func() {
+		gctx := mkZonalGctx(1, 1,
+			zoneMember{id: 0, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+			zoneMember{id: 1, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+		)
+		gctx.datamesh.quorumMinimumRedundancy = 1
+		Expect(raiseQMR(gctx)).To(BeTrue())
 		Expect(gctx.datamesh.quorumMinimumRedundancy).To(Equal(byte(2)))
+	})
+
+	// The first join of r1 -> r3: the new copy has its disk attached but is
+	// still resyncing, so qmr=2 would have one UpToDate copy behind it.
+	It("raiseQMR leaves qmr alone while the new copy is not UpToDate", func() {
+		gctx := mkZonalGctx(1, 1,
+			zoneMember{id: 0, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+			zoneMember{id: 1, memberType: v1alpha1.DatameshMemberTypeDiskful},
+		)
+		gctx.datamesh.quorumMinimumRedundancy = 1
+		Expect(raiseQMR(gctx)).To(BeFalse())
+		Expect(gctx.datamesh.quorumMinimumRedundancy).To(Equal(byte(1)))
+	})
+
+	It("raiseQMR never goes past the configured target", func() {
+		gctx := mkZonalGctx(1, 0,
+			zoneMember{id: 0, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+			zoneMember{id: 1, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+		)
+		gctx.datamesh.quorumMinimumRedundancy = 1
+		Expect(raiseQMR(gctx)).To(BeFalse())
+		Expect(gctx.datamesh.quorumMinimumRedundancy).To(Equal(byte(1)))
 	})
 
 	It("lowerQMR decrements qmr", func() {

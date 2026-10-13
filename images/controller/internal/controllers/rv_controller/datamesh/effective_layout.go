@@ -31,9 +31,18 @@ import (
 // Single-pass classification builds IDSets, then set algebra derives counts:
 //
 //   - Ready agent (fresh data): isAgentReady && Quorum != nil.
-//   - Voter reachable = own Quorum==true OR stale but peer sees Connected.
+//   - Voter reachable = own Quorum==true OR a quorate agent sees it Connected
+//     OR stale but peer sees Connected.
 //   - Voter upToDate = own BackingVolume==UpToDate OR stale but peer sees UpToDate.
 //   - TB reachable = own Quorum==true OR stale but peer sees Connected.
+//
+// A voter's own Quorum lags behind the configuration: a member that has just
+// become a voter (A → D∅ + q↑) still reports the quorum of its previous role
+// until it applies the new revision, while the quorate node it is connected to
+// already counts it — DRBD counts every connected diskful peer, disk or not, as
+// a vote (`present`). Taking the vote from a quorate observer is what that node's
+// kernel does; an observer without quorum is not taken, or both halves of an
+// even split would count each other.
 //
 // FTT/GMDR are set to nil when no voter members exist or no agents have
 // fresh data. Counts and Message are always populated.
@@ -50,6 +59,7 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 		ready                       idset.IDSet // agents with fresh data
 		quorumTrue, diskUpToDate    idset.IDSet // own status of ready agents
 		peerConnected, peerUpToDate idset.IDSet // peer observations from ready agents
+		quorateSeesConnected        idset.IDSet // peers Connected to a ready agent with quorum
 	)
 
 	for i := range gctx.allReplicas {
@@ -83,6 +93,9 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 			id := peer.ID()
 			if peer.ConnectionState == v1alpha1.ConnectionStateConnected {
 				peerConnected.Add(id)
+				if *rc.rvr.Status.Quorum {
+					quorateSeesConnected.Add(id)
+				}
 			}
 			if peer.BackingVolumeState == v1alpha1.DiskStateUpToDate {
 				peerUpToDate.Add(id)
@@ -95,7 +108,7 @@ func updateEffectiveLayout(gctx *globalContext, el *v1alpha1.ReplicatedVolumeEff
 	staleVoters := voters.Difference(ready)
 	staleTBs := tbs.Difference(ready)
 
-	reachableVoters := voters.Intersect(quorumTrue).
+	reachableVoters := voters.Intersect(quorumTrue.Union(quorateSeesConnected)).
 		Union(staleVoters.Intersect(peerConnected))
 	upToDateVoters := voters.Intersect(diskUpToDate).
 		Union(staleVoters.Intersect(peerUpToDate))

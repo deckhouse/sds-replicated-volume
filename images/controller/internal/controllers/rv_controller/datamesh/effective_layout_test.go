@@ -691,3 +691,51 @@ var _ = Describe("updateEffectiveLayout non-obvious interactions", func() {
 		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(0))))
 	})
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// updateEffectiveLayout — votes seen by a quorate peer
+//
+
+var _ = Describe("updateEffectiveLayout votes seen by a quorate peer", func() {
+	// The step A → D∅ + q↑ publishes q=2 together with the new voter, whose
+	// own report is still the Access one (Quorum=false) until it applies the
+	// revision. The origin, which has quorum and is connected to it, counts it
+	// as a vote; so must the effective layout, or Ready reports QuorumLost on a
+	// volume whose kernel never lost quorum.
+	It("a just-promoted voter that a quorate peer sees Connected is reachable", func() {
+		gctx := mkEffGctx(2, 1,
+			readyD(0, peerEntry{"rv-1-1", true, false}),
+			replicaEntry{
+				id: 1, memberType: v1alpha1.DatameshMemberTypeLiminalDiskful,
+				quorum: ptr.To(false),
+			},
+		)
+		var el v1alpha1.ReplicatedVolumeEffectiveLayout
+		updateEffectiveLayout(gctx, &el)
+
+		Expect(el.ReachableVoters).To(Equal(int8(2)))
+		Expect(el.FailuresToTolerate).To(Equal(ptr.To(int8(0))))
+	})
+
+	// An even split without a tie-breaker: no side has quorum, and each sees
+	// its partner Connected. Observers without quorum are not taken, so the
+	// volume is not reported reachable on either side.
+	It("peers seen only by agents without quorum are not reachable (2|2 split)", func() {
+		quorumless := func(id uint8, partner string) replicaEntry {
+			return replicaEntry{
+				id: id, memberType: v1alpha1.DatameshMemberTypeDiskful,
+				quorum: ptr.To(false), bvState: v1alpha1.DiskStateUpToDate,
+				peers: []peerEntry{{partner, true, true}},
+			}
+		}
+		gctx := mkEffGctx(3, 1,
+			quorumless(0, "rv-1-1"), quorumless(1, "rv-1-0"),
+			quorumless(2, "rv-1-3"), quorumless(3, "rv-1-2"),
+		)
+		var el v1alpha1.ReplicatedVolumeEffectiveLayout
+		updateEffectiveLayout(gctx, &el)
+
+		Expect(el.ReachableVoters).To(Equal(int8(0)))
+		Expect(*el.FailuresToTolerate).To(BeNumerically("<", 0))
+	})
+})

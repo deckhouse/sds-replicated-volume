@@ -151,7 +151,7 @@ func transitionLayout(from, to layoutEntry, features FeatureFlags) {
 	rv.Status.DatameshReplicaRequests = requests
 
 	// Run until all transitions complete.
-	runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
+	runSettleLoop(rv, rsp, rvrs, nil, features, simulateWithPeersAndResync, assertSafetyInvariants)
 
 	// Assert final state.
 	// Count D and TB members.
@@ -358,7 +358,7 @@ func transitionLayoutStepwise(from, to layoutEntry, dFirst bool, features Featur
 			)
 		}
 
-		runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
+		runSettleLoop(rv, rsp, rvrs, nil, features, simulateWithPeersAndResync, assertSafetyInvariants)
 
 		// Intermediate invariant: q = voters/2+1.
 		var voters int

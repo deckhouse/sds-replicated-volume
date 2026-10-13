@@ -107,9 +107,30 @@ func lowerQ(gctx *globalContext) bool {
 	return true
 }
 
-// raiseQMR increments qmr by 1. Always returns true (guards guarantee change needed).
+// raiseQMR increments qmr by 1 when enough UpToDate copies already back the new
+// value, and is a no-op otherwise (returns false, so the step publishes nothing).
+//
+// It is the qmr↑ step that ends AddReplica(D), and it runs right after D∅ → D,
+// which confirms the disk attach, not the end of the resync. When the volume
+// has a single UpToDate copy (the first join of the r1 → r3 growth) the new
+// copy is still resyncing then, and an unconditional raise would demand two
+// UpToDate copies of one: every replica loses quorum until the resync ends.
+// The bound is the one ChangeQuorum applies (computeCorrectQuorum), and a raise
+// skipped here is made by ChangeQuorum once the new copy is UpToDate.
+//
+// Bounding the raise changed what the qmr↑ step applies, yet the *-qmr-up/v1
+// plans kept their versions, as a recorded exception to the PlanID versioning
+// rule (membership_plan_diskful.go). The change only narrows what the step may
+// publish, and the persisted transition stays valid: the steps and their names
+// are the same, a step applied before an upgrade is not applied again (the
+// engine records its revision), and a step activated after it publishes the
+// bounded value or nothing, which ChangeQuorum then completes.
 func raiseQMR(gctx *globalContext) bool {
-	gctx.datamesh.quorumMinimumRedundancy++
+	next := gctx.datamesh.quorumMinimumRedundancy + 1
+	if next > gctx.configuration.QuorumMinimumRedundancy() || next > upToDateDiskfulCount(gctx) {
+		return false
+	}
+	gctx.datamesh.quorumMinimumRedundancy = next
 	return true
 }
 

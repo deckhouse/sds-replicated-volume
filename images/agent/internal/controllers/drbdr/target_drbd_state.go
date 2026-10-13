@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -77,7 +78,9 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 		})
 	}
 
-	// 2. Reconcile resource options (handles both new and existing)
+	// 2. Reconcile resource options (handles both new and existing). A raise of
+	// quorum-minimum-redundancy, and a raise of quorum the counted votes do not
+	// cover yet, is held back until step 5b.
 	res = append(res, computeResourceOptions(resourceName, iState, aState)...)
 
 	// 3. Compute minor actions (create if missing)
@@ -150,6 +153,10 @@ func computeBringUpActions(iState IntendedDRBDState, aState ActualDRBDState) (re
 			PeerNodeID:   nodeID,
 		})
 	}
+
+	// 5b. Raise quorum / quorum-minimum-redundancy held back in step 2, now that
+	// the peers carry their new votes (see computeQuorumRaiseAction).
+	res = append(res, computeQuorumRaiseAction(resourceName, iState, aState)...)
 
 	// Resize action (only for diskful resources with existing volumes)
 	res = append(res, computeResizeAction(iState, aState)...)
@@ -299,6 +306,13 @@ func computeResourceOptionsAction(resourceName string, iState IntendedDRBDState)
 	return res
 }
 
+// computeResourceOptionsActionReconcile brings the options of an existing
+// resource to the intended values, except a raise of quorum-minimum-redundancy
+// and a raise of quorum that has to wait for the peers
+// (quorumRaiseWaitsForPeers): computeQuorumRaiseAction applies those after the
+// peers. A lowering stays here, ahead of the peers, for the mirror reason: once
+// a peer loses its vote (--bitmap=no), any recount that still finds the old,
+// higher threshold loses quorum.
 func computeResourceOptionsActionReconcile(resourceName string, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
 	var changed bool
 	action := ResourceOptionsAction{ResourceName: resourceName}
@@ -306,7 +320,7 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 	// Check quorum
 	intendedQuorum := uint(iState.Quorum())
 	actualQuorum := aState.Quorum()
-	if !quorumMatches(intendedQuorum, actualQuorum) {
+	if !quorumMatches(intendedQuorum, actualQuorum) && !quorumRaiseWaitsForPeers(intendedQuorum, aState) {
 		action.Quorum = &intendedQuorum
 		changed = true
 	}
@@ -314,7 +328,7 @@ func computeResourceOptionsActionReconcile(resourceName string, iState IntendedD
 	// Check quorum minimum redundancy
 	intendedQMR := uint(iState.QuorumMinimumRedundancy())
 	actualQMR := aState.QuorumMinimumRedundancy()
-	if !quorumMatches(intendedQMR, actualQMR) {
+	if !quorumMatches(intendedQMR, actualQMR) && !quorumRaised(intendedQMR, actualQMR) {
 		action.QuorumMinimumRedundancy = &intendedQMR
 		changed = true
 	}
@@ -554,11 +568,107 @@ func computeNetOptionsActionReconcile(resourceName string, iPeer IntendedPeer, a
 	return res
 }
 
+// computeQuorumRaiseAction raises quorum-minimum-redundancy, and quorum when it
+// has to wait for the peers (quorumRaiseWaitsForPeers), of an existing resource.
+// computeBringUpActions runs it after the peer options, and the order is the
+// point of it.
+//
+// A new resource takes its whole option set in step 2: it has no peers yet,
+// so no vote can be missing.
+func computeQuorumRaiseAction(resourceName string, iState IntendedDRBDState, aState ActualDRBDState) (res DRBDActions) {
+	if !aState.ResourceExists() {
+		return nil
+	}
+
+	var changed bool
+	action := ResourceOptionsAction{ResourceName: resourceName}
+
+	intendedQuorum := uint(iState.Quorum())
+	if quorumRaiseWaitsForPeers(intendedQuorum, aState) {
+		action.Quorum = &intendedQuorum
+		changed = true
+	}
+
+	intendedQMR := uint(iState.QuorumMinimumRedundancy())
+	if quorumRaised(intendedQMR, aState.QuorumMinimumRedundancy()) {
+		action.QuorumMinimumRedundancy = &intendedQMR
+		changed = true
+	}
+
+	if changed {
+		res = append(res, action)
+	}
+	return res
+}
+
+// quorumRaiseWaitsForPeers reports whether a raise of quorum to intended has to
+// wait until the peer options are applied: the votes the kernel counts right
+// now fall short of the new value.
+//
+// A resource-options call that changes the quorum makes the kernel recompute
+// quorum on the spot, while peer-device-options --bitmap=yes, which turns a
+// diskless peer into a voter, recomputes nothing. When the new q needs the
+// vote that revision adds (the odd->even join from one voter, `A → D∅ + q↑`
+// of r1 → r2), q raised first meets one vote too few and suspends I/O until
+// the next state change recounts. Raised after the peers, it meets a vote that
+// is already there.
+//
+// When the counted votes already cover the new q (3 → 4 voters, q 2 → 3), q
+// goes first instead. Raised after the peers, it would leave a moment with
+// the new voter in and the old q: 4 voters at q=2, where both halves of a 2|2
+// split keep quorum. That is the window the split-brain rule (q raised before
+// adding a voter) forbids.
+func quorumRaiseWaitsForPeers(intended uint, aState ActualDRBDState) bool {
+	return quorumRaised(intended, aState.Quorum()) && countedVotes(aState) < intended
+}
+
+// countedVotes returns the votes the kernel counts on this node right now
+// (__calc_quorum_with_disk / __calc_quorum_no_disk in drbd_state.c): its own
+// disk unless it is non-voting, and every Connected peer with allow-remote-read
+// that has a disk, or a bitmap while this node has a disk.
+func countedVotes(aState ActualDRBDState) uint {
+	var votes uint
+	var hasDisk bool
+	if volumes := aState.Volumes(); len(volumes) > 0 {
+		vol := volumes[0]
+		hasDisk = vol.BackingDisk() != "" && vol.DiskState() != "Diskless"
+		if hasDisk && !vol.NonVoting() {
+			votes++
+		}
+	}
+	for _, peer := range aState.Peers() {
+		if peer.ConnectionState() != v1alpha1.ConnectionStateConnected.String() || !peer.AllowRemoteRead() {
+			continue
+		}
+		peerHasDisk := peer.PeerDiskState() != "" && peer.PeerDiskState() != "Diskless"
+		bitmap := peer.Bitmap() != nil && *peer.Bitmap()
+		if peerHasDisk || (hasDisk && bitmap) {
+			votes++
+		}
+	}
+	return votes
+}
+
 func quorumMatches(intended uint, actual string) bool {
 	if intended == 0 {
 		return actual == "off"
 	}
 	return actual == fmt.Sprintf("%d", intended)
+}
+
+// quorumRaised reports whether the intended numeric threshold is higher than the
+// one the kernel reports ("off" reads as 0). A symbolic value the agent never
+// sets ("majority", "all") or a missing one is not a raise: it is replaced in
+// step 2, as any other divergence is.
+func quorumRaised(intended uint, actual string) bool {
+	if actual == "off" {
+		return intended > 0
+	}
+	current, err := strconv.ParseUint(actual, 10, 32)
+	if err != nil {
+		return false
+	}
+	return uint64(intended) > current
 }
 
 func computePathActions(resourceName string, iPeer IntendedPeer, aPeer ActualPeer) (res DRBDActions) {

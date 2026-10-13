@@ -120,19 +120,33 @@ boundary, see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md).
   establishes connections while quorum is unaffected, then the conversion to
   D∅ + q↑ happens in a single configuration push.
 
+  A single push is one revision; each node's agent applies it as several
+  `drbdsetup` calls, and their order matters: a q change makes the kernel
+  recount votes on the spot, while `--bitmap=yes`, which gives the new peer
+  its vote, recounts nothing. The agent raises q before the peer options when
+  the votes the node already counts cover the new q (3 → 4 voters: no moment
+  with four voters at the old q), and after them otherwise (1 → 2 voters:
+  q=2 raised first would meet one vote of two and suspend I/O). See
+  `quorumRaiseWaitsForPeers` in the agent.
+
 - **sD + q↑ detach-before-promote**: when sD needs q↑, direct sD→D promotion
   cannot be used — publishing sD→D + q↑ in one revision is unsafe because a
   peer might apply the new voter before raising q, creating a window with even
   voters and old (low) q where a symmetric partition causes split-brain.
   Instead: sD detaches disk (sD→sD∅), converts to D∅ + q↑ — both are
   diskless, so this is a pure config update (voter status + q) that is safe
-  in any application order. Then D∅→D re-attaches with a delta resync.
+  in any order of application across nodes (inside a node the agent orders q
+  against the peer options, as for q↑ above). Then D∅→D re-attaches with a
+  delta resync.
 
 - **qmr↑**: quorum minimum redundancy raised as the last step of the join, once
   all replicas have confirmed the revision that added the new D. It is NOT
   gated on that D reaching UpToDate — the raise is bounded by the number of
   voters that already are (`computeCorrectQuorum`), so the protection level
-  never claims more copies of the data than exist. The one place that does wait
+  never claims more copies of the data than exist. When too few copies are
+  UpToDate yet — the first join of r1→r3, where the only other copy is the
+  origin — the step is a no-op and the join completes at the old qmr;
+  ChangeQuorum makes the raise once the new D is UpToDate. The one place that does wait
   for UpToDate is the removal of a surplus TieBreaker in layout convergence,
   which is a different question: not "may qmr go up" but "may the witness go
   away".
@@ -157,8 +171,12 @@ boundary, see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md).
 
 - **q↓ uses the A vestibule** (mirror of the add path): D detaches disk
   (D→D∅), then D∅ converts to A + q↓ in a single configuration push. This
-  is safe regardless of application order — A is invisible to quorum, and the
-  lower q is correct for the reduced voter count.
+  is safe regardless of the order in which the nodes apply it — A is
+  invisible to quorum, and the lower q is correct for the reduced voter
+  count. Inside a node the agent lowers q before the peer loses its vote
+  (`--bitmap=no`): in the other order 2 → 1 voters would recount one vote
+  against q=2. The price is a moment with the old voter count at the lower q
+  (4 voters at q=2 on 4 → 3).
 
 - **Backing volume fields** are cleared when transitioning from D∅ to A
   (the member no longer needs disk storage metadata).
@@ -701,6 +719,12 @@ must also confirm (it configures its own connections).
 
 For removal steps (→ ✕), the leaving member confirms by resetting its
 DatameshRevision to 0 (left the datamesh).
+
+The ✦ → A step of the odd→even diskful join (AddReplica(D) + q↑) also waits
+for the subject's connections to every FM member to be Connected, seen by at
+least one side with a ready agent. A revision only proves the configuration
+was applied; the next step raises q, and a q raised before the new voter is
+connected drops the quorum of the existing voters.
 
 ### All-members confirmation
 

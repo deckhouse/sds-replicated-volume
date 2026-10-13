@@ -396,9 +396,12 @@ var _ = Describe("AddReplica(D) diskful-q-up/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rv.Status.Datamesh.Quorum = 1
-		// FM (D) + subject (A) confirmed → step 1 completes.
+		// FM (D) + subject (A) confirmed, and A is connected to the FM member →
+		// step 1 completes.
+		subject := mkRVR("rv-1-1", "node-2", 6)
+		subject.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{mkPeerConnected("rv-1-0")}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+			mkRVR("rv-1-0", "node-1", 6), subject,
 		}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{})
@@ -418,6 +421,97 @@ var _ = Describe("AddReplica(D) diskful-q-up/v1", func() {
 		// Step flow.
 		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
 		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+	})
+
+	// step1QUpRV builds a 3D volume with rv-1-3 in the A vestibule of planID
+	// (diskful-q-up/v1 or diskful-q-up-qmr-up/v1): step 1 (✦ → A) active at
+	// revision 6, q = 2.
+	step1QUpRV := func(planID string) *v1alpha1.ReplicatedVolume {
+		t := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-3", PlanID: planID,
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "✦ → A", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 6, StartedAt: ptr.To(metav1.Now())},
+				{Name: "A → D∅ + q↑", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		if planID == "diskful-q-up-qmr-up/v1" {
+			t.Steps = append(t.Steps, v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				Name: "qmr↑", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending,
+			})
+		}
+		rv := mkRV(6,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeDiskful, "node-3"),
+				mkMember("rv-1-3", v1alpha1.DatameshMemberTypeAccess, "node-4"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-3")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
+		)
+		rv.Status.Datamesh.Quorum = 2
+		return rv
+	}
+	rsp4 := func() RSP { return mkRSP("node-1", "node-2", "node-3", "node-4") }
+
+	DescribeTable("step 1 applied everywhere but A not connected → q stays, step 1 waits", func(planID string) {
+		rv := step1QUpRV(planID)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+			mkRVR("rv-1-2", "node-3", 6), mkRVR("rv-1-3", "node-4", 6),
+		}
+
+		ProcessTransitions(context.Background(), rv, rsp4(), rvrs, nil, FeatureFlags{})
+
+		// Raising q now would count a voter the others cannot reach yet.
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-3").Type).To(Equal(v1alpha1.DatameshMemberTypeAccess))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+	},
+		Entry("diskful-q-up/v1", "diskful-q-up/v1"),
+		Entry("diskful-q-up-qmr-up/v1", "diskful-q-up-qmr-up/v1"),
+	)
+
+	DescribeTable("step 1: A connected to some FM members only → step 1 waits", func(planID string) {
+		rv := step1QUpRV(planID)
+		subject := mkRVR("rv-1-3", "node-4", 6)
+		subject.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			mkPeerConnected("rv-1-0"), mkPeerConnected("rv-1-1"),
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+			mkRVR("rv-1-2", "node-3", 6), subject,
+		}
+
+		ProcessTransitions(context.Background(), rv, rsp4(), rvrs, nil, FeatureFlags{})
+
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2)))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+	},
+		Entry("diskful-q-up/v1", "diskful-q-up/v1"),
+		Entry("diskful-q-up-qmr-up/v1", "diskful-q-up-qmr-up/v1"),
+	)
+
+	It("step 1: connections reported by the FM side only → step 1 completes, q↑", func() {
+		rv := step1QUpRV("diskful-q-up/v1")
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
+			mkRVR("rv-1-2", "node-3", 6), mkRVR("rv-1-3", "node-4", 6),
+		}
+		for _, fm := range rvrs[:3] {
+			fm.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{mkPeerConnected("rv-1-3")}
+		}
+
+		changed, _ := ProcessTransitions(context.Background(), rv, rsp4(), rvrs, nil, FeatureFlags{})
+
+		Expect(changed).To(BeTrue())
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		// 4 voters → q = 4/2+1 = 3.
+		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(3)))
 	})
 
 	It("step 2 confirmed → D∅ → D", func() {
@@ -540,9 +634,10 @@ var _ = Describe("AddReplica(D) diskful-qmr-up/v1", func() {
 		)
 		rv.Status.Configuration.GuaranteedMinimumDataRedundancy = 1
 		rv.Status.Datamesh.QuorumMinimumRedundancy = 1 // pre-raise: GMDR=0 → qmr=1
-		// Subject confirmed (subjectOnly for step 2).
+		// Subject confirmed (subjectOnly for step 2). The two old copies are
+		// UpToDate, so qmr=2 has the copies to back it while the new one resyncs.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 7),
+			mkRVRUpToDate("rv-1-0", "node-1", 6), mkRVRUpToDate("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 7),
 		}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
@@ -1529,9 +1624,13 @@ var _ = Describe("AddReplica(D) additional", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
 		rv2.Status.Datamesh.Quorum = 2
+		subject := mkRVR("rv-1-3", "node-4", 6)
+		subject.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{
+			mkPeerConnected("rv-1-0"), mkPeerConnected("rv-1-1"), mkPeerConnected("rv-1-2"),
+		}
 		rvrs2 := []*v1alpha1.ReplicatedVolumeReplica{
 			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6),
-			mkRVR("rv-1-2", "node-3", 6), mkRVR("rv-1-3", "node-4", 6),
+			mkRVR("rv-1-2", "node-3", 6), subject,
 		}
 
 		changed2, _ := ProcessTransitions(context.Background(), rv2, mkRSP("node-1", "node-2", "node-3", "node-4"), rvrs2, nil, FeatureFlags{})
