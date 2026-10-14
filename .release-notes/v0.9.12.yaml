@@ -1,0 +1,34 @@
+date: "2026-10-14"
+
+summary: "The legacy control plane stops raising the StorageClass alert for a `ReplicatedStorageClass` without `spec.replication`, DRBD is built again on ALT Linux nodes whose kernel flavour is not `std-def`, the migrator and spaas follow the module log level, and the new control plane keeps quorum while a diskful replica joins and finishes the r2 → r3 upsize by itself."
+
+highlights:
+  - "A `ReplicatedStorageClass` created without `spec.replication` is handled as `ConsistencyAndAvailability` by the legacy controller as well: its StorageClass is no longer labeled non-operational and no longer fires the StorageClass alert."
+  - "On ALT Linux nodes that run a kernel flavour other than `std-def` (for example ALT p11 with the `6.12` flavour), the DRBD NodeGroupConfiguration installs the headers of the running flavour, so DRBD is built instead of failing on a missing `kernel-headers-modules-std-def` package."
+  - "The `resyncSlotsPerNode` module setting, which applies only to the new control plane, is removed; the resync limit is fixed at 4 per node. Remove the setting from the ModuleConfig before the update if it is set there."
+
+improvements:
+  - "The control-plane migrator and spaas take their log level from the module `logLevel` instead of always logging at debug level. With the default `Info`, the migrator logs at `info` and spaas runs without `--debug`."
+  - "In the new control plane, current-state metrics of the controller are exported only by the leader replica, so standby replicas no longer publish duplicate cluster-wide series."
+  - "In the new control plane, raising a `ReplicatedStorageClass` from `Availability` to `ConsistencyAndAvailability` completes by itself: after the third diskful copy is `UpToDate`, the surplus tie-breaker is deleted automatically, and the volume no longer stops at `TransitionUnsupported` waiting for it to be deleted by hand."
+
+fixes:
+  - "The legacy webhook applies the three-zone `TransZonal` check to a `ReplicatedStorageClass` without `spec.replication`, so the mistake is rejected on apply instead of surfacing later as `InvalidConfiguration`. The legacy webhook and the CRD validation also reject `replication: Consistency` on the legacy control plane, which has no StorageClass layout for it. Existing StorageClasses already labeled non-operational because of the empty `replication` lose the label."
+  - "The CSI node of the new control plane serves `/metrics`, `/healthz`, `/readyz` and `/health` on its loopback metrics address only. It no longer listens on port 8081 on all interfaces, where it conflicted with `capdvp-controller-manager` on the masters of clusters on DVP: whichever started second crash-looped, and such clusters could not be deleted."
+  - "In the new control plane, a diskful replica joining a volume no longer makes the volume lose quorum and briefly suspend I/O (`Ready=False`, reason `QuorumLost`). The agent raises the quorum only after the new peer counts as a vote, the controller raises it only after the joining replica is `Connected` to every member, and a voter seen `Connected` by a peer with quorum is counted as reachable."
+  - "In the new control plane, adding a diskful replica no longer raises the minimum data redundancy above the number of `UpToDate` copies while the new copy is still resyncing, which suspended I/O on every replica until the resync finished."
+  - "In the new control plane, the controller deletes a `ReplicatedVolumeReplica` only if it is still the same object, so a replica that reused the name of a removed one is never deleted by mistake."
+  - "In the new control plane, `TransZonal` validation of a `ReplicatedStorageClass` requires a non-empty `zones` list with the exact number of zones for the chosen redundancy, and the zone requirements are checked separately from the legacy rules."
+
+breaking:
+  - "The `resyncSlotsPerNode` module setting, which applies only to the new control plane, is removed from the module configuration schema. A ModuleConfig that still sets it fails validation after the update."
+  - "In the new control plane, `failuresToTolerate` and `guaranteedMinimumDataRedundancy` of a `ReplicatedStorageClass` and of `spec.manualConfiguration` of a `ReplicatedVolume` accept values up to 1. Layouts above that (4D, 4D+1TB, 5D) are not admitted; an existing resource with a higher value reports a validation error."
+
+upgrade_notes:
+  - "Before the update, remove `settings.resyncSlotsPerNode` from the `sds-replicated-volume` ModuleConfig if it is set. The setting applies only to the new control plane: after the update, the new control plane limits resyncs to 4 per node in every cluster, and the limit cannot be changed or switched off."
+  - "On ALT Linux nodes that previously failed to build DRBD, nothing has to be done by hand: bashible installs the right headers and builds the module on its next run."
+
+docs:
+  - "The module documentation describes the released (LINSTOR-based) control plane: the `ReplicatedStorageClass` and `ReplicatedStoragePool` phase is `Ready` rather than `Created` or `Completed`, `spec` of these resources cannot be changed after creation, and expanding a `ReplicatedStoragePool` to new nodes is done by recreating it. The new control plane documentation and CRDs are no longer shown in the module docs."
+  - "The CRD reference of `ReplicatedStorageClass` and `ReplicatedStoragePool` marks the fields used only by the new control plane, describes the shared fields identically in English and Russian, and marks `replication` and `storagePool` as deprecated only in the new control plane."
+  - "The `ReplicatedStorageClass` examples are fixed: the HA class example in the Russian usage guide had `name` outside `metadata`, and the FAQ example no longer contains `metadata.generation`."
