@@ -47,8 +47,7 @@ shell:
 # Bundle image, stored in your.registry.io/modules/<module-name>:<semver>
 ---
 image: bundle
-from: {{ index $.Images "builder/scratch" }}
-
+from: scratch
 import:
   # Rendering .werf/images-digests.yaml is required!
   - image: images-digests

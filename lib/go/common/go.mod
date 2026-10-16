@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/lib/go/common
 
-go 1.27.1
+go 1.27.2
 require (
 	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/go-logr/logr v1.4.3

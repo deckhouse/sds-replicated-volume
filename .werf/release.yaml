@@ -71,7 +71,7 @@ shell:
       fi
 ---
 image: release-channel-version
-from: {{ index $.Images "builder/scratch" }}
+from: scratch
 git:
   - add: /
     to: /

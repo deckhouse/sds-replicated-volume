@@ -37,8 +37,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
-from: {{ index $.Images "builder/scratch" }}
-
+from: scratch
 import:
   - image: {{ $.ImageName }}-golang-artifact
     add: /{{ $.ImageName }}

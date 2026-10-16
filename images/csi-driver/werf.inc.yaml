@@ -108,7 +108,7 @@ shell:
     - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ index $.Images "builder/scratch" }}
+from: scratch
 final: false
 import:
   - image: {{ $.ImageName }}-distroless-artifact

@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/linstor-migrator
 
-go 1.27.1
+go 1.27.2
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
