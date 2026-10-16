@@ -1,0 +1,133 @@
+# Alerts on the health of ReplicatedVolumes: the Ready and Resilient conditions (new control plane).
+#
+# Like replicated-volume-layout.yaml, this is a plain static .yaml with no Helm templating and no
+# newControlPlane gate: the sds_rv_condition_problem_timestamp_seconds series is exported only by the
+# new control plane controller, so on the old control plane the expressions yield an empty vector.
+#
+# The series exists only while the condition is not True (deleting volumes are not exported), and its
+# value is the lastTransitionTime of the condition, that is the last change of its status. A change of
+# reason within the same status keeps the value; a change between False and Unknown (for example
+# StatusUnknown -> QuorumLost) moves it to that moment, so the problem may have started earlier. The
+# status and the reason are deliberately left out of the alert labels: otherwise such a change would
+# become a new alert and restart its `for` timer.
+#
+# Forming and Absent (no Ready condition yet) mean the volume is still being created; a volume stuck
+# in formation is a separate concern and is not alerted on here.
+- name: kubernetes.replicated.volume.health
+  rules:
+    - alert: D8ReplicatedVolumeNotReady
+      expr: max by (name, storage_class) (sds_rv_condition_problem_timestamp_seconds{condition="Ready",reason!~"Forming|Absent"})
+      for: 5m
+      # Current metrics disappear for about a minute on a controller restart or a leader change;
+      # without this the firing alert would resolve and wait another 5m before firing again.
+      # It is also the `for` of D8SdsReplicatedVolumeCurrentMetricsUnavailable, which takes over
+      # when the gap is longer; keep the two equal.
+      keep_firing_for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "name,storage_class"
+        plk_create_group_if_not_exists__d8_replicated_volume_health: "D8ReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_volume_health: "D8ReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: ReplicatedVolume is not Ready
+        description: |
+          The ReplicatedVolume `{{ $labels.name }}` is not `Ready`: the volume is not serving I/O at the guaranteed minimum redundancy, so the workloads using it are likely stuck, or, with the reason `StatusUnknown`, the control plane cannot confirm that it does. The `Ready` condition last changed its status at {{ $value | humanizeTimestamp }}; after a change between `Unknown` and `False` the problem may have started earlier.
+
+          The reason is reported by the `Ready` condition of the volume:
+
+          - `QuorumLost` — not enough replicas (diskful voters plus tie-breakers) are reachable to form a quorum, and DRBD suspends I/O. Most often nodes holding the replicas are down or cannot reach each other.
+          - `AttachmentNotReady` — the replicas hold a quorum, but an established attachment is not serving I/O, for example the node where the volume is attached is cut off from its peers. The `AttachedReady` condition names the attachment and the cause.
+          - `StatusUnknown` — the control plane cannot determine the actual layout of the volume, because the agents on the nodes of its replicas do not report their state (the agent is down or the node is unreachable). DRBD may still serve I/O if only the agents are down; if the nodes are down, I/O is stopped.
+
+          The recommended course of action:
+
+          1. Read the reason and the message of the `Ready` condition (the `AttachedReady` column is shown with `-o wide`):
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o wide
+             kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             ```
+
+          2. Inspect the replicas of the volume, the nodes they run on and their phases:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
+             ```
+
+          3. Check the nodes of the replicas and the `agent` Pods on them; bring back the nodes or agents that are down:
+
+             ```shell
+             kubectl get nodes
+             kubectl -n d8-sds-replicated-volume get pods -l app=agent -o wide
+             ```
+
+          4. If the reason is `AttachmentNotReady`, read the `AttachedReady` condition and the attachments of the volume:
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="AttachedReady")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             kubectl get rva --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
+             ```
+
+          5. The alert resolves once the volume is `Ready` again. The `D8DrbdDevice*` alerts for the DRBD resources `sdsrv-<replica name>` of this volume show the state of each replica. If the volume does not recover, contact tech support.
+
+    - alert: D8ReplicatedVolumeNotResilient
+      # A volume that is not Ready is almost always not Resilient as well; it is reported only by
+      # D8ReplicatedVolumeNotReady, so one failure does not raise two alerts per volume.
+      expr: |
+        max by (name, storage_class) (sds_rv_condition_problem_timestamp_seconds{condition="Resilient",reason!~"Forming|Absent"})
+        unless on (name)
+        sds_rv_condition_problem_timestamp_seconds{condition="Ready",reason!~"Forming|Absent"}
+      for: 30m
+      # Bridges the short gap in current metrics on a controller restart or a leader change.
+      # It is also the `for` of D8SdsReplicatedVolumeCurrentMetricsUnavailable, which takes over
+      # when the gap is longer; keep the two equal.
+      keep_firing_for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "name,storage_class"
+        plk_create_group_if_not_exists__d8_replicated_volume_health: "D8ReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_volume_health: "D8ReplicatedVolumeHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: ReplicatedVolume runs below its intended redundancy
+        description: |
+          The ReplicatedVolume `{{ $labels.name }}` is not `Resilient`: it still serves I/O, but it cannot tolerate the number of failures its configuration asks for. The next failure of a node or a disk holding its replicas may stop I/O or lose data. The `Resilient` condition last changed its status at {{ $value | humanizeTimestamp }}; after a change between `Unknown` and `False` the problem may have started earlier.
+
+          A volume normally becomes non-resilient for a short time when a node holding its replica reboots, and recovers on its own once the replica is back and resynchronized. This alert fires only if that has not happened within 30 minutes.
+
+          It also fires while a volume grows to a higher redundancy (for example, `replication` of its ReplicatedStorageClass raised from `Availability` to `ConsistencyAndAvailability`) and the synchronization of the new copy takes longer than 30 minutes: the volume is below its new intended redundancy until the copy is synchronized. At most `maxParallel` volumes of the class (its rollout strategy) are in this state at once. The alert resolves on its own once the copy is synchronized.
+
+          The reason is reported by the `Resilient` condition of the volume:
+
+          - `Degraded` — the effective redundancy (the replicas that are up to date and reachable) is below the intended one: a replica is lost, unreachable, still resynchronizing, or has not been re-created yet.
+          - `StatusUnknown` — the control plane cannot determine the actual layout of the volume, because the agents on the nodes of its replicas do not report their state.
+
+          The recommended course of action:
+
+          1. Read the reason and the message of the `Resilient` condition; the message compares the effective redundancy with the intended one:
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o wide
+             kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="Resilient")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             ```
+
+          2. Inspect the replicas of the volume: a replica that is not `Healthy`, is not up to date (`DataUpToDate`), or is missing from the expected nodes points at the cause:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
+             ```
+
+          3. Check the nodes of the replicas and the `agent` Pods on them; bring back the nodes or agents that are down.
+
+          4. Read the `MembershipLayoutConverged` condition. `False/Converging` with a step such as `waiting for a free resync slot` or `waiting for the diskful copies to synchronize` means a new copy is on its way (after a lost replica, or because the volume grows): wait for it. If a replica cannot be re-created on another node, the condition reports why (`CannotConverge`), and the `D8ReplicatedVolumeLayoutDegraded` alert fires for this volume as well:
+
+             ```shell
+             kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             ```
+
+          5. The alert resolves once the volume is `Resilient` again. If it does not recover, contact tech support.

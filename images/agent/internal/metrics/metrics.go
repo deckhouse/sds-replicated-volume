@@ -24,8 +24,11 @@ import (
 // Histogram bucket configurations.
 // Agent runs one instance per node, so no node label is needed on histograms.
 var (
-	bucketsDRBDRConfigured = []float64{0.5, 1, 2, 4, 8, 10, 30}
-	bucketsDeletion        = []float64{1, 2, 5, 10, 20, 40, 120}
+	// Same 1-2-5 scale as the controller histograms, calibrated on production distributions and
+	// reaching up to an hour to separate slow from stuck. Bands panels on the dashboard use bucket
+	// boundaries as thresholds.
+	bucketsDRBDRConfigured = []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 3600}
+	bucketsDeletion        = []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1800, 3600}
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -35,7 +38,7 @@ var (
 var (
 	DRBDRConfiguredDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sds_drbdr_configured_duration_seconds",
-		Help:    "Time from DRBDResource creation to Configured condition becoming True.",
+		Help:    "Time from DRBDResource creation to its first Configured=True. Later returns to True are not observed, nor are resources created before the agent started.",
 		Buckets: bucketsDRBDRConfigured,
 	})
 
@@ -64,5 +67,6 @@ func init() {
 		DRBDRConfiguredDuration,
 		DRBDRDeletionDuration,
 		DRBDPortRangeUsage,
+		newDRBDModuleInfoCollector(drbdModuleVersionPath),
 	)
 }

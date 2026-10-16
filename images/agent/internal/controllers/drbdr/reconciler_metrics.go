@@ -17,9 +17,11 @@ limitations under the License.
 package drbdr
 
 import (
+	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -44,28 +46,91 @@ func computeDRBDRMetricObservations(
 	now time.Time,
 	drbdr *v1alpha1.DRBDResource,
 	statusBase *v1alpha1.DRBDResource,
+	configured *configuredDRBDRTracker,
 ) drbdrMetricObservations {
 	if drbdr == nil || statusBase == nil {
 		return nil
 	}
 
 	var observations drbdrMetricObservations
+	observations = append(observations, computeDRBDRConfiguredMetricObservations(now, drbdr, statusBase, configured)...)
+	return observations
+}
 
-	// Detect Configured condition transition to True.
+// computeDRBDRConfiguredMetricObservations records the time from DRBDR creation to its first
+// Configured=True. Later returns to True (after a failed reconfiguration or maintenance) are
+// not configuration latency and would otherwise record the age of the resource.
+func computeDRBDRConfiguredMetricObservations(
+	now time.Time,
+	drbdr *v1alpha1.DRBDResource,
+	statusBase *v1alpha1.DRBDResource,
+	configured *configuredDRBDRTracker,
+) drbdrMetricObservations {
 	oldCond := obju.GetStatusCondition(statusBase, v1alpha1.DRBDResourceCondConfiguredType)
 	newCond := obju.GetStatusCondition(drbdr, v1alpha1.DRBDResourceCondConfiguredType)
 
 	wasTrue := oldCond != nil && oldCond.Status == metav1.ConditionTrue
 	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
-
-	if !wasTrue && isTrue {
-		dur := now.Sub(drbdr.CreationTimestamp.Time).Seconds()
-		observations = append(observations, func() {
-			metrics.DRBDRConfiguredDuration.Observe(dur)
-		})
+	if wasTrue || !isTrue || !configured.isFirstConfiguration(drbdr) {
+		return nil
 	}
 
-	return observations
+	name, uid := drbdr.Name, drbdr.UID
+	dur := now.Sub(drbdr.CreationTimestamp.Time).Seconds()
+	return drbdrMetricObservations{
+		func() {
+			metrics.DRBDRConfiguredDuration.Observe(dur)
+			configured.markConfigured(name, uid)
+		},
+	}
+}
+
+// configuredDRBDRTracker remembers DRBDResources that have already been configured, so that
+// only the first Configured=True is reported. The DRBDR status has no field that records a past
+// successful configuration for every resource type (deviceUUID exists only for diskful ones),
+// so the state is kept in memory. Resources created before the agent started are never
+// reported: whether they were configured before the restart is unknown. The cost is one lost
+// observation for a resource whose first configuration spans an agent restart.
+//
+// Entries are keyed by name and hold the UID of the configured object: a resource recreated
+// under the same name is a new one, and an entry can be released by name when the object is
+// already gone and only its name is known (the reconcile request of a deleted resource).
+// So the tracker holds at most one entry per resource name.
+//
+// startedAt is the node clock, CreationTimestamp is the API server clock: with a clock skew, a
+// resource created within the skew around the agent start may be misclassified, one lost or
+// extra observation at most. Durations measured from CreationTimestamp carry the same skew.
+type configuredDRBDRTracker struct {
+	startedAt time.Time
+
+	mu     sync.Mutex
+	byName map[string]types.UID
+}
+
+func newConfiguredDRBDRTracker(startedAt time.Time) *configuredDRBDRTracker {
+	return &configuredDRBDRTracker{startedAt: startedAt, byName: make(map[string]types.UID)}
+}
+
+func (t *configuredDRBDRTracker) isFirstConfiguration(drbdr *v1alpha1.DRBDResource) bool {
+	if drbdr.CreationTimestamp.Time.Before(t.startedAt) {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	uid, ok := t.byName[drbdr.Name]
+	return !ok || uid != drbdr.UID
+}
+
+func (t *configuredDRBDRTracker) markConfigured(name string, uid types.UID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.byName[name] = uid
+}
+
+func (t *configuredDRBDRTracker) forget(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.byName, name)
 }
 
 // observeDRBDRDeletion records the deletion duration when the agent finalizer is removed.

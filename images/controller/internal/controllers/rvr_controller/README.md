@@ -422,8 +422,6 @@ Message combines cleanup progress from DRBDConfigured and BackingVolumeReady con
 
 The bring-up chain of a new replica is therefore `Pending → Configuring → WaitingForDatamesh → Configuring → Progressing → PartiallyDegraded → Healthy`; before this rule it passed through `Critical` between `Configuring` and `PartiallyDegraded` on every volume formation, TieBreaker replacement and partner heal.
 
-**Monitoring consequence**: the `sds:rvr_degraded_count` recording rule (`monitoring/prometheus-rules/sds-replicated-volume.yaml`) counts `PartiallyDegraded|Degraded|Critical|AgentNotReady`. Replica bring-up no longer produces a `Critical` spike in it; `PartiallyDegraded` during bring-up is unchanged. The rule itself needs no edit.
-
 **Deletion note**: When DeletionTimestamp is set but `rvrShouldNotExist` is false (replica is still operational — e.g., datamesh leave in progress), a deletion note is appended to the normal phase message. The note comes from the Configured condition (datamesh leave progress, e.g. "Leaving datamesh: 3/4 replicas confirmed revision 7") or a generic ". Deletion pending" fallback.
 
 Message is sourced from the most relevant condition for the current phase, enriched with problem descriptions (`. Problem text`) for all member health phases (including Healthy and Progressing). Informational notes (eligible-node mismatch, deletion progress) are appended to the message without affecting the phase. For Progressing, the progress description is appended to the Ready message. For the pre-member default fallback (Configuring), the first non-True condition message is used in priority order: DRBDConfigured, BackingVolumeReady, Ready.

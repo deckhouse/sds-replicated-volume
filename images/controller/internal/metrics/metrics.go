@@ -21,6 +21,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // ControllerStartTime is captured once at package init.
@@ -31,26 +33,40 @@ var ControllerStartTime = time.Now()
 
 // Metric label name constants.
 const (
-	LabelName         = "name"
-	LabelRV           = "rv"
-	LabelNode         = "node"
-	LabelStorageClass = "storage_class"
-	LabelPhase        = "phase"
-	LabelType         = "type"
-	LabelStep         = "step"
-	LabelReason       = "reason"
+	LabelName              = "name"
+	LabelRV                = "rv"
+	LabelNode              = "node"
+	LabelStorageClass      = "storage_class"
+	LabelConfigurationMode = "configuration_mode"
+	LabelPhase             = "phase"
+	LabelType              = "type"
+	LabelStep              = "step"
+	LabelReason            = "reason"
+	LabelCondition         = "condition"
+	LabelStatus            = "status"
+	LabelKind              = "kind"
 )
+
+// ReasonAbsent is the synthetic reason label value used when a condition is missing from
+// the object status entirely. Real condition reasons never take this value.
+const ReasonAbsent = "Absent"
 
 // Histogram bucket configurations.
 // Prometheus automatically adds +Inf, so data is never lost even if values exceed the upper bound.
+//
+// Buckets follow a 1-2-5 scale calibrated on production distributions (3k RVs, 20 nodes) and
+// reach up to an hour, so a slow operation can be told apart from a stuck one. Finer steps are
+// not worth the extra series: operators need the order of magnitude, the exact mean is available
+// from _sum/_count. Bands panels on the dashboard use bucket boundaries as thresholds; keep them
+// in sync when changing buckets. Datamesh transitions carry the most label combinations, so they
+// get the fewest buckets.
 var (
-	bucketsRVRReady           = []float64{1, 2, 5, 10, 20, 30, 60, 120}
-	bucketsRVAAttach          = []float64{1, 2, 5, 10, 20, 40, 60}
-	bucketsDeletion           = []float64{1, 2, 5, 10, 20, 40, 120}
-	bucketsDatameshTransition = []float64{0.5, 1, 2, 5, 10, 20, 30, 40, 60, 120}
-	bucketsDatameshStep       = []float64{0.5, 1, 2, 5, 10, 20, 30}
-	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 40, 120, 300, 600, 1200, 1800}
-	bucketsBackingVolume      = []float64{0.5, 1, 2, 5, 10, 20, 30}
+	bucketsRVAAttach          = []float64{1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 3600}
+	bucketsDeletion           = []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1800, 3600}
+	bucketsDatameshTransition = []float64{0.5, 1, 2, 5, 10, 30, 60, 300, 3600}
+	bucketsDatameshStep       = []float64{0.5, 1, 2, 5, 10, 30, 120, 600}
+	bucketsRVFormation        = []float64{1, 2, 5, 10, 20, 30, 60, 120, 300, 600}
+	bucketsBackingVolume      = []float64{0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 3600}
 	bucketsCollect            = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 )
 
@@ -59,28 +75,35 @@ var (
 //
 
 var (
+	// RVCreated is a counter rather than a histogram: creation is a point event with no duration.
+	RVCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "sds_rv_created_total",
+		Help: "Number of ReplicatedVolumes taken over by the controller, counted once per volume when RVControllerFinalizer is first added. The finalizer survives controller restarts and leader changes, so a volume is not counted again. Manual volumes have storage_class=\"unknown\" and configuration_mode=\"Manual\".",
+	}, []string{LabelStorageClass, LabelConfigurationMode})
+
 	RVInitialFormationDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_initial_formation_duration_seconds",
-		Help:    "Time from RV creation to first completed initial datamesh formation (datameshRevision > 0 and no active Formation transition). Buckets are calibrated for common test volumes; large volumes may use the upper buckets.",
+		Help:    "Time from RV creation to first completed initial datamesh formation (datameshRevision > 0 and no active Formation transition).",
 		Buckets: bucketsRVFormation,
 	}, []string{LabelStorageClass})
 
 	RVAReadyDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rva_ready_duration_seconds",
-		Help:    "Time from RVA creation to Attached phase.",
+		Help:    "Time from RVA creation to its first Attached phase; re-attaches are not observed, except a re-attach that completes after a controller restart while the attachment was lost: it is observed as a first attach, measured from creation.",
 		Buckets: bucketsRVAAttach,
 	}, []string{LabelNode})
 
-	RVRReadyDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "sds_rvr_ready_transition_duration_seconds",
-		Help:    "Duration of every RVR Ready condition transition from non-True to True, including repeated recovery/flap transitions.",
-		Buckets: bucketsRVRReady,
-	}, []string{LabelNode, LabelStorageClass})
+	// RVRReadyLost is a counter rather than a histogram: how often replicas lose Ready (flaps)
+	// matters per node, while how long they stay not Ready is covered by current metrics.
+	RVRReadyLost = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "sds_rvr_ready_lost_total",
+		Help: "Number of RVR Ready condition transitions from True to non-True, by the new reason (\"Absent\" when the condition disappeared). Deleting replicas are not counted.",
+	}, []string{LabelNode, LabelStorageClass, LabelReason})
 
 	// RVRBackingVolumeDuration reflects LLV/LVMLogicalVolume provisioning time.
 	RVRBackingVolumeDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rvr_backing_volume_duration_seconds",
-		Help:    "Time from RVR creation to BackingVolumeReady condition (reflects LLV/LVMLogicalVolume provisioning time).",
+		Help:    "Time from LVMLogicalVolume creation to BackingVolumeReady=True, observed once per provisioned LLV (initial provisioning or replacement). Returns to Ready after a resize or a temporary NotReady are not observed.",
 		Buckets: bucketsBackingVolume,
 	}, []string{LabelNode, LabelStorageClass})
 
@@ -114,11 +137,6 @@ var (
 		Buckets: bucketsDatameshTransition,
 	}, []string{LabelStorageClass, LabelNode, LabelType})
 
-	DatameshTransitionsCompleted = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "sds_rv_datamesh_transitions_completed_total",
-		Help: "Total number of completed datamesh transitions.",
-	}, []string{LabelStorageClass, LabelNode, LabelType})
-
 	DatameshStepDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "sds_rv_datamesh_step_duration_seconds",
 		Help:    "Duration of individual datamesh transition steps.",
@@ -141,19 +159,34 @@ var (
 		Name: "sds_metrics_collector_collect_errors_total",
 		Help: "Total number of failed SDS current metrics collector runs.",
 	})
-
-	CurrentMetricsObjects = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "sds_metrics_collector_objects",
-		Help: "Number of Kubernetes objects processed by the SDS current metrics collector by kind.",
-	}, []string{"kind"})
 )
+
+// StorageClassLabel returns the storage_class label value for a ReplicatedStorageClass name,
+// mapping an empty name (a Manual volume) to "unknown". Every metric with a storage_class label
+// uses it, so current and lifecycle metrics agree and can be filtered and joined together.
+func StorageClassLabel(storageClass string) string {
+	if storageClass == "" {
+		return currentMetricsSCUnknown
+	}
+	return storageClass
+}
+
+// ConfigurationModeLabel returns the configuration_mode label value of a ReplicatedVolume,
+// mapping an empty mode to Auto, the CRD default.
+func ConfigurationModeLabel(mode v1alpha1.ReplicatedVolumeConfigurationMode) string {
+	if mode == "" {
+		return string(v1alpha1.ReplicatedVolumeConfigurationModeAuto)
+	}
+	return string(mode)
+}
 
 func init() {
 	crmetrics.Registry.MustRegister(
-		// Lifecycle histograms
+		// Lifecycle metrics
+		RVCreated,
 		RVInitialFormationDuration,
 		RVAReadyDuration,
-		RVRReadyDuration,
+		RVRReadyLost,
 		RVRBackingVolumeDuration,
 		RVDeletionDuration,
 		RVRDeletionDuration,
@@ -161,12 +194,10 @@ func init() {
 
 		// Datamesh
 		DatameshTransitionDuration,
-		DatameshTransitionsCompleted,
 		DatameshStepDuration,
 
 		// Current metrics collector self-observability
 		CurrentMetricsCollectDuration,
 		CurrentMetricsCollectErrors,
-		CurrentMetricsObjects,
 	)
 }

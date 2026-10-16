@@ -65,6 +65,10 @@ type Engine[G any, R ReplicaCtx, C ContextProvider[G, R]] struct {
 	// Context provider (by value for stenciling).
 	cp C
 
+	// Snapshots of transitions completed during this cycle, in completion order.
+	// Cancelled transitions are not recorded.
+	completed []Transition
+
 	// Finalized flag: set by Finalize(), prevents further mutations.
 	finalized bool
 }
@@ -450,7 +454,31 @@ func (e *Engine[G, R, C]) completeTransition(p *plan[G, R], idx int, rctx R, slo
 		slot.SetActiveTransition(rctx, nil)
 	}
 
+	e.completed = append(e.completed, completedSnapshot(e.transitions[idx]))
 	e.deleteTransition(idx)
+}
+
+// completedSnapshot copies a transition that is about to leave the engine and marks its
+// last step Completed: the engine removes a transition right after confirming its last
+// step, without advancing it. The copy is detached from the original backing array,
+// which Finalize may overwrite.
+func completedSnapshot(t *Transition) Transition {
+	c := *t
+	c.Steps = slices.Clone(t.Steps)
+	if n := len(c.Steps); n > 0 && c.Steps[n-1].Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+		now := metav1.Now()
+		c.Steps[n-1].Status = v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted
+		c.Steps[n-1].CompletedAt = &now
+	}
+	return c
+}
+
+// CompletedTransitions returns snapshots of the transitions that completed during this
+// cycle, including those created and completed within the same Process call. Transitions
+// cancelled by an emergency plan are not included. Callers use it to observe completions
+// that a before/after comparison of the transitions cannot see.
+func (e *Engine[G, R, C]) CompletedTransitions() []Transition {
+	return e.completed
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

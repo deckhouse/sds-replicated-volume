@@ -1,6 +1,6 @@
 # Alerts on the membership layout of ReplicatedVolumes (new control plane).
 #
-# The sds_rv_membership_layout_converged series is exported only by the new control plane
+# The sds_rv_condition_problem_timestamp_seconds series is exported only by the new control plane
 # controller (images/controller/internal/metrics/current_metrics_collector.go), whose ServiceMonitor
 # is itself gated on newControlPlane, so on the old control plane the series does not exist and the
 # expression below yields an empty vector. That is why this file is a plain static .yaml with no
@@ -8,8 +8,18 @@
 - name: kubernetes.replicated.volume.layout
   rules:
     - alert: D8ReplicatedVolumeLayoutDegraded
-      expr: max by (name, reason) (sds_rv_membership_layout_converged{reason=~"TransitionUnsupported|CannotConverge"} == 0)
+      # A volume under spec.maintenance is excluded: its layout convergence is frozen at the last
+      # value and, per the UnderMaintenance contract, must not be reasoned from.
+      expr: |
+        max by (name, reason) (sds_rv_condition_problem_timestamp_seconds{condition="MembershipLayoutConverged",reason=~"TransitionUnsupported|CannotConverge"})
+        unless on (name)
+        sds_rv_condition_problem_timestamp_seconds{condition="UnderMaintenance"}
       for: 15m
+      # Current metrics disappear for about a minute on a controller restart or a leader change;
+      # without this the firing alert would resolve and wait another 15m before firing again.
+      # It is also the `for` of D8SdsReplicatedVolumeCurrentMetricsUnavailable, which takes over
+      # when the gap is longer; keep the two equal.
+      keep_firing_for: 5m
       labels:
         severity_level: "6"
         tier: cluster
@@ -30,7 +40,7 @@
           - `TransitionUnsupported` — the actual layout differs from the intended one and no automatic transition covers this mismatch. The control plane never removes a replica, so this is the reason for a layout with **too many** replicas: an excess diskful replica, or a tie-breaker the configuration no longer asks for. Raising `replication` from r2 to r3 lands here too, because the volume's tie-breaker becomes redundant: remove it by hand and the missing third copy is then added automatically.
           - `CannotConverge` — an automatic transition does apply, but no admissible candidate is available: most often there is no eligible node left to host the missing replica, or not enough capacity in its storage pool. The condition message carries the scheduler's own summary.
 
-          The alert compares the actual layout against the one intended by the volume configuration, so a volume that is configured to run on a single replica reports `Converged` and never fires here.
+          The alert compares the actual layout against the one intended by the volume configuration, so a volume that is configured to run on a single replica reports `Converged` and never fires here. A volume under `spec.maintenance` does not fire either: its layout convergence is frozen while reconciliation is paused.
 
           The recommended course of action:
 

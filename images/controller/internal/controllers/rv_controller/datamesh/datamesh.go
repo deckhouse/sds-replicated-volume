@@ -85,6 +85,20 @@ func ProcessTransitions(
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	features FeatureFlags,
 ) (bool, []ReplicaContext) {
+	changed, allReplicas, _ := ProcessTransitionsWithCompleted(ctx, rv, rsp, rvrs, rvas, features)
+	return changed, allReplicas
+}
+
+// ProcessTransitionsWithCompleted is ProcessTransitions that also returns snapshots of
+// the transitions completed during this cycle (see dmte.Engine.CompletedTransitions).
+func ProcessTransitionsWithCompleted(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rsp RSP,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+	features FeatureFlags,
+) (bool, []ReplicaContext, []v1alpha1.ReplicatedVolumeDatameshTransition) {
 	// 1. Build contexts.
 	cp := buildContexts(rv, rsp, rvrs, rvas, features)
 	gctx := cp.Global()
@@ -132,5 +146,5 @@ func ProcessTransitions(
 		changed = true
 	}
 
-	return changed, gctx.allReplicas
+	return changed, gctx.allReplicas, engine.CompletedTransitions()
 }

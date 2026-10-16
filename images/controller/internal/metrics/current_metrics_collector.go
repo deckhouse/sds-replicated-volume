@@ -42,16 +42,57 @@ const (
 	currentMetricsSCUnknown       = "unknown"
 	currentMetricsCollectTimeout  = 5 * time.Second
 
+	currentMetricsKindRV  = "rv"
+	currentMetricsKindRVR = "rvr"
+	currentMetricsKindRVA = "rva"
+
 	// currentMetricsReasonAbsent is the synthetic reason label used when a condition is missing
 	// from the object status entirely. Every reason a condition actually carries is exported
 	// verbatim, so this value never collides with a real one.
-	currentMetricsReasonAbsent = "Unknown"
+	currentMetricsReasonAbsent = ReasonAbsent
+
+	// currentMetricsStatusAbsent is the synthetic status label paired with currentMetricsReasonAbsent.
+	// It is distinct from the real Unknown condition status.
+	currentMetricsStatusAbsent = "Absent"
 )
 
-// metricNameRVLayoutConverged is the only current metric whose name is kept in a constant: the
-// alert rule monitoring/prometheus-rules/replicated-volume-layout.yaml selects this very series,
-// and the unit test cross-checks the rule expression against this constant.
-const metricNameRVLayoutConverged = "sds_rv_membership_layout_converged"
+// currentMetricsRVConditionTypes lists the ReplicatedVolume conditions exported by
+// sds_rv_condition_count.
+var currentMetricsRVConditionTypes = []string{
+	v1alpha1.ReplicatedVolumeCondReadyType,
+	v1alpha1.ReplicatedVolumeCondResilientType,
+	v1alpha1.ReplicatedVolumeCondAttachedReadyType,
+	v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+	v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
+	v1alpha1.ReplicatedVolumeCondConfiguredType,
+	v1alpha1.ReplicatedVolumeCondScheduledType,
+	v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+	v1alpha1.ReplicatedVolumeCondUnderMaintenanceType,
+}
+
+// currentMetricsRVProblemConditionTypes lists the ReplicatedVolume conditions exported per volume by
+// sds_rv_condition_problem_timestamp_seconds. Configured, Scheduled and SatisfyEligibleNodes are left
+// out: they are mostly transient and, during an outage, duplicate Resilient and
+// MembershipLayoutConverged while doubling the number of per-volume series; their aggregate is in
+// sds_rv_condition_count.
+var currentMetricsRVProblemConditionTypes = []string{
+	v1alpha1.ReplicatedVolumeCondReadyType,
+	v1alpha1.ReplicatedVolumeCondResilientType,
+	v1alpha1.ReplicatedVolumeCondAttachedReadyType,
+	v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+	v1alpha1.ReplicatedVolumeCondConfigurationReadyType,
+	v1alpha1.ReplicatedVolumeCondUnderMaintenanceType,
+}
+
+// Names of current metrics selected by alert rules are kept in constants, and the unit tests
+// cross-check the rule expressions against them:
+//   - metricNameRVConditionProblem: monitoring/prometheus-rules/replicated-volume-layout.yaml and
+//     monitoring/prometheus-rules/replicated-volume-health.yaml;
+//   - metricNameCollectorUp: monitoring/prometheus-rules/current-metrics.tpl.
+const (
+	metricNameRVConditionProblem = "sds_rv_condition_problem_timestamp_seconds"
+	metricNameCollectorUp        = "sds_metrics_collector_up"
+)
 
 // Package-level guard: exactly one current metrics collector is registered per process.
 // The controller runs one manager per process; a second in-process manager would share the
@@ -67,6 +108,13 @@ type currentMetricLabels3 struct {
 	first  string
 	second string
 	third  string
+}
+
+type currentMetricLabels4 struct {
+	first  string
+	second string
+	third  string
+	fourth string
 }
 
 // currentMetricsCollectorRunnable registers the collector once this replica has won the leader
@@ -111,13 +159,20 @@ type currentMetricsCollector struct {
 	log    logr.Logger
 
 	rvCountDesc                    *prometheus.Desc
+	rvConditionCountDesc           *prometheus.Desc
 	rvrCountDesc                   *prometheus.Desc
 	rvaCountDesc                   *prometheus.Desc
 	rvrDeletingCountDesc           *prometheus.Desc
 	datameshActiveDesc             *prometheus.Desc
 	rvNoPersistentVolumeDesc       *prometheus.Desc
 	rvAutoConfigurationBlockedDesc *prometheus.Desc
-	rvLayoutConvergedDesc          *prometheus.Desc
+	rvConditionProblemDesc         *prometheus.Desc
+	rvDeletingDesc                 *prometheus.Desc
+	deletingOldestDesc             *prometheus.Desc
+	datameshTransitionOldestDesc   *prometheus.Desc
+	rvrNotReadyOldestDesc          *prometheus.Desc
+	collectorUpDesc                *prometheus.Desc
+	collectorObjectsDesc           *prometheus.Desc
 }
 
 func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentMetricsCollector {
@@ -126,13 +181,43 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 		log:    log.WithName("current-metrics-collector"),
 		rvCountDesc: prometheus.NewDesc(
 			"sds_rv_count",
-			"Current number of ReplicatedVolume objects by storage class and lifecycle phase. Built from controller cache at scrape time.",
-			[]string{LabelStorageClass, LabelPhase},
+			"Current number of ReplicatedVolume objects by storage class, configuration mode, and lifecycle phase. Manual volumes have no storage class and use storage_class=\"unknown\", configuration_mode=\"Manual\". Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelConfigurationMode, LabelPhase},
+			nil,
+		),
+		rvConditionCountDesc: prometheus.NewDesc(
+			"sds_rv_condition_count",
+			"Current number of non-deleting ReplicatedVolume objects by storage class and by the status and reason of each condition (Ready, Resilient, AttachedReady, MembershipLayoutConverged, ConfigurationReady, Configured, Scheduled, SatisfyEligibleNodes, UnderMaintenance). A missing condition is reported as status=\"Absent\", reason=\"Absent\", so the sum over one condition equals the number of non-deleting volumes; for the presence-based UnderMaintenance, Absent is the normal state. Deleting volumes are excluded: their conditions are frozen. Only observed label combinations are emitted. Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
+			nil,
+		),
+		rvDeletingDesc: prometheus.NewDesc(
+			"sds_rv_deleting_timestamp_seconds",
+			"Unix time of deletionTimestamp of every ReplicatedVolume that is being deleted; time() minus the value is how long the deletion lasts. Emitted only while the volume is deleting. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelStorageClass},
+			nil,
+		),
+		deletingOldestDesc: prometheus.NewDesc(
+			"sds_deleting_oldest_timestamp_seconds",
+			"Unix time of the oldest deletionTimestamp among deleting ReplicatedVolume (kind=\"rv\", node=\"global\"), ReplicatedVolumeReplica (kind=\"rvr\") and ReplicatedVolumeAttachment (kind=\"rva\") objects, by storage class and node; time() minus the value is the age of the oldest deletion. Emitted only for groups with deleting objects. Built from controller cache at scrape time.",
+			[]string{LabelKind, LabelStorageClass, LabelNode},
+			nil,
+		),
+		datameshTransitionOldestDesc: prometheus.NewDesc(
+			"sds_rv_datamesh_transition_oldest_timestamp_seconds",
+			"Unix time of the start of the oldest active datamesh transition by storage class, node, and transition type (the same labels as sds_rv_datamesh_active_transitions); time() minus the value is the age of the oldest transition. Emitted only for groups with active transitions. Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelNode, LabelType},
+			nil,
+		),
+		rvrNotReadyOldestDesc: prometheus.NewDesc(
+			"sds_rvr_not_ready_oldest_timestamp_seconds",
+			"Unix time since which the longest non-Ready ReplicatedVolumeReplica has been non-Ready (lastTransitionTime of its Ready condition, or creationTimestamp while the condition is absent), by storage class, node, and phase; time() minus the value is how long it lasts. Deleting replicas are excluded (see sds_deleting_oldest_timestamp_seconds). Emitted only for groups with non-Ready replicas. Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelNode, LabelPhase},
 			nil,
 		),
 		rvrCountDesc: prometheus.NewDesc(
 			"sds_rvr_count",
-			"Current number of ReplicatedVolumeReplica objects by node, storage class, and phase. Only observed label combinations are emitted. Built from controller cache at scrape time.",
+			"Current number of ReplicatedVolumeReplica objects by node, storage class (the replica's storage class label, or its volume's storage class while the label is not set; unknown for Manual volumes), and phase. Only observed label combinations are emitted. Built from controller cache at scrape time.",
 			[]string{LabelNode, LabelStorageClass, LabelPhase},
 			nil,
 		),
@@ -144,7 +229,7 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 		),
 		rvrDeletingCountDesc: prometheus.NewDesc(
 			"sds_rvr_deleting_count",
-			"Current number of deleting ReplicatedVolumeReplica objects by node and storage class. Only observed label combinations are emitted. Built from controller cache at scrape time.",
+			"Current number of deleting ReplicatedVolumeReplica objects by node and storage class (resolved as in sds_rvr_count). Only observed label combinations are emitted. Built from controller cache at scrape time.",
 			[]string{LabelNode, LabelStorageClass},
 			nil,
 		),
@@ -166,10 +251,22 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelName},
 			nil,
 		),
-		rvLayoutConvergedDesc: prometheus.NewDesc(
-			metricNameRVLayoutConverged,
-			"Whether the actual datamesh layout of a ReplicatedVolume matches the intended one: 1 if and only if the MembershipLayoutConverged condition is True with reason Converged, 0 in every other state. The reason label carries the condition reason verbatim; reason=\"Unknown\" means the condition is absent (e.g. the volume is still forming). Emitted once per ReplicatedVolume. Built from controller cache at scrape time.",
-			[]string{LabelName, LabelReason},
+		collectorObjectsDesc: prometheus.NewDesc(
+			"sds_metrics_collector_objects",
+			"Number of Kubernetes objects processed by the SDS current metrics collector by kind. Emitted only after a successful run, like every other current metric, so a failed run does not show the counts of an earlier one.",
+			[]string{"kind"},
+			nil,
+		),
+		collectorUpDesc: prometheus.NewDesc(
+			metricNameCollectorUp,
+			"Whether the last run of the current metrics collector succeeded (1) or failed (0); on failure no other current metric is emitted. Exported only by the leader replica, so the series is absent while no leader collector is scraped (controller down, no leader, broken scrape). An empty cluster legitimately has no other current metrics, so use this series, not their absence, to tell whether current metrics are available.",
+			nil,
+			nil,
+		),
+		rvConditionProblemDesc: prometheus.NewDesc(
+			metricNameRVConditionProblem,
+			"Unix time of the last status transition (lastTransitionTime) of a ReplicatedVolume condition that is in a problem state; time() minus the value is how long the problem lasts. Emitted only for problem states: status other than True for Ready, Resilient, AttachedReady, MembershipLayoutConverged and ConfigurationReady, and presence of the presence-based UnderMaintenance. A volume without the Ready condition (no status published yet) is reported as Ready with status and reason Absent and its creationTimestamp as the value; other absent conditions are not reported. A healthy or deleting volume produces no series, and a series disappears once its condition recovers. The reason label carries the condition reason verbatim; a reason change within the same status keeps the value. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
 			nil,
 		),
 	}
@@ -177,13 +274,20 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 
 func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvCountDesc
+	ch <- c.rvConditionCountDesc
 	ch <- c.rvrCountDesc
 	ch <- c.rvaCountDesc
 	ch <- c.rvrDeletingCountDesc
 	ch <- c.datameshActiveDesc
 	ch <- c.rvNoPersistentVolumeDesc
 	ch <- c.rvAutoConfigurationBlockedDesc
-	ch <- c.rvLayoutConvergedDesc
+	ch <- c.rvConditionProblemDesc
+	ch <- c.rvDeletingDesc
+	ch <- c.deletingOldestDesc
+	ch <- c.datameshTransitionOldestDesc
+	ch <- c.rvrNotReadyOldestDesc
+	ch <- c.collectorObjectsDesc
+	ch <- c.collectorUpDesc
 }
 
 func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -197,54 +301,71 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 
 	var nodeList corev1.NodeList
 	if err := c.reader.List(ctx, &nodeList, client.UnsafeDisableDeepCopy); err != nil {
-		c.collectError(err, "listing Nodes for current metrics")
+		c.collectError(ch, err, "listing Nodes for current metrics")
 		return
 	}
 
 	var rscList v1alpha1.ReplicatedStorageClassList
 	if err := c.reader.List(ctx, &rscList, client.UnsafeDisableDeepCopy); err != nil {
-		c.collectError(err, "listing ReplicatedStorageClasses for current metrics")
+		c.collectError(ch, err, "listing ReplicatedStorageClasses for current metrics")
 		return
 	}
 
 	var rvList v1alpha1.ReplicatedVolumeList
 	if err := c.reader.List(ctx, &rvList, client.UnsafeDisableDeepCopy); err != nil {
-		c.collectError(err, "listing ReplicatedVolumes for current metrics")
+		c.collectError(ch, err, "listing ReplicatedVolumes for current metrics")
 		return
 	}
 
 	var rvrList v1alpha1.ReplicatedVolumeReplicaList
 	if err := c.reader.List(ctx, &rvrList, client.UnsafeDisableDeepCopy); err != nil {
-		c.collectError(err, "listing ReplicatedVolumeReplicas for current metrics")
+		c.collectError(ch, err, "listing ReplicatedVolumeReplicas for current metrics")
 		return
 	}
 
 	var rvaList v1alpha1.ReplicatedVolumeAttachmentList
 	if err := c.reader.List(ctx, &rvaList, client.UnsafeDisableDeepCopy); err != nil {
-		c.collectError(err, "listing ReplicatedVolumeAttachments for current metrics")
+		c.collectError(ch, err, "listing ReplicatedVolumeAttachments for current metrics")
 		return
 	}
 
 	storageClasses := collectStorageClassNames(rscList.Items, rvList.Items, rvrList.Items, rvaList.Items)
 
 	collectRVCounts(ch, c.rvCountDesc, storageClasses, rvList.Items)
+	collectRVConditionCounts(ch, c.rvConditionCountDesc, rvList.Items)
 	collectRVMigratorLabels(ch, c.rvNoPersistentVolumeDesc, c.rvAutoConfigurationBlockedDesc, rvList.Items)
-	collectRVLayoutConverged(ch, c.rvLayoutConvergedDesc, rvList.Items)
-	collectRVRCounts(ch, c.rvrCountDesc, rvrList.Items)
+	collectRVConditionProblems(ch, c.rvConditionProblemDesc, rvList.Items)
+	collectRVDeleting(ch, c.rvDeletingDesc, rvList.Items)
+	collectDeletingOldest(ch, c.deletingOldestDesc, rvList.Items, rvrList.Items, rvaList.Items)
+	collectDatameshTransitionOldest(ch, c.datameshTransitionOldestDesc, rvList.Items, rvrList.Items)
+	collectRVRNotReadyOldest(ch, c.rvrNotReadyOldestDesc, rvList.Items, rvrList.Items)
+	collectRVRCounts(ch, c.rvrCountDesc, rvList.Items, rvrList.Items)
 	collectRVACounts(ch, c.rvaCountDesc, rvList.Items, rvaList.Items)
-	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvrList.Items)
+	collectRVRDeletingCounts(ch, c.rvrDeletingCountDesc, rvList.Items, rvrList.Items)
 	collectDatameshActiveTransitions(ch, c.datameshActiveDesc, rvList.Items, rvrList.Items)
 
-	CurrentMetricsObjects.WithLabelValues("node").Set(float64(len(nodeList.Items)))
-	CurrentMetricsObjects.WithLabelValues("rsc").Set(float64(len(rscList.Items)))
-	CurrentMetricsObjects.WithLabelValues("rv").Set(float64(len(rvList.Items)))
-	CurrentMetricsObjects.WithLabelValues("rvr").Set(float64(len(rvrList.Items)))
-	CurrentMetricsObjects.WithLabelValues("rva").Set(float64(len(rvaList.Items)))
+	for _, o := range []struct {
+		kind  string
+		count int
+	}{
+		{"node", len(nodeList.Items)},
+		{"rsc", len(rscList.Items)},
+		{"rv", len(rvList.Items)},
+		{"rvr", len(rvrList.Items)},
+		{"rva", len(rvaList.Items)},
+	} {
+		ch <- prometheus.MustNewConstMetric(c.collectorObjectsDesc, prometheus.GaugeValue, float64(o.count), o.kind)
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.collectorUpDesc, prometheus.GaugeValue, 1)
 }
 
-func (c *currentMetricsCollector) collectError(err error, msg string) {
+// collectError reports a failed collector run: no other current metric is emitted on this
+// scrape, so sds_metrics_collector_up=0 tells it apart from an empty cluster.
+func (c *currentMetricsCollector) collectError(ch chan<- prometheus.Metric, err error, msg string) {
 	CurrentMetricsCollectErrors.Inc()
 	c.log.Error(err, msg)
+	ch <- prometheus.MustNewConstMetric(c.collectorUpDesc, prometheus.GaugeValue, 0)
 }
 
 func collectStorageClassNames(
@@ -255,16 +376,16 @@ func collectStorageClassNames(
 ) []string {
 	seen := make(map[string]struct{}, len(rscs)+len(rvs)+len(rvrs)+len(rvas))
 	for i := range rscs {
-		seen[currentMetricsStorageClassLabel(rscs[i].Name)] = struct{}{}
+		seen[StorageClassLabel(rscs[i].Name)] = struct{}{}
 	}
 	for i := range rvs {
-		seen[currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)] = struct{}{}
+		seen[StorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)] = struct{}{}
 	}
 	for i := range rvrs {
-		seen[currentMetricsStorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
+		seen[StorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
 	}
 	for i := range rvas {
-		seen[currentMetricsStorageClassLabel(rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
+		seen[StorageClassLabel(rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])] = struct{}{}
 	}
 
 	values := make([]string, 0, len(seen))
@@ -282,26 +403,69 @@ func collectRVCounts(
 	rvs []v1alpha1.ReplicatedVolume,
 ) {
 	phases := []string{currentMetricsRVPhaseActive, currentMetricsRVPhaseDeleting}
-	counts := make(map[string]float64, len(storageClasses)*len(phases))
+
+	// Zero-fill one configuration mode per storage class, so the series set stays the same as
+	// without the mode label: the API requires an RSC for Auto and forbids it for Manual, hence
+	// storage_class="unknown" is Manual and every named storage class is Auto.
+	counts := make(map[currentMetricLabels3]float64, len(storageClasses)*len(phases))
 	for _, sc := range storageClasses {
+		mode := string(v1alpha1.ReplicatedVolumeConfigurationModeAuto)
+		if sc == currentMetricsSCUnknown {
+			mode = string(v1alpha1.ReplicatedVolumeConfigurationModeManual)
+		}
 		for _, phase := range phases {
-			counts[metricKey(sc, phase)] = 0
+			counts[currentMetricLabels3{first: sc, second: mode, third: phase}] = 0
 		}
 	}
 
+	// A combination outside the zero-filled matrix (e.g. an Auto RV without an RSC) is still
+	// counted as an observed series rather than dropped.
 	for i := range rvs {
-		sc := currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
+		rv := &rvs[i]
 		phase := currentMetricsRVPhaseActive
-		if rvs[i].DeletionTimestamp != nil {
+		if rv.DeletionTimestamp != nil {
 			phase = currentMetricsRVPhaseDeleting
 		}
-		counts[metricKey(sc, phase)]++
+		counts[currentMetricLabels3{
+			first:  StorageClassLabel(rv.Spec.ReplicatedStorageClassName),
+			second: ConfigurationModeLabel(rv.Spec.ConfigurationMode),
+			third:  phase,
+		}]++
 	}
 
-	for _, sc := range storageClasses {
-		for _, phase := range phases {
-			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[metricKey(sc, phase)], sc, phase)
+	for _, key := range sortedCurrentMetricLabels3(counts) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[key], key.first, key.second, key.third)
+	}
+}
+
+// collectRVConditionCounts emits the number of non-deleting ReplicatedVolumes per storage class and
+// per status/reason of every condition in currentMetricsRVConditionTypes. Deleting volumes are
+// skipped: Ready switches to Terminating while Resilient, AttachedReady and Configured are frozen at
+// their last values, so counting them would report stale problems; sds_rv_count{phase="Deleting"}
+// already covers them.
+func collectRVConditionCounts(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+) {
+	counts := make(map[currentMetricLabels4]float64)
+	for i := range rvs {
+		rv := &rvs[i]
+		if rv.DeletionTimestamp != nil {
+			continue
 		}
+		sc := StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
+		for _, condType := range currentMetricsRVConditionTypes {
+			status, reason := currentMetricsStatusAbsent, currentMetricsReasonAbsent
+			if cond := meta.FindStatusCondition(rv.Status.Conditions, condType); cond != nil {
+				status, reason = string(cond.Status), cond.Reason
+			}
+			counts[currentMetricLabels4{first: sc, second: condType, third: status, fourth: reason}]++
+		}
+	}
+
+	for _, key := range sortedCurrentMetricLabels4(counts) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, counts[key], key.first, key.second, key.third, key.fourth)
 	}
 }
 
@@ -342,64 +506,75 @@ func collectRVMigratorLabels(
 	emit(autoConfigurationBlockedDesc, autoConfigurationBlocked)
 }
 
-// collectRVLayoutConverged emits exactly one gauge per ReplicatedVolume describing the state of its
-// MembershipLayoutConverged condition (written solely by rv_controller's reconcileLayoutStatus):
-// the value is 1 if and only if the condition is True with reason Converged, and 0 in every other
-// state, including Unknown ones.
+// collectRVConditionProblems emits one gauge per problem condition of every non-deleting
+// ReplicatedVolume; see isRVConditionProblem. The value is the condition's lastTransitionTime, so
+// dashboards and alerts read "since when" as time() - value. A missing condition is skipped: it has
+// no transition time, and sds_rv_condition_count already reports it as Absent.
 //
-// The reason label is the reason recorded in the status, verbatim
-// (Converging/CannotConverge/TransitionUnsupported/VolumeDeleting — see api/v1alpha1/rv_conditions.go).
-// The synthetic currentMetricsReasonAbsent is used in exactly one case: the condition is missing
-// from the status altogether (a forming volume never gets it). A recorded reason is never empty —
-// metav1.Condition.Reason is a required, non-empty API field — so no other fallback is needed.
-//
-// One series per volume means the series follows the cache snapshot on its own: a reason change
-// replaces the previous series on the next scrape, and a deleted ReplicatedVolume simply stops
-// being emitted (no DeleteLabelValues/finalizer bookkeeping).
-func collectRVLayoutConverged(
+// Only problem states produce series, so the series count follows the number of broken volumes,
+// not the total; a recovered or deleted volume simply stops being emitted (no
+// DeleteLabelValues/finalizer bookkeeping). Deleting volumes are skipped for the same reason as in
+// collectRVConditionCounts: their conditions are frozen.
+func collectRVConditionProblems(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
 	rvs []v1alpha1.ReplicatedVolume,
 ) {
-	type layoutState struct {
-		reason string
-		value  float64
-	}
-
-	states := make(map[string]layoutState, len(rvs))
 	for i := range rvs {
 		rv := &rvs[i]
-		state := layoutState{reason: currentMetricsReasonAbsent}
-		if cond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType); cond != nil {
-			state.reason = cond.Reason
-			if cond.Status == metav1.ConditionTrue &&
-				cond.Reason == v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged {
-				state.value = 1
-			}
+		if rv.DeletionTimestamp != nil {
+			continue
 		}
-		states[rv.Name] = state
+		sc := StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
+		for _, condType := range currentMetricsRVProblemConditionTypes {
+			cond := meta.FindStatusCondition(rv.Status.Conditions, condType)
+			if cond == nil && condType == v1alpha1.ReplicatedVolumeCondReadyType {
+				// No Ready means the controller has not published any status yet. Normally this lasts
+				// until the first reconcile; a volume stuck before it (e.g. a missing storage pool)
+				// would otherwise be invisible, so report it as not Ready since creation. Other
+				// absent conditions are not reported: one series per stuck volume is enough.
+				ch <- prometheus.MustNewConstMetric(
+					desc,
+					prometheus.GaugeValue,
+					float64(rv.CreationTimestamp.Unix()),
+					rv.Name, sc, condType, currentMetricsStatusAbsent, currentMetricsReasonAbsent,
+				)
+				continue
+			}
+			if cond == nil || !isRVConditionProblem(cond) {
+				continue
+			}
+			ch <- prometheus.MustNewConstMetric(
+				desc,
+				prometheus.GaugeValue,
+				float64(cond.LastTransitionTime.Unix()),
+				rv.Name, sc, condType, string(cond.Status), cond.Reason,
+			)
+		}
 	}
+}
 
-	names := make([]string, 0, len(states))
-	for name := range states {
-		names = append(names, name)
+// isRVConditionProblem reports whether a present condition is in a problem state. UnderMaintenance
+// is presence-based, so its mere presence is the problem; every other condition is a problem
+// whenever it is not True.
+func isRVConditionProblem(cond *metav1.Condition) bool {
+	if cond.Type == v1alpha1.ReplicatedVolumeCondUnderMaintenanceType {
+		return true
 	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, states[name].value, name, states[name].reason)
-	}
+	return cond.Status != metav1.ConditionTrue
 }
 
 func collectRVRCounts(
 	ch chan<- prometheus.Metric,
 	countDesc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
+	rvStorageClasses := currentMetricsRVStorageClasses(rvs)
 	counts := make(map[currentMetricLabels3]float64, len(rvrs))
 	for i := range rvrs {
 		node := currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
-		sc := currentMetricsStorageClassLabel(rvrs[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey])
+		sc := childStorageClassLabel(rvrs[i].Labels, rvrs[i].Spec.ReplicatedVolumeName, rvStorageClasses)
 		phase := string(rvrs[i].Status.Phase)
 		if phase == "" {
 			phase = "Unknown"
@@ -420,17 +595,13 @@ func collectRVACounts(
 ) {
 	rvStorageClasses := make(map[string]string, len(rvs))
 	for i := range rvs {
-		rvStorageClasses[rvs[i].Name] = currentMetricsStorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
+		rvStorageClasses[rvs[i].Name] = StorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
 	}
 
 	counts := make(map[currentMetricLabels3]float64, len(rvas))
 	for i := range rvas {
 		node := currentMetricsNodeLabel(rvas[i].Spec.NodeName)
-		sc := rvas[i].Labels[v1alpha1.ReplicatedStorageClassLabelKey]
-		if sc == "" {
-			sc = rvStorageClasses[rvas[i].Spec.ReplicatedVolumeName]
-		}
-		sc = currentMetricsStorageClassLabel(sc)
+		sc := childStorageClassLabel(rvas[i].Labels, rvas[i].Spec.ReplicatedVolumeName, rvStorageClasses)
 		phase := string(rvas[i].Status.Phase)
 		if phase == "" {
 			phase = "Unknown"
@@ -446,8 +617,10 @@ func collectRVACounts(
 func collectRVRDeletingCounts(
 	ch chan<- prometheus.Metric,
 	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
 	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) {
+	rvStorageClasses := currentMetricsRVStorageClasses(rvs)
 	counts := make(map[currentMetricLabels2]float64, len(rvrs))
 	for i := range rvrs {
 		rvr := &rvrs[i]
@@ -455,7 +628,7 @@ func collectRVRDeletingCounts(
 			continue
 		}
 		node := currentMetricsNodeLabel(rvr.Spec.NodeName)
-		sc := currentMetricsStorageClassLabel(rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey])
+		sc := childStorageClassLabel(rvr.Labels, rvr.Spec.ReplicatedVolumeName, rvStorageClasses)
 		counts[currentMetricLabels2{node, sc}]++
 	}
 
@@ -478,7 +651,7 @@ func collectDatameshActiveTransitions(
 	typeCounts := make(map[currentMetricLabels3]float64)
 	for i := range rvs {
 		rv := &rvs[i]
-		sc := currentMetricsStorageClassLabel(rv.Spec.ReplicatedStorageClassName)
+		sc := StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
 		for j := range rv.Status.DatameshTransitions {
 			transition := &rv.Status.DatameshTransitions[j]
 			typ := string(transition.Type)
@@ -498,29 +671,178 @@ func collectDatameshActiveTransitions(
 	}
 }
 
+// collectRVDeleting emits one gauge per deleting ReplicatedVolume valued at its deletionTimestamp.
+// Deletion normally takes seconds, so a series rarely outlives a scrape; one that does is a stuck
+// deletion, and it disappears once the volume is gone.
+func collectRVDeleting(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+) {
+	for i := range rvs {
+		rv := &rvs[i]
+		if rv.DeletionTimestamp == nil {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(rv.DeletionTimestamp.Unix()),
+			rv.Name, StorageClassLabel(rv.Spec.ReplicatedStorageClassName))
+	}
+}
+
+// collectDeletingOldest emits, per kind, storage class and node, the oldest deletionTimestamp among
+// deleting RVs, RVRs and RVAs. A replica or attachment is pinned to a node, so a stuck deletion there
+// usually points at that node's agent; a volume has no node and uses node="global".
+func collectDeletingOldest(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
+	rvas []v1alpha1.ReplicatedVolumeAttachment,
+) {
+	rvStorageClasses := currentMetricsRVStorageClasses(rvs)
+	oldest := make(map[currentMetricLabels3]float64)
+	for i := range rvs {
+		rv := &rvs[i]
+		if rv.DeletionTimestamp == nil {
+			continue
+		}
+		key := currentMetricLabels3{currentMetricsKindRV, StorageClassLabel(rv.Spec.ReplicatedStorageClassName), currentMetricsNodeGlobal}
+		keepOldest(oldest, key, rv.DeletionTimestamp.Time)
+	}
+	for i := range rvrs {
+		rvr := &rvrs[i]
+		if rvr.DeletionTimestamp == nil {
+			continue
+		}
+		key := currentMetricLabels3{currentMetricsKindRVR, childStorageClassLabel(rvr.Labels, rvr.Spec.ReplicatedVolumeName, rvStorageClasses), currentMetricsNodeLabel(rvr.Spec.NodeName)}
+		keepOldest(oldest, key, rvr.DeletionTimestamp.Time)
+	}
+	for i := range rvas {
+		rva := &rvas[i]
+		if rva.DeletionTimestamp == nil {
+			continue
+		}
+		key := currentMetricLabels3{currentMetricsKindRVA, childStorageClassLabel(rva.Labels, rva.Spec.ReplicatedVolumeName, rvStorageClasses), currentMetricsNodeLabel(rva.Spec.NodeName)}
+		keepOldest(oldest, key, rva.DeletionTimestamp.Time)
+	}
+
+	for _, key := range sortedCurrentMetricLabels3(oldest) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, oldest[key], key.first, key.second, key.third)
+	}
+}
+
+// collectDatameshTransitionOldest emits the start time of the oldest active datamesh transition,
+// grouped exactly like collectDatameshActiveTransitions so the two can be matched in one query.
+// A transition without a start time (its first step not started) has no age and is skipped.
+func collectDatameshTransitionOldest(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
+) {
+	replicaNodes := make(map[string]string, len(rvrs))
+	for i := range rvrs {
+		replicaNodes[rvrs[i].Name] = currentMetricsNodeLabel(rvrs[i].Spec.NodeName)
+	}
+
+	oldest := make(map[currentMetricLabels3]float64)
+	for i := range rvs {
+		rv := &rvs[i]
+		sc := StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
+		for j := range rv.Status.DatameshTransitions {
+			transition := &rv.Status.DatameshTransitions[j]
+			startedAt := transition.StartedAt()
+			if startedAt.IsZero() {
+				continue
+			}
+			node := currentMetricsNodeGlobal
+			if transition.ReplicaName != "" {
+				node = replicaNodes[transition.ReplicaName]
+				if node == "" {
+					node = currentMetricsNodeUnknown
+				}
+			}
+			keepOldest(oldest, currentMetricLabels3{sc, node, string(transition.Type)}, startedAt.Time)
+		}
+	}
+
+	for _, key := range sortedCurrentMetricLabels3(oldest) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, oldest[key], key.first, key.second, key.third)
+	}
+}
+
+// collectRVRNotReadyOldest emits, per storage class, node and phase, the moment since which the
+// longest non-Ready replica has been non-Ready. The Ready condition's lastTransitionTime covers both
+// a replica that never became Ready (startup phases) and one that lost readiness later; a replica
+// without the condition yet falls back to its creation time. Deleting replicas are left to
+// collectDeletingOldest.
+func collectRVRNotReadyOldest(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rvs []v1alpha1.ReplicatedVolume,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
+) {
+	rvStorageClasses := currentMetricsRVStorageClasses(rvs)
+	oldest := make(map[currentMetricLabels3]float64)
+	for i := range rvrs {
+		rvr := &rvrs[i]
+		if rvr.DeletionTimestamp != nil {
+			continue
+		}
+		since := rvr.CreationTimestamp.Time
+		if cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondReadyType); cond != nil {
+			if cond.Status == metav1.ConditionTrue {
+				continue
+			}
+			since = cond.LastTransitionTime.Time
+		}
+		phase := string(rvr.Status.Phase)
+		if phase == "" {
+			phase = "Unknown"
+		}
+		key := currentMetricLabels3{childStorageClassLabel(rvr.Labels, rvr.Spec.ReplicatedVolumeName, rvStorageClasses), currentMetricsNodeLabel(rvr.Spec.NodeName), phase}
+		keepOldest(oldest, key, since)
+	}
+
+	for _, key := range sortedCurrentMetricLabels3(oldest) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, oldest[key], key.first, key.second, key.third)
+	}
+}
+
+// keepOldest stores t (as Unix seconds) under key unless an earlier time is already stored.
+func keepOldest(oldest map[currentMetricLabels3]float64, key currentMetricLabels3, t time.Time) {
+	value := float64(t.Unix())
+	if current, ok := oldest[key]; !ok || value < current {
+		oldest[key] = value
+	}
+}
+
+// currentMetricsRVStorageClasses maps ReplicatedVolume names to their storage class label.
+func currentMetricsRVStorageClasses(rvs []v1alpha1.ReplicatedVolume) map[string]string {
+	storageClasses := make(map[string]string, len(rvs))
+	for i := range rvs {
+		storageClasses[rvs[i].Name] = StorageClassLabel(rvs[i].Spec.ReplicatedStorageClassName)
+	}
+	return storageClasses
+}
+
+// childStorageClassLabel returns the storage class label of an RVR or RVA: its own RSC label, or the
+// parent volume's storage class while the label is not set yet.
+func childStorageClassLabel(labels map[string]string, rvName string, rvStorageClasses map[string]string) string {
+	if sc := labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
+		return sc
+	}
+	if sc, ok := rvStorageClasses[rvName]; ok {
+		return sc
+	}
+	return currentMetricsSCUnknown
+}
+
 func currentMetricsNodeLabel(node string) string {
 	if node == "" {
 		return currentMetricsNodeUnknown
 	}
 	return node
-}
-
-func currentMetricsStorageClassLabel(storageClass string) string {
-	if storageClass == "" {
-		return currentMetricsSCUnknown
-	}
-	return storageClass
-}
-
-func metricKey(values ...string) string {
-	key := ""
-	for i, value := range values {
-		if i > 0 {
-			key += "\x00"
-		}
-		key += value
-	}
-	return key
 }
 
 func sortedCurrentMetricLabels2(counts map[currentMetricLabels2]float64) []currentMetricLabels2 {
@@ -550,6 +872,26 @@ func sortedCurrentMetricLabels3(counts map[currentMetricLabels3]float64) []curre
 			return labels[i].second < labels[j].second
 		}
 		return labels[i].third < labels[j].third
+	})
+	return labels
+}
+
+func sortedCurrentMetricLabels4(counts map[currentMetricLabels4]float64) []currentMetricLabels4 {
+	labels := make([]currentMetricLabels4, 0, len(counts))
+	for label := range counts {
+		labels = append(labels, label)
+	}
+	sort.Slice(labels, func(i, j int) bool {
+		if labels[i].first != labels[j].first {
+			return labels[i].first < labels[j].first
+		}
+		if labels[i].second != labels[j].second {
+			return labels[i].second < labels[j].second
+		}
+		if labels[i].third != labels[j].third {
+			return labels[i].third < labels[j].third
+		}
+		return labels[i].fourth < labels[j].fourth
 	})
 	return labels
 }

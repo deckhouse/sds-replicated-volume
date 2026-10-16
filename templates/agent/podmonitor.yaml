@@ -46,9 +46,10 @@ spec:
       targetLabel: node
     - targetLabel: tier
       replacement: cluster
-    - sourceLabels: [__meta_kubernetes_pod_ready]
-      regex: "true"
-      action: keep
+    # No pod readiness filter here: drbd-reactor runs in its own container and does not depend
+    # on the agent, while the pod turns not Ready whenever the agent restarts. Dropping the
+    # target then would hide the DRBD state of the node and resolve DRBD alerts exactly when
+    # something is wrong on it.
   selector:
     matchLabels:
       app: agent

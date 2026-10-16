@@ -17,6 +17,7 @@ limitations under the License.
 package drbdr_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,16 +25,21 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbdr"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/metrics"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 	fakedrbdutils "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils/fake"
@@ -840,4 +846,95 @@ func expectLLVHasNoAgentFinalizer(t *testing.T, cl client.Client, llvName string
 			return
 		}
 	}
+}
+
+// TestReconcileRecordsDRBDRDeletionOnceOnFinalizerRemoval checks that the deletion duration is
+// recorded when the agent removes its finalizer, and not again when a reconcile working on a
+// stale cache retries the removal of an already deleted object (the patch returns NotFound).
+func TestReconcileRecordsDRBDRDeletionOnceOnFinalizerRemoval(t *testing.T) {
+	sch, err := scheme.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name            string
+		patchNotFound   bool
+		staleCache      bool
+		wantObservation uint64
+	}{
+		{name: "finalizer removed", wantObservation: 1},
+		{name: "object already deleted by a previous reconcile", patchNotFound: true, wantObservation: 0},
+		{name: "stale cache without the agent finalizer", staleCache: true, wantObservation: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			drbdutils.ResetNextDeviceMinor()
+			drbdutils.FlantExtensionsSupported = false
+			drbdr.OverrideDeviceSymlinkDir(t.TempDir() + "/")
+
+			builder := fake.NewClientBuilder().
+				WithScheme(sch).
+				WithStatusSubresource(&v1alpha1.DRBDResource{}).
+				WithObjects(deletingDRBDR(testNodeName, v1alpha1.AgentFinalizer), testNode(testNodeName))
+			if tt.patchNotFound {
+				builder = builder.WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						if _, ok := obj.(*v1alpha1.DRBDResource); ok {
+							return apierrors.NewNotFound(schema.GroupResource{Resource: "drbdresources"}, obj.GetName())
+						}
+						return c.Patch(ctx, obj, patch, opts...)
+					},
+				})
+			}
+			if tt.staleCache {
+				// A previous reconcile removed the agent finalizer and the object is gone from the
+				// API server, but the cache still returns the deleting object without finalizers.
+				builder = fake.NewClientBuilder().
+					WithScheme(sch).
+					WithStatusSubresource(&v1alpha1.DRBDResource{}).
+					WithObjects(testNode(testNodeName)).
+					WithInterceptorFuncs(interceptor.Funcs{
+						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+							if dr, ok := obj.(*v1alpha1.DRBDResource); ok && key.Name == testDRBDRName {
+								deletingDRBDR(testNodeName).DeepCopyInto(dr)
+								return nil
+							}
+							return c.Get(ctx, key, obj, opts...)
+						},
+					})
+			}
+			cl := builder.Build()
+
+			fakeExec := &fakedrbdutils.Exec{}
+			fakeExec.ExpectCommands(statusCmd(drbdutils.StatusResult{}))
+			fakeExec.Setup(t)
+
+			drbdPortCache := drbdr.NewDRBDPortCache()
+			drbdPortCache.BeginDump()
+			drbdPortCache.EndDump()
+			portRegistry := drbdr.NewPortRegistry(cl, testNodeName, drbdPortCache, 7000, 7999, 10*time.Minute)
+			caches := drbdr.NewCaches()
+			caches.SeedStatusAbsentForTest(testDRBDResName, testCustomDRBDName)
+			rec := drbdr.NewReconciler(cl, testNodeName, portRegistry, caches)
+
+			before := histogramSampleCount(t, metrics.DRBDRDeletionDuration)
+			if _, err := rec.Reconcile(t.Context(), drbdr.DRBDReconcileRequest{Name: testDRBDRName}); err != nil {
+				t.Fatalf("unexpected reconcile error: %v", err)
+			}
+			if got := histogramSampleCount(t, metrics.DRBDRDeletionDuration) - before; got != tt.wantObservation {
+				t.Fatalf("expected %d deletion observation(s), got %d", tt.wantObservation, got)
+			}
+		})
+	}
+}
+
+func histogramSampleCount(t *testing.T, h interface{ Write(*dto.Metric) error }) uint64 {
+	t.Helper()
+	var m dto.Metric
+	if err := h.Write(&m); err != nil {
+		t.Fatal(err)
+	}
+	return m.GetHistogram().GetSampleCount()
 }

@@ -163,7 +163,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Compute pending metric observations before patching, then observe them
 	// only after the status state they describe has been committed.
-	metricObservations := computeRVRMetricObservations(time.Now(), rvr, base, rv)
+	var bvLLV *snc.LVMLogicalVolume
+	if intendedBV != nil {
+		bvLLV = findLLVByName(llvs, intendedBV.LLVName)
+	}
+	metricObservations := computeRVRMetricObservations(time.Now(), rvr, base, rv, bvLLV)
 
 	// Patch the RVR status if changed.
 	if outcome.DidChange() && rvr != nil {

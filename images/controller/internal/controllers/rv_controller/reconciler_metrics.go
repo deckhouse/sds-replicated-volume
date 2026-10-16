@@ -17,7 +17,10 @@ limitations under the License.
 package rvcontroller
 
 import (
+	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
@@ -36,13 +39,23 @@ func (observations rvMetricObservations) observe() {
 	}
 }
 
+// observeRVCreated counts an RV once, when the controller first adds RVControllerFinalizer to it.
+// The finalizer persists across controller restarts and leader changes, so the event is not
+// replayed; call it only after the patch that added the finalizer has been committed.
+func observeRVCreated(rv *v1alpha1.ReplicatedVolume) {
+	metrics.RVCreated.WithLabelValues(
+		metrics.StorageClassLabel(rv.Spec.ReplicatedStorageClassName),
+		metrics.ConfigurationModeLabel(rv.Spec.ConfigurationMode),
+	).Inc()
+}
+
 // observeRVDeletion records the deletion duration when an RV finalizer is removed.
 func observeRVDeletion(rv *v1alpha1.ReplicatedVolume) {
 	if rv == nil || rv.DeletionTimestamp == nil {
 		return
 	}
 	dur := time.Since(rv.DeletionTimestamp.Time).Seconds()
-	metrics.RVDeletionDuration.WithLabelValues(rv.Spec.ReplicatedStorageClassName).Observe(dur)
+	metrics.RVDeletionDuration.WithLabelValues(metrics.StorageClassLabel(rv.Spec.ReplicatedStorageClassName)).Observe(dur)
 }
 
 // computeRVInitialFormationMetricObservations returns the first point when RV initial formation is ready.
@@ -56,7 +69,7 @@ func computeRVInitialFormationMetricObservations(now time.Time, base, rv *v1alph
 	}
 
 	dur := now.Sub(rv.CreationTimestamp.Time).Seconds()
-	storageClass := rv.Spec.ReplicatedStorageClassName
+	storageClass := metrics.StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
 	return rvMetricObservations{
 		func() {
 			metrics.RVInitialFormationDuration.WithLabelValues(storageClass).Observe(dur)
@@ -65,13 +78,16 @@ func computeRVInitialFormationMetricObservations(now time.Time, base, rv *v1alph
 }
 
 // computeRVAPhaseChangeMetricObservations records RVA metrics when phase changes.
+// attachedBefore reports whether this RVA has already been attached earlier: a re-attach
+// after a lost attachment is not an attach latency and must not be measured from creation.
 func computeRVAPhaseChangeMetricObservations(
 	now time.Time,
 	rva *v1alpha1.ReplicatedVolumeAttachment,
 	oldPhase v1alpha1.ReplicatedVolumeAttachmentPhase,
 	newPhase v1alpha1.ReplicatedVolumeAttachmentPhase,
+	attachedBefore bool,
 ) rvMetricObservations {
-	if rva == nil {
+	if rva == nil || attachedBefore {
 		return nil
 	}
 
@@ -102,13 +118,21 @@ func observeRVADetach(rva *v1alpha1.ReplicatedVolumeAttachment) {
 	metrics.RVADetachDuration.WithLabelValues(rva.Spec.NodeName).Observe(dur)
 }
 
-// computeDatameshMetricObservations compares datamesh transitions before and after ProcessTransitions.
-// Transitions that were in oldTransitions but are absent in rv.Status.DatameshTransitions
-// were completed during this reconcile cycle.
+// computeDatameshMetricObservations records datamesh transitions and steps that completed
+// during this reconcile. Every step is observed exactly once, in the reconcile where it
+// completes:
+//   - transitions the engine completed come from completed, including those created and
+//     completed within this reconcile and steps passed through without changes in one
+//     engine run; cancelled transitions never appear there;
+//   - Formation is managed by the reconciler, not the engine, so its completion is detected
+//     as its disappearance from rv.Status.DatameshTransitions; a Formation restart drops it
+//     and resets the datamesh revision to zero and is not a completion;
+//   - steps of transitions that are still active are observed when they become Completed.
 func computeDatameshMetricObservations(
 	now time.Time,
 	rv *v1alpha1.ReplicatedVolume,
 	oldTransitions []v1alpha1.ReplicatedVolumeDatameshTransition,
+	completed []v1alpha1.ReplicatedVolumeDatameshTransition,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) rvMetricObservations {
 	if rv == nil {
@@ -118,84 +142,113 @@ func computeDatameshMetricObservations(
 	var observations rvMetricObservations
 	replicaNodes := datameshReplicaNodes(rvrs)
 
-	// Detect completed transitions: present in old but absent in new.
-	for i := range oldTransitions {
-		old := &oldTransitions[i]
-		storageClass, node, typ := datameshMetricLabels(rv, old, replicaNodes)
-		found := false
-		for j := range rv.Status.DatameshTransitions {
-			cur := &rv.Status.DatameshTransitions[j]
-			if old.Type == cur.Type && old.ReplicaName == cur.ReplicaName &&
-				old.StartedAt() == cur.StartedAt() {
-				found = true
-				break
+	observeTransition := func(t *v1alpha1.ReplicatedVolumeDatameshTransition) {
+		startedAt := t.StartedAt()
+		if startedAt.IsZero() {
+			return
+		}
+		storageClass, node, typ := datameshMetricLabels(rv, t, replicaNodes)
+		dur := now.Sub(startedAt.Time).Seconds()
+		observations = append(observations, func() {
+			metrics.DatameshTransitionDuration.WithLabelValues(storageClass, node, typ).Observe(dur)
+		})
+	}
+	observeStep := func(t *v1alpha1.ReplicatedVolumeDatameshTransition, stepName string, stepDur float64) {
+		storageClass, node, typ := datameshMetricLabels(rv, t, replicaNodes)
+		observations = append(observations, func() {
+			metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, stepName).Observe(stepDur)
+		})
+	}
+	observeCompletedStep := func(t *v1alpha1.ReplicatedVolumeDatameshTransition, step *v1alpha1.ReplicatedVolumeDatameshTransitionStep) {
+		if step.StartedAt == nil || step.CompletedAt == nil {
+			return
+		}
+		observeStep(t, step.Name, step.CompletedAt.Sub(step.StartedAt.Time).Seconds())
+	}
+
+	// Transitions completed by the engine: steps that were Completed in the old snapshot
+	// were observed in earlier reconciles.
+	for i := range completed {
+		t := &completed[i]
+		observeTransition(t)
+		old := findDatameshTransition(oldTransitions, t)
+		for si := range t.Steps {
+			step := &t.Steps[si]
+			if step.Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted || step.CompletedAt == nil {
+				continue
 			}
+			if old != nil && si < len(old.Steps) &&
+				old.Steps[si].Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+				continue
+			}
+			observeCompletedStep(t, step)
 		}
-		if found {
-			continue
-		}
+	}
 
-		// Transition was removed (completed). Duration ≈ now - startedAt.
-		startedAt := old.StartedAt()
-		if !startedAt.IsZero() {
-			dur := now.Sub(startedAt.Time).Seconds()
-			observations = append(observations, func() {
-				metrics.DatameshTransitionDuration.WithLabelValues(storageClass, node, typ).Observe(dur)
-				metrics.DatameshTransitionsCompleted.WithLabelValues(storageClass, node, typ).Inc()
-			})
-		}
-
-		// Observe individual step durations from the old transition snapshot.
-		for si := range old.Steps {
-			step := &old.Steps[si]
-			if step.StartedAt != nil && step.CompletedAt != nil {
-				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				stepName := step.Name
-				observations = append(observations, func() {
-					metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, stepName).Observe(stepDur)
-				})
+	// Formation that disappeared without a restart completed: the reconciler removes it
+	// right after its last step, without marking that step Completed. The reconciler also
+	// falls through to the next step when it is already satisfied, so the steps after the
+	// one active in the old snapshot started and completed within this reconcile.
+	if rv.Status.DatameshRevision != 0 {
+		for i := range oldTransitions {
+			old := &oldTransitions[i]
+			if old.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation ||
+				findDatameshTransition(rv.Status.DatameshTransitions, old) != nil {
+				continue
+			}
+			observeTransition(old)
+			passed := false
+			for si := range old.Steps {
+				step := &old.Steps[si]
+				switch {
+				case step.Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted:
+					// Observed in the reconcile where it completed.
+				case !passed:
+					passed = true
+					if step.StartedAt != nil {
+						observeStep(old, step.Name, now.Sub(step.StartedAt.Time).Seconds())
+					}
+				default:
+					observeStep(old, step.Name, 0)
+				}
 			}
 		}
 	}
 
-	// Also observe step durations for steps that just completed in still-active transitions.
+	// Steps that just completed in still-active transitions.
 	for i := range rv.Status.DatameshTransitions {
 		cur := &rv.Status.DatameshTransitions[i]
-		storageClass, node, typ := datameshMetricLabels(rv, cur, replicaNodes)
+		old := findDatameshTransition(oldTransitions, cur)
 		for si := range cur.Steps {
 			step := &cur.Steps[si]
-			if step.Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
+			if step.Status != v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted || step.CompletedAt == nil {
 				continue
 			}
-			if step.StartedAt == nil || step.CompletedAt == nil {
+			if old != nil && si < len(old.Steps) &&
+				old.Steps[si].Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
 				continue
 			}
-
-			// Check if this step was already completed in the old snapshot.
-			alreadyCompleted := false
-			for j := range oldTransitions {
-				old := &oldTransitions[j]
-				if old.Type != cur.Type || old.ReplicaName != cur.ReplicaName ||
-					old.StartedAt() != cur.StartedAt() {
-					continue
-				}
-				if si < len(old.Steps) && old.Steps[si].Status == v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted {
-					alreadyCompleted = true
-				}
-				break
-			}
-
-			if !alreadyCompleted {
-				stepDur := step.CompletedAt.Time.Sub(step.StartedAt.Time).Seconds()
-				stepName := step.Name
-				observations = append(observations, func() {
-					metrics.DatameshStepDuration.WithLabelValues(storageClass, node, typ, stepName).Observe(stepDur)
-				})
-			}
+			observeCompletedStep(cur, step)
 		}
 	}
 
 	return observations
+}
+
+// findDatameshTransition returns the transition in transitions that is the same instance
+// as t (same type, replica and start time), or nil.
+func findDatameshTransition(
+	transitions []v1alpha1.ReplicatedVolumeDatameshTransition,
+	t *v1alpha1.ReplicatedVolumeDatameshTransition,
+) *v1alpha1.ReplicatedVolumeDatameshTransition {
+	startedAt := t.StartedAt()
+	for i := range transitions {
+		cur := &transitions[i]
+		if cur.Type == t.Type && cur.ReplicaName == t.ReplicaName && cur.StartedAt().Time.Equal(startedAt.Time) {
+			return cur
+		}
+	}
+	return nil
 }
 
 func datameshReplicaNodes(rvrs []*v1alpha1.ReplicatedVolumeReplica) map[string]string {
@@ -214,7 +267,7 @@ func datameshMetricLabels(
 	transition *v1alpha1.ReplicatedVolumeDatameshTransition,
 	replicaNodes map[string]string,
 ) (storageClass, node, typ string) {
-	storageClass = rv.Spec.ReplicatedStorageClassName
+	storageClass = metrics.StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
 	typ = string(transition.Type)
 	node = "global"
 
@@ -242,4 +295,83 @@ func rvInitialFormationReady(rv *v1alpha1.ReplicatedVolume) bool {
 	}
 
 	return true
+}
+
+// attachedRVATracker remembers RVAs that have already been attached, so that a re-attach
+// after a lost attachment is not reported as attach latency. The RVA status has no field
+// that survives the loss of the attachment, so the state is kept in memory: after a
+// controller restart it is rebuilt from RVAs whose committed phase is Attached.
+//
+// An RVA that lost its attachment before the restart is not rebuilt, so its re-attach is
+// observed as a first attach, measured from creation. Telling it apart would need a marker
+// persisted in the RVA, which is not worth one outlier per such RVA.
+//
+// Entries are grouped by volume and pruned on every reconcile of the volume (retain, and
+// forgetVolume once the volume is gone): an RVA may leave without this controller removing
+// its finalizer, and nothing reconciles the RVA itself then.
+type attachedRVATracker struct {
+	mu   sync.Mutex
+	byRV map[string]map[types.UID]struct{}
+}
+
+func newAttachedRVATracker() *attachedRVATracker {
+	return &attachedRVATracker{byRV: make(map[string]map[types.UID]struct{})}
+}
+
+func (t *attachedRVATracker) wasAttached(rva *v1alpha1.ReplicatedVolumeAttachment) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, ok := t.byRV[rva.Spec.ReplicatedVolumeName][rva.UID]
+	return ok
+}
+
+func (t *attachedRVATracker) markAttached(rva *v1alpha1.ReplicatedVolumeAttachment) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	uids := t.byRV[rva.Spec.ReplicatedVolumeName]
+	if uids == nil {
+		uids = make(map[types.UID]struct{})
+		t.byRV[rva.Spec.ReplicatedVolumeName] = uids
+	}
+	uids[rva.UID] = struct{}{}
+}
+
+func (t *attachedRVATracker) forget(rva *v1alpha1.ReplicatedVolumeAttachment) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	uids := t.byRV[rva.Spec.ReplicatedVolumeName]
+	delete(uids, rva.UID)
+	if len(uids) == 0 {
+		delete(t.byRV, rva.Spec.ReplicatedVolumeName)
+	}
+}
+
+// retain drops the entries of the volume whose RVAs are no longer among rvas, the current
+// RVAs of the volume. An RVA is marked only while it is among them, so a live one is kept.
+func (t *attachedRVATracker) retain(rvName string, rvas []*v1alpha1.ReplicatedVolumeAttachment) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	uids := t.byRV[rvName]
+	if len(uids) == 0 {
+		return
+	}
+	live := make(map[types.UID]struct{}, len(rvas))
+	for _, rva := range rvas {
+		live[rva.UID] = struct{}{}
+	}
+	for uid := range uids {
+		if _, ok := live[uid]; !ok {
+			delete(uids, uid)
+		}
+	}
+	if len(uids) == 0 {
+		delete(t.byRV, rvName)
+	}
+}
+
+// forgetVolume drops all entries of a volume that no longer exists.
+func (t *attachedRVATracker) forgetVolume(rvName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.byRV, rvName)
 }

@@ -1,2 +1,11 @@
-{{- include "helm_lib_grafana_dashboard_definitions" . }}
+{{- /* Dashboards are gated by control plane: LINSTOR dashboards live in a separate root,
+       so only one set is rendered. Folder and resource names are derived relative to the root,
+       so they stay the same as with helm_lib_grafana_dashboard_definitions. */ -}}
+{{- if .Values.global.enabledModules | has "prometheus" }}
+  {{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+{{- include "helm_lib_grafana_dashboard_definitions_recursion" (list . "monitoring/grafana-dashboards") }}
+  {{- else }}
+{{- include "helm_lib_grafana_dashboard_definitions_recursion" (list . "monitoring/linstor-grafana-dashboards") }}
+  {{- end }}
+{{- end }}
 {{- include "helm_lib_prometheus_rules" (list . "d8-sds-replicated-volume") }}

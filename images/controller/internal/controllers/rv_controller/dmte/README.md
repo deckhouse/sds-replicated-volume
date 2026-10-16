@@ -315,6 +315,15 @@ that don't fit the dispatcher model — or vice versa.
 
 After `Finalize`, the engine is sealed — further calls panic.
 
+### CompletedTransitions
+
+`CompletedTransitions()` returns detached copies of the transitions completed
+during this cycle, with every step marked Completed. It includes transitions
+created and completed within the same `Process` call, which a before/after
+comparison of the transitions cannot see. Transitions cancelled by
+`CancelActiveOnCreate` are not included. The controller uses it for the
+datamesh transition and step duration metrics.
+
 ## Quick Example
 
 ```go

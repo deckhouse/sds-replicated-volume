@@ -424,6 +424,79 @@ var _ = Describe("Process", func() {
 		Expect(e.Finalize()).To(BeEmpty())
 	})
 
+	It("reports a multi-step transition completed in one Process with every step completed", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		reg.ReplicaTransition("AddReplica", 0).
+			Plan("diskful/v1").Group("G").DisplayName("Adding").
+			Steps(
+				ReplicaStep("✦ → D∅", stubReplicaApply, stubReplicaConfirm),
+				ReplicaStep("D∅ → D", stubReplicaApply, stubReplicaConfirm),
+			).Build()
+
+		started := metav1.Now()
+		transitions := []Transition{{
+			Type:        "AddReplica",
+			PlanID:      "diskful/v1",
+			ReplicaName: "rv-1-0",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "✦ → D∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive, StartedAt: &started},
+				{Name: "D∅ → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}}
+
+		rctx0 := &testReplicaCtx{id: 0, name: "rv-1-0"}
+		var rev int64
+		e := newTestEngine(reg, &mockTracker{}, &rev, transitions, testCtx(rctx0))
+
+		e.Process(context.Background())
+		Expect(e.Finalize()).To(BeEmpty())
+
+		completed := e.CompletedTransitions()
+		Expect(completed).To(HaveLen(1))
+		Expect(completed[0].Type).To(Equal(TransitionType("AddReplica")))
+		Expect(completed[0].ReplicaName).To(Equal("rv-1-0"))
+		Expect(completed[0].StartedAt()).To(Equal(started))
+		for _, step := range completed[0].Steps {
+			Expect(step.Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+			Expect(step.StartedAt).NotTo(BeNil())
+			Expect(step.CompletedAt).NotTo(BeNil())
+		}
+	})
+
+	It("reports a transition created and completed in one Process", func() {
+		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
+		slot := newRecordingSlotAccessor()
+		reg.RegisterReplicaSlot(0, slot)
+		reg.ReplicaTransition("Detach", 0).
+			Plan("force/v1").Group("G").DisplayName("Detaching").
+			Steps(ReplicaStep("detach", stubReplicaApply, stubReplicaConfirm)).Build()
+
+		// Dispatch once: an auto-confirming plan would be re-dispatched on every outer pass.
+		rctx5 := &testReplicaCtx{id: 5, name: "rv-1-5"}
+		dispatched := false
+		dispatchOnce := func(_ testCtxProvider) iter.Seq[DispatchDecision] {
+			return func(yield func(DispatchDecision) bool) {
+				if dispatched {
+					return
+				}
+				dispatched = true
+				yield(DispatchReplica(rctx5, "Detach", "force/v1"))
+			}
+		}
+
+		var rev int64
+		e := NewEngine(context.Background(), reg, &mockTracker{}, []DispatchFunc[testCtxProvider]{dispatchOnce}, &rev, nil, testCtx(rctx5))
+
+		e.Process(context.Background())
+		Expect(e.Finalize()).To(BeEmpty())
+
+		completed := e.CompletedTransitions()
+		Expect(completed).To(HaveLen(1))
+		Expect(completed[0].Type).To(Equal(TransitionType("Detach")))
+		Expect(completed[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted))
+		Expect(completed[0].Steps[0].CompletedAt).NotTo(BeNil())
+	})
+
 	It("step-level onComplete is called after confirmation before advancing", func() {
 		reg := NewRegistry[*testGCtx, *testReplicaCtx]()
 
@@ -559,6 +632,8 @@ var _ = Describe("Process", func() {
 		result := e.Finalize()
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].Type).To(Equal(TransitionType("ForceRemove")))
+		// A cancelled transition is not reported as completed.
+		Expect(e.CompletedTransitions()).To(BeEmpty())
 	})
 
 	It("unknown transitions are skipped during settle", func() {

@@ -70,6 +70,10 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 				obju.ConditionSemanticallyEqual(obju.GetStatusCondition(rva, ready.Type), &ready) &&
 				isRVAAttachmentFieldsInSync(rva, dmrctx.RVR()) &&
 				rva.Status.Phase == phase && rva.Status.Message == phaseMessage {
+				// The committed phase may already be Attached (e.g. after a controller restart).
+				if phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
+					r.attachedRVAs.markAttached(rva)
+				}
 				continue
 			}
 
@@ -84,7 +88,8 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			// Copy attachment fields from RVR if available, clear otherwise.
 			applyRVAAttachmentFields(rva, dmrctx.RVR())
 
-			metricObservations := computeRVAPhaseChangeMetricObservations(time.Now(), rva, base.Status.Phase, phase)
+			metricObservations := computeRVAPhaseChangeMetricObservations(
+				time.Now(), rva, base.Status.Phase, phase, r.attachedRVAs.wasAttached(rva))
 
 			if err := r.patchRVAStatus(rf.Ctx(), rva, base); err != nil {
 				return rf.Failf(err, "patching RVA %s status", rva.Name)
@@ -92,6 +97,11 @@ func (r *Reconciler) reconcileRVAConditionsFromDatameshReplicaContext(
 			// patchRVAStatus treats NotFound as success because the RVA may be deleted
 			// concurrently. Keep the attach observation for the completed reconcile path.
 			metricObservations.observe()
+			// Remember the attachment only once it is committed, so a failed patch
+			// does not suppress the first attach observation on retry.
+			if phase == v1alpha1.ReplicatedVolumeAttachmentPhaseAttached {
+				r.attachedRVAs.markAttached(rva)
+			}
 		}
 	}
 
@@ -362,6 +372,7 @@ func (r *Reconciler) reconcileRVAMetadata(
 				return rf.Failf(err, "removing finalizer from RVA %s", rva.Name)
 			}
 			observeRVADetach(rva)
+			r.attachedRVAs.forget(rva)
 		}
 	}
 

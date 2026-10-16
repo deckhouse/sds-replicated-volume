@@ -1199,44 +1199,50 @@ Message is passthrough from the Attached condition, except when Phase=Attached a
 
 ## Metrics
 
-### sds_rv_membership_layout_converged
+### sds_rv_condition_problem_timestamp_seconds
 
-Per-volume export of the [MembershipLayoutConverged](#membershiplayoutconverged) condition. It exists
-so that a degraded layout — a volume that lost a replica, keeps serving I/O on a lowered quorum and
-will not heal by itself — is noticed without watching conditions by hand.
+Per-volume export of the conditions that are in a problem state. It exists so that a broken volume —
+for example one that lost a replica, keeps serving I/O on a lowered quorum and will not heal by
+itself — is noticed without watching conditions by hand, together with the moment the problem
+started.
 
-**Source.** `collectRVLayoutConverged` in the current-metrics collector
+**Source.** `collectRVConditionProblems` in the current-metrics collector
 (`images/controller/internal/metrics/current_metrics_collector.go`), which builds every series from
-the controller cache at scrape time. The reconciler does **not** write this gauge:
-`reconcileLayoutStatus` remains the single writer of the condition, and the metric is a pure read of
-the status it publishes.
+the controller cache at scrape time. The reconciler does **not** write this gauge: it remains the
+single writer of the conditions, and the metric is a pure read of the status it publishes.
 
-**Semantics.** Exactly one series per ReplicatedVolume, labels `name` and `reason`:
+**Semantics.** Labels `name`, `storage_class`, `condition`, `status`, `reason`; the value is the
+condition's `lastTransitionTime` as Unix seconds, so `time() - value` is how long the problem lasts
+(`lastTransitionTime` moves only on a status change, so a reason change keeps the value). A series is
+emitted only for a problem state:
 
-| Condition in `rv.status` | Value | `reason` label |
-|--------------------------|-------|----------------|
-| `True` / `Converged` | 1 | `Converged` |
-| `False` / `Converging`, `CannotConverge`, `TransitionUnsupported` | 0 | the reason, verbatim |
-| `Unknown` / `VolumeDeleting` | 0 | `VolumeDeleting` |
-| condition absent (the volume is still forming) | 0 | `Unknown` (synthetic) |
+| Condition | Problem state |
+|-----------|---------------|
+| `Ready`, `Resilient`, `AttachedReady`, [MembershipLayoutConverged](#membershiplayoutconverged), `ConfigurationReady` | status is not `True` |
+| `UnderMaintenance` | the condition is present |
 
-The value is 1 **if and only if** the condition is `True` with reason `Converged`; the `reason` label
-otherwise always carries the reason recorded in the status, and the synthetic `Unknown` is used in
-exactly one case — the condition is missing from the status altogether.
+A volume without the `Ready` condition has no status published yet: normally only until its first
+reconcile, but a volume stuck before it (for example, its storage pool does not exist) would
+otherwise be invisible. It is reported as `condition="Ready"` with `status` and `reason` `Absent` and
+its `creationTimestamp` as the value; other absent conditions are not reported, one series per such
+volume is enough. A healthy volume and a deleting one (its conditions are frozen) produce no series. `Configured`, `Scheduled` and
+`SatisfyEligibleNodes` are not exported per volume: they are mostly transient and, during an outage,
+duplicate `Resilient` and `MembershipLayoutConverged`; their aggregate is in `sds_rv_condition_count`.
 
 **Removal.** There is nothing to remove: the collector rebuilds all series on every scrape, so a
-reason change replaces the volume's series and a deleted volume simply stops being emitted (no
-`DeleteLabelValues`, no finalizer bookkeeping). Cardinality equals the number of volumes, so queries
-over this metric should stay cheap — select an exact `reason` set rather than run heavy regexps.
+reason change replaces the series, and a recovered condition or a deleted volume simply stops being
+emitted (no `DeleteLabelValues`, no finalizer bookkeeping). Cardinality follows the number of broken
+volumes, not the total.
 
 **Alerting.** `D8ReplicatedVolumeLayoutDegraded`
 (`monitoring/prometheus-rules/replicated-volume-layout.yaml`) fires on
-`max by (name, reason) (sds_rv_membership_layout_converged{reason=~"TransitionUnsupported|CannotConverge"} == 0)`
-held for 15m. Only those two reasons are verdicts that need a human: `Converging` is transient (this
-deliberately leaves flip-flop branch B — a permanent honest `Converging` — outside the alert's scope,
-see [Configuration flip-flop](#configuration-flip-flop-known-limitation)), while `VolumeDeleting` and
-the synthetic `Unknown` are not degradations at all. `max by` collapses duplicate series coming from
-several controller replicas (the ServiceMonitor drops `pod`, but `instance` survives). Because the
+`max by (name, reason) (sds_rv_condition_problem_timestamp_seconds{condition="MembershipLayoutConverged",reason=~"TransitionUnsupported|CannotConverge"})`
+held for 15m and resolves once the series disappears. Only those two reasons are verdicts that need a
+human: `Converging` is transient (this deliberately leaves flip-flop branch B — a permanent honest
+`Converging` — outside the alert's scope, see
+[Configuration flip-flop](#configuration-flip-flop-known-limitation)), while `VolumeDeleting` is not a
+degradation at all (and deleting volumes are not exported). `max by` collapses duplicate series coming
+from several controller replicas (the ServiceMonitor drops `pod`, but `instance` survives). Because the
 comparison is against the layout intended by the configuration, a volume configured to run on a
 single replica reports `Converged` and never alerts. The rule ships as a static `.yaml` with no
 `newControlPlane` gate: the series is exported only by this controller, whose ServiceMonitor is

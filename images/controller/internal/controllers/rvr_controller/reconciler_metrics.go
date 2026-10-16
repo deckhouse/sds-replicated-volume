@@ -21,6 +21,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
@@ -40,11 +41,13 @@ func (observations rvrMetricObservations) observe() {
 }
 
 // computeRVRMetricObservations compares the RVR state before (base) and after ensures.
+// bvLLV is the intended LVMLogicalVolume from the cache (nil when there is none).
 func computeRVRMetricObservations(
 	now time.Time,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 	rv *v1alpha1.ReplicatedVolume,
+	bvLLV *snc.LVMLogicalVolume,
 ) rvrMetricObservations {
 	if rvr == nil || base == nil {
 		return nil
@@ -54,15 +57,17 @@ func computeRVRMetricObservations(
 	sc := rvrStorageClassLabel(rvr, rv)
 
 	var observations rvrMetricObservations
-	observations = append(observations, computeRVRReadyTransitionMetricObservations(rvr, base, node, sc)...)
+	observations = append(observations, computeRVRReadyLostMetricObservations(rvr, base, node, sc)...)
 
 	// BackingVolumeReady transition: observe LLV provisioning time.
-	observations = append(observations, computeBackingVolumeReadyMetricObservations(now, rvr, base, node, sc)...)
+	observations = append(observations, computeBackingVolumeReadyMetricObservations(now, base, rvr, bvLLV, node, sc)...)
 	return observations
 }
 
-// computeRVRReadyTransitionMetricObservations records every Ready condition transition from non-True to True.
-func computeRVRReadyTransitionMetricObservations(
+// computeRVRReadyLostMetricObservations counts Ready condition transitions from True to
+// non-True (replica flaps), labeled with the reason the replica lost Ready.
+// Losing Ready on the way to deletion is expected and is not counted.
+func computeRVRReadyLostMetricObservations(
 	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
 	node, sc string,
@@ -76,50 +81,63 @@ func computeRVRReadyTransitionMetricObservations(
 
 	wasTrue := oldCond != nil && oldCond.Status == metav1.ConditionTrue
 	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
-	if wasTrue || !isTrue {
+	if !wasTrue || isTrue {
 		return nil
 	}
 
-	startedAt := rvr.CreationTimestamp.Time
-	if oldCond != nil && !oldCond.LastTransitionTime.IsZero() {
-		startedAt = oldCond.LastTransitionTime.Time
-	}
-
-	duration := newCond.LastTransitionTime.Sub(startedAt)
-	if duration <= 0 {
-		return nil
+	reason := metrics.ReasonAbsent
+	if newCond != nil {
+		reason = newCond.Reason
 	}
 
 	return rvrMetricObservations{
 		func() {
-			metrics.RVRReadyDuration.WithLabelValues(node, sc).Observe(duration.Seconds())
+			metrics.RVRReadyLost.WithLabelValues(node, sc, reason).Inc()
 		},
 	}
 }
 
-// computeBackingVolumeReadyMetricObservations detects BackingVolumeReady condition transitioning to True
-// and records the LLV provisioning time.
+// computeBackingVolumeReadyMetricObservations records the LLV provisioning time when
+// BackingVolumeReady becomes True after provisioning a new LLV, measured from the LLV creation.
+//
+// Only transitions out of the provisioning reasons count. Returning to Ready after a resize or
+// a temporary NotReady is not provisioning, and an absent condition means an existing LLV was
+// picked up (e.g. after migration); both would otherwise record the age of the volume.
+// Measuring from the LLV rather than the RVR keeps a re-provisioned LLV (replica type change,
+// LLV replacement) from inheriting the replica age.
 func computeBackingVolumeReadyMetricObservations(
 	now time.Time,
-	rvr *v1alpha1.ReplicatedVolumeReplica,
 	base *v1alpha1.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	bvLLV *snc.LVMLogicalVolume,
 	node, sc string,
 ) rvrMetricObservations {
+	if bvLLV == nil {
+		return nil
+	}
+
 	oldCond := obju.GetStatusCondition(base, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
 	newCond := obju.GetStatusCondition(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType)
-
-	wasTrue := oldCond != nil && oldCond.Status == metav1.ConditionTrue
-	isTrue := newCond != nil && newCond.Status == metav1.ConditionTrue
-
-	if !wasTrue && isTrue {
-		dur := now.Sub(rvr.CreationTimestamp.Time).Seconds()
-		return rvrMetricObservations{
-			func() {
-				metrics.RVRBackingVolumeDuration.WithLabelValues(node, sc).Observe(dur)
-			},
-		}
+	if oldCond == nil || newCond == nil || newCond.Status != metav1.ConditionTrue {
+		return nil
 	}
-	return nil
+
+	switch oldCond.Reason {
+	case v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+		v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReprovisioning,
+		v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioningFailed:
+	default:
+		return nil
+	}
+	dur := now.Sub(bvLLV.CreationTimestamp.Time).Seconds()
+	if dur <= 0 {
+		return nil
+	}
+	return rvrMetricObservations{
+		func() {
+			metrics.RVRBackingVolumeDuration.WithLabelValues(node, sc).Observe(dur)
+		},
+	}
 }
 
 // observeRVRDeletion records the deletion duration when an RVR finalizer is removed.
@@ -134,6 +152,7 @@ func observeRVRDeletion(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Repl
 // rvrStorageClassLabel returns the ReplicatedStorageClass name for metric labels.
 // Primary source: RVR's own label (always available, even after RV deletion).
 // Fallback: RV spec (for cases where label is missing).
+// A replica of a Manual volume has neither and is reported as "unknown".
 func rvrStorageClassLabel(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) string {
 	if rvr != nil {
 		if sc := rvr.Labels[v1alpha1.ReplicatedStorageClassLabelKey]; sc != "" {
@@ -141,7 +160,7 @@ func rvrStorageClassLabel(rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.Re
 		}
 	}
 	if rv != nil {
-		return rv.Spec.ReplicatedStorageClassName
+		return metrics.StorageClassLabel(rv.Spec.ReplicatedStorageClassName)
 	}
-	return ""
+	return metrics.StorageClassLabel("")
 }

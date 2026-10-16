@@ -47,12 +47,15 @@ import (
 type Reconciler struct {
 	cl     client.Client
 	scheme *runtime.Scheme
+
+	// attachedRVAs is metrics-only state: it never affects reconciliation decisions.
+	attachedRVAs *attachedRVATracker
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 func NewReconciler(cl client.Client, scheme *runtime.Scheme) *Reconciler {
-	return &Reconciler{cl: cl, scheme: scheme}
+	return &Reconciler{cl: cl, scheme: scheme, attachedRVAs: newAttachedRVATracker()}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -69,6 +72,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 	if rv == nil {
+		// Metrics-only state: the volume is gone, so are its attachments.
+		r.attachedRVAs.forgetVolume(req.Name)
 		return flow.MergeReconciles(
 			r.reconcileOrphanedRVAs(rf.Ctx(), req.Name),
 			r.reconcileOrphanedRVRs(rf.Ctx(), req.Name),
@@ -89,6 +94,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err != nil {
 		return rf.Failf(err, "listing ReplicatedVolumeAttachments").ToCtrl()
 	}
+	// Metrics-only state: drop RVAs that left without this controller removing the finalizer.
+	r.attachedRVAs.retain(req.Name, rvas)
 
 	rvrs, err := r.getRVRsSorted(rf.Ctx(), req.Name)
 	if err != nil {
@@ -176,6 +183,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// below needs it to judge placement, and it must run for a volume in any state, including
 	// one still forming.
 	var rsp *rspView
+	// Transitions the datamesh engine completed during this pass, for the datamesh metrics.
+	var completedTransitions []v1alpha1.ReplicatedVolumeDatameshTransition
 	if rv.Status.Configuration != nil {
 		var err error
 		rsp, err = r.getRSP(rf.Ctx(), rv.Status.Configuration.ReplicatedStoragePoolName, rvrs, rvas)
@@ -187,7 +196,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		} else {
 			outcome = flow.MergeReconciles(outcome,
 				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
-				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp),
+				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp, &completedTransitions),
 				r.reconcileLayoutStatus(rf.Ctx(), rv, rvrs, rvas),
 			)
 		}
@@ -250,7 +259,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Compute pending metric observations before patching, then observe them
 	// only after the status state they describe has been committed.
 	now := time.Now()
-	metricObservations := computeDatameshMetricObservations(now, rv, base.Status.DatameshTransitions, rvrs)
+	metricObservations := computeDatameshMetricObservations(now, rv, base.Status.DatameshTransitions, completedTransitions, rvrs)
 	metricObservations = append(metricObservations, computeRVInitialFormationMetricObservations(now, base, rv)...)
 
 	if outcome.DidChange() {
@@ -377,6 +386,7 @@ func applyUnderMaintenanceCond(rv *v1alpha1.ReplicatedVolume) bool {
 
 // reconcileNormalOperation handles the steady-state lifecycle of a formed datamesh
 // (attach handling, scaling, etc.).
+// The transitions the datamesh engine completed are stored in completedTransitions.
 //
 // Reconcile pattern: Pure orchestration
 func (r *Reconciler) reconcileNormalOperation(
@@ -385,6 +395,7 @@ func (r *Reconciler) reconcileNormalOperation(
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
+	completedTransitions *[]v1alpha1.ReplicatedVolumeDatameshTransition,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "normal-operation")
 	defer rf.OnEnd(&outcome)
@@ -396,8 +407,9 @@ func (r *Reconciler) reconcileNormalOperation(
 	}
 
 	// Run datamesh transition engine: membership, quorum, attachment, network transitions.
-	changed, dmrctxs := datamesh.ProcessTransitions(
+	changed, dmrctxs, completed := datamesh.ProcessTransitionsWithCompleted(
 		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{})
+	*completedTransitions = completed
 	if changed {
 		outcome = outcome.ReportChanged()
 	}
@@ -1768,6 +1780,13 @@ func (r *Reconciler) reconcileMetadata(
 
 	if err := r.patchRV(rf.Ctx(), rv, base); err != nil {
 		return rf.Fail(err)
+	}
+
+	// The first finalizer add on a live RV is the moment the controller takes the volume over.
+	if rv.DeletionTimestamp == nil &&
+		!obju.HasFinalizer(base, v1alpha1.RVControllerFinalizer) &&
+		obju.HasFinalizer(rv, v1alpha1.RVControllerFinalizer) {
+		observeRVCreated(rv)
 	}
 
 	// If finalizer was removed, we're done (object will be deleted).

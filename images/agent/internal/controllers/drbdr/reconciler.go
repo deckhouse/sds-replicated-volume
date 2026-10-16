@@ -44,6 +44,7 @@ type Reconciler struct {
 	nodeName     string
 	portRegistry *PortRegistry
 	caches       *Caches
+	configured   *configuredDRBDRTracker
 }
 
 var _ reconcile.TypedReconciler[DRBDReconcileRequest] = (*Reconciler)(nil)
@@ -55,6 +56,7 @@ func NewReconciler(cl client.Client, nodeName string, portRegistry *PortRegistry
 		nodeName:     nodeName,
 		portRegistry: portRegistry,
 		caches:       caches,
+		configured:   newConfiguredDRBDRTracker(time.Now()),
 	}
 }
 
@@ -98,6 +100,9 @@ func (r *Reconciler) Reconcile(
 		return rf.Fail(err).ToCtrl()
 	}
 	if !ok {
+		// The object may have left without this agent removing its finalizer; release its
+		// metrics-only tracker entry here, where only the name is known.
+		r.configured.forget(req.Name)
 		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
 	}
 
@@ -286,7 +291,7 @@ func (r *Reconciler) reconcileDRBDR(
 
 	// Compute pending metric observations before patching, then observe them
 	// only after the status state they describe has been committed.
-	metricObservations := computeDRBDRMetricObservations(time.Now(), drbdr, statusBase)
+	metricObservations := computeDRBDRMetricObservations(time.Now(), drbdr, statusBase, r.configured)
 
 	statusChanged := !equality.Semantic.DeepEqual(statusBase.Status, drbdr.Status)
 	if statusChanged {
@@ -311,14 +316,19 @@ func (r *Reconciler) reconcileDRBDR(
 	// teardown.
 	drbdResourceGone := !aState.IsZero() && !aState.ResourceExists()
 	if len(intendedLLVFinalizersToRelease) == 0 && drbdResourceGone {
-		if finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup); finalizerOutcome.ShouldReturn() {
-			if finalizerOutcome.Error() != nil {
-				reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
-			}
-			// If finalizer was removed during cleanup, observe deletion metrics.
-			if finalizerOutcome.Error() == nil && isInCleanup(drbdr) && !obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
-				observeDRBDRDeletion(drbdr)
-			}
+		hadFinalizer := obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer)
+		finalizerOutcome := r.reconcileFinalizer(rf.Ctx(), drbdr, false, upAndNotInCleanup)
+		if finalizerOutcome.Error() != nil {
+			reconcileErr = errors.Join(reconcileErr, finalizerOutcome.Error())
+		}
+		// Observe the deletion only when this reconcile actually removed the finalizer.
+		// A successful removal continues the reconcile; a NotFound patch also ends without
+		// an error, but means a previous reconcile already removed it (stale cache), so
+		// observing it there would count the deletion twice.
+		if finalizerOutcome.Error() == nil && !finalizerOutcome.ShouldReturn() &&
+			hadFinalizer && isInCleanup(drbdr) && !obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
+			observeDRBDRDeletion(drbdr)
+			r.configured.forget(drbdr.Name)
 		}
 	} else if !upAndNotInCleanup {
 		rf.Log().Info("Deferring DRBDResource finalizer removal until DRBD teardown completes",

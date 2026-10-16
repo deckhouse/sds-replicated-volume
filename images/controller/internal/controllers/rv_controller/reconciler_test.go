@@ -25,6 +25,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,6 +44,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/metrics"
 )
 
 func TestRvControllerReconciler(t *testing.T) {
@@ -2163,6 +2166,135 @@ var _ = Describe("Reconciler", func() {
 			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Name).To(Equal(formationStepNames[formationStepIdxPreconfigure]))
 			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Waiting for"))
 			Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("deleting replicas"))
+		})
+	})
+
+	Describe("Datamesh metrics", func() {
+		It("observes every step of a datamesh transition the engine completes within one reconcile", func(ctx SpecContext) {
+			// The ChangeQuorum transition is on its first step, already applied at revision 1 and
+			// confirmed by every member. Its second step finds qmr already correct (no-op), so the
+			// engine confirms it in the same run and removes the transition: both steps must reach
+			// the metrics through Reconcile, not only the one active in the old snapshot.
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1", Generation: 5},
+				Status: v1alpha1.ReplicatedStorageClassStatus{
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
+					},
+				},
+			}
+			rsp := newTestRSP("pool-1")
+
+			startedAt := metav1.NewTime(time.Now().Add(-10 * time.Second))
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-1",
+					Generation: 1,
+					Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					Labels: map[string]string{
+						v1alpha1.ReplicatedStorageClassLabelKey: "rsc-1",
+					},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-1",
+				},
+				Status: v1alpha1.ReplicatedVolumeStatus{
+					DatameshRevision:        1,
+					ConfigurationGeneration: 5,
+					Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+						Topology:           v1alpha1.TopologyTransZonal,
+						FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+						VolumeAccess:              v1alpha1.VolumeAccessPreferablyLocal,
+						ReplicatedStoragePoolName: "pool-1",
+					},
+					Datamesh: v1alpha1.ReplicatedVolumeDatamesh{
+						Members: []v1alpha1.DatameshMember{
+							{Name: "rv-1-0", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-1"},
+							{Name: "rv-1-1", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-2"},
+							{Name: "rv-1-2", Type: v1alpha1.DatameshMemberTypeDiskful, NodeName: "node-3"},
+						},
+						Quorum:                  2,
+						QuorumMinimumRedundancy: 2,
+						SystemNetworkNames:      []string{"Internal"},
+					},
+					BaselineGuaranteedMinimumDataRedundancy: 1,
+					DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{{
+						Type:   v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum,
+						Group:  v1alpha1.ReplicatedVolumeDatameshTransitionGroupQuorum,
+						PlanID: "raise/v1",
+						Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+							{
+								Name:             "q↑",
+								Status:           v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+								StartedAt:        &startedAt,
+								DatameshRevision: 1,
+							},
+							{Name: "qmr↑", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+						},
+					}},
+				},
+			}
+
+			newRVR := func(name, node, lvg string) *v1alpha1.ReplicatedVolumeReplica {
+				return &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       name,
+						Finalizers: []string{v1alpha1.RVControllerFinalizer},
+					},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-1",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
+						NodeName:             node,
+						LVMVolumeGroupName:   lvg,
+					},
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+						DatameshRevision: 1,
+						Quorum:           ptr.To(true),
+						BackingVolume: &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+							State: v1alpha1.DiskStateUpToDate,
+						},
+					},
+				}
+			}
+			rvr0 := newRVR("rv-1-0", "node-1", "lvg-1")
+			rvr1 := newRVR("rv-1-1", "node-2", "lvg-2")
+			rvr2 := newRVR("rv-1-2", "node-3", "lvg-3")
+
+			typ := string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeQuorum)
+			sampleCount := func(observer prometheus.Observer) uint64 {
+				var m dto.Metric
+				Expect(observer.(prometheus.Metric).Write(&m)).To(Succeed())
+				return m.GetHistogram().GetSampleCount()
+			}
+			transitionCount := func() uint64 {
+				return sampleCount(metrics.DatameshTransitionDuration.WithLabelValues("rsc-1", "global", typ))
+			}
+			stepCount := func(step string) uint64 {
+				return sampleCount(metrics.DatameshStepDuration.WithLabelValues("rsc-1", "global", typ, step))
+			}
+			transitionsBefore, firstBefore, secondBefore := transitionCount(), stepCount("q↑"), stepCount("qmr↑")
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsc, rsp, rvr0, rvr1, rvr2).
+				WithStatusSubresource(rv, rsc, rvr0, rvr1, rvr2).
+				Build()
+			rec := NewReconciler(cl, scheme)
+
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated v1alpha1.ReplicatedVolume
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
+			Expect(updated.Status.DatameshTransitions).To(BeEmpty(), "the transition should complete within this reconcile")
+
+			Expect(transitionCount()-transitionsBefore).To(Equal(uint64(1)), "transition duration")
+			Expect(stepCount("q↑")-firstBefore).To(Equal(uint64(1)), "the step active in the old snapshot")
+			Expect(stepCount("qmr↑")-secondBefore).To(Equal(uint64(1)), "the step passed within the same engine run")
 		})
 	})
 })

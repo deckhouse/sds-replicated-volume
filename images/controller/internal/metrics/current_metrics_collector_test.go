@@ -19,6 +19,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -32,6 +33,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
 
@@ -143,7 +145,7 @@ func TestCurrentMetricsCollectorIsRegisteredOnLeaderOnly(t *testing.T) {
 
 func TestCurrentMetricsCollectorExportsExpectedMetricFamilies(t *testing.T) {
 	collector := newCurrentMetricsCollector(nil, logr.Discard())
-	descriptions := make(chan *prometheus.Desc, 8)
+	descriptions := make(chan *prometheus.Desc, 16)
 	collector.Describe(descriptions)
 	close(descriptions)
 
@@ -161,14 +163,21 @@ func TestCurrentMetricsCollectorExportsExpectedMetricFamilies(t *testing.T) {
 
 	slices.Sort(got)
 	want := []string{
+		"sds_deleting_oldest_timestamp_seconds",
+		"sds_metrics_collector_objects",
+		"sds_metrics_collector_up",
 		"sds_rv_auto_configuration_blocked",
+		"sds_rv_condition_count",
+		"sds_rv_condition_problem_timestamp_seconds",
 		"sds_rv_count",
 		"sds_rv_datamesh_active_transitions",
-		"sds_rv_membership_layout_converged",
+		"sds_rv_datamesh_transition_oldest_timestamp_seconds",
+		"sds_rv_deleting_timestamp_seconds",
 		"sds_rv_no_persistent_volume",
 		"sds_rva_count",
 		"sds_rvr_count",
 		"sds_rvr_deleting_count",
+		"sds_rvr_not_ready_oldest_timestamp_seconds",
 	}
 
 	if !slices.Equal(got, want) {
@@ -193,13 +202,13 @@ func TestCollectStorageClassNamesUsesUnknownForMissingLabels(t *testing.T) {
 	}
 }
 
-func TestCollectRVCountsEmitsStorageClassPhaseMatrix(t *testing.T) {
+func TestCollectRVCountsEmitsStorageClassModePhaseMatrix(t *testing.T) {
 	deleteTime := metav1.Now()
 	ch := make(chan prometheus.Metric, 100)
 	desc := prometheus.NewDesc(
 		"test_rv_count",
 		"test",
-		[]string{LabelStorageClass, LabelPhase},
+		[]string{LabelStorageClass, LabelConfigurationMode, LabelPhase},
 		nil,
 	)
 
@@ -208,10 +217,11 @@ func TestCollectRVCountsEmitsStorageClassPhaseMatrix(t *testing.T) {
 		collectRVCounts(
 			ch,
 			desc,
-			[]string{"sc-a", "sc-b"},
+			[]string{"sc-a", "sc-b", currentMetricsSCUnknown},
 			[]v1alpha1.ReplicatedVolume{
 				{
 					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ConfigurationMode:          v1alpha1.ReplicatedVolumeConfigurationModeAuto,
 						ReplicatedStorageClassName: "sc-a",
 					},
 				},
@@ -224,29 +234,290 @@ func TestCollectRVCountsEmitsStorageClassPhaseMatrix(t *testing.T) {
 						ReplicatedStorageClassName: "sc-a",
 					},
 				},
+				{
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual,
+					},
+				},
+			},
+		)
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 6 {
+		t.Fatalf("expected storage_class x phase matrix with one mode per storage class, got %d: %#v", len(metrics), metrics)
+	}
+	want := []struct {
+		value float64
+		sc    string
+		mode  v1alpha1.ReplicatedVolumeConfigurationMode
+		phase string
+	}{
+		{1, "sc-a", v1alpha1.ReplicatedVolumeConfigurationModeAuto, currentMetricsRVPhaseActive},
+		{1, "sc-a", v1alpha1.ReplicatedVolumeConfigurationModeAuto, currentMetricsRVPhaseDeleting},
+		{0, "sc-b", v1alpha1.ReplicatedVolumeConfigurationModeAuto, currentMetricsRVPhaseActive},
+		{0, "sc-b", v1alpha1.ReplicatedVolumeConfigurationModeAuto, currentMetricsRVPhaseDeleting},
+		{1, currentMetricsSCUnknown, v1alpha1.ReplicatedVolumeConfigurationModeManual, currentMetricsRVPhaseActive},
+		{0, currentMetricsSCUnknown, v1alpha1.ReplicatedVolumeConfigurationModeManual, currentMetricsRVPhaseDeleting},
+	}
+	for i, w := range want {
+		assertMetric(t, metrics[i], w.value, map[string]string{
+			LabelStorageClass:      w.sc,
+			LabelConfigurationMode: string(w.mode),
+			LabelPhase:             w.phase,
+		})
+	}
+}
+
+func TestCollectRVConditionCountsCountsEveryConditionAndSkipsDeleting(t *testing.T) {
+	deleteTime := metav1.Now()
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc(
+		"test_rv_condition_count",
+		"test",
+		[]string{LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
+		nil,
+	)
+
+	cond := func(condType string, status metav1.ConditionStatus, reason string) metav1.Condition {
+		return metav1.Condition{Type: condType, Status: status, Reason: reason}
+	}
+
+	go func() {
+		defer close(ch)
+		collectRVConditionCounts(ch, desc, []v1alpha1.ReplicatedVolume{
+			{
+				Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondResilientReasonResilient),
+				}},
+			},
+			{
+				Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondReadyReasonQuorumLost),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondResilientReasonResilient),
+					cond(v1alpha1.ReplicatedVolumeCondUnderMaintenanceType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation),
+				}},
+			},
+			{
+				// Manual volume: no storage class.
+				Spec: v1alpha1.ReplicatedVolumeSpec{ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady),
+				}},
+			},
+			{
+				// Deleting volume: its frozen conditions must not be counted.
+				ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &deleteTime, Finalizers: []string{"test"}},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondReadyReasonTerminating),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondResilientReasonDegraded),
+				}},
+			},
+		})
+	}()
+
+	got := make(map[currentMetricLabels4]float64)
+	for _, metric := range collectTestMetrics(t, ch) {
+		got[currentMetricLabels4{
+			first:  metric.labels[LabelStorageClass],
+			second: metric.labels[LabelCondition],
+			third:  metric.labels[LabelStatus],
+			fourth: metric.labels[LabelReason],
+		}] = metric.value
+	}
+
+	want := map[currentMetricLabels4]float64{
+		{"sc-a", v1alpha1.ReplicatedVolumeCondReadyType, "True", v1alpha1.ReplicatedVolumeCondReadyReasonReady}:                                          1,
+		{"sc-a", v1alpha1.ReplicatedVolumeCondReadyType, "False", v1alpha1.ReplicatedVolumeCondReadyReasonQuorumLost}:                                    1,
+		{"sc-a", v1alpha1.ReplicatedVolumeCondResilientType, "True", v1alpha1.ReplicatedVolumeCondResilientReasonResilient}:                              2,
+		{"sc-a", v1alpha1.ReplicatedVolumeCondUnderMaintenanceType, "True", v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation}: 1,
+		{"sc-a", v1alpha1.ReplicatedVolumeCondUnderMaintenanceType, currentMetricsStatusAbsent, currentMetricsReasonAbsent}:                              1,
+		{currentMetricsSCUnknown, v1alpha1.ReplicatedVolumeCondReadyType, "True", v1alpha1.ReplicatedVolumeCondReadyReasonReady}:                         1,
+	}
+	for _, condType := range currentMetricsRVConditionTypes {
+		switch condType {
+		case v1alpha1.ReplicatedVolumeCondReadyType:
+			continue
+		case v1alpha1.ReplicatedVolumeCondResilientType, v1alpha1.ReplicatedVolumeCondUnderMaintenanceType:
+		default:
+			want[currentMetricLabels4{"sc-a", condType, currentMetricsStatusAbsent, currentMetricsReasonAbsent}] = 2
+		}
+		want[currentMetricLabels4{currentMetricsSCUnknown, condType, currentMetricsStatusAbsent, currentMetricsReasonAbsent}] = 1
+	}
+
+	if !maps.Equal(got, want) {
+		t.Fatalf("unexpected condition counts:\ngot  %v\nwant %v", got, want)
+	}
+}
+
+func TestCollectRVDeletingEmitsOnlyDeletingRVs(t *testing.T) {
+	deleteTime := metav1.Unix(100, 0)
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc("test_rv_deleting_timestamp_seconds", "test", []string{LabelName, LabelStorageClass}, nil)
+
+	go func() {
+		defer close(ch)
+		collectRVDeleting(ch, desc, []v1alpha1.ReplicatedVolume{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-live"}, Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-deleting", DeletionTimestamp: &deleteTime, Finalizers: []string{"test"}}},
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 1 {
+		t.Fatalf("expected one deleting RV, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 100, map[string]string{LabelName: "rv-deleting", LabelStorageClass: currentMetricsSCUnknown})
+}
+
+func TestCollectDeletingOldestKeepsTheOldestPerGroup(t *testing.T) {
+	ts := func(sec int64) *metav1.Time { t := metav1.Unix(sec, 0); return &t }
+	deleting := func(name string, sec int64) metav1.ObjectMeta {
+		return metav1.ObjectMeta{Name: name, DeletionTimestamp: ts(sec), Finalizers: []string{"test"}}
+	}
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc("test_deleting_oldest_timestamp_seconds", "test", []string{LabelKind, LabelStorageClass, LabelNode}, nil)
+
+	go func() {
+		defer close(ch)
+		collectDeletingOldest(ch, desc,
+			[]v1alpha1.ReplicatedVolume{
+				{ObjectMeta: deleting("rv-1", 300), Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"}},
+				{ObjectMeta: deleting("rv-2", 200), Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "rv-live"}, Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"}},
+			},
+			[]v1alpha1.ReplicatedVolumeReplica{
+				// No RSC label yet: the storage class comes from the parent volume.
+				{ObjectMeta: deleting("rv-live-0", 150), Spec: v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-live", NodeName: "node-1"}},
+				{ObjectMeta: deleting("rv-live-1", 120), Spec: v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-live", NodeName: "node-2"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "rv-live-2"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "rv-live", NodeName: "node-1"}},
+			},
+			[]v1alpha1.ReplicatedVolumeAttachment{
+				{
+					ObjectMeta: func() metav1.ObjectMeta {
+						m := deleting("rva-1", 400)
+						m.Labels = map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "sc-b"}
+						return m
+					}(),
+					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{ReplicatedVolumeName: "rv-gone", NodeName: "node-1"},
+				},
 			},
 		)
 	}()
 
 	metrics := collectTestMetrics(t, ch)
 	if len(metrics) != 4 {
-		t.Fatalf("expected storage_class x phase matrix, got %d: %#v", len(metrics), metrics)
+		t.Fatalf("expected four groups, got %d: %#v", len(metrics), metrics)
 	}
-	assertMetric(t, metrics[0], 1, map[string]string{
-		LabelStorageClass: "sc-a",
-		LabelPhase:        currentMetricsRVPhaseActive,
+	assertMetric(t, metrics[0], 200, map[string]string{LabelKind: currentMetricsKindRV, LabelStorageClass: "sc-a", LabelNode: currentMetricsNodeGlobal})
+	assertMetric(t, metrics[1], 400, map[string]string{LabelKind: currentMetricsKindRVA, LabelStorageClass: "sc-b", LabelNode: "node-1"})
+	assertMetric(t, metrics[2], 150, map[string]string{LabelKind: currentMetricsKindRVR, LabelStorageClass: "sc-a", LabelNode: "node-1"})
+	assertMetric(t, metrics[3], 120, map[string]string{LabelKind: currentMetricsKindRVR, LabelStorageClass: "sc-a", LabelNode: "node-2"})
+}
+
+func TestCollectDatameshTransitionOldestKeepsTheOldestPerGroup(t *testing.T) {
+	transition := func(typ v1alpha1.ReplicatedVolumeDatameshTransitionType, replica string, startedAt *metav1.Time) v1alpha1.ReplicatedVolumeDatameshTransition {
+		return v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        typ,
+			ReplicaName: replica,
+			Steps:       []v1alpha1.ReplicatedVolumeDatameshTransitionStep{{Name: "Step", StartedAt: startedAt}},
+		}
+	}
+	at := func(sec int64) *metav1.Time { t := metav1.Unix(sec, 0); return &t }
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc("test_rv_datamesh_transition_oldest_timestamp_seconds", "test", []string{LabelStorageClass, LabelNode, LabelType}, nil)
+
+	go func() {
+		defer close(ch)
+		collectDatameshTransitionOldest(ch, desc,
+			[]v1alpha1.ReplicatedVolume{
+				{
+					Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+					Status: v1alpha1.ReplicatedVolumeStatus{DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+						transition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation, "", at(300)),
+						transition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach, "rv-1-0", at(500)),
+						// Not started yet: no age to report.
+						transition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeDetach, "rv-1-0", nil),
+					}},
+				},
+				{
+					Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+					Status: v1alpha1.ReplicatedVolumeStatus{DatameshTransitions: []v1alpha1.ReplicatedVolumeDatameshTransition{
+						transition(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation, "", at(100)),
+					}},
+				},
+			},
+			[]v1alpha1.ReplicatedVolumeReplica{
+				{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"}},
+			},
+		)
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 2 {
+		t.Fatalf("expected two groups, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 100, map[string]string{
+		LabelStorageClass: "sc-a", LabelNode: currentMetricsNodeGlobal, LabelType: string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeFormation),
 	})
-	assertMetric(t, metrics[1], 1, map[string]string{
-		LabelStorageClass: "sc-a",
-		LabelPhase:        currentMetricsRVPhaseDeleting,
+	assertMetric(t, metrics[1], 500, map[string]string{
+		LabelStorageClass: "sc-a", LabelNode: "node-1", LabelType: string(v1alpha1.ReplicatedVolumeDatameshTransitionTypeAttach),
 	})
-	assertMetric(t, metrics[2], 0, map[string]string{
-		LabelStorageClass: "sc-b",
-		LabelPhase:        currentMetricsRVPhaseActive,
+}
+
+func TestCollectRVRNotReadyOldestKeepsTheOldestPerGroup(t *testing.T) {
+	deleteTime := metav1.Unix(50, 0)
+	ready := func(status metav1.ConditionStatus, sec int64) []metav1.Condition {
+		return []metav1.Condition{{
+			Type:               v1alpha1.ReplicatedVolumeReplicaCondReadyType,
+			Status:             status,
+			Reason:             "Test",
+			LastTransitionTime: metav1.Unix(sec, 0),
+		}}
+	}
+	rvr := func(name, node string, phase v1alpha1.ReplicatedVolumeReplicaPhase, conds []metav1.Condition) v1alpha1.ReplicatedVolumeReplica {
+		return v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				CreationTimestamp: metav1.Unix(10, 0),
+				Labels:            map[string]string{v1alpha1.ReplicatedStorageClassLabelKey: "sc-a"},
+			},
+			Spec:   v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: node},
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{Phase: phase, Conditions: conds},
+		}
+	}
+	deletingRVR := rvr("rvr-deleting", "node-1", v1alpha1.ReplicatedVolumeReplicaPhaseDegraded, ready(metav1.ConditionFalse, 20))
+	deletingRVR.DeletionTimestamp = &deleteTime
+	deletingRVR.Finalizers = []string{"test"}
+
+	ch := make(chan prometheus.Metric, 100)
+	desc := prometheus.NewDesc("test_rvr_not_ready_oldest_timestamp_seconds", "test", []string{LabelStorageClass, LabelNode, LabelPhase}, nil)
+
+	go func() {
+		defer close(ch)
+		collectRVRNotReadyOldest(ch, desc, nil, []v1alpha1.ReplicatedVolumeReplica{
+			rvr("rvr-healthy", "node-1", v1alpha1.ReplicatedVolumeReplicaPhaseHealthy, ready(metav1.ConditionTrue, 5)),
+			rvr("rvr-degraded-new", "node-1", v1alpha1.ReplicatedVolumeReplicaPhaseDegraded, ready(metav1.ConditionFalse, 300)),
+			rvr("rvr-degraded-old", "node-1", v1alpha1.ReplicatedVolumeReplicaPhaseDegraded, ready(metav1.ConditionFalse, 200)),
+			// No Ready condition yet: falls back to creationTimestamp.
+			rvr("rvr-pending", "node-2", v1alpha1.ReplicatedVolumeReplicaPhasePending, nil),
+			deletingRVR,
+		})
+	}()
+
+	metrics := collectTestMetrics(t, ch)
+	if len(metrics) != 2 {
+		t.Fatalf("expected two groups, got %d: %#v", len(metrics), metrics)
+	}
+	assertMetric(t, metrics[0], 200, map[string]string{
+		LabelStorageClass: "sc-a", LabelNode: "node-1", LabelPhase: string(v1alpha1.ReplicatedVolumeReplicaPhaseDegraded),
 	})
-	assertMetric(t, metrics[3], 0, map[string]string{
-		LabelStorageClass: "sc-b",
-		LabelPhase:        currentMetricsRVPhaseDeleting,
+	assertMetric(t, metrics[1], 10, map[string]string{
+		LabelStorageClass: "sc-a", LabelNode: "node-2", LabelPhase: string(v1alpha1.ReplicatedVolumeReplicaPhasePending),
 	})
 }
 
@@ -261,7 +532,24 @@ func TestCollectRVRCountsEmitsOnlyNonZeroCombinations(t *testing.T) {
 
 	go func() {
 		defer close(ch)
-		collectRVRCounts(ch, desc, []v1alpha1.ReplicatedVolumeReplica{
+		collectRVRCounts(ch, desc, []v1alpha1.ReplicatedVolume{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-auto"}, Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-b"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-manual"}, Spec: v1alpha1.ReplicatedVolumeSpec{ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual}},
+		}, []v1alpha1.ReplicatedVolumeReplica{
+			{
+				// No RSC label yet: falls back to the parent volume's storage class.
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a", ReplicatedVolumeName: "rv-auto"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Phase: v1alpha1.ReplicatedVolumeReplicaPhasePending,
+				},
+			},
+			{
+				// Replica of a Manual volume: no storage class anywhere.
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a", ReplicatedVolumeName: "rv-manual"},
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
+					Phase: v1alpha1.ReplicatedVolumeReplicaPhaseHealthy,
+				},
+			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -288,12 +576,22 @@ func TestCollectRVRCountsEmitsOnlyNonZeroCombinations(t *testing.T) {
 	}()
 
 	metrics := collectTestMetrics(t, ch)
-	if len(metrics) != 1 {
-		t.Fatalf("expected only one non-zero metric, got %d: %#v", len(metrics), metrics)
+	if len(metrics) != 3 {
+		t.Fatalf("expected three non-zero metrics, got %d: %#v", len(metrics), metrics)
 	}
 	assertMetric(t, metrics[0], 2, map[string]string{
 		LabelNode:         "node-a",
 		LabelStorageClass: "sc-a",
+		LabelPhase:        string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy),
+	})
+	assertMetric(t, metrics[1], 1, map[string]string{
+		LabelNode:         "node-a",
+		LabelStorageClass: "sc-b",
+		LabelPhase:        string(v1alpha1.ReplicatedVolumeReplicaPhasePending),
+	})
+	assertMetric(t, metrics[2], 1, map[string]string{
+		LabelNode:         "node-a",
+		LabelStorageClass: currentMetricsSCUnknown,
 		LabelPhase:        string(v1alpha1.ReplicatedVolumeReplicaPhaseHealthy),
 	})
 }
@@ -310,7 +608,14 @@ func TestCollectRVRDeletingCountsEmitsOnlyDeletingReplicas(t *testing.T) {
 
 	go func() {
 		defer close(ch)
-		collectRVRDeletingCounts(ch, desc, []v1alpha1.ReplicatedVolumeReplica{
+		collectRVRDeletingCounts(ch, desc, []v1alpha1.ReplicatedVolume{
+			{ObjectMeta: metav1.ObjectMeta{Name: "rv-auto"}, Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-b"}},
+		}, []v1alpha1.ReplicatedVolumeReplica{
+			{
+				// Deleting before the RSC label was set: falls back to the parent volume's storage class.
+				ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &deleteTime, Finalizers: []string{"test"}},
+				Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a", ReplicatedVolumeName: "rv-auto"},
+			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -333,12 +638,16 @@ func TestCollectRVRDeletingCountsEmitsOnlyDeletingReplicas(t *testing.T) {
 	}()
 
 	metrics := collectTestMetrics(t, ch)
-	if len(metrics) != 1 {
-		t.Fatalf("expected one deleting metric, got %d: %#v", len(metrics), metrics)
+	if len(metrics) != 2 {
+		t.Fatalf("expected two deleting metrics, got %d: %#v", len(metrics), metrics)
 	}
 	assertMetric(t, metrics[0], 1, map[string]string{
 		LabelNode:         "node-a",
 		LabelStorageClass: "sc-a",
+	})
+	assertMetric(t, metrics[1], 1, map[string]string{
+		LabelNode:         "node-a",
+		LabelStorageClass: "sc-b",
 	})
 }
 
@@ -503,146 +812,132 @@ func TestCollectRVMigratorLabelsEmitsOnlyLabeledRVs(t *testing.T) {
 	})
 }
 
-func TestCollectRVLayoutConvergedEmitsOneSeriesPerRV(t *testing.T) {
+func TestCollectRVConditionProblemsEmitsOnlyProblemConditions(t *testing.T) {
+	deleteTime := metav1.Now()
 	ch := make(chan prometheus.Metric, 100)
 	desc := prometheus.NewDesc(
-		"test_rv_membership_layout_converged",
+		"test_rv_condition_problem_timestamp_seconds",
 		"test",
-		[]string{LabelName, LabelReason},
+		[]string{LabelName, LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
 		nil,
 	)
 
-	layoutCond := func(status metav1.ConditionStatus, reason string) metav1.Condition {
+	cond := func(condType string, status metav1.ConditionStatus, reason string, since int64) metav1.Condition {
 		return metav1.Condition{
-			Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
-			Status: status,
-			Reason: reason,
+			Type:               condType,
+			Status:             status,
+			Reason:             reason,
+			LastTransitionTime: metav1.Unix(since, 0),
 		}
 	}
 
 	go func() {
 		defer close(ch)
-		collectRVLayoutConverged(ch, desc, []v1alpha1.ReplicatedVolume{
+		collectRVConditionProblems(ch, desc, []v1alpha1.ReplicatedVolume{
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-converged"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						// An unrelated condition with its own reason: the reason label must come
-						// from MembershipLayoutConverged, not from whatever comes first.
-						{
-							Type:   v1alpha1.ReplicatedVolumeCondReadyType,
-							Status: metav1.ConditionFalse,
-							Reason: "SomeUnrelatedReason",
-						},
-						layoutCond(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged),
-					},
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-1-healthy"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady, 100),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondResilientReasonResilient, 100),
+				}},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-2-converging"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging),
-					},
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-2-degraded"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady, 100),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondResilientReasonDegraded, 200),
+					cond(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge, 300),
+					// Not in the per-volume set: covered by the aggregate only.
+					cond(v1alpha1.ReplicatedVolumeCondConfiguredType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondConfiguredReasonConfigurationInProgress, 300),
+					cond(v1alpha1.ReplicatedVolumeCondScheduledType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled, 300),
+				}},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-3-cannot-converge"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge),
-					},
-				},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-3-unknown"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-b"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeCondReadyReasonStatusUnknown, 400),
+				}},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-4-unsupported"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported),
-					},
-				},
-			},
-			// A deleting RV keeps its series: value 0 with the reason recorded in the status,
-			// never the synthetic absent-condition reason.
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-5-deleting"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting),
-					},
-				},
+				// Manual volume under maintenance: presence of UnderMaintenance is the problem.
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-4-maintenance"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ConfigurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondReadyReasonReady, 100),
+					cond(v1alpha1.ReplicatedVolumeCondUnderMaintenanceType, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation, 500),
+				}},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-6-no-condition"},
+				// No status published yet: reported once, as Ready Absent since creation.
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-5-no-status", CreationTimestamp: metav1.Unix(550, 0)},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
 			},
-			// Reason Converged without status True (never written by the controller) must not be
-			// reported as converged: the value follows status AND reason together.
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-7-converged-not-true"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionUnknown, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged),
-					},
-				},
+				// Deleting volume: its frozen conditions must not be reported.
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-6-deleting", DeletionTimestamp: &deleteTime, Finalizers: []string{"test"}},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+				Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{
+					cond(v1alpha1.ReplicatedVolumeCondReadyType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondReadyReasonTerminating, 600),
+					cond(v1alpha1.ReplicatedVolumeCondResilientType, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondResilientReasonDegraded, 600),
+				}},
 			},
-			// The mirror case of rv-7: status True with a reason other than Converged (also never
-			// written by the controller) must not be reported as converged either. Both directions
-			// are needed to pin the convention "value 1 iff status True AND reason Converged".
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-8-true-not-converged"},
-				Status: v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						layoutCond(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging),
-					},
-				},
+				// Deleting volume without status: not reported either.
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-7-deleting-no-status", DeletionTimestamp: &deleteTime, Finalizers: []string{"test"}},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
 			},
 		})
 	}()
 
 	metrics := collectTestMetrics(t, ch)
-	if len(metrics) != 8 {
-		t.Fatalf("expected one series per RV, got %d: %#v", len(metrics), metrics)
+	if len(metrics) != 5 {
+		t.Fatalf("expected five problem series, got %d: %#v", len(metrics), metrics)
 	}
-	// Series are emitted sorted by RV name.
-	assertMetric(t, metrics[0], 1, map[string]string{
-		LabelName:   "rv-1-converged",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
+	assertMetric(t, metrics[0], 200, map[string]string{
+		LabelName:         "rv-2-degraded",
+		LabelStorageClass: "sc-a",
+		LabelCondition:    v1alpha1.ReplicatedVolumeCondResilientType,
+		LabelStatus:       "False",
+		LabelReason:       v1alpha1.ReplicatedVolumeCondResilientReasonDegraded,
 	})
-	assertMetric(t, metrics[1], 0, map[string]string{
-		LabelName:   "rv-2-converging",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	assertMetric(t, metrics[1], 300, map[string]string{
+		LabelName:         "rv-2-degraded",
+		LabelStorageClass: "sc-a",
+		LabelCondition:    v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+		LabelStatus:       "False",
+		LabelReason:       v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
 	})
-	assertMetric(t, metrics[2], 0, map[string]string{
-		LabelName:   "rv-3-cannot-converge",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+	assertMetric(t, metrics[2], 400, map[string]string{
+		LabelName:         "rv-3-unknown",
+		LabelStorageClass: "sc-b",
+		LabelCondition:    v1alpha1.ReplicatedVolumeCondReadyType,
+		LabelStatus:       "Unknown",
+		LabelReason:       v1alpha1.ReplicatedVolumeCondReadyReasonStatusUnknown,
 	})
-	assertMetric(t, metrics[3], 0, map[string]string{
-		LabelName:   "rv-4-unsupported",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
+	assertMetric(t, metrics[3], 500, map[string]string{
+		LabelName:         "rv-4-maintenance",
+		LabelStorageClass: currentMetricsSCUnknown,
+		LabelCondition:    v1alpha1.ReplicatedVolumeCondUnderMaintenanceType,
+		LabelStatus:       "True",
+		LabelReason:       v1alpha1.ReplicatedVolumeCondUnderMaintenanceReasonNoResourceReconciliation,
 	})
-	assertMetric(t, metrics[4], 0, map[string]string{
-		LabelName:   "rv-5-deleting",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonVolumeDeleting,
-	})
-	assertMetric(t, metrics[5], 0, map[string]string{
-		LabelName:   "rv-6-no-condition",
-		LabelReason: currentMetricsReasonAbsent,
-	})
-	assertMetric(t, metrics[6], 0, map[string]string{
-		LabelName:   "rv-7-converged-not-true",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
-	})
-	assertMetric(t, metrics[7], 0, map[string]string{
-		LabelName:   "rv-8-true-not-converged",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	assertMetric(t, metrics[4], 550, map[string]string{
+		LabelName:         "rv-5-no-status",
+		LabelStorageClass: "sc-a",
+		LabelCondition:    v1alpha1.ReplicatedVolumeCondReadyType,
+		LabelStatus:       currentMetricsStatusAbsent,
+		LabelReason:       currentMetricsReasonAbsent,
 	})
 }
 
-func TestCollectRVLayoutConvergedFollowsTheCacheSnapshot(t *testing.T) {
+func TestCollectRVConditionProblemsFollowsTheCacheSnapshot(t *testing.T) {
 	desc := prometheus.NewDesc(
-		"test_rv_membership_layout_converged",
+		"test_rv_condition_problem_timestamp_seconds",
 		"test",
-		[]string{LabelName, LabelReason},
+		[]string{LabelName, LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
 		nil,
 	)
 
@@ -652,47 +947,63 @@ func TestCollectRVLayoutConvergedFollowsTheCacheSnapshot(t *testing.T) {
 		ch := make(chan prometheus.Metric, 100)
 		go func() {
 			defer close(ch)
-			collectRVLayoutConverged(ch, desc, rvs)
+			collectRVConditionProblems(ch, desc, rvs)
 		}()
 		return collectTestMetrics(t, ch)
 	}
 
-	rvWithReason := func(status metav1.ConditionStatus, reason string) []v1alpha1.ReplicatedVolume {
+	rvWithLayout := func(status metav1.ConditionStatus, reason string, since int64) []v1alpha1.ReplicatedVolume {
 		return []v1alpha1.ReplicatedVolume{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "rv-a"},
+				Spec:       v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
+						// Ready is present so that only the layout condition is under test.
 						{
-							Type:   v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
-							Status: status,
-							Reason: reason,
+							Type:   v1alpha1.ReplicatedVolumeCondReadyType,
+							Status: metav1.ConditionTrue,
+							Reason: v1alpha1.ReplicatedVolumeCondReadyReasonReady,
+						},
+						{
+							Type:               v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+							Status:             status,
+							Reason:             reason,
+							LastTransitionTime: metav1.Unix(since, 0),
 						},
 					},
 				},
 			},
 		}
 	}
+	layoutLabels := func(reason string) map[string]string {
+		return map[string]string{
+			LabelName:      "rv-a",
+			LabelCondition: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType,
+			LabelStatus:    "False",
+			LabelReason:    reason,
+		}
+	}
 
-	metrics := collect(rvWithReason(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+	metrics := collect(rvWithLayout(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging, 100))
 	if len(metrics) != 1 {
 		t.Fatalf("expected one series, got %d: %#v", len(metrics), metrics)
 	}
-	assertMetric(t, metrics[0], 1, map[string]string{
-		LabelName:   "rv-a",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged,
-	})
+	assertMetric(t, metrics[0], 100, layoutLabels(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 
-	// A reason change replaces the series instead of adding a second one: the collector rebuilds
-	// every series from the cache on each scrape.
-	metrics = collect(rvWithReason(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
+	// A reason change within the same status replaces the series instead of adding a second one,
+	// and keeps the transition time: the collector rebuilds every series from the cache on each
+	// scrape, and lastTransitionTime moves only on a status change.
+	metrics = collect(rvWithLayout(metav1.ConditionFalse, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported, 100))
 	if len(metrics) != 1 {
 		t.Fatalf("expected the series to be replaced, got %d: %#v", len(metrics), metrics)
 	}
-	assertMetric(t, metrics[0], 0, map[string]string{
-		LabelName:   "rv-a",
-		LabelReason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported,
-	})
+	assertMetric(t, metrics[0], 100, layoutLabels(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
+
+	// A recovered condition stops being emitted, which is what resolves the alert.
+	if metrics = collect(rvWithLayout(metav1.ConditionTrue, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged, 200)); len(metrics) != 0 {
+		t.Fatalf("expected no series for a converged RV, got %d: %#v", len(metrics), metrics)
+	}
 
 	// A deleted RV is simply absent from the reader, so its series disappears without any
 	// explicit metric removal.
@@ -711,10 +1022,11 @@ type prometheusRuleGroup struct {
 }
 
 type prometheusAlertRule struct {
-	Alert  string            `json:"alert"`
-	Expr   string            `json:"expr"`
-	For    string            `json:"for"`
-	Labels map[string]string `json:"labels"`
+	Alert         string            `json:"alert"`
+	Expr          string            `json:"expr"`
+	For           string            `json:"for"`
+	KeepFiringFor string            `json:"keep_firing_for"`
+	Labels        map[string]string `json:"labels"`
 }
 
 func TestReplicatedVolumeLayoutRuleMatchesTheExportedMetric(t *testing.T) {
@@ -751,6 +1063,10 @@ func TestReplicatedVolumeLayoutRuleMatchesTheExportedMetric(t *testing.T) {
 	if alert.For != "15m" {
 		t.Fatalf("expected for: 15m, got %q", alert.For)
 	}
+	// Bridges the short gap in current metrics on a controller restart or a leader change.
+	if alert.KeepFiringFor != "5m" {
+		t.Fatalf("expected keep_firing_for: 5m, got %q", alert.KeepFiringFor)
+	}
 	if alert.Labels["severity_level"] != "6" {
 		t.Fatalf("expected severity_level 6, got %q", alert.Labels["severity_level"])
 	}
@@ -758,8 +1074,18 @@ func TestReplicatedVolumeLayoutRuleMatchesTheExportedMetric(t *testing.T) {
 		t.Fatalf("expected tier cluster, got %q", alert.Labels["tier"])
 	}
 
-	if !strings.Contains(alert.Expr, metricNameRVLayoutConverged) {
-		t.Fatalf("expected expr to select %q, got %q", metricNameRVLayoutConverged, alert.Expr)
+	if !strings.Contains(alert.Expr, metricNameRVConditionProblem) {
+		t.Fatalf("expected expr to select %q, got %q", metricNameRVConditionProblem, alert.Expr)
+	}
+	condSelector := `condition="` + v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType + `"`
+	if !strings.Contains(alert.Expr, condSelector) {
+		t.Fatalf("expected expr to select %s, got %q", condSelector, alert.Expr)
+	}
+	// A volume under maintenance has its layout convergence frozen and must not fire.
+	maintenance := "unless on (name)\n" + metricNameRVConditionProblem +
+		`{condition="` + v1alpha1.ReplicatedVolumeCondUnderMaintenanceType + `"}`
+	if !strings.Contains(alert.Expr, maintenance) {
+		t.Fatalf("expected expr to exclude volumes under maintenance with %q, got %q", maintenance, alert.Expr)
 	}
 	// Only the two verdict reasons are alerted on: transient and deletion states must not fire.
 	for _, reason := range []string{
@@ -778,6 +1104,184 @@ func TestReplicatedVolumeLayoutRuleMatchesTheExportedMetric(t *testing.T) {
 		if strings.Contains(alert.Expr, reason) {
 			t.Fatalf("expr must not alert on reason %q, got %q", reason, alert.Expr)
 		}
+	}
+}
+
+// replicatedVolumeHealthRulePath points at the static Prometheus rule file with the Ready and
+// Resilient alerts (read at runtime for the same reason as replicatedVolumeLayoutRulePath).
+const replicatedVolumeHealthRulePath = "../../../../monitoring/prometheus-rules/replicated-volume-health.yaml"
+
+func TestReplicatedVolumeHealthRulesMatchTheExportedMetric(t *testing.T) {
+	data, err := os.ReadFile(replicatedVolumeHealthRulePath)
+	if err != nil {
+		t.Fatalf("reading rule file %q: %v", replicatedVolumeHealthRulePath, err)
+	}
+
+	// Static .yaml like the layout rule: Prometheus templates are written plainly, no Helm gate.
+	for _, helmMarker := range []string{`{{ "`, "{{-", "{{ if", "{{ end"} {
+		if strings.Contains(string(data), helmMarker) {
+			t.Fatalf("rule file %q must contain no Helm templating, found %q", replicatedVolumeHealthRulePath, helmMarker)
+		}
+	}
+
+	var groups []prometheusRuleGroup
+	if err := yaml.Unmarshal(data, &groups); err != nil {
+		t.Fatalf("unmarshalling rule file %q: %v", replicatedVolumeHealthRulePath, err)
+	}
+	alerts := map[string]prometheusAlertRule{}
+	for _, g := range groups {
+		for _, r := range g.Rules {
+			alerts[r.Alert] = r
+		}
+	}
+
+	// Formation is not a health problem of these alerts: Forming is the reason while the volume is
+	// being created, Absent is synthesized by the collector for a volume with no Ready condition yet.
+	formingSelector := `reason!~"` + v1alpha1.ReplicatedVolumeCondReadyReasonForming + "|" + currentMetricsReasonAbsent + `"`
+	readySelector := metricNameRVConditionProblem + `{condition="` + v1alpha1.ReplicatedVolumeCondReadyType + `",` + formingSelector + `}`
+	resilientSelector := metricNameRVConditionProblem + `{condition="` + v1alpha1.ReplicatedVolumeCondResilientType + `",` + formingSelector + `}`
+	// Both conditions share the reason names the alerts exclude.
+	if v1alpha1.ReplicatedVolumeCondResilientReasonForming != v1alpha1.ReplicatedVolumeCondReadyReasonForming {
+		t.Fatalf("Ready and Resilient must share the Forming reason, got %q and %q",
+			v1alpha1.ReplicatedVolumeCondReadyReasonForming, v1alpha1.ReplicatedVolumeCondResilientReasonForming)
+	}
+
+	tests := []struct {
+		alert    string
+		expr     string
+		for_     string
+		severity string
+	}{
+		{
+			alert:    "D8ReplicatedVolumeNotReady",
+			expr:     "max by (name, storage_class) (" + readySelector + ")",
+			for_:     "5m",
+			severity: "4",
+		},
+		{
+			// A volume that is not Ready is reported only by the NotReady alert.
+			alert:    "D8ReplicatedVolumeNotResilient",
+			expr:     "max by (name, storage_class) (" + resilientSelector + ") unless on (name) " + readySelector,
+			for_:     "30m",
+			severity: "6",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.alert, func(t *testing.T) {
+			alert, ok := alerts[tt.alert]
+			if !ok {
+				t.Fatalf("alert %s not found in %q", tt.alert, replicatedVolumeHealthRulePath)
+			}
+			// The multi-line block scalar is compared with its whitespace collapsed.
+			if got := strings.Join(strings.Fields(alert.Expr), " "); got != tt.expr {
+				t.Fatalf("expected expr %q, got %q", tt.expr, got)
+			}
+			if alert.For != tt.for_ {
+				t.Fatalf("expected for: %s, got %q", tt.for_, alert.For)
+			}
+			// Bridges the short gap in current metrics on a controller restart or a leader change.
+			if alert.KeepFiringFor != "5m" {
+				t.Fatalf("expected keep_firing_for: 5m, got %q", alert.KeepFiringFor)
+			}
+			if alert.Labels["severity_level"] != tt.severity {
+				t.Fatalf("expected severity_level %s, got %q", tt.severity, alert.Labels["severity_level"])
+			}
+			if alert.Labels["tier"] != "cluster" {
+				t.Fatalf("expected tier cluster, got %q", alert.Labels["tier"])
+			}
+		})
+	}
+}
+
+// currentMetricsRulePath points at the Helm-templated Prometheus rule file shipped with the module
+// (read at runtime for the same reason as replicatedVolumeLayoutRulePath).
+const currentMetricsRulePath = "../../../../monitoring/prometheus-rules/current-metrics.tpl"
+
+func TestCurrentMetricsUnavailableRuleMatchesTheExportedMetric(t *testing.T) {
+	data, err := os.ReadFile(currentMetricsRulePath)
+	if err != nil {
+		t.Fatalf("reading rule file %q: %v", currentMetricsRulePath, err)
+	}
+
+	// absent() fires wherever the series is missing, including the old control plane that has
+	// no such controller, so the rule must be gated on the new control plane.
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	const gate = "{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}"
+	if lines[0] != gate || lines[len(lines)-1] != "{{- end }}" {
+		t.Fatalf("rule file %q must be wrapped in %q ... {{- end }}", currentMetricsRulePath, gate)
+	}
+
+	var groups []prometheusRuleGroup
+	if err := yaml.Unmarshal([]byte(strings.Join(lines[1:len(lines)-1], "\n")), &groups); err != nil {
+		t.Fatalf("unmarshalling rule file %q: %v", currentMetricsRulePath, err)
+	}
+	var alert *prometheusAlertRule
+	for i := range groups {
+		for j := range groups[i].Rules {
+			if groups[i].Rules[j].Alert == "D8SdsReplicatedVolumeCurrentMetricsUnavailable" {
+				alert = &groups[i].Rules[j]
+			}
+		}
+	}
+	if alert == nil {
+		t.Fatalf("alert D8SdsReplicatedVolumeCurrentMetricsUnavailable not found in %q", currentMetricsRulePath)
+	}
+
+	if want := "absent(" + metricNameCollectorUp + " == 1)"; alert.Expr != want {
+		t.Fatalf("expected expr %q, got %q", want, alert.Expr)
+	}
+	// Equal to keep_firing_for of the alerts built on current metrics, so that it takes over
+	// as they resolve when the metrics are gone.
+	if alert.For != "5m" {
+		t.Fatalf("expected for: 5m, got %q", alert.For)
+	}
+	// Equal to the for of D8ReplicatedVolumeNotReady, so that it keeps firing while that
+	// alert is pending again after the metrics return.
+	if alert.KeepFiringFor != "5m" {
+		t.Fatalf("expected keep_firing_for: 5m, got %q", alert.KeepFiringFor)
+	}
+	if alert.Labels["severity_level"] != "6" || alert.Labels["tier"] != "cluster" {
+		t.Fatalf("expected severity_level 6 and tier cluster, got %v", alert.Labels)
+	}
+}
+
+// listStubReader serves empty lists, or fails every List call when err is set.
+type listStubReader struct {
+	client.Reader
+	err error
+}
+
+func (r listStubReader) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return r.err
+}
+
+func TestCurrentMetricsCollectorReportsWhetherCollectionSucceeded(t *testing.T) {
+	collectUp := func(reader client.Reader) (up []float64, others int) {
+		ch := make(chan prometheus.Metric, 64)
+		newCurrentMetricsCollector(reader, logr.Discard()).Collect(ch)
+		close(ch)
+		for metric := range ch {
+			if !strings.Contains(metric.Desc().String(), `"`+metricNameCollectorUp+`"`) {
+				others++
+				continue
+			}
+			var m dto.Metric
+			if err := metric.Write(&m); err != nil {
+				t.Fatal(err)
+			}
+			up = append(up, m.GetGauge().GetValue())
+		}
+		return up, others
+	}
+
+	// An empty cluster has no metrics of its objects, but the collector did succeed and reports
+	// the zero object counts of every kind.
+	if up, others := collectUp(listStubReader{}); !slices.Equal(up, []float64{1}) || others != 5 {
+		t.Fatalf("expected %s=1 and 5 object counts on success, got %v and %d other metrics", metricNameCollectorUp, up, others)
+	}
+	up, others := collectUp(listStubReader{err: errors.New("cache is not synced")})
+	if !slices.Equal(up, []float64{0}) || others != 0 {
+		t.Fatalf("expected only %s=0 on failure, got %v and %d other metrics", metricNameCollectorUp, up, others)
 	}
 }
 
