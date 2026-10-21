@@ -934,6 +934,36 @@ var _ = Describe("rvrPredicates", func() {
 			}
 		})
 
+		// A tie-breaker being promoted in place has no status.backingVolume until D∅,
+		// so BackingVolumeReady is the only change that can wake the RV to admit
+		// the promotion once its prepared LLV is ready.
+		It("returns true when BackingVolumeReady condition status changes", func() {
+			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(oldRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+				Status: metav1.ConditionFalse,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonProvisioning,
+			})
+			newRVR := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+			}
+			obju.SetStatusCondition(newRVR, metav1.Condition{
+				Type:   v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
+				Status: metav1.ConditionTrue,
+				Reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyReasonReady,
+			})
+			e := event.TypedUpdateEvent[client.Object]{
+				ObjectOld: oldRVR,
+				ObjectNew: newRVR,
+			}
+
+			for _, pred := range preds {
+				Expect(pred(e)).To(BeTrue())
+			}
+		})
+
 		It("returns true when Quorum changes", func() {
 			oldRVR := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},

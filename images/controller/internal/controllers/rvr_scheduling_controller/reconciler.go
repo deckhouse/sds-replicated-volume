@@ -232,11 +232,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			continue
 		}
 
-		// Only a replica with no node yet has its whole copy arriving over the network. One that
-		// already has a node is here for its LVG, and holding that back would leave it partially
-		// placed forever.
+		// A new placement and a TB's first storage assignment both start a
+		// full resync. Other partially placed replicas retain their existing
+		// admission and finish assigning storage on their reserved node.
 		unplaced := rvr.Spec.NodeName == ""
-		if unplaced {
+		promoting := sctx.Promoting.Contains(rvr.ID())
+		if promoting && sctx.RepairBeforePromotion {
+			// Restore the original data copy first. Assigning the TB's first
+			// LVG now could reserve the only sender slot and block that repair.
+			continue
+		}
+		needsResyncAdmission := unplaced || promoting
+		if needsResyncAdmission {
 			if targetResyncBudget == nil {
 				target, budgetOutcome := r.reconcileResyncBudget(rf.Ctx(), rv, rvrs)
 				outcome = outcome.Merge(budgetOutcome.Enrichf("deciding the resync budget"))
@@ -279,7 +286,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// A node on the replica, not the outcome, is what says it was placed: scheduling that found
 		// nowhere to land also returns a non-terminal outcome.
-		if unplaced && rvr.Spec.NodeName != "" && sctx.ResyncOccupancy != nil {
+		if needsResyncAdmission && isReplicaScheduled(rvr, rsp.Spec.Type) && sctx.ResyncOccupancy != nil {
 			for _, node := range targetResyncBudget.senderNodes {
 				sctx.ResyncOccupancy[node]++
 			}
@@ -609,6 +616,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// back only for its LVG. Read before anything places it, since placement fills
 	// the field in.
 	unplaced := rvr.Spec.NodeName == ""
+	needsResyncAdmission := unplaced || sctx.Promoting.Contains(rvr.ID())
 
 	logger := rf.Log()
 
@@ -713,6 +721,8 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	if sctx.Topology == v1alpha1.TopologyTransZonal {
 		var compare func(a, b idset.IDSet) int
 		if isDiskful {
+			diskfulPeers := sctx.Diskful
+			diskfulPeers.Remove(rvr.ID())
 			// Diskful replicas participate in the quorum, so they must be spread
 			// evenly across zones for availability. The rv_controller is
 			// responsible for creating the right number of replicas; this
@@ -720,8 +730,8 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 			// Preferred zone: fewest Diskful replicas.
 			compare = func(a, b idset.IDSet) int {
 				return -1 * cmp.Compare(
-					a.Intersect(sctx.Diskful).Len(),
-					b.Intersect(sctx.Diskful).Len(),
+					a.Intersect(diskfulPeers).Len(),
+					b.Intersect(diskfulPeers).Len(),
 				)
 			}
 		} else {
@@ -760,13 +770,14 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// Exclude nodes with no free resync end. The sending side of the budget
 	// is settled before this pipeline runs; the receiving node is chosen here.
 	//
-	// The gate repeats the one in Reconcile: a tie-breaker receives no data, and a partially placed
-	// replica would be judged against its own owed end on the only node left to it.
+	// The gate repeats Reconcile: new placements and TB promotions need a
+	// receiver slot. A promoting diskless member without an LVG occupies no
+	// owed end yet; other partial placements keep their existing admission.
 	//
 	// The stage sits last among the filters, so everything it saw had already survived the others:
 	// when it admitted none of them, the budget alone is what left the replica nowhere to land.
 	resyncSeen, resyncAdmitted := 0, 0
-	if isDiskful && unplaced && sctx.ResyncOccupancy != nil {
+	if isDiskful && needsResyncAdmission && sctx.ResyncOccupancy != nil {
 		resyncOccupancy := sctx.ResyncOccupancy
 		resyncLimit := r.resyncLimit
 		p = WithPredicate(p, "no free resync end", logger, func(e *CandidateEntry) *CandidateEntry {
@@ -919,7 +930,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// Losing the race is a wait, not a failure, and it is reported as the filter reports one: the
 	// re-check comes round again on the requeue, by which time the winner's placement is visible.
 	reservedReceivingEnd := false
-	if isDiskful && unplaced && sctx.ResyncOccupancy != nil {
+	if isDiskful && needsResyncAdmission && sctx.ResyncOccupancy != nil {
 		if !r.resyncReservations.reserve(
 			rvr.Name, best.Node.NodeName, sctx.ResyncSenderNodes, r.resyncLimit, sctx.ResyncObservedOccupancy,
 		) {
@@ -952,7 +963,7 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	if outcome.ShouldReturn() {
 		// A node on the replica is what says it was placed, here as in Reconcile. Without one
 		// nothing took the end, and holding it would idle a node until the TTL ran out.
-		if reservedReceivingEnd && rvr.Spec.NodeName == "" {
+		if reservedReceivingEnd && (rvr.Spec.NodeName == "" || rvr.Spec.LVMVolumeGroupName == "") {
 			r.resyncReservations.release(rvr.Name)
 		}
 		return outcome
@@ -1095,6 +1106,13 @@ type schedulingContext struct {
 	TieBreaker idset.IDSet
 	Scheduled  idset.IDSet
 	Unplaced   idset.IDSet
+	// Promoting contains existing TBs whose spec asks for a disk. Assigning
+	// their first LVG starts a full resync even though their node is unchanged.
+	Promoting idset.IDSet
+	// RepairBeforePromotion gives original-copy repair priority when a voter
+	// disappeared before R2 -> R3 promotion started. Already assigned storage
+	// remains assigned, but the TB must not reserve a new resync ahead of repair.
+	RepairBeforePromotion bool
 }
 
 // computeSchedulingContext builds a schedulingContext from RV, RSP, RVRs, and
@@ -1136,6 +1154,14 @@ func computeSchedulingContext(
 		Size:                            rv.Spec.Size.Value(),
 		OccupiedNodes:                   make(map[string]struct{}, len(rvrs)),
 	}
+	voters := 0
+	for _, member := range rv.Status.Datamesh.Members {
+		if member.Type.IsVoter() {
+			voters++
+		}
+	}
+	sctx.RepairBeforePromotion = sctx.FailuresToTolerate == 1 &&
+		sctx.GuaranteedMinimumDataRedundancy == 1 && voters < 2
 
 	poolType := rsp.Spec.Type
 
@@ -1149,6 +1175,9 @@ func computeSchedulingContext(
 			sctx.Access.Add(id)
 		case v1alpha1.ReplicaTypeDiskful:
 			sctx.Diskful.Add(id)
+			if member := rv.Status.Datamesh.FindMemberByName(rvr.Name); member != nil && member.Type == v1alpha1.DatameshMemberTypeTieBreaker {
+				sctx.Promoting.Add(id)
+			}
 		case v1alpha1.ReplicaTypeTieBreaker:
 			sctx.TieBreaker.Add(id)
 		}

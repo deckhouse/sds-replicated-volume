@@ -2028,25 +2028,12 @@ var _ = Describe("ChangeReplicaType(D→A) additional", func() {
 //
 
 var _ = Describe("ChangeReplicaType(TB→D) dispatch", func() {
-	It("even voters, no sD → tb-to-d/v1", func() {
-		// 2D + 1TB. Voters=2 (even).
-		rv := mkRV(5,
-			[]v1alpha1.DatameshMember{
-				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
-				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
-			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
-			},
-			nil,
-		)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
-		}
-		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+	It("even voters, no sD → tb-to-d/v2", func() {
+		rv, rvrs := promotionFixture()
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-0", "node-1", "node-2"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
-		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d/v1"))
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d/v2"))
 	})
 
 	It("odd voters, no sD → tb-to-d-q-up/v1", func() {
@@ -2110,33 +2097,19 @@ var _ = Describe("ChangeReplicaType(TB→D) dispatch", func() {
 })
 
 var _ = Describe("ChangeReplicaType(TB→D) plans", func() {
-	It("tb-to-d/v1: creates (2 steps), BV set", func() {
-		rv := mkRV(5,
-			[]v1alpha1.DatameshMember{
-				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
-				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
-				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeTieBreaker, "node-3"),
-			},
-			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{
-				mkChangeRoleRequest("rv-1-2", v1alpha1.ReplicaTypeDiskful),
-			},
-			nil,
-		)
-		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
-		}
-		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{})
+	It("tb-to-d/v2: creates three steps and preserves the backing-volume assignment", func() {
+		rv, rvrs := promotionFixture()
+		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-0", "node-1", "node-2"), rvrs, nil, FeatureFlags{})
 		Expect(changed).To(BeTrue())
-
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
 		Expect(m.Type).To(Equal(v1alpha1.DatameshMemberTypeLiminalDiskful))
 		Expect(m.LVMVolumeGroupName).To(Equal("test-lvg"))
-
 		t := &rv.Status.DatameshTransitions[0]
-		Expect(t.PlanID).To(Equal("tb-to-d/v1"))
-		Expect(t.Steps).To(HaveLen(2))
+		Expect(t.PlanID).To(Equal("tb-to-d/v2"))
+		Expect(t.Steps).To(HaveLen(3))
 		Expect(t.Steps[0].Name).To(Equal("TB → D∅"))
-		Expect(t.Steps[1].Name).To(Equal("D∅ → D"))
+		Expect(t.Steps[1].Name).To(Equal("D∅ → D; synchronize"))
+		Expect(t.Steps[2].Name).To(Equal("qmr↑"))
 	})
 
 	It("tb-to-d-q-up/v1: creates (2 steps), q raised on confirm", func() {

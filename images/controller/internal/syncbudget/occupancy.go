@@ -138,6 +138,13 @@ func owedDataEnds(rvr *v1alpha1.ReplicatedVolumeReplica) int {
 	if !memberType.HasBackingVolume() {
 		return 0
 	}
+	// A diskless member being promoted has not been admitted for a resync
+	// until its first LVG is assigned. Its existing node alone must not charge
+	// an owed end, or it would block its own receiver admission at limit=1.
+	if rvr.Spec.LVMVolumeGroupName == "" && rvr.Status.DatameshRevision != 0 &&
+		rvr.Status.Type == v1alpha1.DRBDResourceTypeDiskless {
+		return 0
+	}
 
 	if !rvr.DeletionTimestamp.IsZero() {
 		return 0

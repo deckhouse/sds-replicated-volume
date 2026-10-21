@@ -182,7 +182,7 @@ func drbdrOpPredicates() []predicate.Predicate {
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to:
 // - Generation changes (spec updates, e.g. spec.type retype driven by layout convergence)
-// - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready
+// - Condition changes: Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready, Attached, BackingVolumeReady
 // - DatameshRequest changes (preconfiguration readiness)
 // - DatameshRevision changes (rollout progress)
 // - Addresses changes (network readiness during formation)
@@ -216,6 +216,9 @@ func rvrPredicates() []predicate.Predicate {
 				// - Ready: attachment guards + RVA ReplicaReady/message updates
 				// - Attached: RV AttachedReady condition (a freeze can be reported by reason
 				//   alone, e.g. AgentNotReady, without touching status.attachment below)
+				// - BackingVolumeReady: tie-breaker promotion guard (a TB keeps
+				//   status.backingVolume empty until D∅, so the condition is the only signal
+				//   that its prepared LLV became ready)
 				if !obju.AreConditionsSemanticallyEqual(
 					oldRVR, newRVR,
 					v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
@@ -223,6 +226,7 @@ func rvrPredicates() []predicate.Predicate {
 					v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesType,
 					v1alpha1.ReplicatedVolumeReplicaCondReadyType,
 					v1alpha1.ReplicatedVolumeReplicaCondAttachedType,
+					v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeReadyType,
 				) {
 					return true
 				}

@@ -500,7 +500,7 @@ func registerChangeTypePlans(
 	// (TB leaving its role — if TB required for tiebreaker, guard blocks;
 	// user adds another TB first, then converts).
 
-	// ChangeReplicaType(TB → D): TB → D∅ → D (even→odd, no sD)
+	// Retained for settling transitions persisted by older controllers.
 	changeReplicaType.Plan("tb-to-d/v1").
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
@@ -520,6 +520,33 @@ func registerChangeTypePlans(
 				setType(v1alpha1.DatameshMemberTypeDiskful),
 				confirmSubjectOnly,
 			),
+		).
+		OnComplete(onChangeTypeComplete).
+		Build()
+
+	// In-place promotion keeps the same connected peer and q throughout.
+	// First allocate its bitmaps everywhere, then attach and fully synchronize
+	// its disk. Only after that may qmr increase: raising it at disk attach
+	// would consume R2's one-failure headroom while the third copy is incomplete.
+	changeReplicaType.Plan("tb-to-d/v2").
+		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
+		Init(setReplicaFromToType(v1alpha1.ReplicaTypeTieBreaker, v1alpha1.ReplicaTypeDiskful)).
+		DisplayName("Promoting tie-breaker to diskful").
+		Guards(guardRVNotDeleting, guardRSPAvailable, guardNodeEligible).
+		Guards(guardTieBreakerPromotion, guardVotersEven, guardMaxDiskMembers).
+		Guards(gainVoterGuards...).
+		Steps(
+			mrStep("TB → D∅",
+				dmte.ComposeReplicaApply(setType(v1alpha1.DatameshMemberTypeLiminalDiskful), setBackingVolumeFromRequest),
+				asReplicaConfirm(confirmPromotionConnected),
+			),
+			mrStep("D∅ → D; synchronize",
+				setType(v1alpha1.DatameshMemberTypeDiskful),
+				asReplicaConfirm(confirmPromotionSynchronized),
+			).DiagnosticConditions(v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+				v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeUpToDateType),
+			mgStep("qmr↑", raisePromotionQMR, confirmPromotionConnected).
+				OnComplete(dmte.AdaptApplyToOnComplete(updateBaselineGMDR)),
 		).
 		OnComplete(onChangeTypeComplete).
 		Build()

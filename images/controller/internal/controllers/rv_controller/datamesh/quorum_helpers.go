@@ -54,9 +54,24 @@ func computeCorrectQuorum(gctx *globalContext) (q, qmr byte) {
 		// Lowering or no change — always safe.
 		qmr = targetQMR
 	} else {
+		// R2 -> R3 intent is visible before layout convergence reserves the TB
+		// or the replica controller submits ChangeRole. Keep the current data
+		// requirement throughout that window. Once promotion starts its voting
+		// transition owns the final raise. Never lower an already committed qmr.
+		if holdR3QMRRaise(gctx) {
+			return q, currentQMR
+		}
 		// Raising — raise as far as safely possible.
 		safeQMR := min(targetQMR, upToDateDiskfulCount(gctx))
 		qmr = max(currentQMR, safeQMR)
 	}
 	return
+}
+
+// Shared by standalone quorum reconciliation and the qmr step embedded in
+// membership plans, including a repair after an interrupted TB promotion.
+func holdR3QMRRaise(gctx *globalContext) bool {
+	return gctx.configuration.FailuresToTolerate == 1 &&
+		gctx.configuration.GuaranteedMinimumDataRedundancy == 1 &&
+		gctx.baselineGMDR == 0 && freshUpToDateVoters(gctx) < 3
 }

@@ -19,6 +19,7 @@ package datamesh
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -147,11 +148,17 @@ var _ = Describe("raiseQ / lowerQ", func() {
 })
 
 var _ = Describe("raiseQMR / lowerQMR", func() {
-	It("raiseQMR increments qmr when the copies to back it are UpToDate", func() {
+	It("raiseQMR increments qmr when all R3 copies preserve failure headroom", func() {
 		gctx := mkZonalGctx(1, 1,
 			zoneMember{id: 0, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
 			zoneMember{id: 1, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
+			zoneMember{id: 2, memberType: v1alpha1.DatameshMemberTypeDiskful, upToDate: true},
 		)
+		for i := range gctx.allReplicas {
+			gctx.allReplicas[i].rvr.Status.Conditions = []metav1.Condition{{
+				Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue,
+			}}
+		}
 		gctx.datamesh.quorumMinimumRedundancy = 1
 		Expect(raiseQMR(gctx)).To(BeTrue())
 		Expect(gctx.datamesh.quorumMinimumRedundancy).To(Equal(byte(2)))

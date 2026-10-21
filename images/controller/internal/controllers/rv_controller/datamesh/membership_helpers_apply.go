@@ -126,6 +126,9 @@ func lowerQ(gctx *globalContext) bool {
 // engine records its revision), and a step activated after it publishes the
 // bounded value or nothing, which ChangeQuorum then completes.
 func raiseQMR(gctx *globalContext) bool {
+	if holdR3QMRRaise(gctx) {
+		return false
+	}
 	next := gctx.datamesh.quorumMinimumRedundancy + 1
 	if next > gctx.configuration.QuorumMinimumRedundancy() || next > upToDateDiskfulCount(gctx) {
 		return false

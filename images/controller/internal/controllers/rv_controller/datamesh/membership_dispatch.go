@@ -152,6 +152,15 @@ func planAddReplica(gctx *globalContext, rctx *ReplicaContext) (dmte.PlanID, str
 // planAddDiskful selects the AddReplica(D) plan variant based on voter parity,
 // sD feature availability, and whether qmr needs to be raised.
 func planAddDiskful(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
+	repairBeforePromotion := gctx.configuration.FailuresToTolerate == 1 &&
+		gctx.configuration.GuaranteedMinimumDataRedundancy == 1 && voterCount(gctx) < 2
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if rc.member != nil && rc.member.Type == v1alpha1.DatameshMemberTypeTieBreaker &&
+			rc.rvr != nil && rc.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && !repairBeforePromotion {
+			return "", "a tie-breaker promotion already owns the pending diskful copy"
+		}
+	}
 	voters := voterCount(gctx)
 	needsQUp := voters%2 != 0 // odd voters → adding makes even → q↑ needed
 	needsQMRUp := gctx.datamesh.quorumMinimumRedundancy < gctx.configuration.QuorumMinimumRedundancy()
@@ -323,11 +332,20 @@ func planChangeDToA(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string
 // planChangeTBToD selects the ChangeReplicaType(TB→D) plan variant.
 func planChangeTBToD(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, string) {
 	voters := voterCount(gctx)
+	if gctx.configuration.FailuresToTolerate == 1 &&
+		gctx.configuration.GuaranteedMinimumDataRedundancy == 1 {
+		if voters >= 3 {
+			return "", "the intended R3 layout already has all diskful voters"
+		}
+		if voters < 2 {
+			return "", "waiting to restore the original diskful copies before tie-breaker promotion"
+		}
+	}
 	viaSd := gctx.features.ShadowDiskful
 
 	switch {
 	case !viaSd && voters%2 == 0:
-		return "tb-to-d/v1", ""
+		return "tb-to-d/v2", ""
 	case !viaSd && voters%2 != 0:
 		return "tb-to-d-q-up/v1", ""
 	case viaSd && voters%2 == 0:

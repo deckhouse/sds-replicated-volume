@@ -75,6 +75,24 @@ func TestComputeActualOccupancyShadowDiskful(t *testing.T) {
 	}
 }
 
+func TestPromotionOccupancyStartsAtStorageAdmission(t *testing.T) {
+	rvr := newRVR("node-tb", v1alpha1.ReplicaTypeDiskful, "")
+	rvr.Status.DatameshRevision = 10
+	rvr.Status.Type = v1alpha1.DRBDResourceTypeDiskless
+	if syncbudget.OccupiesEnds(rvr) {
+		t.Fatal("a diskless member without storage must not block its own receiver admission")
+	}
+	rvr.Spec.LVMVolumeGroupName = "admitted-vg"
+	if !syncbudget.OccupiesEnds(rvr) {
+		t.Fatal("storage admission must reserve the receiver before resync starts")
+	}
+	rvr.Spec.LVMVolumeGroupName = ""
+	rvr.Status.Peers = []v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{{ReplicationState: v1alpha1.ReplicationStateSyncSource}}
+	if !syncbudget.OccupiesEnds(rvr) {
+		t.Fatal("a reported transfer must remain charged regardless of preparation state")
+	}
+}
+
 func TestComputeActualOccupancy(t *testing.T) {
 	tests := []struct {
 		name string

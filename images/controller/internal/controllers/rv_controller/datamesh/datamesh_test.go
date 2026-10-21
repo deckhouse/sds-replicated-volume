@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -190,7 +191,10 @@ func runSettleLoop(
 			return
 		}
 		simulate(rv, rvrs)
-		if len(rv.Status.DatameshTransitions) == 0 {
+		// The simulated resync can enable a deferred qmr raise even after
+		// membership completed. Observe that event before declaring stability.
+		if len(rv.Status.DatameshTransitions) == 0 &&
+			rv.Status.Datamesh.QuorumMinimumRedundancy == rv.Status.Configuration.QuorumMinimumRedundancy() {
 			return
 		}
 	}
@@ -234,6 +238,11 @@ func simulateWithPeersAndResync(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.
 func simulateWithPeers(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica) {
 	for _, rvr := range rvrs {
 		rvr.Status.DatameshRevision = rv.Status.DatameshRevision
+		obju.SetStatusCondition(rvr, metav1.Condition{
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType,
+			Status: metav1.ConditionTrue,
+			Reason: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredReasonConfigured,
+		})
 		rvr.Status.Peers = nil
 		for _, other := range rvrs {
 			if other.Name != rvr.Name {

@@ -4981,6 +4981,28 @@ func convergenceFixture(gmdr byte, diskful, tb int) (*v1alpha1.ReplicatedVolume,
 	return rv, rvrs
 }
 
+// promotionLayoutFixture has the current connected reports required to reserve
+// the sole tie-breaker for the three-node conversion.
+func promotionLayoutFixture() (*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica) {
+	rv, rvrs := convergenceFixture(1, 2, 1)
+	rv.Status.DatameshRevision = 10
+	rv.Status.Datamesh.Quorum = 2
+	rv.Status.Datamesh.QuorumMinimumRedundancy = 1
+	for i, rvr := range rvrs {
+		rvr.Status.DatameshRevision = 10
+		rvr.Status.Conditions = []metav1.Condition{{Type: v1alpha1.ReplicatedVolumeReplicaCondDRBDConfiguredType, Status: metav1.ConditionTrue}}
+		if i < 2 {
+			rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{State: v1alpha1.DiskStateUpToDate}
+		}
+		for _, peer := range rvrs {
+			if peer != rvr {
+				rvr.Status.Peers = append(rvr.Status.Peers, v1alpha1.ReplicatedVolumeReplicaStatusPeerStatus{Name: peer.Name, ConnectionState: v1alpha1.ConnectionStateConnected})
+			}
+		}
+	}
+	return rv, rvrs
+}
+
 var _ = Describe("computeTargetLayoutAction", func() {
 	It("takes no action when converged (2D+1TB at r2)", func() {
 		rv, rvrs := convergenceFixture(0, 2, 1)
@@ -5588,15 +5610,13 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("creating diskful replica: have 1D, want 2D+1TB"))
 	})
 
-	It("heals a copy deficit with a tie-breaker surplus too (2D+1TB at an r3 config, upsize)", func() {
-		// The first half of the upsize. The tie-breaker count plays no part in the condition: a
-		// copy deficit is healed by a copy, and the tie-breaker left over once the copies match is
-		// P4's job. Repetition reaches 3D+1TB and then 3D.
-		rv, rvrs := convergenceFixture(1, 2, 1)
+	It("promotes the existing tie-breaker for healthy three-node R2 to R3", func() {
+		rv, rvrs := promotionLayoutFixture()
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		Expect(action.kind).To(Equal(layoutActionRetypeToDiskful))
+		Expect(action.retypeRVRName).To(Equal("rv-1-2"))
 		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
-		Expect(report.message).To(Equal("creating diskful replica: have 2D+1TB, want 3D"))
+		Expect(report.message).To(Equal("promoting tie-breaker rv-1-2 in place: have 2D+1TB, want 3D"))
 	})
 
 	It("heals a copy deficit at one copy and a tie-breaker (1D+1TB at an r3 config)", func() {
@@ -5659,12 +5679,11 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("retype to diskful pending on rv-1-2: have 2D, want 3D"))
 	})
 
-	It("reports a requested retype to diskful even when the layout already matches", func() {
-		// Symmetric to the tie-breaker direction: a replica whose spec already asks for Diskful
-		// while its member is not is a layout change in flight, so "nothing is moving" would be
-		// a lie even at matching counts.
-		rv, rvrs := convergenceFixture(0, 2, 1) // r2 config, actual 2D+1TB
-		rvrs[2].Spec.Type = v1alpha1.ReplicaTypeDiskful
+	It("reports a pending Access-to-Diskful retype even when the layout already matches", func() {
+		// Empty TB reservations can be cancelled after a target reversal. An Access
+		// vestibule still represents a copy in flight and must block Converged.
+		rv, rvrs := convergenceFixture(0, 3, 1)
+		rv.Status.Datamesh.Members[2].Type = v1alpha1.DatameshMemberTypeAccess // actual 2D+1TB
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
@@ -5909,12 +5928,10 @@ var _ = Describe("computeTargetLayoutAction", func() {
 			"tie-breaker rv-1-3 has no replica: waiting for the datamesh to force-remove it (have 2D+2TB, want 2D+1TB)"))
 	})
 
-	It("P4: does not take the tie-breaker away while the third copy cannot be placed", func() {
-		// The cost of getting this wrong is a volume LESS resilient than before the class was
-		// edited, so the composition is pinned explicitly: the removal is reachable only once the
-		// copies match, and here they never do.
-		rv, rvrs := convergenceFixture(1, 2, 1) // r3 config wants 3D, actual 2D+1TB
-		upToDate(rv, 2)
+	It("does not reserve the TB while a fourth replica is already in flight", func() {
+		// The in-flight copy owns the deficit through the add-first path; it is reported, not
+		// removed, even when it cannot be placed.
+		rv, rvrs := promotionLayoutFixture()
 		rvrs = pendingDiskfulRVR(rvrs, 3, scheduledCond(metav1.ConditionFalse,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
 			"no eligible node available", 3))
@@ -5949,13 +5966,15 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(HavePrefix("retype to tie-breaker pending on rv-1-0:"))
 	})
 
-	It("the upsize r2→r3 walks 2D+1TB → 3D+1TB → 3D on its own", func() {
+	It("finishes an older add-first upsize whose extra diskful replica is already placed", func() {
 		// The composition of P3 and P4, one pass per row. Neither pattern knows about the other:
 		// the copy deficit is a copy deficit, and the leftover tie-breaker is a surplus.
 		before, beforeRVRs := convergenceFixture(1, 2, 1)
 		upToDate(before, 2)
+		beforeRVRs = pendingDiskfulRVR(beforeRVRs, 3, nil)
+		beforeRVRs[3].Spec.NodeName = "node-3"
 		action, _ := computeTargetLayoutAction(before, beforeRVRs, nil)
-		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		Expect(action.kind).To(Equal(layoutActionNone))
 
 		// The copy joined but is still resyncing.
 		joined, joinedRVRs := convergenceFixture(1, 3, 1)

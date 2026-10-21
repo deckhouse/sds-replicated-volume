@@ -489,14 +489,15 @@ func makeDatameshSingleStepTransition(
 //     still counted by the raw layout, so the replacement deficit is computed separately
 //     (computeTargetTieBreakerReplacement) — strict create-first, the datamesh releases the old
 //     one only once the replacement is operational.
-//   - P3 heal: create a missing Diskful replica when a copy is gone from the membership — the
-//     one pattern that heals a volume, because only a copy holds data. The replica is created
+//   - In-place R2→R3: prepare and promote the existing TB on its current node,
+//     preserving its identity and waiting for the third copy before raising qmr.
+//   - P3 heal: create a missing Diskful replica when a copy is gone from the membership. The replica is created
 //     with no node and no storage; the scheduler places it (under the resync limiter), the
 //     replica controller asks to join, the datamesh picks an add-diskful plan and the resync runs
 //     itself. Whatever removed the member — a graceful leave, a force-removal, a manual
 //     force-leave, the automatic cleanup of an orphan — is immaterial: the trigger is the missing
 //     member, not its cause.
-//   - P4 tie-breaker surplus (the second half of the upsize r2→r3): delete one TieBreaker replica
+//   - P4 tie-breaker surplus (including completion of older add-first upsizes): delete one TieBreaker replica
 //     once the copies match the configuration and every one of them is UpToDate. Deleting the RVR
 //     is the whole action — the replica controller turns it into a Leave request and the datamesh
 //     removes the member under its own guards.
@@ -548,6 +549,20 @@ func (r *Reconciler) reconcileLayoutConvergence(
 	// MembershipLayoutConverged condition); convergence acts on the target only.
 	targetAction, _ := computeTargetLayoutAction(rv, *rvrs, rvas)
 	switch targetAction.kind {
+	case layoutActionRetypeToDiskful:
+		rvr := findRVRByName(*rvrs, targetAction.retypeRVRName)
+		if rvr == nil {
+			return rf.ContinueAndRequeue()
+		}
+		base := rvr.DeepCopy()
+		// The scheduler assigns storage on this same node; the member remains TB
+		// until DMTE's preparation and connectivity guards pass.
+		rvr.Spec.Type = v1alpha1.ReplicaTypeDiskful
+		if err := r.patchRVR(rf.Ctx(), rvr, base); err != nil {
+			return rf.Failf(err, "retyping TieBreaker RVR %s to Diskful", rvr.Name)
+		}
+		return rf.ContinueAndRequeue()
+
 	case layoutActionRetypeToTieBreaker:
 		rvr := findRVRByName(*rvrs, targetAction.retypeRVRName)
 		if rvr == nil {
@@ -653,6 +668,8 @@ const (
 	layoutActionCreateDiskful
 	// layoutActionRemoveTieBreaker deletes one surplus TieBreaker replica (P4).
 	layoutActionRemoveTieBreaker
+	// layoutActionRetypeToDiskful reserves the existing TB for in-place R2 -> R3.
+	layoutActionRetypeToDiskful
 )
 
 // targetLayoutAction is the pure decision of what (if anything) layout convergence should do this
@@ -663,7 +680,8 @@ const (
 // target artifact (see controller-reconcile-helper-compute.mdc, "Patch-domain separation").
 type targetLayoutAction struct {
 	kind layoutActionKind
-	// retypeRVRName is the RVR chosen for a P1 retype (set only for layoutActionRetypeToTieBreaker).
+	// retypeRVRName identifies the replica whose spec type changes, including
+	// cancellation of an unstarted promotion reservation.
 	retypeRVRName string
 	// removeRVRName is the tie-breaker RVR chosen for a P4 removal (set only for
 	// layoutActionRemoveTieBreaker).
@@ -691,7 +709,9 @@ type membershipLayoutConvergedReport struct {
 //     actual/intended comparison on purpose: mid-flight D→TB makes the counted layout equal the
 //     intended one for one step (the member is already a TieBreaker while the transition is still
 //     running), and reporting Converged there would flip the condition True and back.
-//  3. ANY retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
+//     Before generic pending-work checks, in-place promotion reserves the TB and
+//     handles a pre-dispatch target reversal or lost original voter.
+//  3. ANY remaining retype requested in an earlier pass (spec flipped, DMTE not dispatched yet) →
 //     Converging, in either direction (to a tie-breaker, or to diskful). The step does not look
 //     at the deficit: a flipped spec is a layout change in flight even when the intended layout
 //     no longer asks for it (the configuration was switched back inside the dispatch window), and
@@ -707,7 +727,8 @@ type membershipLayoutConvergedReport struct {
 //     otherwise the whitelist below. The in-flight term belongs here for the same reason steps
 //     3 and 4 precede the comparison — see "Diskful replicas in flight" below.
 //
-// Whitelist (only these four mismatches ever trigger an action; everything else is reported but
+// Whitelist (in-place promotion/recovery is considered before these general patterns; all
+// other mismatches are reported but
 // never acted upon). The criterion for membership is that REPEATING the action provably ends in
 // the intended layout; it is also what explains P1's dead end below, which without it reads as
 // an unmotivated concession:
@@ -716,18 +737,16 @@ type membershipLayoutConvergedReport struct {
 //     an r2 config becomes 3D+1TB after one retype and is then reported TransitionUnsupported.
 //   - P2 tie-breaker deficit: actualD == intendedD && actualTB < intendedTB — create the missing
 //     tie-breaker.
-//   - P3 heal (diskful deficit): actualD < intendedD — create the missing diskful copy. A copy
-//     carries data, so this is the only pattern that actually heals a volume. The tie-breaker
-//     count is deliberately NOT part of the condition: a copy deficit is healed by a copy
-//     whatever the tie-breakers are doing, and a surplus one left over afterwards is P4's job.
-//   - P4 tie-breaker surplus (upsize r2→r3): actualD == intendedD && actualTB > intendedTB —
+//   - P3 heal (diskful deficit): actualD < intendedD — create the missing diskful copy
+//     when the in-place TB promotion does not own the deficit. A surplus TB left
+//     over after an add-first growth is handled by P4.
+//   - P4 tie-breaker surplus: actualD == intendedD && actualTB > intendedTB —
 //     delete one tie-breaker replica, but only once every counted copy is UpToDate
 //     (computeTargetSurplusTieBreakerRemoval). A tie-breaker carries no data, so this is the one
 //     deletion convergence performs, and it is reversible by P2.
 //
-// P3 and P4 compose into the upsize without either knowing about the other: 2D+1TB at an intended
-// 3D is a copy deficit, so P3 runs; once the copy has joined the counts level and P4 takes over;
-// while the copy resyncs P4 waits. The four patterns are mutually exclusive by the sign of the
+// P3 and P4 complete an add-first upsize when a copy was already placed before
+// the TB could be reserved. Healthy 2D+TB → 3D uses the in-place promotion instead. The four patterns are mutually exclusive by the sign of the
 // diskful deficit and, at an equal one, by the sign of the tie-breaker deficit, so the order of
 // the case arms carries no meaning.
 //
@@ -793,6 +812,14 @@ func computeTargetLayoutAction(
 			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
 			message: fmt.Sprintf("layout transition in progress: have %s, want %s", actualLayout, intendedLayout),
 		}
+	}
+
+	if action, report, ok := computeTargetPendingPromotionRecovery(rv, rvrs); ok {
+		return action, report
+	}
+
+	if action, report, ok := computeTargetTieBreakerPromotion(rv, rvrs); ok {
+		return action, report
 	}
 
 	// 3. A retype already requested in a previous pass (spec flipped, DMTE not started yet).
@@ -947,7 +974,7 @@ func computeTargetLayoutAction(
 		}
 
 	// P4 tie-breaker surplus: the copies match the configuration and a tie-breaker is left over.
-	// The one deletion convergence performs, and the second half of the upsize: it is gated on
+	// This removes an obsolete witness after add-first growth and is gated on
 	// every counted copy being UpToDate, because until then the volume carries fewer copies of the
 	// data than the configuration asks for (see computeTargetSurplusTieBreakerRemoval).
 	case actualD == intendedD && actualTB > intendedTB:
@@ -965,6 +992,134 @@ func computeTargetLayoutAction(
 				actualLayout, intendedLayout),
 		}
 	}
+}
+
+// computeTargetPendingPromotionRecovery handles changes to the input layout
+// before DMTE starts a promotion. Empty storage intent can be cancelled after
+// a target reversal. If an original voter was removed, repair that data copy
+// first while the existing TB keeps its role and its prepared storage.
+func computeTargetPendingPromotionRecovery(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (targetLayoutAction, membershipLayoutConvergedReport, bool) {
+	if rv.Status.Configuration.FailuresToTolerate != 1 {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	var tb *v1alpha1.ReplicatedVolumeReplica
+	for _, member := range rv.Status.Datamesh.Members {
+		if member.Type != v1alpha1.DatameshMemberTypeTieBreaker {
+			continue
+		}
+		rvr := findRVRByName(rvrs, member.Name)
+		if rvr != nil && rvr.DeletionTimestamp == nil && rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			tb = rvr
+			break
+		}
+	}
+	if tb == nil {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	report := membershipLayoutConvergedReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	}
+	if rv.Status.Configuration.GuaranteedMinimumDataRedundancy == 0 {
+		// No LVG means the scheduler has not committed any storage or resync
+		// reservation. The patch's resourceVersion protects that assumption
+		// against a concurrent scheduler write on this same RVR.
+		canCancel := tb.Spec.LVMVolumeGroupName == "" && tb.Spec.LVMVolumeGroupThinPoolName == "" && tb.Status.BackingVolume == nil
+		for _, request := range rv.Status.DatameshReplicaRequests {
+			if request.Name == tb.Name {
+				canCancel = false
+			}
+		}
+		if canCancel {
+			report.message = fmt.Sprintf("cancelling unstarted tie-breaker promotion on %s after the target returned to R2", tb.Name)
+			return targetLayoutAction{kind: layoutActionRetypeToTieBreaker, retypeRVRName: tb.Name}, report, true
+		}
+		report.reason = v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge
+		report.message = fmt.Sprintf("target returned to R2 after storage preparation on %s; prepared promotion is not cancelled automatically", tb.Name)
+		return targetLayoutAction{kind: layoutActionNone}, report, true
+	}
+	actualD, actualTB := computeActualLayout(rv)
+	if rv.Status.Configuration.GuaranteedMinimumDataRedundancy != 1 || actualD >= 2 {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	// The TB's own spec is an in-flight copy, but cannot replace an original
+	// voter yet. Exclude that one reservation when checking for a repair.
+	others := make([]*v1alpha1.ReplicatedVolumeReplica, 0, len(rvrs)-1)
+	for _, rvr := range rvrs {
+		if rvr.Name != tb.Name {
+			others = append(others, rvr)
+		}
+	}
+	if countPendingDiskfulCreations(rv, others) > 0 {
+		return targetLayoutAction{kind: layoutActionNone},
+			computeDiskfulCreationPendingReport(rv, others, formatLayout(actualD, actualTB), "3D", false), true
+	}
+	report.message = "restoring the original diskful copies before continuing tie-breaker promotion"
+	return targetLayoutAction{kind: layoutActionCreateDiskful}, report, true
+}
+
+// computeTargetTieBreakerPromotion prefers the existing TB for R2 -> R3. A
+// pending Diskful spec on that same member is the durable reservation. Another
+// diskful copy already in flight is never discarded to make room: before the
+// reservation it keeps its existing path, after it the conflict is reported.
+func computeTargetTieBreakerPromotion(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (targetLayoutAction, membershipLayoutConvergedReport, bool) {
+	if !datamesh.IsR2ToR3Promotion(rv) {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	var tb *v1alpha1.ReplicatedVolumeReplica
+	for _, member := range rv.Status.Datamesh.Members {
+		if member.Type == v1alpha1.DatameshMemberTypeTieBreaker {
+			tb = findRVRByName(rvrs, member.Name)
+			break
+		}
+	}
+	if tb == nil || tb.DeletionTimestamp != nil {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	report := membershipLayoutConvergedReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+	}
+	for _, rvr := range rvrs {
+		if rvr.Name == tb.Name || !isDiskfulCreationInFlight(rv, rvr) {
+			continue
+		}
+		if tb.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			// Another copy is already on its way in. Let the add-first path
+			// own it instead of reserving the TB as well.
+			return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+		}
+		report.reason = v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge
+		report.message = fmt.Sprintf("tie-breaker promotion on %s conflicts with diskful replica %s; neither replica is removed automatically", tb.Name, rvr.Name)
+		return targetLayoutAction{kind: layoutActionNone}, report, true
+	}
+	if tb.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+		if condition := obju.GetStatusCondition(tb, v1alpha1.ReplicatedVolumeReplicaCondScheduledType); condition != nil && condition.ObservedGeneration == tb.Generation && condition.Status == metav1.ConditionFalse {
+			report.reason = v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge
+			report.message = fmt.Sprintf("cannot prepare disk on tie-breaker %s: %s", tb.Name, condition.Message)
+		} else if condition != nil && condition.ObservedGeneration == tb.Generation &&
+			condition.Reason == v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot {
+			report.message = fmt.Sprintf("tie-breaker promotion on %s is waiting for a free resync slot: %s", tb.Name, condition.Message)
+		} else {
+			report.message = fmt.Sprintf("preparing in-place tie-breaker promotion on %s: have 2D+1TB, want 3D", tb.Name)
+		}
+		return targetLayoutAction{kind: layoutActionNone}, report, true
+	}
+	if tb.Spec.Type != v1alpha1.ReplicaTypeTieBreaker {
+		return targetLayoutAction{}, membershipLayoutConvergedReport{}, false
+	}
+	if ready, message := datamesh.TieBreakerPromotionReadiness(rv, rvrs, tb.Name); !ready {
+		report.message = "waiting to promote tie-breaker: " + message
+		return targetLayoutAction{kind: layoutActionNone}, report, true
+	}
+	report.message = fmt.Sprintf("promoting tie-breaker %s in place: have 2D+1TB, want 3D", tb.Name)
+	return targetLayoutAction{kind: layoutActionRetypeToDiskful, retypeRVRName: tb.Name}, report, true
 }
 
 // computeTargetTieBreakerReplacement decides what convergence does about tie-breaker members

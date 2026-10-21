@@ -907,9 +907,49 @@ reason P1 stops where it does:
   (`computeActualPendingTieBreakerSchedulingFailure`); a missing, `Unknown` or stale `Scheduled`
   means the scheduler has simply not (re-)evaluated the replica yet → `Converging`. Once it becomes
   `Scheduled=True` the report goes back to `Converging`.
+- **In-place R2 → R3 promotion** — with target `FTT=1, GMDR=1` and actual `2D+TB`,
+  reserve the existing TB by patching its RVR `spec.type` to `Diskful`. It keeps its RVR UID,
+  DRBD Node ID and node; no fourth replica or node is required. Selection waits for both existing
+  disks to be UpToDate and for current configured/connected reports. TransZonal promotion requires
+  three distinct zones. The scheduler assigns an LVG on the TB's own node using normal capacity
+  scoring and **both sender and receiver resync budgets**, even though `nodeName` is already set.
+  Until backing storage is ready, the datamesh member remains a functioning TB. No eligible storage
+  on that node is `CannotConverge`; `WaitingForResyncSlot` is `Converging`.
+
+  `tb-to-d/v2` keeps `q=2` throughout: **TB → D∅** enables peer bitmaps and waits for every
+  current configured/connected acknowledgement; **D∅ → D** attaches the disk and waits until all
+  current voting copies are UpToDate; **qmr↑** then commits `qmr=2` and waits for all acknowledgements.
+  Only that final acknowledgement commits baseline GMDR=1 and releases the rollout slot.
+  A persisted v1 transition is still settled with its original steps.
+
+  Standalone quorum reconciliation and the raises embedded in membership plans preserve `qmr=1`
+  for R3 growth/repair while baseline GMDR is still zero and fewer than three current UpToDate copies
+  exist. This hold starts at the configuration intent, before the TB request is published. An already
+  committed `qmr=2` is never automatically reduced: that older stuck state can still be converted,
+  but one-node failure tolerance returns only after the third copy synchronizes.
+
+  A Diskful replica already in flight is never removed to make room. If it exists before the
+  reservation, no TB is reserved and the add-first path (P3, then P4) keeps it. If it appears after
+  the reservation, both its Join and the TB promotion are blocked and the conflict is reported as
+  `CannotConverge`; no replica is deleted automatically. A repair of a lost original voter takes
+  priority over the reserved TB's first storage assignment.
+
+  Before dispatch, a target reverted to R2 cancels an empty promotion reservation through an
+  optimistic-lock spec patch, provided no LVG, backing volume or membership request exists.
+  If storage was already assigned but the plan has not started, automatic cancellation is refused
+  and reported as `CannotConverge`. If an original voter disappears before dispatch, the TB keeps
+  its role while normal diskful repair restores the two source copies, then v2 can start.
+
+  Restart resumes the persisted step. A target reverted during an active plan does not roll the
+  disk conversion back: the plan finishes without an unnecessary qmr increase, then normal layout
+  convergence can demote a copy again. An emergency removal of an original voter lets the surviving
+  synchronized members finish the promotion without raising qmr, releasing the voting slot for
+  repair; that repair keeps the same qmr hold until three copies are current.
+
 - **P3 heal (diskful deficit)** — `actualD < intendedD`: create the
   missing diskful copy (`newRVR(..., Diskful, "")` → `SetControllerRef` → `createRVR` →
-  `insertRVRSorted`). This is the only pattern that heals a volume, because only a copy holds data.
+  `insertRVRSorted`). The in-place TB promotion owns the R2→R3 deficit first; P3 repairs
+  missing data-bearing members in other layouts.
   It fires on the member going missing, whatever removed it — a graceful Leave, a
   `ForceRemoveReplica`, a manual `ForceLeave`, or the datamesh's own cleanup of an orphan. A copy
   whose *member* is alive but whose *disk* is gone is invisible here on purpose: `computeActualLayout`
@@ -925,8 +965,9 @@ reason P1 stops where it does:
   The tie-breaker count is deliberately NOT part of the condition. A copy deficit is healed by a
   copy whatever the tie-breakers are doing: with **fewer** tie-breakers than intended (r1→r2,
   r1→r3, 3D → 4D+1TB) the copy goes in first and P2 supplies the tie-breaker on a later pass; with
-  **more** (the upsize r2→r3, or 4D+1TB → 5D) the copy goes in first and P4 takes the leftover
-  tie-breaker away. Either way repetition arrives at the intended layout, which is what the
+  **more** (e.g. 4D+1TB → 5D, or an older R2→R3 whose extra copy was already placed),
+  the copy goes in first and P4 takes the leftover tie-breaker away. Healthy R2→R3 is handled
+  by the in-place promotion above before P3 is considered. Either way repetition arrives at the intended layout, which is what the
   whitelist criterion asks for. The condition used to carry `&& actualTB <= intendedTB`, and it
   had to: without P4 the upsize would have healed the copy and then sat at `3D+1TB` forever.
 
@@ -944,9 +985,8 @@ reason P1 stops where it does:
   the member has left and the DRBD resource on that node is torn down. Nothing new appears in that
   chain — it is the path a hand-deleted tie-breaker has always taken.
 
-  This is the one deletion convergence performs, and the pattern that makes the upsize r2→r3 a
-  single operator action: P3 brings the third copy in, the counts level, P4 takes the witness the
-  configuration no longer asks for away. Neither pattern knows about the other. It is written over
+  This removes a surplus witness after an add-first growth has finished. The in-place R2→R3
+  promotion does not remove a witness: the same member becomes the third diskful copy. It is written over
   a tie-breaker SURPLUS rather than over the special case "none is intended", so `2D+2TB` at an r2
   class converges as well; splitting the two would mean two nearly identical whitelist entries.
 
@@ -1029,7 +1069,9 @@ created and only its replica id is taken. Removing the volume's own unplaceable 
 #### Configuration flip-flop (known limitation)
 
 The whitelist is one-directional: convergence retypes D→TB and creates a tie-breaker, and it never
-flips a `spec.type` back. Reverting the class (r2 → r3) inside the retype window — between the
+flips a completed diskful demotion back. The exception is an unstarted TB promotion with no
+storage assignment or membership request: it can return to TB when the target returns to R2.
+Reverting the class (r2 → r3) inside the retype window — between the
 `spec.type` patch and the DMTE dispatch — therefore leaves the retype **stranded**, and it is not
 rolled back automatically. The volume never reports `Converged` while this lasts (step 3 of the
 decision order fires on any pending retype), and the `Converging` message names the flipped
@@ -1037,7 +1079,7 @@ replica. Two outcomes, depending on when the revert lands:
 
 | Branch | What happened | Resulting state | Recovery |
 |--------|---------------|-----------------|----------|
-| **A — the DMTE dispatched under the r2 configuration** | The lose-side guards passed (`D_min = FTT+GMDR+1 = 2` at r2), so the ChangeRole transition runs to completion | The retype finishes: `2D+1TB` against an intended `3D` | Nothing. This is the upsize, and it converges on its own: P3 creates the third copy, and once every copy is UpToDate P4 removes the leftover tie-breaker. The volume reports `Converging` with the step it is on throughout |
+| **A — the DMTE dispatched under the r2 configuration** | The lose-side guards passed (`D_min = FTT+GMDR+1 = 2` at r2), so the ChangeRole transition runs to completion | The retype finishes: `2D+1TB` against an intended `3D` | Nothing. This is the upsize, and it converges on its own by promoting the existing tie-breaker on its current node. The volume reports `Converging` with the step it is on throughout |
 | **B — the configuration was already r3 at dispatch time** | `guardFTTPreserved` blocks the transition permanently (`D_min = FTT+GMDR+1 = 3`, voters = 3, so `3 <= 3`); the retype never runs and **no data is lost** — the guard did its job | Raw layout stays `3D` and matches the intended one, but the volume reports `Converging` **forever** | Undo the flip: patch the RVR back to `spec.type: Diskful` **together with** the backing-volume fields the retype cleared (`spec.lvmVolumeGroupName`, plus `spec.lvmVolumeGroupThinPoolName` on a thin pool), copying the values from the volume's datamesh member record, which still carries them |
 
 Both fields must go in the **same** patch as the type: the API rejects backing-volume fields on a
@@ -1130,7 +1172,7 @@ name and the leading ones take the free slots together, each slot freed only by 
 `MembershipLayoutConverged=True/Converged`. A layout no volume can converge on (this section's
 `TransitionUnsupported`) therefore reaches at most `maxParallel` volumes. For the upsize r2→r3 the
 same rule sets the pace of a class-wide growth: a volume holds its slot for the whole of it — the
-copy is created, it waits for a resync slot, it resyncs, and only then does the tie-breaker leave —
+TB reserves a disk, waits for a resync slot, is promoted, resyncs, and confirms the final qmr —
 so `maxParallel` bounds how many volumes resync at once on top of whatever the resync limiter
 already allows per node.
 
