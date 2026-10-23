@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261013063326-687a3669cd1c
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261022094722-9b73a0437623
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
 	github.com/LINBIT/golinstor v0.49.0
 	github.com/google/uuid v1.6.0
