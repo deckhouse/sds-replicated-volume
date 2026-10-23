@@ -18,7 +18,7 @@ final: false
 dependencies:
 {{- range $ImageID := $ImagesIDList }}
   {{- $ImageNameCamel  := $ImageID | splitList "/" | last  | camelcase | untitle }}
-  - image: {{ $ImageID }}
+  - from: {{ $ImageID }}
     before: setup
     imports:
     - type: ImageDigest

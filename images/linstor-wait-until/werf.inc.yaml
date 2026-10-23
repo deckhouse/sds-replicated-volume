@@ -15,8 +15,6 @@ git:
   - add: /images/{{ $.ImageName }}/patches
     to: /patches
     stageDependencies:
-      beforeSetup:
-        - "**/*"
       setup:
         - "**/*"
 
@@ -47,9 +45,6 @@ import:
     to: /{{ $.ImageName }}
     before: setup
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  LABEL:
-    distro: all
-    version: all
-    linstor-wait-until: {{ include "get_oss_version_by_id" (list "LINSTOR_WAIT_UNTIL" $.Root) }}
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]

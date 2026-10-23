@@ -59,8 +59,3 @@ import:
       - install
       - uninstall
     before: setup
-docker:
-  LABEL:
-    distro: all
-    version: all
-    drbd: {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}

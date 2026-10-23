@@ -41,3 +41,10 @@ stork -> gcp-compute-persistent-disk-csi-driver, a code path this scheduler
 extender does not use.
 
 Applied after 004; `go.mod` / `go.sum` only.
+
+### 006-fix-cve-x-net.patch
+
+Raises `golang.org/x/net` v0.58.0 -> **v0.60.0** for **CVE-2026-78669**, the
+Trivy finding against the built `linstor-scheduler-extender` binary
+(`golang.org/x/text` is already at the fixed v0.42.0). Applied after 005;
+`go.mod` / `go.sum` only.

@@ -66,8 +66,9 @@ import:
 git:
 {{- include "image mount points" . }}
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  USER: deckhouse:deckhouse
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
+    user: deckhouse:deckhouse
 ---
 {{- include "vex mitigation" (list $ $.ImageName) }}

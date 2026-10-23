@@ -71,3 +71,9 @@ Raises `google.golang.org/grpc` v1.82.1 -> **v1.83.2** for **CVE-2026-84304** an
 **CVE-2026-84303** (fixed in 1.83.1) and **CVE-2026-84445** (fixed in 1.83.2), the
 Trivy findings against the built `linstor-csi` binary. Applied after 007;
 `go.mod` / `go.sum` only.
+
+### 009-fix-cve.patch
+
+Raises `golang.org/x/net` v0.58.0 -> **v0.60.0** for **CVE-2026-78669** and
+`golang.org/x/text` v0.41.0 -> **v0.42.0** for **CVE-2026-56851**. Applied after
+008; `go.mod` / `go.sum` only.

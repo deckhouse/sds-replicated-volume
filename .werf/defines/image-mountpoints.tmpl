@@ -7,17 +7,11 @@
   to: {{ $v }}
   owner: 64535
   group: 64535
-  stageDependencies:
-    install:
-    - "**/*"
   {{- end }}
   {{- range $v := $mountPoints.files }}
 - add: /tools/mounts/mountfile
   to: {{ $v }}
   owner: 64535
   group: 64535
-  stageDependencies:
-    install:
-    - "**/*"
   {{- end }}
 {{- end }}

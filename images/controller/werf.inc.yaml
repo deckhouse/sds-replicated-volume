@@ -64,6 +64,7 @@ import:
     to: /{{ $.ImageName }}
     before: setup
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  USER: deckhouse:deckhouse
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
+    user: deckhouse:deckhouse

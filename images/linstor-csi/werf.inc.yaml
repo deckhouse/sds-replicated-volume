@@ -117,9 +117,6 @@ import:
     add: /relocate
     to: /
     before: setup
-docker:
-  ENTRYPOINT: ["/linstor-csi"]
-  LABEL:
-    distro: all
-    version: all
-    linstor-csi: {{ include "get_oss_version_by_id" (list "LINSTOR_CSI" $.Root) }}
+imageSpec:
+  config:
+    entrypoint: ["/linstor-csi"]

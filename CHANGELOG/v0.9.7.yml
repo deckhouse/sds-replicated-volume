@@ -1,6 +1,6 @@
 Changes:
-  - Bugfix: the controller is granted patch on events instead of list - a repeated event write is no longer denied by RBAC
-  - Bugfix: the VPA is switched from the deprecated Auto update mode to InPlaceOrRecreate
+  - "Bugfix: the controller is granted patch on events instead of list - a repeated event write is no longer denied by RBAC"
+  - "Bugfix: the VPA is switched from the deprecated Auto update mode to InPlaceOrRecreate"
   - Optional resources are enabled based on the presence of the CRD in the API, not on the list of enabled modules - the checks are routed through helm_lib_api_version_exists
   - Base images updated to v2.1.2 and Go to 1.26.6
-  - Internal build changes: CI updated, crds, docs and openapi are shipped in the release image
+  - "Internal build changes: CI updated, crds, docs and openapi are shipped in the release image"

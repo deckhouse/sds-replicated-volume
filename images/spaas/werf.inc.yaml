@@ -57,9 +57,6 @@ shell:
     - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  LABEL:
-    distro: all
-    version: all
-    spaas: {{ include "get_oss_version_by_id" (list "SPAAS" $.Root) }}
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]

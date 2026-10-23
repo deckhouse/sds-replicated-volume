@@ -206,12 +206,8 @@ shell:
       done
     - sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf
 
-docker:
-  ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
-  LABEL:
-    distro: ALTLinux
-    version: all
-    drbd-utils: {{ include "get_oss_version_by_id" (list "DRBD_UTILS" $.Root) }}
-    drbd-reactor: {{ include "get_oss_version_by_id" (list "DRBD_REACTOR" $.Root) }}
+imageSpec:
+  config:
+    entrypoint: ["/usr/sbin/drbd-reactor"]
 ---
 {{- include "vex mitigation" (list $ $.ImageName) }}

@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-linstor-scheduler-extender",
   "author": "Deckhouse <contact@deckhouse.io>",
-  "version": 2,
+  "version": 3,
   "statements": [
     {
       "vulnerability": {
@@ -140,7 +140,7 @@
       },
       "products": [
         {
-          "@id": "pkg:golang/golang.org/x/crypto@v0.53.0"
+          "@id": "pkg:golang/golang.org/x/crypto@v0.57.0"
         }
       ],
       "status": "not_affected",
@@ -148,5 +148,5 @@
       "impact_statement": "Advisory затрагивает неподдерживаемый пакет golang.org/x/crypto/openpgp. golang.org/x/crypto подтягивается транзитивно только ради cryptobyte, chacha20 и ssh; `go mod why golang.org/x/crypto/openpgp` показывает, что main module не нуждается в пакете openpgp, поэтому он не компилируется в бинарный файл. Релиза golang.org/x/crypto без openpgp не существует, поэтому исправить обновлением нельзя"
     }
   ],
-  "timestamp": "2026-07-27T00:00:00Z"
+  "timestamp": "2026-10-22T00:00:00Z"
 }

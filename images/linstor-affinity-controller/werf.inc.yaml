@@ -44,9 +44,6 @@ import:
     to: /{{ $.ImageName }}
     before: setup
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  LABEL:
-    distro: all
-    version: all
-    linstor-affinity-controller: {{ include "get_oss_version_by_id" (list "LINSTOR_AFFINITY_CONTROLLER" $.Root) }}
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]

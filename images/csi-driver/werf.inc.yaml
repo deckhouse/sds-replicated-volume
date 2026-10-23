@@ -129,8 +129,6 @@ import:
     add: /relocate
     to: /
     before: setup
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  LABEL:
-    distro: all
-    version: all
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]

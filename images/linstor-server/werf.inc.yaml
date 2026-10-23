@@ -443,20 +443,12 @@ shell:
     - {{ $.Root.SVACE_CLEANUP_CMD }}
     - {{ $.Root.ALT_CLEANUP_CMD }}
 
-docker:
-  # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
-  # satellite: 3366/tcp 3367/tcp
-  EXPOSE: ["3376/tcp", "3377/tcp", "3370/tcp", "3371/tcp", "3366/tcp", "3367/tcp"]
-  ENTRYPOINT: ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
-  CMD: ["startSatellite"]
-  LABEL:
-    distro: ALTLinux
-    version: all
-    linstor-server: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER" $.Root) }}
-    linstor-api-py: {{ include "get_oss_version_by_id" (list "LINSTOR_API_PY" $.Root) }}
-    linstor-client: {{ include "get_oss_version_by_id" (list "LINSTOR_CLIENT" $.Root) }}
-    linstor-common: {{ include "get_oss_version_by_id" (list "LINSTOR_COMMON" $.Root) }}
-    k8s-await-election: {{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" $.Root) }}
-    piraeus-entry: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" $.Root) }}
+imageSpec:
+  config:
+    # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
+    # satellite: 3366/tcp 3367/tcp
+    expose: ["3376/tcp", "3377/tcp", "3370/tcp", "3371/tcp", "3366/tcp", "3367/tcp"]
+    entrypoint: ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
+    cmd: ["startSatellite"]
 ---
 {{- include "vex mitigation" (list $ $.ImageName) }}

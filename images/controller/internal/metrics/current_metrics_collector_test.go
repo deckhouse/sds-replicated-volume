@@ -115,8 +115,8 @@ func TestCurrentMetricsCollectorIsRegisteredOnLeaderOnly(t *testing.T) {
 	}
 
 	select {
-	case <-started:
-		t.Fatal("runnable returned before its context was canceled")
+	case err := <-started:
+		t.Fatalf("runnable returned before its context was canceled: %v", err)
 	default:
 	}
 
@@ -133,7 +133,10 @@ func TestCurrentMetricsCollectorIsRegisteredOnLeaderOnly(t *testing.T) {
 	cancel()
 
 	select {
-	case <-started:
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("runnable returned an error after the second start: %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("runnable did not stop after the second context was canceled")
 	}
