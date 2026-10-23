@@ -1,0 +1,79 @@
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (.Values.global.enabledModules | has "admission-policy-engine-crd") }}
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: SecurityPolicyException
+metadata:
+  name: agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+spec:
+  securityContext:
+    privileged:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privileged mode for the agent container.
+          The agent drives the DRBD kernel module of the node with drbdsetup and drbdmeta: it creates DRBD devices on top of the node block devices, writes DRBD metadata to them, disables the DRBD usermode helper in sysfs and maintains the /dev/sdsrv symlinks. None of this is possible from an unprivileged container.
+    allowPrivilegeEscalation:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privilege escalation for the agent container.
+          The container runs privileged, and a privileged container always runs with privilege escalation allowed.
+    runAsUser:
+      allowedValues:
+        - 0
+      metadata:
+        description: |
+          Allow running as root (UID 0) for the agent and drbd-prometheus-exporter containers.
+          The agent manages DRBD devices and metadata of the node, which requires root. drbd-reactor reads its configuration /etc/drbd-reactor.toml, which belongs to root with mode 0640 in the image; it drops all capabilities.
+    runAsNonRoot:
+      allowedValue: false
+      metadata:
+        description: |
+          Allow running as root for the agent and drbd-prometheus-exporter containers.
+          The agent manages DRBD devices and metadata of the node, which requires root. drbd-reactor reads its configuration, which only root can read in the image; it drops all capabilities.
+  network:
+    hostNetwork:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow host network access for the agent Pod.
+          DRBD replicates over the node network: the agent configures DRBD connections on the node addresses and checks that a port of the DRBD port range is free on the node by binding it before handing it to DRBD.
+    hostPorts:
+      - port: 4215
+        protocol: TCP
+        metadata:
+          description: |
+            Port 4215 of kube-rbac-proxy, bound on the node because the Pod runs in the host network. It serves the agent metrics to Prometheus.
+      - port: 4273
+        protocol: TCP
+        metadata:
+          description: |
+            Port 4273 of kube-rbac-proxy-drbd, bound on the node because the Pod runs in the host network. It serves the DRBD metrics of drbd-reactor to Prometheus.
+  volumes:
+    types:
+      allowedValues:
+        - hostPath
+      metadata:
+        description: |
+          Allow hostPath volumes for the agent Pod.
+          The agent works with the block devices and the sysfs of the node and publishes stable device paths for the replicated volumes on the node.
+    hostPath:
+      allowedValues:
+        - path: /dev/
+          readOnly: false
+          metadata:
+            description: |
+              The block devices of the node, on which the agent creates DRBD devices and writes their metadata.
+        - path: /dev/sdsrv/
+          readOnly: false
+          metadata:
+            description: |
+              The directory of the node where the agent keeps the /dev/sdsrv/<name> symlinks to the DRBD devices of the replicated volumes.
+        - path: /sys/
+          readOnly: false
+          metadata:
+            description: |
+              The sysfs of the node, read for the DRBD module version and block device attributes and written to disable the DRBD usermode helper.
+{{- end }}

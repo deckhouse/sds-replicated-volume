@@ -1,0 +1,50 @@
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (.Values.global.enabledModules | has "admission-policy-engine-crd") }}
+{{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: SecurityPolicyException
+metadata:
+  name: control-plane-migrator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 2 }}
+spec:
+  securityContext:
+    runAsUser:
+      allowedValues:
+        - 0
+      metadata:
+        description: |
+          Allow running as root (UID 0) for the create-migrator-directory init container.
+          It creates /opt/deckhouse/tmp/linstor-migrator in the root-owned /opt/deckhouse/tmp of the node and hands it to the deckhouse user (64535) with mode 0700, so the migrator itself runs as that user.
+    runAsNonRoot:
+      allowedValue: false
+      metadata:
+        description: |
+          Allow running as root for the create-migrator-directory init container.
+          It creates the migrator directory in the root-owned /opt/deckhouse/tmp of the node and hands it to the deckhouse user.
+    capabilities:
+      allowedValues:
+        add:
+          - CHOWN
+          - FOWNER
+      metadata:
+        description: |
+          Allow the CHOWN and FOWNER capabilities for the create-migrator-directory init container.
+          It drops all capabilities and adds back only these two: CHOWN to hand the directory to the deckhouse user, FOWNER to reset the mode of the directory on a re-run, when it already belongs to that user.
+  volumes:
+    types:
+      allowedValues:
+        - hostPath
+      metadata:
+        description: |
+          Allow hostPath volumes for the control-plane-migrator Pod.
+          The migrator keeps its log and a backup of the LINSTOR database resources in a directory of the master node, so they outlive the Job Pods.
+    hostPath:
+      allowedValues:
+        - path: /opt/deckhouse/tmp
+          readOnly: false
+          metadata:
+            description: |
+              The Deckhouse temporary directory of the node, where the migrator keeps /opt/deckhouse/tmp/linstor-migrator.
+{{- end }}
+{{- end }}

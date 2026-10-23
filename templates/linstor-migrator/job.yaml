@@ -12,6 +12,9 @@ spec:
   template:
     metadata:
       {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 6 }}
+        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        security.deckhouse.io/security-policy-exception: control-plane-migrator
+        {{- end }}
     spec:
       serviceAccountName: control-plane-migrator
       restartPolicy: Never
@@ -42,6 +45,12 @@ spec:
           runAsGroup: 0
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - FOWNER
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:

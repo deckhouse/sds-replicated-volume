@@ -93,6 +93,9 @@ spec:
       namespace: d8-{{ .Chart.Name }}
       labels:
         app: linstor-node
+        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        security.deckhouse.io/security-policy-exception: linstor-node
+        {{- end }}
       annotations:
         kubectl.kubernetes.io/default-container: linstor-satellite
     spec:
@@ -118,6 +121,9 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         resources:
@@ -136,6 +142,9 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         resources:
@@ -193,6 +202,9 @@ spec:
           privileged: true
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: true
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
           seLinuxOptions:
@@ -307,6 +319,9 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         terminationMessagePath: /dev/termination-log

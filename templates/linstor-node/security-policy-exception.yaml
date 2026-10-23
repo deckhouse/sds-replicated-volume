@@ -1,0 +1,92 @@
+{{- if and (not .Values.sdsReplicatedVolume.internal.newControlPlane) (.Values.global.enabledModules | has "admission-policy-engine-crd") }}
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: SecurityPolicyException
+metadata:
+  name: linstor-node
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-node")) | nindent 2 }}
+spec:
+  securityContext:
+    privileged:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privileged mode for the linstor-satellite container.
+          The LINSTOR satellite creates LVM volumes and DRBD devices on the node block devices with the LVM tooling and drbdsetup, and mounts the kernel modules directory of the node with bidirectional propagation. None of this is possible from an unprivileged container.
+    allowPrivilegeEscalation:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privilege escalation for the linstor-satellite container.
+          The container runs privileged, and a privileged container always runs with privilege escalation allowed.
+    runAsUser:
+      allowedValues:
+        - 0
+      metadata:
+        description: |
+          Allow running as root (UID 0) for the linstor-node Pod.
+          The LINSTOR satellite manages LVM and DRBD on the node, which requires root. The other containers share the LINSTOR and drbd-reactor images, whose files are owned by root; they drop all capabilities.
+    runAsNonRoot:
+      allowedValue: false
+      metadata:
+        description: |
+          Allow running as root for the linstor-node Pod.
+          The LINSTOR satellite manages LVM and DRBD on the node, which requires root. The other containers share the LINSTOR and drbd-reactor images, whose files are owned by root; they drop all capabilities.
+    seLinuxOptions:
+      allowedValues:
+        - level: s0
+          type: spc_t
+      metadata:
+        description: |
+          Allow the spc_t SELinux type for the linstor-satellite container.
+          On nodes with SELinux enforcing, the satellite manages block devices, LVM metadata and kernel modules of the host, which the confined container types forbid.
+  network:
+    hostNetwork:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow host network access for the linstor-node Pod.
+          DRBD replicates over the node network, and the LINSTOR controller reaches the satellite on the node address.
+    hostPorts:
+      - port: 3367
+        protocol: TCP
+        metadata:
+          description: |
+            Port 3367 of the LINSTOR satellite, bound on the node because the Pod runs in the host network. The LINSTOR controller connects to it over TLS.
+      - port: 4215
+        protocol: TCP
+        metadata:
+          description: |
+            Port 4215, bound on the node because the Pod runs in the host network. kube-rbac-proxy serves the DRBD metrics of drbd-reactor on it to Prometheus.
+  volumes:
+    types:
+      allowedValues:
+        - hostPath
+      metadata:
+        description: |
+          Allow hostPath volumes for the linstor-node Pod.
+          The LINSTOR satellite works with the block devices, the sysfs, the cgroups and the kernel modules of the node.
+    hostPath:
+      allowedValues:
+        - path: /dev/
+          readOnly: false
+          metadata:
+            description: |
+              The block devices of the node, on which the satellite creates LVM volumes and DRBD devices.
+        - path: /sys/
+          readOnly: false
+          metadata:
+            description: |
+              The sysfs of the node, used by the LVM tooling and DRBD to discover and configure block devices.
+        - path: /sys/fs/cgroup
+          readOnly: false
+          metadata:
+            description: |
+              The cgroup filesystem of the node, which the LVM tooling run by the satellite expects to find.
+        - path: /lib/modules/
+          readOnly: false
+          metadata:
+            description: |
+              The kernel modules directory of the node, which the satellite and the LVM and DRBD tooling it runs use to check and load kernel modules.
+{{- end }}

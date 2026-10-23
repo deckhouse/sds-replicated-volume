@@ -65,6 +65,9 @@ spec:
       name: agent
       namespace: d8-{{ .Chart.Name }}
       {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 6 }}
+        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        security.deckhouse.io/security-policy-exception: agent
+        {{- end }}
     spec:
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
@@ -125,6 +128,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
@@ -195,7 +201,7 @@ spec:
             {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
               {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
             {{- end }}
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
       - name: drbd-prometheus-exporter
         image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
         imagePullPolicy: IfNotPresent
@@ -218,6 +224,9 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         terminationMessagePath: /dev/termination-log
@@ -276,7 +285,7 @@ spec:
             {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
               {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
             {{- end }}
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
       volumes:
       - hostPath:
           path: /dev/

@@ -65,6 +65,9 @@ spec:
       namespace: d8-{{ .Chart.Name }}
       labels:
         app: linstor-controller
+        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        security.deckhouse.io/security-policy-exception: linstor-controller
+        {{- end }}
     spec:
       {{- include "helm_lib_module_pod_security_context_run_as_user_root" . | nindent 6 }}
         supplementalGroups:
@@ -170,6 +173,9 @@ spec:
         securityContext: 
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         terminationMessagePath: /dev/termination-log

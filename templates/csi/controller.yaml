@@ -108,6 +108,9 @@
   securityContext:
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
     seccompProfile:
       type: RuntimeDefault
 {{- end }}
@@ -348,6 +351,9 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
   securityContext:
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
     seccompProfile:
       type: RuntimeDefault
 {{- end }}
@@ -435,6 +441,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "customNodeSelector" (include "csi_custom_node_selector" . | fromYaml) }}
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
 {{- $_ := set $csiNodeConfig "additionalPullSecrets" (include "additional_pull_secrets" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "securityPolicyExceptionEnabled" true }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
 {{- end }}
@@ -458,6 +465,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
 {{- $_ := set $csiNodeConfig "additionalContainers" (include "csi_node_metrics_proxy" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "additionalNodeVPA" (include "csi_node_metrics_proxy_vpa" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "securityPolicyExceptionEnabled" true }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
 {{- end }}
