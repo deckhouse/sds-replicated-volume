@@ -138,6 +138,22 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 		s.VolumeAccess = v
 		return s
 	}
+	// newCPStorage returns a spec.storage value; its presence marks a new control plane class.
+	newCPStorage := func() *srv.ReplicatedStorageClassStorage {
+		return &srv.ReplicatedStorageClassStorage{
+			Type:            srv.ReplicatedStoragePoolType("LVM"),
+			LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-a"}},
+		}
+	}
+	// withZones returns a TransZonal spec over the given zones; a nil storage makes it a legacy
+	// control plane class.
+	withZones := func(storage *srv.ReplicatedStorageClassStorage, zones ...string) srv.ReplicatedStorageClassSpec {
+		s := base()
+		s.Storage = storage
+		s.Topology = srv.TopologyTransZonal
+		s.Zones = zones
+		return s
+	}
 
 	tests := []struct {
 		name string
@@ -152,7 +168,22 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			new:  base(),
 		},
 		{
-			name: "reclaimPolicy change is accepted (mutable: the StorageClass is recreated with the new policy)",
+			name: "reclaimPolicy change is accepted for the new control plane (the StorageClass is recreated with the new policy)",
+			old: func() srv.ReplicatedStorageClassSpec {
+				s := base()
+				s.Storage = newCPStorage()
+				s.ReclaimPolicy = srv.RSCReclaimPolicyDelete
+				return s
+			}(),
+			new: func() srv.ReplicatedStorageClassSpec {
+				s := base()
+				s.Storage = newCPStorage()
+				s.ReclaimPolicy = srv.RSCReclaimPolicyRetain
+				return s
+			}(),
+		},
+		{
+			name: "reclaimPolicy change is rejected for the legacy control plane",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.ReclaimPolicy = srv.RSCReclaimPolicyDelete
@@ -163,6 +194,7 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 				s.ReclaimPolicy = srv.RSCReclaimPolicyRetain
 				return s
 			}(),
+			wantErrSubstring: "spec.reclaimPolicy is immutable for the legacy control plane",
 		},
 		{
 			name:             "topology change is rejected",
@@ -183,35 +215,79 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			wantErrSubstring: "spec.volumeAccess is immutable",
 		},
 		{
-			name: "zones change is rejected",
-			old: func() srv.ReplicatedStorageClassSpec {
-				s := base()
-				s.Topology = srv.TopologyTransZonal
-				s.Zones = []string{"zone-a", "zone-b", "zone-c"}
-				return s
-			}(),
-			new: func() srv.ReplicatedStorageClassSpec {
-				s := base()
-				s.Topology = srv.TopologyTransZonal
-				s.Zones = []string{"zone-a", "zone-b", "zone-d"}
-				return s
-			}(),
-			wantErrSubstring: "spec.zones is immutable",
+			// The new control plane applies a zones change through a new auto-generated
+			// storage pool.
+			name: "zones change is accepted for the new control plane",
+			old:  withZones(newCPStorage(), "zone-a", "zone-b", "zone-c"),
+			new:  withZones(newCPStorage(), "zone-a", "zone-b", "zone-d"),
 		},
 		{
-			name: "zones no-op (same set) is accepted",
+			name:             "zones change is rejected for the legacy control plane",
+			old:              withZones(nil, "zone-a", "zone-b", "zone-c"),
+			new:              withZones(nil, "zone-a", "zone-b", "zone-d"),
+			wantErrSubstring: "spec.zones is immutable for the legacy control plane",
+		},
+		{
+			name: "zones added is rejected for the legacy control plane",
+			old:  base(),
+			new: func() srv.ReplicatedStorageClassSpec {
+				s := base()
+				s.Zones = []string{"zone-a"}
+				return s
+			}(),
+			wantErrSubstring: "spec.zones is immutable for the legacy control plane",
+		},
+		{
+			// zones is a set: reordering it is not a change.
+			name: "zones reordered is accepted for the legacy control plane",
+			old:  withZones(nil, "zone-a", "zone-b", "zone-c"),
+			new:  withZones(nil, "zone-c", "zone-a", "zone-b"),
+		},
+		{
+			name: "zones no-op (same set) is accepted for the legacy control plane",
+			old:  withZones(nil, "zone-a", "zone-b", "zone-c"),
+			new:  withZones(nil, "zone-a", "zone-b", "zone-c"),
+		},
+		{
+			// A class counts as a new control plane one only if spec.storage is set both
+			// before and after the update: adding it in the same request does not lift the
+			// legacy restriction.
+			name:             "zones change together with adding storage is rejected for the legacy control plane",
+			old:              withZones(nil, "zone-a", "zone-b", "zone-c"),
+			new:              withZones(newCPStorage(), "zone-a", "zone-b", "zone-d"),
+			wantErrSubstring: "spec.zones is immutable for the legacy control plane",
+		},
+		{
+			name:             "zones change together with removing storage is rejected",
+			old:              withZones(newCPStorage(), "zone-a", "zone-b", "zone-c"),
+			new:              withZones(nil, "zone-a", "zone-b", "zone-d"),
+			wantErrSubstring: "spec.zones is immutable for the legacy control plane",
+		},
+		{
+			name: "reclaimPolicy change together with adding storage is rejected for the legacy control plane",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
-				s.Topology = srv.TopologyTransZonal
-				s.Zones = []string{"zone-a", "zone-b", "zone-c"}
+				s.ReclaimPolicy = srv.RSCReclaimPolicyDelete
 				return s
 			}(),
 			new: func() srv.ReplicatedStorageClassSpec {
 				s := base()
-				s.Topology = srv.TopologyTransZonal
-				s.Zones = []string{"zone-a", "zone-b", "zone-c"}
+				s.Storage = newCPStorage()
+				s.ReclaimPolicy = srv.RSCReclaimPolicyRetain
 				return s
 			}(),
+			wantErrSubstring: "spec.reclaimPolicy is immutable for the legacy control plane",
+		},
+		{
+			// Regression guard for the controller's storagePool->storage migration: it sets
+			// storage from nil and clears storagePool, leaving zones and reclaimPolicy as is.
+			name: "storagePool->storage migration (zones and reclaimPolicy unchanged) is accepted",
+			old: func() srv.ReplicatedStorageClassSpec {
+				s := withZones(nil, "zone-a", "zone-b", "zone-c")
+				s.StoragePool = "legacy-pool" //nolint:staticcheck // SA1019: the migration under test clears the deprecated StoragePool field
+				return s
+			}(),
+			new: withZones(newCPStorage(), "zone-a", "zone-b", "zone-c"),
 		},
 		{
 			// systemNetworkNames is immutable once set; the controller fills it from nil, so
@@ -348,10 +424,9 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			}(),
 		},
 		{
-			// storage is deliberately NOT guarded by CEL (its unbounded list would risk the
-			// cost budget); the webhook guards it (Test_validateImmutableSpecFields). This
-			// asserts the split: CEL raises no error when only storage changes.
-			name: "storage change raises no CEL error (guarded by webhook instead)",
+			// storage is mutable: the controller moves the class to a new auto-generated
+			// storage pool built from the new value.
+			name: "storage change is accepted",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.Storage = &srv.ReplicatedStorageClassStorage{
@@ -366,6 +441,22 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 					Type:            srv.ReplicatedStoragePoolType("LVM"),
 					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-b"}},
 				}
+				return s
+			}(),
+		},
+		{
+			// nodeLabelSelector is mutable for the same reason as storage.
+			name: "nodeLabelSelector change is accepted for the new control plane",
+			old: func() srv.ReplicatedStorageClassSpec {
+				s := base()
+				s.Storage = newCPStorage()
+				s.NodeLabelSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"role": "storage"}}
+				return s
+			}(),
+			new: func() srv.ReplicatedStorageClassSpec {
+				s := base()
+				s.Storage = newCPStorage()
+				s.NodeLabelSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"role": "compute"}}
 				return s
 			}(),
 		},

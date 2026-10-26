@@ -22,8 +22,8 @@ spec:
               description: |
                 Определяет конфигурацию Kubernetes StorageClass.
 
-                > В LINSTOR control-plane spec нельзя изменить после создания: изменение большинства полей отклоняется, а изменение replication или reclaimPolicy переводит ресурс в состояние InvalidConfiguration, и его StorageClass остаётся без изменений.
-                > В новом control-plane большинство полей также неизменяемы после создания, но у существующего ресурса можно изменить параметры репликации (replication, failuresToTolerate, guaranteedMinimumDataRedundancy), configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy и reclaimPolicy (StorageClass при этом пересоздаётся с новой политикой).
+                > В LINSTOR control-plane spec нельзя изменить после создания: изменение большинства полей отклоняется, а изменение replication переводит ресурс в состояние InvalidConfiguration, и его StorageClass остаётся без изменений.
+                > В новом control-plane неизменяемы topology, volumeAccess, а также systemNetworkNames и eligibleNodesPolicy после того, как они заданы. Остальные поля у существующего ресурса можно изменить: изменение storage, zones или nodeLabelSelector переносит тома StorageClass в новый storage pool, а изменение reclaimPolicy пересоздаёт StorageClass с новой политикой.
               properties:
                 configurationRolloutStrategy:
                   description: |
@@ -67,6 +67,8 @@ spec:
 
                     Определяет политики управления допустимыми узлами (eligible nodes).
                     Если не задано, контроллер подставляет значение по умолчанию (notReadyGracePeriod=10m).
+
+                    > Политика применяется через автоматически созданный storage pool. Этот пул общий для всех классов с одинаковыми storage, zones, nodeLabelSelector и systemNetworkNames, и в нём сохраняется политика класса, который его создал.
                   properties:
                     notReadyGracePeriod:
                       description: |
@@ -128,7 +130,7 @@ spec:
                     - Delete (если PersistentVolumeClaim будет удален, вместе с ним удалится соответствующий PersistentVolume)
                     - Retain (если PersistentVolumeClaim будет удален, соответствующий PersistentVolume останется нетронутым в статусе Released)
 
-                    > Изменение поля не поддерживается в LINSTOR control-plane: ресурс переходит в состояние InvalidConfiguration. В новом control-plane StorageClass пересоздаётся с новой политикой.
+                    > В LINSTOR control-plane поле нельзя изменить после создания ресурса. В новом control-plane StorageClass пересоздаётся с новой политикой.
                 replication:
                   description: |
                     Устарело: в новом control-plane используйте failuresToTolerate и guaranteedMinimumDataRedundancy; поле взаимоисключающее с ними.
@@ -218,7 +220,7 @@ spec:
                     > Режим репликации 'Consistency' в LINSTOR control-plane не поддерживается.
                     > В новом control-plane при режиме 'None' зоны ограничивают узлы, на которых может
                     > быть размещена единственная реплика.
-                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+                    > В LINSTOR control-plane поле нельзя изменить после создания ресурса; в новом control-plane его можно изменить.
             status:
               description: |
                 Отображает текущую информацию о StorageClass.

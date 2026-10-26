@@ -18,6 +18,9 @@ package rsccontroller
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
+	"hash/fnv"
 	"testing"
 	"time"
 
@@ -1314,9 +1317,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("keeps already-set spec.Storage and clears storagePool with an honest condition on content conflict", func() {
 			// Legacy object with both fields set, but storage disagrees with the RSP the
-			// deprecated storagePool points to. storage is immutable once set, so it must not
-			// be overwritten (that would be rejected by the update webhook and trap reconcile
-			// in a fail-loop); the conflict is surfaced instead.
+			// deprecated storagePool points to. storage is authoritative, so it must not be
+			// overwritten (that would silently move the class to another pool); the conflict
+			// is surfaced instead.
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
@@ -3480,6 +3483,77 @@ var _ = Describe("Reconciler", func() {
 			checksum2 := computeStoragePoolChecksum(rsc2)
 
 			Expect(checksum1).NotTo(Equal(checksum2))
+		})
+
+		Context("NodeLabelSelector order", func() {
+			rscWithSelector := func(sel *metav1.LabelSelector) *v1alpha1.ReplicatedStorageClass {
+				return &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "rsc-1"},
+					Spec: v1alpha1.ReplicatedStorageClassSpec{
+						Storage: &v1alpha1.ReplicatedStorageClassStorage{
+							Type:            v1alpha1.ReplicatedStoragePoolTypeLVM,
+							LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1"}},
+						},
+						NodeLabelSelector: sel,
+					},
+				}
+			}
+			zoneIn := func(values ...string) metav1.LabelSelectorRequirement {
+				return metav1.LabelSelectorRequirement{Key: "zone", Operator: metav1.LabelSelectorOpIn, Values: values}
+			}
+			tierExists := metav1.LabelSelectorRequirement{Key: "tier", Operator: metav1.LabelSelectorOpExists}
+
+			It("ignores the order of matchExpressions", func() {
+				checksum1 := computeStoragePoolChecksum(rscWithSelector(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{tierExists, zoneIn("a")},
+				}))
+				checksum2 := computeStoragePoolChecksum(rscWithSelector(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{zoneIn("a"), tierExists},
+				}))
+
+				Expect(checksum1).To(Equal(checksum2))
+			})
+
+			It("ignores the order of values within a requirement", func() {
+				checksum1 := computeStoragePoolChecksum(rscWithSelector(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{zoneIn("b", "a")},
+				}))
+				checksum2 := computeStoragePoolChecksum(rscWithSelector(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{zoneIn("a", "b")},
+				}))
+
+				Expect(checksum1).To(Equal(checksum2))
+			})
+
+			It("does not mutate the selector of the RSC", func() {
+				sel := &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{zoneIn("b", "a"), tierExists},
+				}
+				computeStoragePoolChecksum(rscWithSelector(sel))
+
+				Expect(sel.MatchExpressions).To(Equal([]metav1.LabelSelectorRequirement{zoneIn("b", "a"), tierExists}))
+			})
+
+			It("keeps the checksum of an already sorted selector (existing pool names stay valid)", func() {
+				// The pre-normalization checksum was computed over json.Marshal of the selector as is,
+				// so for an already sorted selector the canonical copy must serialize identically.
+				sel := &metav1.LabelSelector{
+					MatchLabels:      map[string]string{"role": "storage"},
+					MatchExpressions: []metav1.LabelSelectorRequirement{tierExists, zoneIn("a", "b")},
+				}
+				selectorBytes, err := json.Marshal(sel)
+				Expect(err).NotTo(HaveOccurred())
+
+				h := fnv.New128a()
+				h.Write([]byte(v1alpha1.ReplicatedStoragePoolTypeLVM))
+				h.Write([]byte{0})
+				h.Write([]byte("lvg-1:"))
+				h.Write([]byte{0})
+				h.Write(selectorBytes)
+				h.Write([]byte{0})
+
+				Expect(computeStoragePoolChecksum(rscWithSelector(sel))).To(Equal(hex.EncodeToString(h.Sum(nil))))
+			})
 		})
 
 		It("produces 32-character hex string (FNV-128)", func() {

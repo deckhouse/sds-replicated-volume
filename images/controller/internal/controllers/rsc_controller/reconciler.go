@@ -17,6 +17,7 @@ limitations under the License.
 package rsccontroller
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -253,8 +254,8 @@ func (r *Reconciler) reconcileDeletion(
 // Logic:
 //   - If RSP not found → set conditions (Ready=False, StoragePoolReady=False), patch status, return Done
 //   - If RSP found and spec.storage is empty → copy type+lvmVolumeGroups to spec.storage, clear storagePool
-//   - If RSP found and spec.storage is already set → keep spec.storage (it is immutable once set;
-//     overwriting it would be rejected by the update webhook and trap reconcile in a fail-loop),
+//   - If RSP found and spec.storage is already set → keep spec.storage (it is authoritative;
+//     overwriting it from the deprecated reference would silently move the class to another pool),
 //     only clear the deprecated storagePool; on a content conflict, surface Ready=False/InvalidConfiguration
 func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
@@ -298,13 +299,12 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 
 	base := rsc.DeepCopy()
 
-	// spec.storage is immutable once set (enforced by the update webhook). If it is already
-	// populated, never overwrite it: the webhook would reject the change and reconcile would
-	// spin in a fail-loop for legacy objects that carry both storagePool and storage (a legacy
-	// install admitted them before its RSC webhook started rejecting spec.storage, so that
-	// state is reachable). Keep the authoritative spec.storage and only drop the deprecated
-	// storagePool; when the two disagree, surface the conflict honestly instead of silently
-	// overwriting.
+	// spec.storage is the authoritative storage configuration. Legacy objects may carry both
+	// storagePool and storage (a legacy install admitted them before its RSC webhook started
+	// rejecting spec.storage, so that state is reachable). Never overwrite an already populated
+	// spec.storage from the deprecated reference: that would silently replace an explicit value
+	// and move the class to another storage pool. Keep spec.storage and only drop the deprecated
+	// storagePool; when the two disagree, surface the conflict honestly.
 	if rsc.Spec.Storage != nil {
 		conflict := !isStorageInSync(rsc, migratedStorage)
 
@@ -315,7 +315,7 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 
 		if conflict {
 			const conflictMessage = "spec.storagePool and spec.storage were both set with conflicting content; " +
-				"the deprecated spec.storagePool was dropped and spec.storage kept unchanged (storage is immutable once set)"
+				"the deprecated spec.storagePool was dropped and spec.storage kept unchanged (spec.storage takes precedence)"
 			rf.Log().Info(conflictMessage)
 
 			statusBase := rsc.DeepCopy()
@@ -1490,9 +1490,29 @@ func computeStoragePoolChecksum(rsc *v1alpha1.ReplicatedStorageClass) string {
 		h.Write([]byte{0})
 	}
 
-	// nodeLabelSelector (JSON for deterministic serialization)
-	if rsc.Spec.NodeLabelSelector != nil {
-		selectorBytes, _ := json.Marshal(rsc.Spec.NodeLabelSelector)
+	// nodeLabelSelector (JSON of a canonical copy). Requirements are ANDed and the values of a
+	// requirement form a set, so their order carries no meaning and must not change the pool
+	// name. Sorting both keeps the serialization of an already sorted selector unchanged, so
+	// existing pool names stay valid. matchLabels is a map and is serialized sorted anyway.
+	if sel := rsc.Spec.NodeLabelSelector; sel != nil {
+		canonical := metav1.LabelSelector{MatchLabels: sel.MatchLabels}
+		if len(sel.MatchExpressions) > 0 {
+			canonical.MatchExpressions = make([]metav1.LabelSelectorRequirement, len(sel.MatchExpressions))
+			for i, req := range sel.MatchExpressions {
+				req.Values = slices.Clone(req.Values)
+				slices.Sort(req.Values)
+				canonical.MatchExpressions[i] = req
+			}
+			// Keys may repeat, so the order falls back to the operator and the values.
+			slices.SortFunc(canonical.MatchExpressions, func(a, b metav1.LabelSelectorRequirement) int {
+				return cmp.Or(
+					cmp.Compare(a.Key, b.Key),
+					cmp.Compare(a.Operator, b.Operator),
+					slices.Compare(a.Values, b.Values),
+				)
+			})
+		}
+		selectorBytes, _ := json.Marshal(&canonical)
 		h.Write(selectorBytes)
 	}
 	h.Write([]byte{0})

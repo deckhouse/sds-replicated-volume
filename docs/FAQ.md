@@ -432,7 +432,9 @@ Yes, this is the expected behavior. Currently, the `sds-replicated-volume` modul
 
 ## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
-Yes, this is the expected behavior. Changing the `spec` of an existing ReplicatedStorageClass is not supported: most fields are rejected on update, and changes to `replication` and `reclaimPolicy`, while accepted by the API, switch the resource to the `InvalidConfiguration` phase and leave its StorageClass unchanged. Revert the change to bring the resource back to `Ready`, or recreate the resource to apply a new configuration.
+Yes, this is the expected behavior. Changing the `spec` of an existing ReplicatedStorageClass is not supported: most fields are rejected on update, and a change to `replication`, while accepted by the API, switches the resource to the `InvalidConfiguration` phase and leaves its StorageClass unchanged. Revert the change to bring the resource back to `Ready`, or recreate the resource to apply a new configuration.
+
+If the resource is already in the `InvalidConfiguration` phase because its `reclaimPolicy` was changed on an earlier module version, the change cannot be reverted, since `reclaimPolicy` is now immutable. Recreate the resource instead.
 
 ## Deleting a ReplicatedStorageClass resource does not delete its child StorageClass in Kubernetes. What can I do?
 

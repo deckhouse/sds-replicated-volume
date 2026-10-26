@@ -134,7 +134,7 @@ The `sds-replicated-volume-controller` will automatically keep the `status` fiel
 
 #### Updating the ReplicatedStorageClass resource
 
-It is currently **not possible** to change configuration parameters of the StorageClass created via the ReplicatedStorageClass resource. Most `spec` fields are rejected on update. Changes to `replication` and `reclaimPolicy` are accepted by the API, but the resource switches to the `InvalidConfiguration` phase and its StorageClass is left unchanged; revert the change to bring the resource back to `Ready`. To apply a new configuration, recreate the resource.
+It is currently **not possible** to change configuration parameters of the StorageClass created via the ReplicatedStorageClass resource. Most `spec` fields are rejected on update. A change to `replication` is accepted by the API, but the resource switches to the `InvalidConfiguration` phase and its StorageClass is left unchanged; revert the change to bring the resource back to `Ready`. To apply a new configuration, recreate the resource.
 
 #### Deleting the ReplicatedStorageClass resource
 

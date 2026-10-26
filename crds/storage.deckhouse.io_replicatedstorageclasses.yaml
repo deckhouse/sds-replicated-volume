@@ -81,13 +81,13 @@ spec:
               Defines a Kubernetes Storage class configuration.
 
               > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
-              > most fields are rejected, and changes to replication or reclaimPolicy switch the
-              > resource to the InvalidConfiguration phase and leave its StorageClass unchanged.
-              > In the new control-plane most fields are immutable after creation as well, but the
-              > replication settings (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
-              > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
-              > reclaimPolicy (the StorageClass is recreated with the new policy) can be changed on an
-              > existing resource.
+              > most fields are rejected, and a change to replication switches the resource to the
+              > InvalidConfiguration phase and leaves its StorageClass unchanged.
+              > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames and
+              > eligibleNodesPolicy are immutable. The other fields can be changed on an existing
+              > resource: a change to storage, zones or nodeLabelSelector moves the StorageClass's
+              > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
+              > with the new policy.
             properties:
               configurationRolloutStrategy:
                 description: |-
@@ -169,6 +169,10 @@ spec:
 
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   When not specified, the controller fills the default (notReadyGracePeriod=10m).
+
+                  > The policy is applied through the auto-generated storage pool. The pool is shared by all
+                  > classes with the same storage, zones, nodeLabelSelector and systemNetworkNames, and it
+                  > keeps the policy of the class that created it.
                 properties:
                   notReadyGracePeriod:
                     default: 10m
@@ -267,9 +271,8 @@ spec:
                   - Delete (if the PersistentVolumeClaim is deleted, the PersistentVolume is deleted with it)
                   - Retain (if the PersistentVolumeClaim is deleted, the PersistentVolume stays intact in the Released phase)
 
-                  > Changing the field is not supported in the LINSTOR control-plane: the resource switches
-                  > to the InvalidConfiguration phase. In the new control-plane the StorageClass is recreated
-                  > with the new policy.
+                  > In the LINSTOR control-plane the field is immutable after creation. In the new
+                  > control-plane the StorageClass is recreated with the new policy.
                 enum:
                 - Delete
                 - Retain
@@ -443,7 +446,8 @@ spec:
                   > be specified. The 'Consistency' replication is not supported there.
                   > In the new control-plane, with 'None' replication the zones limit where the single
                   > replica can be placed.
-                  > The field is immutable after creation.
+                  > In the LINSTOR control-plane the field is immutable after creation; in the new
+                  > control-plane it can be changed.
                 items:
                   maxLength: 63
                   type: string
@@ -528,9 +532,12 @@ spec:
             - message: spec.volumeAccess is immutable
               rule: has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess)
                 || self.volumeAccess == oldSelf.volumeAccess)
-            - message: spec.zones is immutable
-              rule: has(self.zones) == has(oldSelf.zones) && (!has(self.zones) ||
-                self.zones == oldSelf.zones)
+            - message: spec.zones is immutable for the legacy control plane
+              rule: (has(oldSelf.storage) && has(self.storage)) || (has(self.zones)
+                == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones))
+            - message: spec.reclaimPolicy is immutable for the legacy control plane
+              rule: (has(oldSelf.storage) && has(self.storage)) || self.reclaimPolicy
+                == oldSelf.reclaimPolicy
             - message: spec.systemNetworkNames is immutable once set
               rule: '!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames)
                 && self.systemNetworkNames == oldSelf.systemNetworkNames)'

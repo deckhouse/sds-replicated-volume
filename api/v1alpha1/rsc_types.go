@@ -48,13 +48,13 @@ type ReplicatedStorageClass struct {
 	// Defines a Kubernetes Storage class configuration.
 	//
 	// > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
-	// > most fields are rejected, and changes to replication or reclaimPolicy switch the
-	// > resource to the InvalidConfiguration phase and leave its StorageClass unchanged.
-	// > In the new control-plane most fields are immutable after creation as well, but the
-	// > replication settings (replication, failuresToTolerate, guaranteedMinimumDataRedundancy),
-	// > configurationRolloutStrategy, eligibleNodesConflictResolutionStrategy and
-	// > reclaimPolicy (the StorageClass is recreated with the new policy) can be changed on an
-	// > existing resource.
+	// > most fields are rejected, and a change to replication switches the resource to the
+	// > InvalidConfiguration phase and leaves its StorageClass unchanged.
+	// > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames and
+	// > eligibleNodesPolicy are immutable. The other fields can be changed on an existing
+	// > resource: a change to storage, zones or nodeLabelSelector moves the StorageClass's
+	// > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
+	// > with the new policy.
 	Spec   ReplicatedStorageClassSpec   `json:"spec"`
 	Status ReplicatedStorageClassStatus `json:"status,omitempty"`
 }
@@ -145,26 +145,34 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 0 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=0 requires exactly 3 zones."
 // +kubebuilder:validation:XValidation:rule="!has(self.storage) || self.topology != 'TransZonal' || !has(self.failuresToTolerate) || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones) == 3",message="TransZonal with FTT=1, GMDR=1 requires exactly 3 zones."
 //
-// Immutable spec fields (transition rules; evaluated on update only):
-// the conservative r3->r2 migration matrix permits changing only replication,
-// failuresToTolerate, guaranteedMinimumDataRedundancy, configurationRolloutStrategy and
-// eligibleNodesConflictResolutionStrategy; every other spec field is immutable after
-// creation. These CEL rules guard the scalar/enum and bounded-list fields. The unbounded
-// structured fields (storage, nodeLabelSelector) are guarded by the update webhook
-// (images/webhooks/handlers/rscValidator.go) instead of CEL, because a CEL equality
-// comparison over their unbounded list/map would risk the per-expression CEL cost budget
-// and cause the apiserver to reject the whole CRD at install time.
+// Immutable spec fields (transition rules; evaluated on update only).
 //
-// topology, volumeAccess and zones are strictly immutable (never touched by the
-// controller). reclaimPolicy is deliberately MUTABLE: changing it is a supported operation —
-// rsc_controller reacts by recreating the Kubernetes StorageClass with the new policy (a
-// StorageClass itself is immutable, so recreate is the mechanism; covered by the SC
-// lifecycle e2e). systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the
-// controller fills them from nil to their default (rsc_controller applySpecDefaults), so the
-// rules must permit that initial nil->value transition while still rejecting later changes.
+// topology and volumeAccess are strictly immutable (never touched by the controller).
+// systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the controller fills
+// them from nil to their default (rsc_controller applySpecDefaults), so the rules must permit
+// that initial nil->value transition while still rejecting later changes. eligibleNodesPolicy
+// stays immutable because it is not part of the auto-generated storage pool identity: the pool
+// keeps the policy it was created with, so a later change would be accepted but never applied.
+// For the same reason immutability does not pin the effective policy: the pool is shared by
+// every class with the same identity, so a class created with, or moved to, the identity of an
+// existing pool runs with that pool's policy.
+//
+// Every other spec field is mutable. storage, zones and nodeLabelSelector make up the identity
+// of the auto-generated storage pool (rsc_controller computeStoragePoolChecksum), so a change
+// moves the class to a new pool and rolls the volumes out to it. reclaimPolicy is applied by
+// recreating the Kubernetes StorageClass with the new policy (a StorageClass itself is
+// immutable, so recreate is the mechanism; covered by the SC lifecycle e2e).
+//
+// The legacy control plane (spec.storage is not set) keeps zones and reclaimPolicy immutable:
+// it has no storage pool to move to, and the old controller refuses to recreate a StorageClass
+// whose reclaimPolicy differs. zones is a set, so reordering it is not a change. A class counts
+// as a new control plane one only if spec.storage is set both before and after the update, so
+// adding or removing spec.storage in the same request as such a change cannot bypass these
+// rules; the controller's storagePool->storage migration changes neither field.
 // +kubebuilder:validation:XValidation:rule="self.topology == oldSelf.topology",message="spec.topology is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess) || self.volumeAccess == oldSelf.volumeAccess)",message="spec.volumeAccess is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones)",message="spec.zones is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || (has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones))",message="spec.zones is immutable for the legacy control plane"
+// +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || self.reclaimPolicy == oldSelf.reclaimPolicy",message="spec.reclaimPolicy is immutable for the legacy control plane"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy) && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)",message="spec.eligibleNodesPolicy is immutable once set"
 // +kubebuilder:object:generate=true
@@ -190,9 +198,8 @@ type ReplicatedStorageClassSpec struct {
 	// - Delete (if the PersistentVolumeClaim is deleted, the PersistentVolume is deleted with it)
 	// - Retain (if the PersistentVolumeClaim is deleted, the PersistentVolume stays intact in the Released phase)
 	//
-	// > Changing the field is not supported in the LINSTOR control-plane: the resource switches
-	// > to the InvalidConfiguration phase. In the new control-plane the StorageClass is recreated
-	// > with the new policy.
+	// > In the LINSTOR control-plane the field is immutable after creation. In the new
+	// > control-plane the StorageClass is recreated with the new policy.
 	// +kubebuilder:validation:Enum=Delete;Retain
 	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
 	// Deprecated: in the new control-plane, use failuresToTolerate and
@@ -287,7 +294,8 @@ type ReplicatedStorageClassSpec struct {
 	// > be specified. The 'Consistency' replication is not supported there.
 	// > In the new control-plane, with 'None' replication the zones limit where the single
 	// > replica can be placed.
-	// > The field is immutable after creation.
+	// > In the LINSTOR control-plane the field is immutable after creation; in the new
+	// > control-plane it can be changed.
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=63
 	// +listType=set
@@ -343,6 +351,10 @@ type ReplicatedStorageClassSpec struct {
 	//
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// When not specified, the controller fills the default (notReadyGracePeriod=10m).
+	//
+	// > The policy is applied through the auto-generated storage pool. The pool is shared by all
+	// > classes with the same storage, zones, nodeLabelSelector and systemNetworkNames, and it
+	// > keeps the policy of the class that created it.
 	// +optional
 	EligibleNodesPolicy *ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy,omitempty"`
 }
