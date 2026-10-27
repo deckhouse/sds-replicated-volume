@@ -1,5 +1,90 @@
+diff --git a/pkg/extender/dryrun_test.go b/pkg/extender/dryrun_test.go
+new file mode 100644
+index 0000000..a2aa96c
+--- /dev/null
++++ b/pkg/extender/dryrun_test.go
+@@ -0,0 +1,79 @@
++//go:build unittest
++// +build unittest
++
++package extender
++
++import (
++	"bytes"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++
++	"github.com/libopenstorage/stork/drivers/volume"
++	"github.com/portworx/sched-ops/k8s/core"
++	log "github.com/sirupsen/logrus"
++	kubernetes "k8s.io/client-go/kubernetes/fake"
++	"k8s.io/client-go/tools/record"
++)
++
++// dryRunBody is a request for a pod whose PVC exists neither in Kubernetes nor in
++// the mock driver, so filter and prioritize both reach a scheduling failure.
++func dryRunBody(dryRun string) string {
++	return `{"pod":{"metadata":{"name":"vm","namespace":"default"},` +
++		`"spec":{"volumes":[{"name":"disk","persistentVolumeClaim":{"claimName":"missing"}}]}},` +
++		`"nodes":{"items":[{"metadata":{"name":"node1"}}]}` + dryRun + `}`
++}
++
++// A request with and without dryRun gets the same response; only the request
++// without dryRun records an Event, and only the dry run marks its log lines.
++func TestDryRunSkipsEvent(t *testing.T) {
++	prev := core.Instance()
++	core.SetInstance(core.New(kubernetes.NewSimpleClientset()))
++	t.Cleanup(func() { core.SetInstance(prev) })
++
++	driver, err := volume.Get(mockDriverName)
++	if err != nil {
++		t.Fatalf("Error getting mock volume driver: %v", err)
++	}
++
++	var logs bytes.Buffer
++	prevOut := log.StandardLogger().Out
++	log.SetOutput(&logs)
++	t.Cleanup(func() { log.SetOutput(prevOut) })
++
++	for _, tc := range []struct {
++		verb       string
++		handle     func(*Extender, http.ResponseWriter, *http.Request)
++		wantStatus int
++	}{
++		// PVC lookup fails before the driver is asked.
++		{"filter", (*Extender).processFilterRequest, http.StatusBadRequest},
++		// The driver does not know the PVC; prioritize scores the nodes anyway.
++		{"prioritize", (*Extender).processPrioritizeRequest, http.StatusOK},
++	} {
++		t.Run(tc.verb, func(t *testing.T) {
++			run := func(dryRun string) (*httptest.ResponseRecorder, int, string) {
++				logs.Reset()
++				recorder := record.NewFakeRecorder(10)
++				e := &Extender{Driver: driver, Recorder: recorder}
++				w := httptest.NewRecorder()
++				tc.handle(e, w, httptest.NewRequest(http.MethodPost, "/"+tc.verb, strings.NewReader(dryRunBody(dryRun))))
++				return w, len(recorder.Events), logs.String()
++			}
++
++			normal, normalEvents, normalLog := run("")
++			dry, dryEvents, dryLog := run(`,"dryRun":true`)
++
++			if normal.Code != tc.wantStatus || dry.Code != normal.Code || dry.Body.String() != normal.Body.String() {
++				t.Fatalf("responses differ: normal %d %q, dryRun %d %q", normal.Code, normal.Body, dry.Code, dry.Body)
++			}
++			if normalEvents != 1 || dryEvents != 0 {
++				t.Fatalf("events: normal %d (want 1), dryRun %d (want 0)", normalEvents, dryEvents)
++			}
++			if strings.Contains(normalLog, "dryRun=true") || !strings.Contains(dryLog, "dryRun=true") {
++				t.Fatalf("log of the dry run must carry dryRun=true, the normal one must not:\nnormal: %s\ndryRun: %s", normalLog, dryLog)
++			}
++		})
++	}
++}
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..531718a0c 100644
+index 73c8c30..95ac9d7 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,14 +3,18 @@ package extender
@@ -120,12 +205,20 @@ index 73c8c307a..531718a0c 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -164,6 +225,14 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -157,13 +218,21 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 	}()
+ 	encoder := json.NewEncoder(w)
+ 
+-	var args schedulerapi.ExtenderArgs
++	var args extenderArgs
+ 	if err := decoder.Decode(&args); err != nil {
+ 		log.Errorf("Error decoding filter request: %v", err)
+ 		http.Error(w, "Decode error", http.StatusBadRequest)
  		return
  	}
  
 +	// block added by flant.com
-+	if err = fillNodesByNames(&args); err != nil {
++	if err = fillNodesByNames(&args.ExtenderArgs); err != nil {
 +		log.Errorf("[filter] Cannot fill nodes: %s", err.Error())
 +		http.Error(w, "[filter] Cannot fill nodes", http.StatusBadRequest)
 +		return
@@ -135,7 +228,7 @@ index 73c8c307a..531718a0c 100644
  	pod := args.Pod
  	if pod == nil {
  		msg := "Empty pod received in filter request"
-@@ -176,9 +245,24 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -176,23 +245,38 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		if vol.PersistentVolumeClaim == nil {
  			continue
  		}
@@ -159,10 +252,20 @@ index 73c8c307a..531718a0c 100644
 +
  		if err != nil {
 -			msg := fmt.Sprintf("Unable to find PVC %s, err: %v", vol.Name, err)
- 			storklog.PodLog(pod).Warnf(msg)
- 			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
+-			storklog.PodLog(pod).Warnf(msg)
+-			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++			podLog(pod, args.DryRun).Warnf(msg)
++			e.recordSchedulingFailure(pod, args.DryRun, msg)
  			http.Error(w, msg, http.StatusBadRequest)
-@@ -192,7 +276,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 			return
+ 		} else if pvc.Annotations != nil && pvc.Annotations[restore.RestoreAnnotation] == "true" {
+ 			msg := "Volume restore is in progress for pvc: " + pvc.Name
+-			storklog.PodLog(pod).Warnf(msg)
+-			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++			podLog(pod, args.DryRun).Warnf(msg)
++			e.recordSchedulingFailure(pod, args.DryRun, msg)
+ 			http.Error(w, msg, http.StatusBadRequest)
+ 			return
  		}
  	}
  
@@ -171,6 +274,40 @@ index 73c8c307a..531718a0c 100644
  	for _, node := range args.Nodes.Items {
  		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
  	}
+@@ -202,8 +286,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 
+ 	if err != nil {
+ 		msg := fmt.Sprintf("Error getting volumes for Pod for driver: %v", err)
+-		storklog.PodLog(pod).Warnf(msg)
+-		e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++		podLog(pod, args.DryRun).Warnf(msg)
++		e.recordSchedulingFailure(pod, args.DryRun, msg)
+ 		if _, ok := err.(*volume.ErrPVCPending); ok {
+ 			http.Error(w, "Waiting for PVC to be bound", http.StatusBadRequest)
+ 			return
+@@ -226,9 +310,9 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 				if !onlineNodeFound && len(volumeInfo.DataNodes) > 0 {
+ 					// Volume has a list of DataNodes where it has a replica present and none of
+ 					// those nodes are online
+-					storklog.PodLog(pod).Errorf("No online storage nodes have replica for volume, returning error")
++					podLog(pod, args.DryRun).Errorf("No online storage nodes have replica for volume, returning error")
+ 					msg := "No online node found with volume replica"
+-					e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++					e.recordSchedulingFailure(pod, args.DryRun, msg)
+ 					http.Error(w, msg, http.StatusBadRequest)
+ 					return
+ 				}
+@@ -280,8 +364,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 				} else {
+ 					msg = "No node found with storage driver"
+ 				}
+-				storklog.PodLog(pod).Error(msg)
+-				e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++				podLog(pod, args.DryRun).Error(msg)
++				e.recordSchedulingFailure(pod, args.DryRun, msg)
+ 				http.Error(w, msg, http.StatusBadRequest)
+ 				return
+ 			}
 @@ -385,9 +469,27 @@ func (e *Extender) collectExtenderMetrics() error {
  		return nil
  	}
@@ -219,12 +356,20 @@ index 73c8c307a..531718a0c 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -476,6 +588,14 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -469,13 +581,21 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+ 	}()
+ 	encoder := json.NewEncoder(w)
+ 
+-	var args schedulerapi.ExtenderArgs
++	var args extenderArgs
+ 	if err := decoder.Decode(&args); err != nil {
+ 		log.Errorf("Error decoding prioritize request: %v", err)
+ 		http.Error(w, "Decode error", http.StatusBadRequest)
  		return
  	}
  
 +	// block added by flant.com
-+	if err = fillNodesByNames(&args); err != nil {
++	if err = fillNodesByNames(&args.ExtenderArgs); err != nil {
 +		log.Errorf("[prioritize] Cannot fill nodes: %+v", err)
 +		http.Error(w, "[prioritize] Cannot fill nodes", http.StatusBadRequest)
 +		return
@@ -242,12 +387,52 @@ index 73c8c307a..531718a0c 100644
  	if pod.Annotations != nil {
  		if value, ok := pod.Annotations[disableHyperconvergenceAnnotation]; ok {
  			if disableHyperconvergence, err = strconv.ParseBool(value); err != nil {
-@@ -632,3 +751,48 @@ sendResponse:
+@@ -511,8 +630,8 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+ 		driverVolumes, _, err := e.Driver.GetPodVolumes(&pod.Spec, pod.Namespace, true)
+ 		if err != nil {
+ 			msg := fmt.Sprintf("Error getting volumes for Pod for driver: %v", err)
+-			storklog.PodLog(pod).Warnf(msg)
+-			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++			podLog(pod, args.DryRun).Warnf(msg)
++			e.recordSchedulingFailure(pod, args.DryRun, msg)
+ 			if _, ok := err.(*volume.ErrPVCPending); ok {
+ 				http.Error(w, "Waiting for PVC to be bound", http.StatusBadRequest)
+ 				return
+@@ -632,3 +751,77 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
 +
 +// block added by flant.com
++
++// extenderArgs is the body of filter and prioritize requests. The Deckhouse
++// kube-scheduler sets dryRun when it simulates scheduling (POST /simulate):
++// the pod is a copy of a real pod and is never bound.
++type extenderArgs struct {
++	schedulerapi.ExtenderArgs
++	DryRun bool `json:"dryRun"`
++}
++
++// recordSchedulingFailure records a FailedScheduling Event on the pod. A dry
++// run records nothing: the Event would land on the real pod the simulation copied.
++func (e *Extender) recordSchedulingFailure(pod *v1.Pod, dryRun bool, msg string) {
++	if dryRun {
++		return
++	}
++	e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
++}
++
++// podLog is storklog.PodLog with dryRun=true on the lines of a dry run, so a
++// failure of a simulation can be told apart from a real scheduling failure in
++// the extender log.
++func podLog(pod *v1.Pod, dryRun bool) *log.Entry {
++	entry := storklog.PodLog(pod)
++	if dryRun {
++		return entry.WithField("dryRun", true)
++	}
++	return entry
++}
++
 +func fillNodesByNames(inputData *schedulerapi.ExtenderArgs) error {
 +	if inputData.Nodes != nil && len(inputData.Nodes.Items) > 0 {
 +		// nodes already presents in inputData, just return 'as is'

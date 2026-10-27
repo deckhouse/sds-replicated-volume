@@ -6,7 +6,8 @@ highlights: []
 
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []
-# improvements: []
+improvements:
+  - "В симуляциях планирования kube-scheduler Deckhouse (запросы filter и prioritize с `dryRun: true`) `linstor-scheduler-extender` больше не записывает Events `FailedScheduling` на симулируемый под, поэтому проверки descheduler не оставляют ложных ошибок планирования на работающих подах ВМ."
 # fixes: []
 # security: []
 # breaking: []

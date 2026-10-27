@@ -48,3 +48,28 @@ Raises `golang.org/x/net` v0.58.0 -> **v0.60.0** for **CVE-2026-78669**, the
 Trivy finding against the built `linstor-scheduler-extender` binary
 (`golang.org/x/text` is already at the fixed v0.42.0). Applied after 005;
 `go.mod` / `go.sum` only.
+
+### stork/stork.patch
+
+Changes to stork v2.11.5 (`LINSTOR_SCHEDULER_STORK` in `oss.yaml`), the library
+that serves the extender's `filter` and `prioritize` endpoints. The build copies
+`stork/new-files/` into the stork source and then applies `stork/*.patch` in glob
+order. All stork changes are kept in this one patch: a second patch for
+`pkg/extender/extender.go` applies only if its name sorts after `stork.patch`.
+
+- HTTPS, log level and the shared informer cache (`stork/new-files/pkg/cache`)
+  for PVC, node and pod lookups.
+- Trace logging of each request; `nodenames` requests (`nodeCacheCapable`) are
+  filled with the Node objects.
+- Dry run: the Deckhouse kube-scheduler sets `"dryRun": true` in `filter` and
+  `prioritize` requests while it simulates scheduling (`POST /simulate`, for
+  example for the descheduler). The Pod in such a request is a copy of a real Pod
+  and is never bound. For these requests the extender records no
+  `FailedScheduling` Event on the Pod; the response (nodes, scores, error text and
+  status) is the same as without `dryRun`. The log lines of these failures carry
+  the field `dryRun=true`, so a simulation can be told apart from a real
+  scheduling failure in the extender log. `dryRun` must be a JSON boolean: any
+  other type fails to decode, and the request is answered with 400
+  "Decode error". Requests without the field work as before.
+  `pkg/extender/dryrun_test.go` (build tag `unittest`) checks this for `filter`
+  and `prioritize`.
