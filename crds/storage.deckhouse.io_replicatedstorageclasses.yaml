@@ -83,9 +83,9 @@ spec:
               > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
               > most fields are rejected, and a change to replication switches the resource to the
               > InvalidConfiguration phase and leaves its StorageClass unchanged.
-              > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames and
-              > eligibleNodesPolicy are immutable. The other fields can be changed on an existing
-              > resource: a change to storage, zones or nodeLabelSelector moves the StorageClass's
+              > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames are
+              > immutable. The other fields can be changed on an existing resource: a change to
+              > storage, zones, nodeLabelSelector or eligibleNodesPolicy moves the StorageClass's
               > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
               > with the new policy.
             properties:
@@ -170,9 +170,10 @@ spec:
                   EligibleNodesPolicy defines policies for managing eligible nodes.
                   When not specified, the controller fills the default (notReadyGracePeriod=10m).
 
-                  > The policy is applied through the auto-generated storage pool. The pool is shared by all
-                  > classes with the same storage, zones, nodeLabelSelector and systemNetworkNames, and it
-                  > keeps the policy of the class that created it.
+                  > The policy is applied through the auto-generated storage pool and is part of its
+                  > identity: classes share a pool only if their storage, zones, nodeLabelSelector,
+                  > systemNetworkNames and eligibleNodesPolicy match. A change moves the StorageClass's
+                  > volumes to a new storage pool.
                 properties:
                   notReadyGracePeriod:
                     default: 10m
@@ -541,9 +542,6 @@ spec:
             - message: spec.systemNetworkNames is immutable once set
               rule: '!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames)
                 && self.systemNetworkNames == oldSelf.systemNetworkNames)'
-            - message: spec.eligibleNodesPolicy is immutable once set
-              rule: '!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy)
-                && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)'
           status:
             description: Displays current information about the Storage Class.
             properties:
@@ -672,13 +670,30 @@ spec:
                   phase.
                 type: string
               phase:
-                description: Phase is the operational state summary of the storage
-                  class.
+                description: |-
+                  Phase is the operational state summary of the storage class. Might be:
+                  - Ready — the configuration is accepted and all volumes are aligned with it. In the LINSTOR
+                    control-plane: the StorageClass is created and matches the spec.
+                  - InvalidConfiguration — the spec is invalid. In the LINSTOR control-plane: any reconciliation
+                    error, including a transient one.
+                  - WaitingForStoragePool — the configuration of the current spec is not accepted yet because the
+                    storage pool is not ready; new volumes wait for it.
+                  - InsufficientNodes — the configuration of the current spec is not accepted because the eligible
+                    nodes do not meet the FTT/GMDR/topology requirements; new volumes wait for it.
+                  - Degraded — the storage pool or its eligible nodes have degraded since the configuration was
+                    accepted. The accepted configuration stays in effect: new volumes get it and existing ones keep
+                    it, but replicas can be placed only on the nodes the storage pool still offers.
+                  - RollingOut — volumes are being aligned with the configuration.
+                  - PartiallyAligned — some volumes are not aligned, and every automatic fix for them is disabled.
+                  - Terminating — the storage class is being deleted.
+
+                  > The LINSTOR control-plane sets only Ready and InvalidConfiguration.
                 enum:
                 - Ready
                 - WaitingForStoragePool
                 - InsufficientNodes
                 - InvalidConfiguration
+                - Degraded
                 - RollingOut
                 - PartiallyAligned
                 - Terminating

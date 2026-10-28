@@ -26,14 +26,63 @@ Where: docs/USAGE_RU.md, «Создание ресурса ReplicatedStorageClas
 Replaced by: примечание о том, что поля spec нельзя изменить после создания
 -->
 
-> Обратите внимание, что большинство полей `spec` ресурса ReplicatedStorageClass являются **неизменяемыми** после создания. Изменить у существующего ресурса можно только параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, а также `reclaimPolicy` (StorageClass при этом пересоздаётся с новой политикой); изменение любого другого поля (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector` и т. д.) при обновлении будет отклонено.
+> Обратите внимание, что поля `topology`, `volumeAccess` и, после того как оно задано, `systemNetworkNames` ресурса ReplicatedStorageClass являются **неизменяемыми**: их изменение при обновлении отклоняется. Остальные поля `spec` у существующего ресурса можно изменить. Изменение `storage`, `zones`, `nodeLabelSelector` или `eligibleNodesPolicy` переносит класс в новый storage pool, а изменение `reclaimPolicy` заставляет модуль пересоздать StorageClass с новой политикой (см. «Обновление ресурса ReplicatedStorageClass»).
+
+<!--
+Where: docs/USAGE_RU.md, «Создание ресурса ReplicatedStorageClass», примечание после примера о проверке конфигурации перед созданием StorageClass
+Replaced by: примечание о том, что при ошибках StorageClass не создаётся, а ошибка сохраняется в поле status
+-->
+
+> Конфигурация проверяется при создании и обновлении ресурса: некорректная отклоняется с ошибкой. StorageClass модуль создаёт сразу; можно ли уже создавать тома класса, показывает поле `status` ресурса ReplicatedStorageClass (см. «Проверка состояния ресурса ReplicatedStorageClass»).
+
+<!--
+Where: docs/USAGE_RU.md, отдельный раздел между «Создание ресурса ReplicatedStorageClass» и «Обновление ресурса ReplicatedStorageClass»
+Replaced by: предложение о том, что контроллер поддерживает поле status в актуальном состоянии
+-->
+
+#### Проверка состояния ресурса ReplicatedStorageClass
+
+`kubectl get replicatedstorageclass` показывает фазу каждого класса, его FTT/GMDR и число томов; `-o wide` добавляет topology, storage pool и сообщение, поясняющее фазу. Подробности — в conditions:
+
+```shell
+kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.phase}: {.status.message}{"\n"}{range .status.conditions[*]}{.type}={.status}/{.reason}: {.message}{"\n"}{end}'
+```
+
+Класс публикует конфигурацию, по которой строятся его тома (`status.configuration`). Конфигурация текущего `spec` **принята**, когда `status.configurationGeneration` равен `metadata.generation`. До этого новые тома класса её ждут, а существующие сохраняют прежнюю конфигурацию. Пока изменение не принято, сообщение `Ready` начинается с `Pending:` и называет, что именно ожидает применения.
+
+| Фаза | `Ready` | Что означает | Что делать |
+|---|---|---|---|
+| `Ready` | `True/Ready` | Конфигурация принята, все тома с ней согласованы | Ничего |
+| `RollingOut` | `True/Ready` | Тома приводятся в соответствие с конфигурацией (раскатка или тома, ещё не увидевшие конфигурацию) | Ждать; следить за `ConfigurationRolledOut` и `status.volumes` |
+| `PartiallyAligned` | `True/Ready` | Часть томов не согласована, и все автоматические исправления для них отключены (`NewVolumesOnly`, `Manual`) | Включить раскатку или исправить тома вручную |
+| `WaitingForStoragePool` | `False/WaitingForStoragePool` | Конфигурация текущего `spec` не принята: storage pool не готов. Новые тома ждут | Проверить `StoragePoolReady` и ReplicatedStoragePool: отсутствующие или некорректные LVMVolumeGroup, некорректный селектор узлов |
+| `InsufficientNodes` | `False/InsufficientEligibleNodes` | Конфигурация текущего `spec` не принята: eligible nodes не удовлетворяют требованиям FTT/GMDR/topology. Новые тома ждут | Добавить узлы или ослабить `nodeLabelSelector`/`zones`/параметры избыточности |
+| `Degraded` | `False/Degraded` | Storage pool не готов или его eligible nodes перестали удовлетворять требованиям после того, как конфигурация была принята. Принятая конфигурация продолжает действовать: новые тома получают её, существующие сохраняют, но реплики можно разместить только на узлах, которые storage pool ещё предоставляет, поэтому новый том может не сформироваться | Восстановить LVMVolumeGroup или узлы пула; причина — в `StoragePoolReady` или в сообщении. Если новый том не формируется, смотрите его conditions `Scheduled` и `MembershipLayoutConverged` |
+| `InvalidConfiguration` | `False/InvalidConfiguration` | `spec` некорректен, например отсутствует `storage` | Исправить `spec` |
+| `Terminating` | — | Класс удаляется; сообщение называет число томов, которые он ещё ждёт | Удалить оставшиеся тома |
+
+Conditions класса:
+
+- `Ready` — сводка, описанная выше;
+- `StoragePoolReady` — condition `Ready` storage pool, в который класс переходит или на котором находится (`status.storagePoolName`), с его reason и сообщением;
+- `ConfigurationRolledOut` — согласованы ли с классом все тома, берущие у него конфигурацию (см. «Обновление ресурса ReplicatedStorageClass»);
+- `VolumesSatisfyEligibleNodes` — стоят ли реплики всех томов на eligible nodes; сообщение называет число томов, у которых это не так.
 
 <!--
 Where: docs/USAGE_RU.md, текст раздела «Обновление ресурса ReplicatedStorageClass» вместе с подразделами
 Replaced by: абзац о том, что параметры StorageClass поменять невозможно
 -->
 
-Большинство полей `spec` неизменяемы после создания, и попытка их изменить отклоняется с ошибкой, называющей поле; для изменения такого поля (например `storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`) ресурс нужно пересоздать. Параметры репликации и `reclaimPolicy` изменяемы: правка `replication` позволяет выполнить миграцию r3→r2, описанную ниже, а правка `reclaimPolicy` заставляет модуль пересоздать StorageClass с новой политикой.
+Поля `topology`, `volumeAccess` и, после того как оно задано, `systemNetworkNames` неизменяемы: попытка их изменить отклоняется с ошибкой, называющей поле, и для изменения такого поля ресурс нужно пересоздать. Все остальные поля `spec` изменяемы:
+
+- параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`) меняют целевой layout томов — например, при миграции r3→r2, описанной ниже;
+- `storage`, `zones`, `nodeLabelSelector` и `eligibleNodesPolicy` образуют идентичность storage pool класса, поэтому их изменение переносит класс в новый storage pool;
+- `reclaimPolicy` заставляет модуль пересоздать StorageClass с новой политикой;
+- `configurationRolloutStrategy` и `eligibleNodesConflictResolutionStrategy` задают, как изменения доходят до существующих томов.
+
+**Переход в новый storage pool.** Классы с одинаковыми `storage`, `zones`, `nodeLabelSelector`, `systemNetworkNames` и `eligibleNodesPolicy` используют один автоматически созданный storage pool (`status.storagePoolName`). После изменения любого из этих полей класс получает новый пул, а его тома следуют `configurationRolloutStrategy`: при `RollingUpdate` они раскатываются в новый пул (если их реплики уже стоят на подходящих узлах нового пула, данные не переносятся), при `NewVolumesOnly` существующие тома остаются в прежнем пуле, и в новом создаются только новые тома. Прежний пул освобождается, когда его перестаёт использовать последний том. После обновления модуля, изменившего способ построения имени пула, существующие классы остаются на своих пулах; класс переходит в новый пул при первом изменении **любого** поля `spec`, в том числе `reclaimPolicy` или `replication`, и его тома следуют `configurationRolloutStrategy`, как описано выше. Реплика, оставшаяся на узле или LVMVolumeGroup, которых нет в новом пуле, отражается как конфликт (`VolumesSatisfyEligibleNodes`); автоматическое разрешение таких конфликтов пока не реализовано (см. ограничения ниже), поэтому реплику нужно перенести вручную.
+
+Пока новый пул не готов или его узлы не удовлетворяют требованиям FTT/GMDR/topology, изменение не принято: новые тома класса ждут его, а существующие сохраняют прежнюю конфигурацию (см. «Проверка состояния ресурса ReplicatedStorageClass»).
 
 ##### Миграция томов с трёх реплик (r3) на две реплики + tie-breaker (r2)
 
@@ -103,7 +152,7 @@ kubectl get replicatedvolume <RV_NAME> -o jsonpath='{range .status.conditions[?(
 **Ограничения.**
 
 - Откат правки, пока том ещё мигрирует, не отменяет уже запущенный перевод реплики в tie-breaker. В зависимости от момента отката том останется либо в раскладке `2D+1TB` при желаемой `3D` — это ровно тот самый рост, описанный выше, и том сойдётся сам, — либо с репликой, у которой `spec.type` застрял в значении `TieBreaker`, тогда как раскладка по-прежнему `3D` (`MembershipLayoutConverged=False/Converging`, имя реплики указано в сообщении condition). Второй случай сам в `Converged` уже не вернётся; данные не теряются, а реплику нужно восстановить одним патчем: вернуть `spec.type` в `Diskful` и одновременно вернуть поля backing volume (`spec.lvmVolumeGroupName`, а для thin-пула ещё и `spec.lvmVolumeGroupThinPoolName`), взяв значения из `status.datamesh.members` тома.
-- `eligibleNodesConflictResolutionStrategy.rollingRepair.maxParallel` принимается, но не реализован: перенос томов с узлов, переставших быть eligible, не ограничивается по параллельности. Это другой параметр, не тот `maxParallel` из конфигурационной раскатки выше — он-то как раз работает.
+- `eligibleNodesConflictResolutionStrategy: RollingRepair` (значение по умолчанию) принимается, но не реализован: реплики с узлов, переставших быть eligible, никто не переносит, а `rollingRepair.maxParallel` игнорируется. Такие конфликты отражаются в condition `VolumesSatisfyEligibleNodes` и в `status.volumes.inConflictWithEligibleNodes`, а реплики нужно переносить вручную. `maxParallel` из конфигурационной раскатки выше — другой параметр, и он работает.
 
 <!--
 Where: docs/USAGE_RU.md, отдельный раздел между «Обновление ресурса ReplicatedStorageClass» и «Удаление ресурса ReplicatedStorageClass»
@@ -203,7 +252,7 @@ Where: docs/FAQ_RU.md, ответ на «Я не могу обновить по�
 Replaced by: ответ о том, что изменение spec не поддерживается
 -->
 
-Частично. Большинство полей `spec` неизменяемы после создания, и их обновление отклоняется с ошибкой, называющей поле. Однако параметры репликации (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), поля `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy`, а также `reclaimPolicy` (StorageClass при этом пересоздаётся с новой политикой) **можно** менять у существующего ресурса. Именно изменением `replication` выполняется миграция томов между layout'ами — например с `ConsistencyAndAvailability` (`3D`) на `Availability` (`2D+1TB`); см. раздел «Обновление ресурса ReplicatedStorageClass» в руководстве по использованию. Все остальные поля (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector` и т. д.) остаются неизменяемыми — чтобы их изменить, ресурс нужно пересоздать.
+Только для нескольких полей. Поля `topology`, `volumeAccess` и, после того как оно задано, `systemNetworkNames` неизменяемы, и их обновление отклоняется с ошибкой, называющей поле, — чтобы их изменить, ресурс нужно пересоздать. Все остальные поля **можно** менять у существующего ресурса. Изменением `replication` (или `failuresToTolerate`/`guaranteedMinimumDataRedundancy`) выполняется миграция томов между layout'ами — например с `ConsistencyAndAvailability` (`3D`) на `Availability` (`2D+1TB`); изменение `storage`, `zones`, `nodeLabelSelector` или `eligibleNodesPolicy` переносит класс в новый storage pool; изменение `reclaimPolicy` пересоздаёт StorageClass с новой политикой. См. раздел «Обновление ресурса ReplicatedStorageClass» в руководстве по использованию.
 
 <!--
 Where: docs/FAQ_RU.md, текст раздела «Сколько места тома резервируется под суперпользователя?»

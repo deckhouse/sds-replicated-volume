@@ -454,6 +454,34 @@ func TestSwitchRVsToAuto(t *testing.T) {
 			},
 		},
 		{
+			// A Degraded class has accepted its configuration and keeps it in effect, so the
+			// volume can take it: the switch must not wait for the pool to recover.
+			name: "rsc_degraded_patches_rv",
+			objects: []kubecl.Object{
+				rvWithSwitchLabel("pvc-1"),
+				pvWithStorageClass("fast"),
+				&srvv1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "fast"},
+					Status: srvv1alpha1.ReplicatedStorageClassStatus{
+						Phase: srvv1alpha1.ReplicatedStorageClassPhaseDegraded,
+					},
+				},
+			},
+			wantPending: 0,
+			checkRV: func(t *testing.T, m *Migrator) {
+				rv := &srvv1alpha1.ReplicatedVolume{}
+				if err := m.client.Get(context.Background(), types.NamespacedName{Name: "pvc-1"}, rv); err != nil {
+					t.Fatalf("get RV: %v", err)
+				}
+				if rv.Spec.ConfigurationMode != srvv1alpha1.ReplicatedVolumeConfigurationModeAuto {
+					t.Fatalf("ConfigurationMode = %q, want Auto", rv.Spec.ConfigurationMode)
+				}
+				if rv.Spec.ReplicatedStorageClassName != "fast" {
+					t.Fatalf("ReplicatedStorageClassName = %q, want fast", rv.Spec.ReplicatedStorageClassName)
+				}
+			},
+		},
+		{
 			name: "rsc_not_ready_pending",
 			objects: []kubecl.Object{
 				rvWithSwitchLabel("pvc-1"),

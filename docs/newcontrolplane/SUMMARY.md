@@ -26,14 +26,63 @@ Where: docs/USAGE.md, "Creating a ReplicatedStorageClass resource", the note aft
 Replaced by: the note saying that the spec fields cannot be changed after creation
 -->
 
-> Please note that most fields of the `spec` section of the ReplicatedStorageClass resource are **immutable** after creation. Only the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy` and `reclaimPolicy` (the StorageClass is recreated with the new policy) can be changed on an existing resource; changing any other field (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, etc.) is rejected on update.
+> Please note that `topology`, `volumeAccess` and, once set, `systemNetworkNames` of the ReplicatedStorageClass resource are **immutable**: changing them is rejected on update. All other `spec` fields can be changed on an existing resource. A change to `storage`, `zones`, `nodeLabelSelector` or `eligibleNodesPolicy` moves the class to a new storage pool, and a change to `reclaimPolicy` makes the module recreate the StorageClass with the new policy (see "Updating the ReplicatedStorageClass resource").
+
+<!--
+Where: docs/USAGE.md, "Creating a ReplicatedStorageClass resource", the note after the example on validating the configuration before the StorageClass is created
+Replaced by: the note saying that the StorageClass is not created if errors are found, and the error is saved to the status field
+-->
+
+> The configuration is validated when the resource is created or updated: an invalid one is rejected with an error. The module creates the StorageClass right away; whether the volumes of the class can already be created is reported in the `status` field of the ReplicatedStorageClass resource (see "Checking the state of a ReplicatedStorageClass resource").
+
+<!--
+Where: docs/USAGE.md, a section of its own between "Creating a ReplicatedStorageClass resource" and "Updating the ReplicatedStorageClass resource"
+Replaced by: the sentence saying that the controller keeps the status field up to date
+-->
+
+#### Checking the state of a ReplicatedStorageClass resource
+
+`kubectl get replicatedstorageclass` shows the phase of each class together with its FTT/GMDR and the number of volumes; `-o wide` adds the topology, the storage pool and a message explaining the phase. The conditions give the details:
+
+```shell
+kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.phase}: {.status.message}{"\n"}{range .status.conditions[*]}{.type}={.status}/{.reason}: {.message}{"\n"}{end}'
+```
+
+The class publishes the configuration its volumes are built from (`status.configuration`). The configuration of the current `spec` is **accepted** when `status.configurationGeneration` equals `metadata.generation`. Until then new volumes of the class wait for it, and existing volumes keep the previous configuration. While a change is not accepted, the `Ready` message starts with `Pending:` and names what is pending.
+
+| Phase | `Ready` | What it means | What to do |
+|---|---|---|---|
+| `Ready` | `True/Ready` | The configuration is accepted and all volumes are aligned with it | Nothing |
+| `RollingOut` | `True/Ready` | Volumes are being aligned with the configuration (a rollout, or volumes that have not observed it yet) | Wait; follow `ConfigurationRolledOut` and `status.volumes` |
+| `PartiallyAligned` | `True/Ready` | Some volumes are not aligned, and every automatic fix for them is disabled (`NewVolumesOnly`, `Manual`) | Enable the rollout, or fix the volumes manually |
+| `WaitingForStoragePool` | `False/WaitingForStoragePool` | The configuration of the current `spec` is not accepted: the storage pool is not ready. New volumes wait | Check `StoragePoolReady` and the ReplicatedStoragePool: missing or invalid LVMVolumeGroups, an invalid node selector |
+| `InsufficientNodes` | `False/InsufficientEligibleNodes` | The configuration of the current `spec` is not accepted: the eligible nodes do not meet the FTT/GMDR/topology requirements. New volumes wait | Add nodes, or relax `nodeLabelSelector`/`zones`/the redundancy settings |
+| `Degraded` | `False/Degraded` | The storage pool is not ready or its eligible nodes no longer meet the requirements since the configuration was accepted. The accepted configuration stays in effect: new volumes get it and existing ones keep it, but replicas can be placed only on the nodes the storage pool still offers, so a new volume may not be formed | Restore the LVMVolumeGroups or nodes of the pool; the cause is in `StoragePoolReady` or in the message. If a new volume is not formed, see its `Scheduled` and `MembershipLayoutConverged` conditions |
+| `InvalidConfiguration` | `False/InvalidConfiguration` | The `spec` is invalid, for example `storage` is missing | Fix the `spec` |
+| `Terminating` | — | The class is being deleted; the message names the number of volumes it still waits for | Delete the remaining volumes |
+
+Conditions of the class:
+
+- `Ready` — the summary above;
+- `StoragePoolReady` — the `Ready` condition of the storage pool the class is moving to or is on (`status.storagePoolName`), with its reason and message;
+- `ConfigurationRolledOut` — whether all volumes that take their configuration from the class are aligned with it (see "Updating the ReplicatedStorageClass resource");
+- `VolumesSatisfyEligibleNodes` — whether all volumes have their replicas on eligible nodes; the message names the number of volumes that do not.
 
 <!--
 Where: docs/USAGE.md, the body of "Updating the ReplicatedStorageClass resource", including its subsections
 Replaced by: the paragraph saying that the StorageClass parameters cannot be changed
 -->
 
-Most `spec` fields are immutable after creation, and any attempt to change one is rejected with an error naming the field; changing such a field (for example `storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`) requires recreating the resource. The replication settings and `reclaimPolicy` are mutable: editing `replication` enables the r3→r2 migration below, and editing `reclaimPolicy` makes the module recreate the StorageClass with the new policy.
+`topology`, `volumeAccess` and, once set, `systemNetworkNames` are immutable: an attempt to change one is rejected with an error naming the field, and changing it requires recreating the resource. Every other `spec` field is mutable:
+
+- the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`) change the intended layout of the volumes — for example the r3→r2 migration below;
+- `storage`, `zones`, `nodeLabelSelector` and `eligibleNodesPolicy` make up the identity of the storage pool of the class, so a change moves the class to a new storage pool;
+- `reclaimPolicy` makes the module recreate the StorageClass with the new policy;
+- `configurationRolloutStrategy` and `eligibleNodesConflictResolutionStrategy` control how the changes reach existing volumes.
+
+**Moving to a new storage pool.** Classes with the same `storage`, `zones`, `nodeLabelSelector`, `systemNetworkNames` and `eligibleNodesPolicy` share one automatically created storage pool (`status.storagePoolName`). After a change to any of them the class gets a new pool, and its volumes follow `configurationRolloutStrategy`: under `RollingUpdate` they are rolled out to the new pool (if their replicas are already on eligible nodes of the new pool, no data is moved), under `NewVolumesOnly` the existing volumes stay on the previous pool and only new volumes are created in the new one. The previous pool is released once no volume uses it. After a module update that changes how the pool name is built, existing classes stay on their pools; a class moves to the new pool on its first `spec` change of **any** field, including `reclaimPolicy` or `replication`, and its volumes follow `configurationRolloutStrategy` as above. A replica left on a node or LVMVolumeGroup that the new pool does not include is reported as a conflict (`VolumesSatisfyEligibleNodes`); the automatic repair of such conflicts is not implemented yet (see the limitations below), so move the replica manually.
+
+While the new pool is not ready, or its nodes do not meet the FTT/GMDR/topology requirements, the change is not accepted: new volumes of the class wait for it, and the existing ones keep the previous configuration (see "Checking the state of a ReplicatedStorageClass resource").
 
 ##### Migrating volumes from three replicas (r3) to two replicas + tie-breaker (r2)
 
@@ -103,7 +152,7 @@ The volume holds its rollout slot for the whole of it — including the resync �
 **Limitations.**
 
 - Reverting the edit while a volume is still migrating does not cancel a retype that is already in flight. Depending on the timing the volume ends up either at `2D+1TB` against the intended `3D` — which is simply the growth described above and converges on its own — or with a replica whose `spec.type` is stuck at `TieBreaker` while the layout still reads `3D` (`MembershipLayoutConverged=False/Converging`, with the affected replica named in the condition message). That second one never reports `Converged` again by itself; no data is lost, and the replica is restored with a single patch that sets `spec.type` back to `Diskful` and re-adds its backing-volume fields (`spec.lvmVolumeGroupName`, and `spec.lvmVolumeGroupThinPoolName` for a thin pool) with the values from `status.datamesh.members` of the volume.
-- `eligibleNodesConflictResolutionStrategy.rollingRepair.maxParallel` is accepted but not implemented: repairing volumes that ended up on non-eligible nodes is not throttled. This is a different parameter from the configuration rollout `maxParallel` above, which is enforced.
+- `eligibleNodesConflictResolutionStrategy: RollingRepair` (the default) is accepted but not implemented: nothing moves replicas off nodes that are no longer eligible, and its `rollingRepair.maxParallel` is ignored. Such conflicts are reported in the `VolumesSatisfyEligibleNodes` condition and `status.volumes.inConflictWithEligibleNodes`, and the replicas have to be moved manually. The configuration rollout `maxParallel` above is a different parameter and is enforced.
 
 <!--
 Where: docs/USAGE.md, a section of its own between "Updating the ReplicatedStorageClass resource" and "Deleting the ReplicatedStorageClass resource"
@@ -203,7 +252,7 @@ Where: docs/FAQ.md, the answer to "I am unable to update the fields in the Repli
 Replaced by: the answer saying that changing the spec is not supported
 -->
 
-Partly. Most `spec` fields are immutable after creation, and updates to them are rejected with an error that names the field. The replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`), the `configurationRolloutStrategy`/`eligibleNodesConflictResolutionStrategy` fields and `reclaimPolicy` (the StorageClass is recreated with the new policy) **can** be changed on an existing resource. Editing `replication` is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); see the "Updating the ReplicatedStorageClass resource" section of the usage guide. All other fields (`storage`, `topology`, `zones`, `volumeAccess`, `nodeLabelSelector`, and so on) remain immutable — to change them, recreate the resource.
+Only for a few fields. `topology`, `volumeAccess` and, once set, `systemNetworkNames` are immutable, and updates to them are rejected with an error that names the field — to change them, recreate the resource. All other fields **can** be changed on an existing resource. Editing `replication` (or `failuresToTolerate`/`guaranteedMinimumDataRedundancy`) is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); editing `storage`, `zones`, `nodeLabelSelector` or `eligibleNodesPolicy` moves the class to a new storage pool; editing `reclaimPolicy` recreates the StorageClass with the new policy. See the "Updating the ReplicatedStorageClass resource" section of the usage guide.
 
 <!--
 Where: docs/FAQ.md, the body of "How much of a volume is reserved for the superuser?"

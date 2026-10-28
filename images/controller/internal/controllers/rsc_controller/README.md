@@ -50,7 +50,8 @@ Reconcile (root) [Pure orchestration]
 │       ├── reconcileRSPRelease × N (release all RSPs from usedBy)
 │       └── remove finalizer from RSC (if RSC still exists)
 ├── reconcileMigrationFromRSP [Target-state driven]
-│   └── migrate spec.storagePool → spec.storage (deprecated field)
+│   └── migrate spec.storagePool → spec.storage (deprecated field); if both are set and differ,
+│       keep spec.storage, drop spec.storagePool and log it (no status: the conflict is resolved)
 ├── Storage nil check → Ready=False InvalidConfiguration, Done
 ├── reconcileDefaults [Conditional target evaluation]
 │   └── fill nil optional spec fields (systemNetworkNames, strategies, policy) and patch
@@ -127,12 +128,24 @@ flowchart TD
 
 Indicates overall readiness of the storage class configuration.
 
+The configuration of the current spec is **accepted** when `status.configurationGeneration ==
+metadata.generation`; that is the gate `rv_controller` uses to hand the configuration to volumes.
+`Ready=False` tells apart whether it is accepted:
+
+- not accepted (`WaitingForStoragePool`, `InsufficientEligibleNodes`): new volumes wait for the
+  configuration, existing ones keep the previous one;
+- accepted (`Degraded`): the configuration stays in effect and new volumes keep getting it, but the
+  storage pool or its eligible nodes have degraded since it was accepted, so replicas can be placed
+  only on the nodes the storage pool still offers. Getting the configuration does not mean a new
+  volume can be formed.
+
 | Status | Reason | When |
 |--------|--------|------|
 | True | Ready | Configuration accepted and validated |
-| False | InvalidConfiguration | `spec.storage` is missing (not yet set or webhook not deployed) |
-| False | InsufficientEligibleNodes | RSP eligible nodes do not meet topology and FTT/GMDR requirements |
-| False | WaitingForStoragePool | Waiting for RSP to become ready |
+| False | InvalidConfiguration | `spec.storage` is missing. The webhook requires it, so such a class bypassed admission and stays invalid until its spec is fixed; a class carried over from the LINSTOR control-plane always has `spec.storagePool` and is migrated (or waits for its storage pool) before this check |
+| False | WaitingForStoragePool | Not accepted: waiting for the target RSP to become ready (message starts with `Pending: …`) |
+| False | InsufficientEligibleNodes | Not accepted: RSP eligible nodes do not meet topology and FTT/GMDR requirements (message starts with `Pending: …`) |
+| False | Degraded | Accepted, but the RSP is not ready (cause in `StoragePoolReady`) or its eligible nodes no longer meet the requirements (cause in the message); the message ends with `configuration generation N stays in effect` |
 
 ### StoragePoolReady
 
@@ -191,15 +204,16 @@ rollout slot of its class while it does. Before the heal existed those volumes h
 
 Indicates whether all volumes' replicas are placed on eligible nodes.
 
-| Status | Reason | When |
-|--------|--------|------|
-| True | AllVolumesSatisfy | No RV is known to be in conflict |
-| False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) |
-| False | ManualConflictResolution | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=Manual` |
+| Status | Reason | When | Message |
+|--------|--------|------|---------|
+| True | AllVolumesSatisfy | No RV is known to be in conflict | `All volumes have replicas on eligible nodes` |
+| False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) | `N volume(s) have replicas on non-eligible nodes; automatic resolution (RollingRepair) is not implemented yet, move the replicas manually` |
+| False | ManualConflictResolution | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=Manual` | `N volume(s) have replicas on non-eligible nodes; resolution strategy is Manual` |
 
-> **Note:** conflict resolution is read by strategy **type** only, and unlike the configuration
-> rollout its `maxParallel` throttling is **not implemented** anywhere: the parameter is accepted
-> and ignored.
+> **Note:** the `RollingRepair` strategy is **not implemented** yet: nothing moves replicas off
+> non-eligible nodes automatically. The reason still names the configured strategy (and the phase
+> is `RollingOut`), but the messages say that the replicas have to be moved manually. Conflict
+> resolution is read by strategy **type** only; its `maxParallel` is accepted and ignored.
 
 ## Phase
 
@@ -209,13 +223,20 @@ Phase derivation (evaluation order):
 
 | # | Phase | When | Operator action |
 |---|-------|------|-----------------|
-| 1 | **Terminating** | DeletionTimestamp set | Wait for cleanup |
-| 2 | **WaitingForStoragePool** | StoragePoolReady != True | Check RSP, LVGs, node health |
-| 3 | **InsufficientNodes** | Ready=False/InsufficientEligibleNodes | Add nodes or adjust FTT/GMDR |
-| 4 | **InvalidConfiguration** | Ready=False (other reasons) | Fix RSC spec |
-| 5 | **RollingOut** | Ready=True, divergence exists, at least one auto-fix active | Wait, system is working |
-| 6 | **PartiallyAligned** | Ready=True, divergence exists, all auto-fixes disabled | Enable rollout or fix manually |
-| 7 | **Ready** | Ready=True, all aligned (or no volumes) | Nothing |
+| 1 | **Terminating** | DeletionTimestamp set; the message names the number of volumes the finalizer still waits for | Delete the remaining volumes |
+| 2 | **InvalidConfiguration** | Ready=False/InvalidConfiguration | Fix RSC spec |
+| 3 | **Degraded** | Ready=False/Degraded | New volumes still get the configuration, but their replicas fit only on the nodes the pool still offers; check the RSP, LVGs and node health (see the message and `StoragePoolReady`) |
+| 4 | **WaitingForStoragePool** | StoragePoolReady != True | New volumes wait; check RSP, LVGs, node health |
+| 5 | **InsufficientNodes** | Ready=False/InsufficientEligibleNodes | New volumes wait; add nodes or adjust FTT/GMDR |
+| 6 | **InvalidConfiguration** | Ready=False (other reasons, or not set yet) | Fix RSC spec |
+| 7 | **RollingOut** | Ready=True, divergence exists, at least one auto-fix active | Wait, system is working |
+| 8 | **PartiallyAligned** | Ready=True, divergence exists, all auto-fixes disabled | Enable rollout or fix manually |
+| 9 | **Ready** | Ready=True, all aligned (or no volumes) | Nothing |
+
+Rules 2 and 3 come before the storage pool check: a class without `spec.storage` has no pool to
+wait for, and a degraded class keeps working on its accepted configuration whatever the pool
+reports. After them `WaitingForStoragePool` and `InsufficientNodes` mean only "the configuration
+of the current spec is not accepted yet".
 
 **RollingOut vs PartiallyAligned:** The two rollout strategies (ConfigurationRolloutStrategy, EligibleNodesConflictResolutionStrategy) are independently enabled/disabled. If at least one auto-fix is active for a divergent concern, the phase is RollingOut. If all divergent concerns have their auto-fix disabled, the phase is PartiallyAligned. The message explains which concerns are active and which are disabled.
 
@@ -252,7 +273,9 @@ Layout formulas: `D = FTT + GMDR + 1` (diskful replicas), `TB = 1` if D is even 
 
 **Zonal topology** — per-zone requirements (each zone must independently meet the Ignored/default requirements).
 
-If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNodes`.
+If validation fails, RSC sets `Ready=False` with reason `InsufficientEligibleNodes` while the
+configuration of the current spec is not accepted yet, and with reason `Degraded` once it is
+accepted (the eligible nodes shrank afterwards).
 
 ## Volume Statistics
 
@@ -448,12 +471,18 @@ flowchart TD
     Start([ensureConfiguration]) --> CheckGen{StoragePoolBasedOnGeneration == Generation?}
     CheckGen -->|No| Panic[PANIC: caller bug]
     CheckGen -->|Yes| CheckSPReady{StoragePoolReady == True?}
-    CheckSPReady -->|No| SetWaiting[Ready=False WaitingForStoragePool]
-    SetWaiting --> End([Return])
+    CheckSPReady -->|No| AcceptedSP{Config in sync?}
+    AcceptedSP -->|Yes| SetDegradedSP[Ready=False Degraded]
+    AcceptedSP -->|No| SetWaiting[Ready=False WaitingForStoragePool]
+    SetDegradedSP --> End([Return])
+    SetWaiting --> End
     CheckSPReady -->|Yes| NeedsValidation{Revision changed OR config not in sync?}
     NeedsValidation -->|Yes| Validate[Validate eligible nodes]
     NeedsValidation -->|No| CheckConfigSync
-    Validate -->|Invalid| SetInvalid[Ready=False InsufficientEligibleNodes]
+    Validate -->|Invalid| AcceptedEN{Config in sync?}
+    AcceptedEN -->|Yes| SetDegradedEN[Ready=False Degraded]
+    AcceptedEN -->|No| SetInvalid[Ready=False InsufficientEligibleNodes]
+    SetDegradedEN --> End
     SetInvalid --> End
     Validate -->|Valid| UpdateRevision[Update StoragePoolEligibleNodesRevision if changed]
     UpdateRevision --> CheckConfigSync{ConfigurationGeneration == Generation?}
@@ -524,6 +553,19 @@ flowchart TD
 ### reconcileRSP Details
 
 **Purpose:** Ensures the auto-generated RSP exists with proper finalizer and usedBy tracking.
+
+**Pool identity:** the RSP name is `auto-rsp-<fnv128-hex>` of every RSC spec field that is an input
+of the eligible nodes computation: `storage` (type and LVMVolumeGroups with thin pools), `zones`,
+`nodeLabelSelector`, `systemNetworkNames` and `eligibleNodesPolicy.notReadyGracePeriod`
+(`computeStoragePoolChecksum`). Classes share a pool only if all of them match, and a change to
+any of them moves the class to a new pool: the volumes are rolled out to it according to
+`configurationRolloutStrategy`, and the previous pool is released once no volume uses it.
+
+The name is computed once per `metadata.generation` and cached in `status.storagePoolName`
+(`computeTargetStoragePool`). A module update that changes the name format (for example, adding a
+field to the checksum) therefore does not rename the pools of existing classes: a class moves to
+the new name on its next spec change of **any** field, including fields outside the pool identity
+such as `reclaimPolicy` or `replication`.
 
 **Algorithm:**
 

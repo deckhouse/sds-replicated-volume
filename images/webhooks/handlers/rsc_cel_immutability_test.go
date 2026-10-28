@@ -311,7 +311,9 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			wantErrSubstring: "spec.systemNetworkNames is immutable once set",
 		},
 		{
-			name: "eligibleNodesPolicy change is rejected",
+			// eligibleNodesPolicy is part of the storage pool identity: a change moves the class
+			// to a new pool, so it must be accepted.
+			name: "eligibleNodesPolicy change is accepted",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.EligibleNodesPolicy = &srv.ReplicatedStoragePoolEligibleNodesPolicy{NotReadyGracePeriod: metav1.Duration{Duration: 10 * time.Minute}}
@@ -322,21 +324,21 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 				s.EligibleNodesPolicy = &srv.ReplicatedStoragePoolEligibleNodesPolicy{NotReadyGracePeriod: metav1.Duration{Duration: 5 * time.Minute}}
 				return s
 			}(),
-			wantErrSubstring: "spec.eligibleNodesPolicy is immutable once set",
 		},
 		{
-			name: "eligibleNodesPolicy removed is rejected",
+			// Removing the policy makes the controller restore the default, which is an
+			// ordinary policy change.
+			name: "eligibleNodesPolicy removed is accepted",
 			old: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.EligibleNodesPolicy = &srv.ReplicatedStoragePoolEligibleNodesPolicy{NotReadyGracePeriod: metav1.Duration{Duration: 10 * time.Minute}}
 				return s
 			}(),
-			new:              base(),
-			wantErrSubstring: "spec.eligibleNodesPolicy is immutable once set",
+			new: base(),
 		},
 		{
-			// eligibleNodesPolicy is immutable once set; the controller fills it from nil, so
-			// the nil->value transition must be accepted.
+			// The controller fills eligibleNodesPolicy from nil, so the nil->value transition
+			// must be accepted.
 			name: "eligibleNodesPolicy added from nil (controller default) is accepted",
 			old:  base(),
 			new: func() srv.ReplicatedStorageClassSpec {

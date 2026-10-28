@@ -256,7 +256,7 @@ func (r *Reconciler) reconcileDeletion(
 //   - If RSP found and spec.storage is empty → copy type+lvmVolumeGroups to spec.storage, clear storagePool
 //   - If RSP found and spec.storage is already set → keep spec.storage (it is authoritative;
 //     overwriting it from the deprecated reference would silently move the class to another pool),
-//     only clear the deprecated storagePool; on a content conflict, surface Ready=False/InvalidConfiguration
+//     only clear the deprecated storagePool; on a content conflict, log it and continue
 func (r *Reconciler) reconcileMigrationFromRSP(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
@@ -304,9 +304,16 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 	// rejecting spec.storage, so that state is reachable). Never overwrite an already populated
 	// spec.storage from the deprecated reference: that would silently replace an explicit value
 	// and move the class to another storage pool. Keep spec.storage and only drop the deprecated
-	// storagePool; when the two disagree, surface the conflict honestly.
+	// storagePool.
+	//
+	// A content conflict is reported in the log only, not in status: it is resolved
+	// by the patch below, so a status written here would be overwritten by the very next
+	// reconcile (the patch bumps the generation and requeues the class). Such a one-pass
+	// Ready=False/InvalidConfiguration is invisible to an operator, yet the linstor-migrator may
+	// catch it, read the phase as terminal and block the volumes of the class for good.
 	if rsc.Spec.Storage != nil {
 		conflict := !isStorageInSync(rsc, migratedStorage)
+		storagePool := rsc.Spec.StoragePool //nolint:staticcheck // SA1019: reported in the conflict warning below
 
 		rsc.Spec.StoragePool = "" //nolint:staticcheck // SA1019: dropping deprecated field, keeping authoritative spec.storage
 		if err := r.patchRSC(rf.Ctx(), rsc, base); err != nil {
@@ -314,21 +321,11 @@ func (r *Reconciler) reconcileMigrationFromRSP(
 		}
 
 		if conflict {
-			const conflictMessage = "spec.storagePool and spec.storage were both set with conflicting content; " +
-				"the deprecated spec.storagePool was dropped and spec.storage kept unchanged (spec.storage takes precedence)"
-			rf.Log().Info(conflictMessage)
-
-			statusBase := rsc.DeepCopy()
-			changed := applyReadyCondFalse(rsc,
-				v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration,
-				conflictMessage)
-			changed = applyPhase(rsc, v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, conflictMessage) || changed
-			if changed {
-				if err := r.patchRSCStatus(rf.Ctx(), rsc, statusBase); err != nil {
-					return rf.Fail(err)
-				}
-			}
-			return rf.Done()
+			rf.Log().Info("spec.storagePool and spec.storage were both set with conflicting content; "+
+				"the deprecated spec.storagePool was dropped and spec.storage kept unchanged (spec.storage takes precedence)",
+				"droppedStoragePool", storagePool,
+				"droppedStorage", migratedStorage,
+				"keptStorage", rsc.Spec.Storage)
 		}
 
 		return rf.Continue()
@@ -566,12 +563,20 @@ func ensureStoragePool(
 
 // ensureConfiguration ensures configuration is up to date based on RSP state.
 //
+// The configuration is accepted when it is in sync with the current generation: that is the
+// gate rv_controller uses to hand the configuration to volumes. Ready=False tells the two
+// failure modes apart by that gate. While the configuration of the current spec is not
+// accepted, new volumes wait for it (WaitingForStoragePool, InsufficientEligibleNodes). Once it
+// is accepted, it stays in effect and new volumes keep getting it even if the pool degrades
+// later (Degraded).
+//
 // Algorithm:
 //  1. Panic if StoragePoolBasedOnGeneration != Generation (caller bug).
-//  2. If StoragePoolReady != True: set Ready=False (WaitingForStoragePool) and return.
+//  2. If StoragePoolReady != True: set Ready=False (Degraded if accepted, otherwise
+//     WaitingForStoragePool) and return.
 //  3. If RSP.EligibleNodesRevision changed OR configuration is not in sync:
 //     - Validate RSP.EligibleNodes against topology/replication requirements.
-//     - If invalid: Ready=False (InsufficientEligibleNodes) and return.
+//     - If invalid: Ready=False (Degraded if accepted, else InsufficientEligibleNodes), return.
 //     - Update rsc.status.StoragePoolEligibleNodesRevision if changed.
 //  4. If ConfigurationGeneration == Generation: done (configuration already in sync).
 //  5. Otherwise: apply new Configuration, set ConfigurationGeneration.
@@ -591,11 +596,21 @@ func ensureConfiguration(
 
 	changed := false
 
+	// Whether the configuration of the current spec is accepted; decided before any change below.
+	accepted := isConfigurationInSync(rsc)
+
 	// Compute diff message for use in Ready=False messages.
 	pendingDiffMsg := computePendingConfigurationDiffMessage(rsc, rsc.Status.StoragePoolName)
 
 	// 2. If StoragePoolReady != True: set Ready=False and return.
 	if !objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType) {
+		if accepted {
+			changed = applyReadyCondFalse(rsc,
+				v1alpha1.ReplicatedStorageClassCondReadyReasonDegraded,
+				fmt.Sprintf("Storage pool %s is not ready (see StoragePoolReady); %s",
+					rsc.Status.StoragePoolName, computeConfigurationInEffectMessage(rsc)))
+			return ef.Ok().ReportChangedIf(changed)
+		}
 		msg := "Waiting for ReplicatedStoragePool to become ready"
 		if pendingDiffMsg != "" {
 			msg = pendingDiffMsg + ". " + msg
@@ -609,9 +624,15 @@ func ensureConfiguration(
 	// 3. Validate eligibleNodes if revision changed OR configuration is not in sync
 	//    (spec.replication/topology may have changed without RSP revision change).
 	needsValidation := rsp.Status.EligibleNodesRevision != rsc.Status.StoragePoolEligibleNodesRevision ||
-		!isConfigurationInSync(rsc)
+		!accepted
 	if needsValidation {
 		if err := validateEligibleNodes(rsp.Status.EligibleNodes, rsc.Spec.Topology, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR()); err != nil {
+			if accepted {
+				changed = applyReadyCondFalse(rsc,
+					v1alpha1.ReplicatedStorageClassCondReadyReasonDegraded,
+					err.Error()+"; "+computeConfigurationInEffectMessage(rsc))
+				return ef.Ok().ReportChangedIf(changed)
+			}
 			msg := err.Error()
 			if pendingDiffMsg != "" {
 				msg = pendingDiffMsg + ". " + msg
@@ -631,7 +652,7 @@ func ensureConfiguration(
 
 	// 4. If configuration is in sync, re-assert Ready=True (may have been cleared
 	//    by a transient StoragePool-not-ready condition) and we're done.
-	if isConfigurationInSync(rsc) {
+	if accepted {
 		changed = applyReadyCondTrue(rsc,
 			v1alpha1.ReplicatedStorageClassCondReadyReasonReady,
 			"Storage class is ready",
@@ -677,16 +698,19 @@ func ensureVolumeSummaryAndConditions(
 	conflictResolutionEnabled := isEligibleNodesConflictResolutionEnabled(rsc)
 
 	// Apply VolumesSatisfyEligibleNodes condition (calculated regardless of acknowledgment).
-	if *rsc.Status.Volumes.InConflictWithEligibleNodes > 0 {
+	// RollingRepair is not implemented yet, so the message says that nothing repairs the
+	// conflicts automatically even though the reason names the configured strategy.
+	if conflicts := *rsc.Status.Volumes.InConflictWithEligibleNodes; conflicts > 0 {
 		if conflictResolutionEnabled {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress,
-				"Not implemented",
+				fmt.Sprintf("%d volume(s) have replicas on non-eligible nodes; "+
+					"automatic resolution (RollingRepair) is not implemented yet, move the replicas manually", conflicts),
 			) || changed
 		} else {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution,
-				"Not implemented",
+				fmt.Sprintf("%d volume(s) have replicas on non-eligible nodes; resolution strategy is Manual", conflicts),
 			) || changed
 		}
 	} else {
@@ -885,6 +909,12 @@ func computePendingConfigurationDiffMessage(rsc *v1alpha1.ReplicatedStorageClass
 	return "Pending: " + strings.Join(diffs, ", ")
 }
 
+// computeConfigurationInEffectMessage tells the reader of a degraded storage class that its
+// accepted configuration still applies, so new volumes keep getting it.
+func computeConfigurationInEffectMessage(rsc *v1alpha1.ReplicatedStorageClass) string {
+	return fmt.Sprintf("configuration generation %d stays in effect", rsc.Status.ConfigurationGeneration)
+}
+
 // applyConfigurationRolledOutCondUnknown sets the ConfigurationRolledOut condition to Unknown.
 // Returns true if the condition was changed.
 func applyConfigurationRolledOutCondUnknown(rsc *v1alpha1.ReplicatedStorageClass, reason, message string) bool {
@@ -1001,12 +1031,29 @@ func applyVolumesSatisfyEligibleNodesCondFalse(rsc *v1alpha1.ReplicatedStorageCl
 // computePhaseAndMessage derives the RSC phase and human-readable message
 // from conditions, deletion state, volume summary, and rollout strategy state.
 func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.ReplicatedStorageClassPhase, string) {
-	// 1. Deleting.
+	// 1. Deleting. The finalizer holds the class until its volumes are gone, so say what it waits for.
 	if rsc.DeletionTimestamp != nil {
+		if total := rsc.Status.Volumes.Total; total != nil && *total > 0 {
+			return v1alpha1.ReplicatedStorageClassPhaseTerminating,
+				fmt.Sprintf("Storage class is terminating; waiting for %d volume(s) to be deleted", *total)
+		}
 		return v1alpha1.ReplicatedStorageClassPhaseTerminating, "Storage class is terminating"
 	}
 
-	// 2. WaitingForStoragePool.
+	// 2-3. Ready=False reasons that do not depend on the storage pool readiness. An invalid spec
+	// may have no storage pool at all (spec.storage is missing), and a degraded class keeps working
+	// on its accepted configuration whatever the pool reports, so neither is "waiting for the pool".
+	readyCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+	if readyCond != nil && readyCond.Status == metav1.ConditionFalse {
+		switch readyCond.Reason {
+		case v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration:
+			return v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, readyCond.Message
+		case v1alpha1.ReplicatedStorageClassCondReadyReasonDegraded:
+			return v1alpha1.ReplicatedStorageClassPhaseDegraded, readyCond.Message
+		}
+	}
+
+	// 4. WaitingForStoragePool.
 	spCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondStoragePoolReadyType)
 	if spCond == nil || spCond.Status != metav1.ConditionTrue {
 		msg := "Waiting for storage pool"
@@ -1016,8 +1063,7 @@ func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.Repl
 		return v1alpha1.ReplicatedStorageClassPhaseWaitingForStoragePool, msg
 	}
 
-	// 3-4. Ready=False → InsufficientNodes or InvalidConfiguration.
-	readyCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
+	// 5-6. Other Ready=False (or not yet set) → InsufficientNodes or InvalidConfiguration.
 	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
 		msg := ""
 		if readyCond != nil {
@@ -1029,12 +1075,12 @@ func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.Repl
 		return v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, msg
 	}
 
-	// 5-7. Ready=True → check divergence.
+	// 7-9. Ready=True → check divergence.
 	configRolledOut := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondConfigurationRolledOutType)
 	volsSatisfy := objutilv1.IsStatusConditionPresentAndTrue(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
 
 	if configRolledOut && volsSatisfy {
-		// 7. Ready.
+		// 9. Ready.
 		if rsc.Status.Volumes.Total != nil && *rsc.Status.Volumes.Total > 0 {
 			return v1alpha1.ReplicatedStorageClassPhaseReady,
 				fmt.Sprintf("Storage class is ready; %d volumes, all aligned", *rsc.Status.Volumes.Total)
@@ -1107,7 +1153,7 @@ func composeRolloutMessage(
 			buf.WriteString(". ")
 		}
 		if nodesRepairEnabled {
-			fmt.Fprintf(&buf, "Eligible nodes conflict resolution in progress: %d volume(s) on non-eligible nodes",
+			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: RollingRepair, not implemented yet)",
 				*rsc.Status.Volumes.InConflictWithEligibleNodes)
 		} else {
 			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: Manual)",
@@ -1462,7 +1508,13 @@ func computeTargetStoragePool(rsc *v1alpha1.ReplicatedStorageClass) string {
 }
 
 // computeStoragePoolChecksum computes FNV-128a checksum of RSC spec fields that go into RSP.
-// Fields: storage.type, storage.lvmVolumeGroups, zones, nodeLabelSelector, systemNetworkNames.
+// Fields: storage.type, storage.lvmVolumeGroups, zones, nodeLabelSelector, systemNetworkNames,
+// eligibleNodesPolicy.notReadyGracePeriod.
+//
+// The checksum covers every input of the eligible nodes computation, so classes that would get
+// different eligible nodes never share a pool.
+//
+// Precondition: spec.eligibleNodesPolicy is not nil (reconcileDefaults has run).
 func computeStoragePoolChecksum(rsc *v1alpha1.ReplicatedStorageClass) string {
 	h := fnv.New128a()
 
@@ -1524,6 +1576,11 @@ func computeStoragePoolChecksum(rsc *v1alpha1.ReplicatedStorageClass) string {
 		h.Write([]byte(n))
 		h.Write([]byte{0})
 	}
+
+	// eligibleNodesPolicy.notReadyGracePeriod in canonical form: the same duration written
+	// differently (600s, 10m) must not change the pool name.
+	h.Write([]byte(rsc.Spec.EligibleNodesPolicy.NotReadyGracePeriod.Duration.String()))
+	h.Write([]byte{0})
 
 	return hex.EncodeToString(h.Sum(nil))
 }

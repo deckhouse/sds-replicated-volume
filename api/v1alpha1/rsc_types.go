@@ -50,9 +50,9 @@ type ReplicatedStorageClass struct {
 	// > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
 	// > most fields are rejected, and a change to replication switches the resource to the
 	// > InvalidConfiguration phase and leaves its StorageClass unchanged.
-	// > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames and
-	// > eligibleNodesPolicy are immutable. The other fields can be changed on an existing
-	// > resource: a change to storage, zones or nodeLabelSelector moves the StorageClass's
+	// > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames are
+	// > immutable. The other fields can be changed on an existing resource: a change to
+	// > storage, zones, nodeLabelSelector or eligibleNodesPolicy moves the StorageClass's
 	// > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
 	// > with the new policy.
 	Spec   ReplicatedStorageClassSpec   `json:"spec"`
@@ -148,20 +148,19 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // Immutable spec fields (transition rules; evaluated on update only).
 //
 // topology and volumeAccess are strictly immutable (never touched by the controller).
-// systemNetworkNames and eligibleNodesPolicy are immutable *once set*: the controller fills
-// them from nil to their default (rsc_controller applySpecDefaults), so the rules must permit
-// that initial nil->value transition while still rejecting later changes. eligibleNodesPolicy
-// stays immutable because it is not part of the auto-generated storage pool identity: the pool
-// keeps the policy it was created with, so a later change would be accepted but never applied.
-// For the same reason immutability does not pin the effective policy: the pool is shared by
-// every class with the same identity, so a class created with, or moved to, the identity of an
-// existing pool runs with that pool's policy.
+// systemNetworkNames is immutable *once set*: the controller fills it from nil to its default
+// (rsc_controller applySpecDefaults), so the rule must permit that initial nil->value
+// transition while still rejecting later changes.
 //
-// Every other spec field is mutable. storage, zones and nodeLabelSelector make up the identity
-// of the auto-generated storage pool (rsc_controller computeStoragePoolChecksum), so a change
-// moves the class to a new pool and rolls the volumes out to it. reclaimPolicy is applied by
-// recreating the Kubernetes StorageClass with the new policy (a StorageClass itself is
-// immutable, so recreate is the mechanism; covered by the SC lifecycle e2e).
+// Every other spec field is mutable. storage, zones, nodeLabelSelector, systemNetworkNames and
+// eligibleNodesPolicy make up the identity of the auto-generated storage pool (rsc_controller
+// computeStoragePoolChecksum), so a change to any mutable one of them moves the class to a new
+// pool and rolls the volumes out to it. eligibleNodesPolicy is filled from nil by the
+// controller as well; removing it makes the controller restore the default, which is an
+// ordinary policy change.
+// reclaimPolicy is applied by recreating the Kubernetes StorageClass with the new policy (a
+// StorageClass itself is immutable, so recreate is the mechanism; covered by the SC lifecycle
+// e2e).
 //
 // The legacy control plane (spec.storage is not set) keeps zones and reclaimPolicy immutable:
 // it has no storage pool to move to, and the old controller refuses to recreate a StorageClass
@@ -174,7 +173,6 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || (has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones))",message="spec.zones is immutable for the legacy control plane"
 // +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || self.reclaimPolicy == oldSelf.reclaimPolicy",message="spec.reclaimPolicy is immutable for the legacy control plane"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.eligibleNodesPolicy) || (has(self.eligibleNodesPolicy) && self.eligibleNodesPolicy == oldSelf.eligibleNodesPolicy)",message="spec.eligibleNodesPolicy is immutable once set"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
 	// Deprecated: in the new control-plane, use storage instead.
@@ -352,9 +350,10 @@ type ReplicatedStorageClassSpec struct {
 	// EligibleNodesPolicy defines policies for managing eligible nodes.
 	// When not specified, the controller fills the default (notReadyGracePeriod=10m).
 	//
-	// > The policy is applied through the auto-generated storage pool. The pool is shared by all
-	// > classes with the same storage, zones, nodeLabelSelector and systemNetworkNames, and it
-	// > keeps the policy of the class that created it.
+	// > The policy is applied through the auto-generated storage pool and is part of its
+	// > identity: classes share a pool only if their storage, zones, nodeLabelSelector,
+	// > systemNetworkNames and eligibleNodesPolicy match. A change moves the StorageClass's
+	// > volumes to a new storage pool.
 	// +optional
 	EligibleNodesPolicy *ReplicatedStoragePoolEligibleNodesPolicy `json:"eligibleNodesPolicy,omitempty"`
 }
@@ -606,8 +605,24 @@ type ReplicatedStorageClassStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Phase is the operational state summary of the storage class.
-	// +kubebuilder:validation:Enum=Ready;WaitingForStoragePool;InsufficientNodes;InvalidConfiguration;RollingOut;PartiallyAligned;Terminating
+	// Phase is the operational state summary of the storage class. Might be:
+	// - Ready — the configuration is accepted and all volumes are aligned with it. In the LINSTOR
+	//   control-plane: the StorageClass is created and matches the spec.
+	// - InvalidConfiguration — the spec is invalid. In the LINSTOR control-plane: any reconciliation
+	//   error, including a transient one.
+	// - WaitingForStoragePool — the configuration of the current spec is not accepted yet because the
+	//   storage pool is not ready; new volumes wait for it.
+	// - InsufficientNodes — the configuration of the current spec is not accepted because the eligible
+	//   nodes do not meet the FTT/GMDR/topology requirements; new volumes wait for it.
+	// - Degraded — the storage pool or its eligible nodes have degraded since the configuration was
+	//   accepted. The accepted configuration stays in effect: new volumes get it and existing ones keep
+	//   it, but replicas can be placed only on the nodes the storage pool still offers.
+	// - RollingOut — volumes are being aligned with the configuration.
+	// - PartiallyAligned — some volumes are not aligned, and every automatic fix for them is disabled.
+	// - Terminating — the storage class is being deleted.
+	//
+	// > The LINSTOR control-plane sets only Ready and InvalidConfiguration.
+	// +kubebuilder:validation:Enum=Ready;WaitingForStoragePool;InsufficientNodes;InvalidConfiguration;Degraded;RollingOut;PartiallyAligned;Terminating
 	// +optional
 	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
 	// Message is a human-readable description of the current phase.
@@ -643,12 +658,18 @@ type ReplicatedStorageClassPhase string
 const (
 	// ReplicatedStorageClassPhaseReady means configuration is accepted and all volumes are aligned.
 	ReplicatedStorageClassPhaseReady ReplicatedStorageClassPhase = "Ready"
-	// ReplicatedStorageClassPhaseWaitingForStoragePool means the referenced storage pool is not ready.
+	// ReplicatedStorageClassPhaseWaitingForStoragePool means the configuration of the current spec is not
+	// accepted yet because the storage pool is not ready; new volumes wait for it.
 	ReplicatedStorageClassPhaseWaitingForStoragePool ReplicatedStorageClassPhase = "WaitingForStoragePool"
-	// ReplicatedStorageClassPhaseInsufficientNodes means eligible nodes do not meet FTT/GMDR/topology requirements.
+	// ReplicatedStorageClassPhaseInsufficientNodes means the configuration of the current spec is not
+	// accepted because eligible nodes do not meet FTT/GMDR/topology requirements; new volumes wait for it.
 	ReplicatedStorageClassPhaseInsufficientNodes ReplicatedStorageClassPhase = "InsufficientNodes"
 	// ReplicatedStorageClassPhaseInvalidConfiguration means spec validation failed.
 	ReplicatedStorageClassPhaseInvalidConfiguration ReplicatedStorageClassPhase = "InvalidConfiguration"
+	// ReplicatedStorageClassPhaseDegraded means the storage pool or its eligible nodes have degraded since
+	// the configuration was accepted. The accepted configuration stays in effect: new volumes get it and
+	// existing ones keep it, but replicas can be placed only on the nodes the storage pool still offers.
+	ReplicatedStorageClassPhaseDegraded ReplicatedStorageClassPhase = "Degraded"
 	// ReplicatedStorageClassPhaseRollingOut means configuration is accepted and active rollout/repair is in progress.
 	ReplicatedStorageClassPhaseRollingOut ReplicatedStorageClassPhase = "RollingOut"
 	// ReplicatedStorageClassPhasePartiallyAligned means divergence exists but all auto-fixes are disabled.

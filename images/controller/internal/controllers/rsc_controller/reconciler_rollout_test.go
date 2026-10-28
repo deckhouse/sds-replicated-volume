@@ -526,5 +526,8 @@ var _ = Describe("ConfigurationRolledOut rollout strategy reason", func() {
 		Expect(satisfy).NotTo(BeNil())
 		Expect(satisfy.Status).To(Equal(metav1.ConditionFalse))
 		Expect(satisfy.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress))
+		// RollingRepair is not implemented yet, so the message must not promise a repair.
+		Expect(satisfy.Message).To(Equal("1 volume(s) have replicas on non-eligible nodes; " +
+			"automatic resolution (RollingRepair) is not implemented yet, move the replicas manually"))
 	})
 })

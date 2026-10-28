@@ -23,7 +23,7 @@ spec:
                 Определяет конфигурацию Kubernetes StorageClass.
 
                 > В LINSTOR control-plane spec нельзя изменить после создания: изменение большинства полей отклоняется, а изменение replication переводит ресурс в состояние InvalidConfiguration, и его StorageClass остаётся без изменений.
-                > В новом control-plane неизменяемы topology, volumeAccess, а также systemNetworkNames и eligibleNodesPolicy после того, как они заданы. Остальные поля у существующего ресурса можно изменить: изменение storage, zones или nodeLabelSelector переносит тома StorageClass в новый storage pool, а изменение reclaimPolicy пересоздаёт StorageClass с новой политикой.
+                > В новом control-plane неизменяемы topology, volumeAccess, а также systemNetworkNames после того, как оно задано. Остальные поля у существующего ресурса можно изменить: изменение storage, zones, nodeLabelSelector или eligibleNodesPolicy переносит тома StorageClass в новый storage pool, а изменение reclaimPolicy пересоздаёт StorageClass с новой политикой.
               properties:
                 configurationRolloutStrategy:
                   description: |
@@ -68,7 +68,7 @@ spec:
                     Определяет политики управления допустимыми узлами (eligible nodes).
                     Если не задано, контроллер подставляет значение по умолчанию (notReadyGracePeriod=10m).
 
-                    > Политика применяется через автоматически созданный storage pool. Этот пул общий для всех классов с одинаковыми storage, zones, nodeLabelSelector и systemNetworkNames, и в нём сохраняется политика класса, который его создал.
+                    > Политика применяется через автоматически созданный storage pool и входит в его идентичность: классы используют общий пул, только если у них совпадают storage, zones, nodeLabelSelector, systemNetworkNames и eligibleNodesPolicy. Изменение политики переносит тома StorageClass в новый storage pool.
                   properties:
                     notReadyGracePeriod:
                       description: |
@@ -283,9 +283,17 @@ spec:
                     Человекочитаемое описание текущей фазы.
                 phase:
                   description: |
-                    Общее текущее состояние StorageClass. Может быть: 
-                    - Failed (если контроллер получил некорректную конфигурацию ресурса или возникли ошибки в процессе выполнения операции)
-                    - Created (если StorageClass создан успешно)
+                    Общее текущее состояние storage class. Может быть:
+                    - Ready — конфигурация принята, и все тома с ней согласованы. В LINSTOR control-plane: StorageClass создан и соответствует spec.
+                    - InvalidConfiguration — spec некорректен. В LINSTOR control-plane: любая ошибка reconcile, в том числе временная.
+                    - WaitingForStoragePool — конфигурация текущего spec ещё не принята, потому что storage pool не готов; новые тома её ждут.
+                    - InsufficientNodes — конфигурация текущего spec не принята, потому что eligible nodes не удовлетворяют требованиям FTT/GMDR/topology; новые тома её ждут.
+                    - Degraded — storage pool или его eligible nodes деградировали после того, как конфигурация была принята. Принятая конфигурация продолжает действовать: новые тома получают её, существующие сохраняют, но реплики можно разместить только на узлах, которые storage pool ещё предоставляет.
+                    - RollingOut — тома приводятся в соответствие с конфигурацией.
+                    - PartiallyAligned — часть томов не согласована с конфигурацией, и все автоматические исправления для них отключены.
+                    - Terminating — storage class удаляется.
+
+                    > LINSTOR control-plane устанавливает только Ready и InvalidConfiguration.
                 storagePoolBasedOnGeneration:
                   description: |
                     Поколение RSC, при котором было вычислено значение storagePoolName.

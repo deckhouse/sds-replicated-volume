@@ -33,10 +33,11 @@ const (
 	//
 	// Reasons describe readiness or blocking conditions.
 	ReplicatedStorageClassCondReadyType                            = "Ready"
-	ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes = "InsufficientEligibleNodes" // Not enough eligible nodes.
+	ReplicatedStorageClassCondReadyReasonDegraded                  = "Degraded"                  // Accepted configuration stays in effect, but the storage pool or its eligible nodes have degraded.
+	ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes = "InsufficientEligibleNodes" // Not enough eligible nodes to accept the configuration.
 	ReplicatedStorageClassCondReadyReasonInvalidConfiguration      = "InvalidConfiguration"      // Configuration is invalid.
 	ReplicatedStorageClassCondReadyReasonReady                     = "Ready"                     // Storage class is ready.
-	ReplicatedStorageClassCondReadyReasonWaitingForStoragePool     = "WaitingForStoragePool"     // Waiting for referenced storage pool.
+	ReplicatedStorageClassCondReadyReasonWaitingForStoragePool     = "WaitingForStoragePool"     // Waiting for the storage pool to accept the configuration.
 )
 
 const (

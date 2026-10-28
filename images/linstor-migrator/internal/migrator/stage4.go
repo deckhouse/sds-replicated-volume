@@ -197,7 +197,7 @@ func (m *Migrator) ensureConversionRSPs(ctx context.Context) (map[string]struct{
 
 // switchRVsToAuto is sub-stage 4c: finds ReplicatedVolumes with the
 // SwitchToAutoConfigurationLabelKey label, checks that their referenced
-// ReplicatedStorageClass (via PersistentVolume) is Ready, and patches them
+// ReplicatedStorageClass (via PersistentVolume) is Ready or Degraded, and patches them
 // from Manual to Auto configuration. Returns the count of ReplicatedVolumes
 // still pending (RSC in a non-terminal, non-Ready phase that can still reach
 // Ready: WaitingForStoragePool with a conversion RSP created, RollingOut, or
@@ -279,8 +279,18 @@ func (m *Migrator) switchRVsToAuto(ctx context.Context, nonConvertibleRSCs map[s
 			continue
 		}
 
-		if rsc.Status.Phase == srvv1alpha1.ReplicatedStorageClassPhaseReady {
-			// Ready: switch to Auto.
+		// Ready and Degraded both mean the class has accepted the configuration of its current
+		// spec, and that is all a volume needs to take its configuration from the class: a
+		// Degraded class keeps its accepted configuration in effect and hands it to its volumes,
+		// its storage pool or eligible nodes having degraded since does not change that.
+		//
+		// This is deliberate also when the class would otherwise report PartiallyAligned: Degraded
+		// takes precedence over it, and switching to Auto no longer implies a healthy pool or aligned
+		// volumes. That is safe for the volume — it takes the accepted configuration (or, under
+		// NewVolumesOnly, keeps its own) — and the divergence stays reported on the class.
+		if rsc.Status.Phase == srvv1alpha1.ReplicatedStorageClassPhaseReady ||
+			rsc.Status.Phase == srvv1alpha1.ReplicatedStorageClassPhaseDegraded {
+			// Ready or Degraded: switch to Auto.
 			if err := m.patchRVToAuto(ctx, &rv, rscName); err != nil {
 				return 0, err
 			}
@@ -401,8 +411,13 @@ func (m *Migrator) cleanupConversionRSPs(ctx context.Context) (int, error) {
 //     rollout strategy or Manual conflict resolution); requires manual strategy/topology change.
 //   - Terminating: the storage class is being deleted.
 //
-// Non-terminal (waited for) phases: Ready (success), WaitingForStoragePool (our conversion RSP
-// should help), RollingOut (active progress), empty phase (unknown, wait).
+// Non-terminal phases: Ready and Degraded (success: the configuration is accepted, the volume
+// switches to Auto), WaitingForStoragePool (waited for: our conversion RSP should help),
+// RollingOut (waited for: active progress), empty phase (waited for: unknown).
+//
+// InsufficientNodes and WaitingForStoragePool mean that the configuration of the current spec is
+// not accepted; once it is accepted, a later degradation of the pool or of its eligible nodes is
+// reported as Degraded instead.
 func isTerminalRSCPhase(phase srvv1alpha1.ReplicatedStorageClassPhase) bool {
 	switch phase {
 	case srvv1alpha1.ReplicatedStorageClassPhaseInsufficientNodes,
