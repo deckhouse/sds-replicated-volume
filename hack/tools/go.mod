@@ -25,7 +25,6 @@
 module sds-replicated-volume-codegen-tools
 
 go 1.27.3
-
 tool (
 	github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher
 	k8s.io/code-generator/cmd/deepcopy-gen
