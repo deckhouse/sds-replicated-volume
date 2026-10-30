@@ -74,6 +74,45 @@ spec:
   Best suited for non-critical data and applications that require some level of high availability (e.g., when nodes periodically go into maintenance) but do not have strict reliability or data integrity requirements.  
 - **ConsistencyAndAvailability** – The most reliable replication mode, recommended for mission-critical applications, vital data, and deploying virtual machines in a DVP environment.  
 
+### How does the replication mode affect latency and IOPS?
+
+The difference between the modes comes from the number of replicas that hold data: one for `None`, two for `Availability` (the third, diskless replica holds no data and takes no writes), three for `ConsistencyAndAvailability`. The module replicates synchronously (DRBD protocol C): a write completes only when every replica with data has written it to its disk.
+
+Writes:
+
+- Write latency is the slowest of the local disk write and, for every other replica with data, the network round trip plus the write on that node's disk. With three replicas it is the slower of the two remote ones, with two replicas it is the only remote one. The third replica therefore adds little when the nodes have the same disks and network, and noticeably more when one of the nodes, disks or links is slower — for example a replica in another zone with `topology: TransZonal`.
+- A node writing to a volume sends each written block to every other replica with data: write traffic from the node is twice the write throughput with three replicas and once with two. Sequential write throughput is limited by the slowest of the disks and the network share each replica gets.
+- Write IOPS at a high queue depth fall less than latency suggests, since requests are in flight in parallel, but they are capped by the slowest replica and by the network.
+
+Reads:
+
+- When the Pod runs on a node with a replica that holds data, reads are served from the local disk, and the number of replicas does not change read latency or IOPS. `volumeAccess: Local` always places the Pod there. With `EventuallyLocal` a replica with data is created on the Pod's node some time after the Pod starts; until then reads and writes go over the network, as described below.
+- When the Pod runs on a node without such a replica (`volumeAccess: PreferablyLocal` or `Any`), every read and every write goes over the network, and a write is sent to all replicas with data, three or two of them.
+
+#### Measuring it on your nodes
+
+The figures depend on the disks and the network, so measure them on the nodes the volumes will use. Create one ReplicatedStorageClass per mode you are choosing between (the same `storagePool`, `topology` and `volumeAccess: Local`), a PVC of each, and run `fio` from a Pod that mounts the PVC on a node holding a replica. For comparison, run the same tests on a volume of a local disk of that node, for example from the `sds-local-volume` module.
+
+In the commands below, `/data` is where the PVC is mounted in the Pod.
+
+Write latency (queue depth 1):
+
+```shell
+fio --name=write-latency --filename=/data/fio.test --size=4G --direct=1 \
+  --ioengine=libaio --rw=randwrite --bs=4k --iodepth=1 --numjobs=1 \
+  --runtime=60 --time_based --group_reporting
+```
+
+Write IOPS (high queue depth):
+
+```shell
+fio --name=write-iops --filename=/data/fio.test --size=4G --direct=1 \
+  --ioengine=libaio --rw=randwrite --bs=4k --iodepth=32 --numjobs=4 \
+  --runtime=60 --time_based --group_reporting
+```
+
+For reads, run the same commands with `--rw=randread`. Compare the `clat` percentiles (p50, p99) for latency and `IOPS` for throughput. The difference between a replicated volume and the local disk is the cost of replication; the difference between the two classes is the cost of the third replica.
+
 ## How do I get info about the space used?
 
 There are two options:
