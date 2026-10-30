@@ -9,6 +9,7 @@ dirs:
   - /etc/lvm/backup
   - /lib/modules
   - /run/lock
+  - /run/lock/lvm
   - /run/lvm
   - /sys/fs/cgroup
   - /var

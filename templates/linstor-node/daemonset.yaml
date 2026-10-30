@@ -237,6 +237,8 @@ spec:
             name: tmp-dir
           - mountPath: /run/lock
             name: lock-dir
+          - mountPath: /run/lock/lvm
+            name: host-lvm-lock-dir
           - mountPath: /var
             name: var-dir
           - mountPath: /etc/lvm/archive
@@ -345,6 +347,10 @@ spec:
           emptyDir: {}
         - name: lock-dir
           emptyDir: {}
+        - name: host-lvm-lock-dir
+          hostPath:
+            path: /run/lock/lvm
+            type: DirectoryOrCreate
         - name: var-dir
           emptyDir: {}
         - name: tmp-dir

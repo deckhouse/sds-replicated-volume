@@ -66,7 +66,7 @@ spec:
       metadata:
         description: |
           Allow hostPath volumes for the linstor-node Pod.
-          The LINSTOR satellite works with the block devices, the sysfs, the cgroups and the kernel modules of the node.
+          The LINSTOR satellite works with the block devices, the sysfs, the cgroups, the kernel modules and the LVM lock directory of the node.
     hostPath:
       allowedValues:
         - path: /dev/
@@ -89,4 +89,9 @@ spec:
           metadata:
             description: |
               The kernel modules directory of the node, which the satellite and the LVM and DRBD tooling it runs use to check and load kernel modules.
+        - path: /run/lock/lvm
+          readOnly: false
+          metadata:
+            description: |
+              The LVM lock directory of the node. The satellite locks volume groups there, so its LVM commands and the ones the sds-node-configurator agent runs on the node do not change the same volume group at the same time.
 {{- end }}
