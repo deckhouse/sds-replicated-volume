@@ -17,10 +17,13 @@ limitations under the License.
 package handlers
 
 import (
+	"context"
 	"testing"
 
+	"github.com/slok/kubewebhook/v2/pkg/model"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -300,5 +303,32 @@ func Test_validateLegacyControlPlaneTopology(t *testing.T) {
 				t.Errorf("Message = %q, want %q", result.Message, tt.wantMessage)
 			}
 		})
+	}
+}
+
+// A class being deleted is let through without any check, so the controller
+// can remove its finalizer even when the class no longer passes validation.
+// The call must not reach the cluster: there is none in a unit test.
+func TestRSCValidate_DeletingClassIsNotValidated(t *testing.T) {
+	now := metav1.Now()
+	rsc := &srv.ReplicatedStorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "r2-ignored",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"replicatedstorageclass.storage.deckhouse.io"},
+			Annotations:       map[string]string{fsreserve.AnnotationKey: "not-a-number"},
+		},
+		Spec: srv.ReplicatedStorageClassSpec{
+			Topology: topologyIgnored,
+			Zones:    []string{"zone-a"},
+		},
+	}
+
+	got, err := RSCValidate(context.Background(), &model.AdmissionReview{Operation: model.OperationUpdate}, rsc)
+	if err != nil {
+		t.Fatalf("RSCValidate() error = %v", err)
+	}
+	if !got.Valid {
+		t.Fatalf("RSCValidate() = %+v, want a class being deleted to be valid", got)
 	}
 }

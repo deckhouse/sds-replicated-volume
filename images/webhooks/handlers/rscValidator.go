@@ -52,6 +52,14 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 		return &kwhvalidating.ValidatorResult{}, nil
 	}
 
+	// A class being deleted only waits for its finalizers to go. Checking it
+	// against the cluster as it is now would keep a class that no longer
+	// passes (an Ignored topology once the nodes got zone labels, say) from
+	// ever losing its finalizer, and so from ever being deleted.
+	if rsc.GetDeletionTimestamp() != nil {
+		return &kwhvalidating.ValidatorResult{Valid: true}, nil
+	}
+
 	// The reserved-block percentage travels as an annotation, so the CRD schema
 	// cannot vet it. Reject a bad value here instead of letting the controller
 	// fail on every reconcile of this object.
