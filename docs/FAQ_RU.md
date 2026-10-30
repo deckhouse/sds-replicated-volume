@@ -946,3 +946,71 @@ metadata:
 Задавайте аннотацию при создании ресурса: если добавить или изменить её у существующего ReplicatedStorageClass, ресурс перейдёт в состояние `InvalidConfiguration`, а его StorageClass останется без изменений; чтобы вернуть ресурс в состояние `Ready`, отмените изменение.
 
 Процент применяется через property `FileSystem/MkfsParameters` ресурс-дефиниции LINSTOR. Единственное исключение — аварийный путь, создающий файловую систему, когда LINSTOR её не создал: там всегда действует значение по умолчанию 0%, поскольку процент до этого кода не доходит.
+
+## Как отключить модуль?
+
+Отключение модуля удаляет его контроллеры, CSI-драйвер и компоненты репликации на узлах — и ничего больше. Тома остаются на узлах вместе с данными; PersistentVolume и ресурсы модуля остаются в кластере (модуль только снимает финализаторы с ресурсов ReplicatedStorageClass, ReplicatedStoragePool, ReplicatedStorageMetadataBackup и их StorageClass), как и база данных LINSTOR. Оставшийся том не сможет смонтировать под, запущенный после отключения модуля, а удаление его PersistentVolumeClaim больше не освобождает место.
+
+Удалите тома и классы, пока модуль ещё работает:
+
+1. Найдите тома модуля и удалите их PersistentVolumeClaim, включая PVC модулей Deckhouse (например, мониторинга), которые используют StorageClass модуля:
+
+   ```shell
+   kubectl get pv -o jsonpath='{range .items[?(@.spec.csi.driver=="replicated.csi.storage.deckhouse.io")]}{.metadata.name}{"\t"}{.spec.claimRef.namespace}/{.spec.claimRef.name}{"\t"}{.spec.persistentVolumeReclaimPolicy}{"\n"}{end}'
+   ```
+
+   Том с политикой `Retain` не удаляется вместе со своим PersistentVolumeClaim. Перед удалением PVC переключите его PersistentVolume на `Delete`:
+
+   ```shell
+   kubectl patch pv <pv-name> -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
+   ```
+
+   Дождитесь, пока команда выше перестанет что-либо выводить.
+
+1. Если один из StorageClass модуля используется в кластере по умолчанию, назначьте классом по умолчанию другой, см. [Как назначить StorageClass по умолчанию?](#как-назначить-storageclass-по-умолчанию).
+
+1. Удалите ресурсы ReplicatedStorageClass. Их StorageClass контроллер удалит сам, см. [При удалении ресурса ReplicatedStorageClass не удаляется его дочерний StorageClass в Kubernetes. Что делать?](#при-удалении-ресурса-replicatedstorageclass-не-удаляется-его-дочерний-storageclass-в-kubernetes-что-делать).
+
+   ```shell
+   kubectl get replicatedstorageclasses.storage.deckhouse.io
+   kubectl delete replicatedstorageclasses.storage.deckhouse.io <name>
+   ```
+
+1. Удалите ресурсы ReplicatedStoragePool:
+
+   ```shell
+   kubectl get replicatedstoragepools.storage.deckhouse.io
+   kubectl delete replicatedstoragepools.storage.deckhouse.io <name>
+   ```
+
+1. Отключите модуль:
+
+   ```shell
+   kubectl patch moduleconfig sds-replicated-volume --type=merge -p '{"spec":{"enabled":false}}'
+   ```
+
+1. Удалите базу данных LINSTOR. Она хранится в кластерных кастомных ресурсах группы `internal.linstor.linbit.com`, которые модуль не удаляет; если их оставить, при следующем включении модуль начнёт работу со старым состоянием. Пропустите этот шаг, если данные оставшихся томов ещё могут понадобиться.
+
+   ```shell
+   kubectl get crds -o name | grep '\.internal\.linstor\.linbit\.com$' | xargs --no-run-if-empty kubectl delete
+   ```
+
+   Резервные копии базы (ресурсы ReplicatedStorageMetadataBackup, см. [Как восстановить БД из бэкапа?](#как-восстановить-бд-из-бэкапа)) тоже остаются; удалите их, если они больше не нужны:
+
+   ```shell
+   kubectl delete replicatedstoragemetadatabackups.storage.deckhouse.io --all
+   ```
+
+1. Снимите метки модуля с узлов:
+
+   ```shell
+   for node in $(kubectl get nodes -o name); do
+     kubectl get $node -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+       kubectl label $node "$label"-
+     done
+   done
+   ```
+
+1. Если группы томов LVM больше не нужны, удалите их и отключите модуль `sds-node-configurator`, как описано в [его документации](/modules/sds-node-configurator/faq.html#как-отключить-модуль), если его не используют другие модули (`sds-local-volume`, `sds-elastic`).
+
+Что остаётся на узлах: модуль ядра `drbd` (загружается при старте через `/etc/modules-load.d/d8_drbd.conf`) и фильтры DRBD-устройств в конфигурации LVM и multipath.

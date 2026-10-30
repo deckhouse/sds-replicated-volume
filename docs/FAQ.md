@@ -907,3 +907,71 @@ The value is a whole number of percent between 0 and 50; an invalid one is rejec
 Set the annotation when creating the resource: adding or changing it on an existing ReplicatedStorageClass switches the resource to the `InvalidConfiguration` phase and leaves its StorageClass unchanged; revert the change to bring the resource back to `Ready`.
 
 The percentage is applied through the `FileSystem/MkfsParameters` property of the LINSTOR resource definition. The one exception is the rescue path that formats a volume when LINSTOR did not: it always uses the module default of 0%, because the percentage does not reach it.
+
+## How do I disable the module?
+
+Disabling the module removes its controllers, the CSI driver and the replication components on the nodes, and nothing else. Volumes stay on the nodes with the data on them; PersistentVolumes and the module's resources stay in the cluster (the module only removes the finalizers of ReplicatedStorageClass, ReplicatedStoragePool and ReplicatedStorageMetadataBackup resources and of their StorageClasses), and so does the LINSTOR database. A volume left in place cannot be mounted by a Pod that starts after the module is disabled, and deleting its PersistentVolumeClaim no longer frees the space.
+
+Remove the volumes and the classes while the module is still running:
+
+1. Find the volumes of the module and delete their PersistentVolumeClaims, including those of Deckhouse modules (for example, monitoring) that use the module's StorageClasses:
+
+   ```shell
+   kubectl get pv -o jsonpath='{range .items[?(@.spec.csi.driver=="replicated.csi.storage.deckhouse.io")]}{.metadata.name}{"\t"}{.spec.claimRef.namespace}/{.spec.claimRef.name}{"\t"}{.spec.persistentVolumeReclaimPolicy}{"\n"}{end}'
+   ```
+
+   A volume with the `Retain` policy is not deleted together with its PersistentVolumeClaim. Switch its PersistentVolume to `Delete` before deleting the claim:
+
+   ```shell
+   kubectl patch pv <pv-name> -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
+   ```
+
+   Wait until the command above returns nothing.
+
+1. If one of the module's StorageClasses is the default one for the cluster, switch the default to another class, see [How do I set the default StorageClass?](#how-do-i-set-the-default-storageclass).
+
+1. Delete the ReplicatedStorageClass resources. The controller deletes their StorageClasses, see [Deleting a ReplicatedStorageClass resource does not delete its child StorageClass in Kubernetes. What can I do?](#deleting-a-replicatedstorageclass-resource-does-not-delete-its-child-storageclass-in-kubernetes-what-can-i-do).
+
+   ```shell
+   kubectl get replicatedstorageclasses.storage.deckhouse.io
+   kubectl delete replicatedstorageclasses.storage.deckhouse.io <name>
+   ```
+
+1. Delete the ReplicatedStoragePool resources:
+
+   ```shell
+   kubectl get replicatedstoragepools.storage.deckhouse.io
+   kubectl delete replicatedstoragepools.storage.deckhouse.io <name>
+   ```
+
+1. Disable the module:
+
+   ```shell
+   kubectl patch moduleconfig sds-replicated-volume --type=merge -p '{"spec":{"enabled":false}}'
+   ```
+
+1. Delete the LINSTOR database. It is kept in cluster-wide custom resources of the `internal.linstor.linbit.com` group that the module does not remove; if they stay, the module starts from the old state the next time it is enabled. Skip this step if the data of the remaining volumes may still be needed.
+
+   ```shell
+   kubectl get crds -o name | grep '\.internal\.linstor\.linbit\.com$' | xargs --no-run-if-empty kubectl delete
+   ```
+
+   The database backups (the ReplicatedStorageMetadataBackup resources, see [How do I restore DB from backup?](#how-do-i-restore-db-from-backup)) stay as well; delete them if they are no longer needed:
+
+   ```shell
+   kubectl delete replicatedstoragemetadatabackups.storage.deckhouse.io --all
+   ```
+
+1. Remove the module's labels from the nodes:
+
+   ```shell
+   for node in $(kubectl get nodes -o name); do
+     kubectl get $node -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+       kubectl label $node "$label"-
+     done
+   done
+   ```
+
+1. If the LVM Volume Groups are no longer needed, delete them and disable the `sds-node-configurator` module as described in [its documentation](/modules/sds-node-configurator/faq.html#how-do-i-disable-the-module), unless other modules (`sds-local-volume`, `sds-elastic`) still use it.
+
+What stays on the nodes: the `drbd` kernel module (loaded at boot through `/etc/modules-load.d/d8_drbd.conf`) and the DRBD device filters in the LVM and multipath configuration.
