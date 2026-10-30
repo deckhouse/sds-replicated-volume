@@ -42,6 +42,14 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		return &kwhvalidating.ValidatorResult{}, nil
 	}
 
+	// A pool being deleted only waits for its finalizers to go. Checking it
+	// against the cluster as it is now would keep a pool that no longer passes
+	// (one of its LVMVolumeGroups deleted first, say) from ever losing its
+	// finalizer, and so from ever being deleted.
+	if rsp.GetDeletionTimestamp() != nil {
+		return &kwhvalidating.ValidatorResult{Valid: true}, nil
+	}
+
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create in-cluster config: %w", err)
