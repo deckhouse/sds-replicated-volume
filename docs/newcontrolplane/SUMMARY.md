@@ -188,7 +188,7 @@ Replaced by: nothing
 
 This section applies to clusters running the new control plane of `sds-replicated-volume` (its own controller, without LINSTOR). In this mode there is no LINSTOR client: DRBD resources are managed directly with `drbdsetup`, and the per-node agent runs in the `agent` DaemonSet (label `app=agent`). The `agent` container is distroless — it has no shell, so the `drbd*` binaries are invoked directly (`exec ... -- drbdsetup ...`, not `-- bash`).
 
-The DRBD alerts (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdDeviceIsNotConnected`) carry two useful labels:
+The DRBD alerts (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdResourceIOSuspended`, `D8DrbdDeviceIsNotConnected`) carry two useful labels:
 
 - `name` — the DRBD resource name; use it as the `<resource>` argument below;
 - `conn_name` — the affected peer connection, shown as `peer-N`, where `N` is the peer node-id used by `drbdsetup` (confirm it in `drbdsetup status --verbose`, which prints `peer-N node-id:X`).

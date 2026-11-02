@@ -7,6 +7,7 @@ highlights: []
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []
 improvements:
+  - "Новый алерт `D8DrbdResourceIOSuspended` срабатывает, когда I/O DRBD-ресурса приостановлен 5 минут по причине, отличной от потери кворума (недоступна ни одна реплика с актуальными данными, fencing или `drbdsetup suspend-io`). I/O к такому тому зависает, а не завершается ошибкой, и раньше алерт был только на потерю кворума. В описании алерта сказано, как узнать причину и что делать."
   - "Удаление thin pool из `spec.thinPools` LVMVolumeGroup теперь отклоняется, пока его использует ReplicatedStoragePool или ReplicatedStorageClass. sds-node-configurator удаляет убранный из spec thin pool, как только он опустел, и реплики размещались бы в thin pool, которого больше нет. Пока вебхук модуля недоступен, проверка не блокирует изменения LVMVolumeGroup."
   - "В симуляциях планирования kube-scheduler Deckhouse (запросы filter и prioritize с `dryRun: true`) `linstor-scheduler-extender` больше не записывает Events `FailedScheduling` на симулируемый под, поэтому проверки descheduler не оставляют ложных ошибок планирования на работающих подах ВМ."
 fixes:

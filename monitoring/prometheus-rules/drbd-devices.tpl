@@ -35,6 +35,31 @@
 
           Please, contact tech support for assistance.
 
+    - alert: D8DrbdResourceIOSuspended
+      expr: max by (node, name) (drbd_resource_suspended == 1) unless on (node, name) max by (node, name) (drbd_device_quorum == 0)
+      for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_drbd_device_health: "D8DrbdDeviceHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_drbd_device_health: "D8DrbdDeviceHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: DRBD resource has its I/O suspended
+        description: |
+          DRBD resource {{ "{{" }} $labels.name {{ "}}" }} on node {{ "{{" }} $labels.node {{ "}}" }} has had its I/O suspended for more than 5 minutes. Reads and writes to the volume hang instead of failing, so the workload using it is stuck.
+
+          The alert does not fire while the resource has no quorum: that case is reported by `D8DrbdDeviceHasNoQuorum`. The other reasons DRBD suspends I/O are:
+
+          - `no-data`: no replica with up-to-date data is reachable;
+          - `fencing`: DRBD waits for a fencing handler;
+          - `user`: I/O was suspended by hand with `drbdsetup suspend-io`.
+
+          The `suspended:` field of `drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --verbose` on the node shows which of them it is.
+
+          Please, contact tech support for assistance.
+
     - alert: D8DrbdDeviceIsUnintentionalDiskless
       expr: max by (node, name) (drbd_device_unintentionaldiskless == 1)
       for: 5m
@@ -159,6 +184,38 @@
              The connection re-establishes automatically. Once a second replica reaches `UpToDate`, the quorum is restored and I/O resumes.
 
           3. For the detailed procedure and edge cases, see the module FAQ section "Diagnosing DRBD out-of-sync data or lost quorum (new control plane)". If the quorum is not restored, contact tech support.
+
+    - alert: D8DrbdResourceIOSuspended
+      expr: max by (node, name) (drbd_resource_suspended == 1) unless on (node, name) max by (node, name) (drbd_device_quorum == 0)
+      for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_drbd_device_health: "D8DrbdDeviceHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_drbd_device_health: "D8DrbdDeviceHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: DRBD resource has its I/O suspended
+        description: |
+          DRBD resource {{ "{{" }} $labels.name {{ "}}" }} on node {{ "{{" }} $labels.node {{ "}}" }} has had its I/O suspended for more than 5 minutes. Reads and writes to the volume hang instead of failing, so the workload using it is stuck.
+
+          The alert does not fire while the resource has no quorum: that case is reported by `D8DrbdDeviceHasNoQuorum`. The other reasons DRBD suspends I/O are:
+
+          - `no-data`: no replica with up-to-date data is reachable;
+          - `fencing`: DRBD waits for a fencing handler;
+          - `user`: I/O was suspended by hand with `drbdsetup suspend-io`.
+
+          Inspect the resource; the `suspended:` field shows the reason (the `agent` container is distroless, run the binary directly; `--as=system:sudouser` is required to exec into the Pod):
+
+          ```shell
+          d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=agent -o name) -c agent -- drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --verbose --statistics
+          ```
+
+          - For `no-data`, bring back a node holding an up-to-date replica of the resource: I/O resumes once it connects. If no up-to-date replica can come back, contact tech support before doing anything else with the resource.
+          - For `user`, resume I/O with `drbdsetup resume-io {{ "{{" }} $labels.name {{ "}}" }}` (same `exec` as above) once the reason it was suspended for is gone.
+
+          If I/O is still suspended, contact tech support.
 
     - alert: D8DrbdDeviceIsUnintentionalDiskless
       expr: max by (node, name) (drbd_device_unintentionaldiskless == 1)

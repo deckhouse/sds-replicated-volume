@@ -7,6 +7,7 @@ highlights: []
 # Optional sections — delete rather than leave empty.
 # new_features: []
 improvements:
+  - "New alert `D8DrbdResourceIOSuspended` fires when a DRBD resource has had its I/O suspended for 5 minutes for a reason other than a lost quorum (no up-to-date replica reachable, fencing, or `drbdsetup suspend-io`). I/O to such a volume hangs instead of failing, and before only the loss of quorum raised an alert. The alert description shows how to find the reason and what to do."
   - "Removing a thin pool from `spec.thinPools` of an LVMVolumeGroup is now rejected while a ReplicatedStoragePool or a ReplicatedStorageClass uses that thin pool. sds-node-configurator removes a thin pool dropped from the spec once it is empty, and replicas would then be placed in a thin pool that is gone. The check does not block LVMVolumeGroup updates while the module's webhook is unavailable."
   - "During scheduling simulations of the Deckhouse kube-scheduler (filter and prioritize requests with `dryRun: true`), `linstor-scheduler-extender` no longer records `FailedScheduling` Events on the simulated Pod, so descheduler checks no longer leave false scheduling errors on running VM Pods."
 fixes:

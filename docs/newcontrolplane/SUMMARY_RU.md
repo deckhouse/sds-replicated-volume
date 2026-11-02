@@ -188,7 +188,7 @@ Replaced by: nothing
 
 Раздел относится к кластерам на новом control plane (плоскость управления) модуля `sds-replicated-volume` — с собственным контроллером, без LINSTOR. В этом режиме LINSTOR-клиента нет: DRBD-ресурсами управляют напрямую через `drbdsetup`, а поузловой агент работает в DaemonSet `agent` (метка `app=agent`). Контейнер `agent` — distroless (без оболочки shell), поэтому бинарники `drbd*` вызываются напрямую (`exec ... -- drbdsetup ...`, а не `-- bash`).
 
-DRBD-алерты (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdDeviceIsNotConnected`) несут две полезные метки:
+DRBD-алерты (`D8DrbdPeerDeviceIsOutOfSync`, `D8DrbdDeviceHasNoQuorum`, `D8DrbdResourceIOSuspended`, `D8DrbdDeviceIsNotConnected`) несут две полезные метки:
 
 - `name` — имя DRBD-ресурса; используйте его как аргумент `<resource>` ниже;
 - `conn_name` — затронутое соединение с пиром, в виде `peer-N`, где `N` — это peer node-id (идентификатор узла-пира), который использует `drbdsetup` (проверить можно в `drbdsetup status --verbose`, там выводится `peer-N node-id:X`).
