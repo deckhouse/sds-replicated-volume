@@ -18,4 +18,4 @@
 # ALT packages have to move to a newer one to pick up OS security fixes.
 # Only dates present in the archive repository are valid (see
 # http://ftp.altlinux.org/pub/distributions/archive/p11/date/).
-{{- $_ := set $ "ALT_SNAPSHOT_DATE" "2026/10/14" }}
+{{- $_ := set $ "ALT_SNAPSHOT_DATE" "2026/10/31" }}
