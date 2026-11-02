@@ -522,6 +522,43 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(resources[testName].Namespace).To(Equal(testNamespaceConst))
 	})
 
+	It("ReconcileReplicatedStorageClassEvent_StorageClass_of_another_provisioner_exists_Leaves_it_and_sets_Failed_status", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNamespaceConst,
+				Name:      testName,
+			},
+		}
+
+		foreignSC := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testName,
+			},
+			Provisioner: "e2e.example.com/foreign",
+		}
+		Expect(cl.Create(ctx, foreignSC)).To(Succeed())
+		Expect(cl.Create(ctx, &replicatedSC)).To(Succeed())
+
+		requeue, reconcileErr := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(reconcileErr).To(HaveOccurred())
+		Expect(reconcileErr.Error()).To(ContainSubstring("e2e.example.com/foreign"))
+		Expect(requeue).To(BeFalse())
+
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(storageClass.Provisioner).To(Equal("e2e.example.com/foreign"))
+		Expect(storageClass.DeletionTimestamp).To(BeNil())
+
+		updated := srv.ReplicatedStorageClass{}
+		Expect(cl.Get(ctx, client.ObjectKey{Name: testName, Namespace: testNamespaceConst}, &updated)).To(Succeed())
+		Expect(updated.Status.Phase).To(Equal(srv.ReplicatedStorageClassPhase(controller.Failed)))
+		Expect(updated.Status.Message).To(Equal(reconcileErr.Error()))
+	})
+
 	It("ReconcileReplicatedStorageClassEvent_Resource_does_not_exist_Returns_false_no_error", func() {
 		testName := generateTestName()
 		req := reconcile.Request{NamespacedName: types.NamespacedName{

@@ -37,6 +37,7 @@ const (
 	ReplicatedStorageClassCondReadyReasonInsufficientEligibleNodes = "InsufficientEligibleNodes" // Not enough eligible nodes to accept the configuration.
 	ReplicatedStorageClassCondReadyReasonInvalidConfiguration      = "InvalidConfiguration"      // Configuration is invalid.
 	ReplicatedStorageClassCondReadyReasonReady                     = "Ready"                     // Storage class is ready.
+	ReplicatedStorageClassCondReadyReasonStorageClassConflict      = "StorageClassConflict"      // A StorageClass of another provisioner holds the name of the storage class.
 	ReplicatedStorageClassCondReadyReasonWaitingForStoragePool     = "WaitingForStoragePool"     // Waiting for the storage pool to accept the configuration.
 )
 

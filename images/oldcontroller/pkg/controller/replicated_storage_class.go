@@ -244,7 +244,11 @@ func ReconcileReplicatedStorageClassEvent(
 	}
 
 	if sc != nil && sc.Provisioner != StorageClassProvisioner {
-		return false, fmt.Errorf("Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
+		err := fmt.Errorf("StorageClass %q already exists with provisioner %q; delete it or recreate the ReplicatedStorageClass under another name", sc.Name, sc.Provisioner)
+		if updateErr := updateReplicatedStorageClassStatus(ctx, cl, log, replicatedSC, Failed, err.Error()); updateErr != nil {
+			return true, errors.Join(err, updateErr)
+		}
+		return false, err
 	}
 
 	// Handle deletion

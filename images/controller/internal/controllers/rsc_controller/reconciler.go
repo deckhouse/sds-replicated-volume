@@ -53,6 +53,10 @@ type Reconciler struct {
 	cl client.Client
 }
 
+// storageClassConflictRequeueInterval is how often an RSC whose name is held by
+// a StorageClass of another provisioner checks whether the name is free.
+const storageClassConflictRequeueInterval = time.Minute
+
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 func NewReconciler(cl client.Client) *Reconciler {
@@ -1041,12 +1045,14 @@ func computePhaseAndMessage(rsc *v1alpha1.ReplicatedStorageClass) (v1alpha1.Repl
 	}
 
 	// 2-3. Ready=False reasons that do not depend on the storage pool readiness. An invalid spec
-	// may have no storage pool at all (spec.storage is missing), and a degraded class keeps working
-	// on its accepted configuration whatever the pool reports, so neither is "waiting for the pool".
+	// may have no storage pool at all (spec.storage is missing), a StorageClass of another
+	// provisioner keeps the name taken whatever the pool reports, and a degraded class keeps working
+	// on its accepted configuration whatever the pool reports, so none is "waiting for the pool".
 	readyCond := objutilv1.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondReadyType)
 	if readyCond != nil && readyCond.Status == metav1.ConditionFalse {
 		switch readyCond.Reason {
-		case v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration:
+		case v1alpha1.ReplicatedStorageClassCondReadyReasonInvalidConfiguration,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonStorageClassConflict:
 			return v1alpha1.ReplicatedStorageClassPhaseInvalidConfiguration, readyCond.Message
 		case v1alpha1.ReplicatedStorageClassCondReadyReasonDegraded:
 			return v1alpha1.ReplicatedStorageClassPhaseDegraded, readyCond.Message
@@ -1822,6 +1828,9 @@ func applyRSPRemoveUsedBy(rsp *v1alpha1.ReplicatedStoragePool, rscName string) b
 // reconcileStorageClass creates or updates the Kubernetes StorageClass
 // that corresponds to this RSC. SC name = RSC name. When specs differ,
 // the SC is deleted and recreated (SC spec fields are immutable).
+// A StorageClass of another provisioner is never touched: the RSC is marked
+// Ready=False (StorageClassConflict) and checked again later, as nothing
+// watches StorageClasses.
 //
 // Reconcile pattern: Conditional target evaluation
 func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.ReplicatedStorageClass) (outcome flow.ReconcileOutcome) {
@@ -1831,6 +1840,22 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 	oldSC, err := r.getStorageClass(rf.Ctx(), rsc.Name)
 	if err != nil {
 		return rf.Fail(err)
+	}
+
+	if oldSC != nil && oldSC.Provisioner != v1alpha1.CSIProvisioner {
+		base := rsc.DeepCopy()
+		changed := applyReadyCondFalse(rsc,
+			v1alpha1.ReplicatedStorageClassCondReadyReasonStorageClassConflict,
+			fmt.Sprintf("StorageClass %q already exists with provisioner %q; delete it or recreate the ReplicatedStorageClass under another name",
+				oldSC.Name, oldSC.Provisioner))
+		phase, message := computePhaseAndMessage(rsc)
+		changed = applyPhase(rsc, phase, message) || changed
+		if changed {
+			if err := r.patchRSCStatus(rf.Ctx(), rsc, base); err != nil {
+				return rf.Fail(err)
+			}
+		}
+		return rf.DoneAndRequeueAfter(storageClassConflictRequeueInterval)
 	}
 
 	targetSC, err := computeTargetStorageClass(rsc, oldSC)

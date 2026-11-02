@@ -8,7 +8,9 @@ highlights: []
 # new_features: []
 improvements:
   - "During scheduling simulations of the Deckhouse kube-scheduler (filter and prioritize requests with `dryRun: true`), `linstor-scheduler-extender` no longer records `FailedScheduling` Events on the simulated Pod, so descheduler checks no longer leave false scheduling errors on running VM Pods."
-# fixes: []
+fixes:
+  - "In the new control plane, the controller no longer deletes a StorageClass of another provisioner that has the name of a `ReplicatedStorageClass`. It used to remove such a StorageClass and create its own in its place. Now it leaves the StorageClass alone, and the `ReplicatedStorageClass` goes to the `InvalidConfiguration` phase with `Ready=False`, reason `StorageClassConflict`, and a message naming the StorageClass and its provisioner. Once the name is free, the class gets its StorageClass within a minute."
+  - "In the LINSTOR control plane, a `ReplicatedStorageClass` whose name is held by a StorageClass of another provisioner now goes to the `InvalidConfiguration` phase with a message naming the StorageClass and its provisioner. Before, the conflict was only written to the controller log and the status did not change."
 # security: []
 # breaking: []
 # upgrade_notes: []

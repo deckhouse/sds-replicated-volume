@@ -62,7 +62,8 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileRSP [Conditional target evaluation]
 │   └── ensure auto-generated RSP exists with finalizer and usedBy
 ├── reconcileStorageClass [Conditional target evaluation]
-│   └── ensure Kubernetes StorageClass exists; delete+recreate on immutable spec change
+│   └── ensure Kubernetes StorageClass exists; delete+recreate on immutable spec change;
+│       an SC of another provisioner → Ready=False StorageClassConflict, requeue after 1 minute
 ├── ensureStoragePool
 │   └── status.storagePoolName + StoragePoolReady condition
 ├── ensureConfiguration
@@ -143,6 +144,7 @@ metadata.generation`; that is the gate `rv_controller` uses to hand the configur
 |--------|--------|------|
 | True | Ready | Configuration accepted and validated |
 | False | InvalidConfiguration | `spec.storage` is missing. The webhook requires it, so such a class bypassed admission and stays invalid until its spec is fixed; a class carried over from the LINSTOR control-plane always has `spec.storagePool` and is migrated (or waits for its storage pool) before this check |
+| False | StorageClassConflict | A StorageClass of another provisioner holds the name of the RSC. The controller leaves it alone and checks again every minute; the class gets its StorageClass once the name is free |
 | False | WaitingForStoragePool | Not accepted: waiting for the target RSP to become ready (message starts with `Pending: …`) |
 | False | InsufficientEligibleNodes | Not accepted: RSP eligible nodes do not meet topology and FTT/GMDR requirements (message starts with `Pending: …`) |
 | False | Degraded | Accepted, but the RSP is not ready (cause in `StoragePoolReady`) or its eligible nodes no longer meet the requirements (cause in the message); the message ends with `configuration generation N stays in effect` |
@@ -224,7 +226,7 @@ Phase derivation (evaluation order):
 | # | Phase | When | Operator action |
 |---|-------|------|-----------------|
 | 1 | **Terminating** | DeletionTimestamp set; the message names the number of volumes the finalizer still waits for | Delete the remaining volumes |
-| 2 | **InvalidConfiguration** | Ready=False/InvalidConfiguration | Fix RSC spec |
+| 2 | **InvalidConfiguration** | Ready=False/InvalidConfiguration or Ready=False/StorageClassConflict | Fix RSC spec; for a conflict, delete the other StorageClass or recreate the RSC under another name |
 | 3 | **Degraded** | Ready=False/Degraded | New volumes still get the configuration, but their replicas fit only on the nodes the pool still offers; check the RSP, LVGs and node health (see the message and `StoragePoolReady`) |
 | 4 | **WaitingForStoragePool** | StoragePoolReady != True | New volumes wait; check RSP, LVGs, node health |
 | 5 | **InsufficientNodes** | Ready=False/InsufficientEligibleNodes | New volumes wait; add nodes or adjust FTT/GMDR |
@@ -234,7 +236,7 @@ Phase derivation (evaluation order):
 | 9 | **Ready** | Ready=True, all aligned (or no volumes) | Nothing |
 
 Rules 2 and 3 come before the storage pool check: a class without `spec.storage` has no pool to
-wait for, and a degraded class keeps working on its accepted configuration whatever the pool
+wait for, a StorageClass of another provisioner keeps the name taken whatever the pool reports, and a degraded class keeps working on its accepted configuration whatever the pool
 reports. After them `WaitingForStoragePool` and `InsufficientNodes` mean only "the configuration
 of the current spec is not accepted yet".
 
@@ -602,7 +604,7 @@ flowchart TD
 
 ### reconcileStorageClass Details
 
-**Purpose:** Creates or updates the Kubernetes StorageClass that corresponds to this RSC. SC name equals RSC name. When immutable spec fields differ (parameters, provisioner, reclaimPolicy, volumeBindingMode), the SC is deleted and recreated.
+**Purpose:** Creates or updates the Kubernetes StorageClass that corresponds to this RSC. SC name equals RSC name. When immutable spec fields differ (parameters, reclaimPolicy, volumeBindingMode), the SC is deleted and recreated. A StorageClass of another provisioner is never changed or deleted: the RSC gets `Ready=False` with reason `StorageClassConflict`, and the controller checks again after a minute, as it does not watch StorageClasses.
 
 **Algorithm:**
 
@@ -614,7 +616,10 @@ flowchart TD
     Create -->|Error| Fail
     Create --> End([Continue])
 
-    GetSC -->|Found| CheckSpec{Spec in sync?}
+    GetSC -->|Found| CheckOwn{Replicated provisioner?}
+    CheckOwn -->|No| Conflict[Ready=False StorageClassConflict, patch RSC status]
+    Conflict --> Requeue([Done, requeue after 1 minute])
+    CheckOwn -->|Yes| CheckSpec{Spec in sync?}
     CheckSpec -->|No| RemoveFin1[Remove finalizer from old SC]
     RemoveFin1 --> DeleteOld[Delete old SC]
     DeleteOld --> Recreate[Create target SC]

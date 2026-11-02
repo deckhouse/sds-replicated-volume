@@ -23,6 +23,7 @@ import (
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -81,12 +82,12 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	}
 
 	if arReview.Operation == model.OperationCreate {
-		sc, err := staticClient.StorageV1().StorageClasses().Get(ctx, rsc.Name, metav1.GetOptions{})
-		if err == nil && sc.Provisioner != replicatedCSIProvisioner {
-			return &kwhvalidating.ValidatorResult{
-				Valid:   false,
-				Message: fmt.Sprintf("StorageClass %q already exists with provisioner %q; choose a different ReplicatedStorageClass name", rsc.Name, sc.Provisioner),
-			}, nil
+		r, err := validateStorageClassName(ctx, staticClient, rsc.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !r.Valid {
+			return r, nil
 		}
 	}
 
@@ -125,6 +126,29 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 		if r := validateLegacyControlPlaneTopology(rsc, clusterZoneList); !r.Valid {
 			return r, nil
 		}
+	}
+
+	return &kwhvalidating.ValidatorResult{Valid: true}, nil
+}
+
+// validateStorageClassName rejects a name already taken by a StorageClass of
+// another provisioner: the controller names the StorageClass after the
+// ReplicatedStorageClass, so such a class could never get one. A failed read
+// fails the request rather than admitting the class.
+func validateStorageClassName(ctx context.Context, cl kubernetes.Interface, name string) (*kwhvalidating.ValidatorResult, error) {
+	sc, err := cl.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return &kwhvalidating.ValidatorResult{Valid: true}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("unable to get the StorageClass %s: %w", name, err)
+	}
+
+	if sc.Provisioner != replicatedCSIProvisioner {
+		return &kwhvalidating.ValidatorResult{
+			Valid:   false,
+			Message: fmt.Sprintf("StorageClass %q already exists with provisioner %q; choose a different ReplicatedStorageClass name", name, sc.Provisioner),
+		}, nil
 	}
 
 	return &kwhvalidating.ValidatorResult{Valid: true}, nil

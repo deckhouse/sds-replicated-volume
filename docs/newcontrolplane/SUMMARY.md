@@ -59,6 +59,7 @@ The class publishes the configuration its volumes are built from (`status.config
 | `InsufficientNodes` | `False/InsufficientEligibleNodes` | The configuration of the current `spec` is not accepted: the eligible nodes do not meet the FTT/GMDR/topology requirements. New volumes wait | Add nodes, or relax `nodeLabelSelector`/`zones`/the redundancy settings |
 | `Degraded` | `False/Degraded` | The storage pool is not ready or its eligible nodes no longer meet the requirements since the configuration was accepted. The accepted configuration stays in effect: new volumes get it and existing ones keep it, but replicas can be placed only on the nodes the storage pool still offers, so a new volume may not be formed | Restore the LVMVolumeGroups or nodes of the pool; the cause is in `StoragePoolReady` or in the message. If a new volume is not formed, see its `Scheduled` and `MembershipLayoutConverged` conditions |
 | `InvalidConfiguration` | `False/InvalidConfiguration` | The `spec` is invalid, for example `storage` is missing | Fix the `spec` |
+| `InvalidConfiguration` | `False/StorageClassConflict` | A StorageClass of another provisioner already has the name of the class. The module leaves that StorageClass alone and does not create its own | Delete the other StorageClass, or recreate the class under another name |
 | `Terminating` | — | The class is being deleted; the message names the number of volumes it still waits for | Delete the remaining volumes |
 
 Conditions of the class:

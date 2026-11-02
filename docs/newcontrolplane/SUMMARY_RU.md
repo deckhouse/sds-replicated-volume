@@ -59,6 +59,7 @@ kubectl get replicatedstorageclass <RSC_NAME> -o jsonpath='{.status.phase}: {.st
 | `InsufficientNodes` | `False/InsufficientEligibleNodes` | Конфигурация текущего `spec` не принята: eligible nodes не удовлетворяют требованиям FTT/GMDR/topology. Новые тома ждут | Добавить узлы или ослабить `nodeLabelSelector`/`zones`/параметры избыточности |
 | `Degraded` | `False/Degraded` | Storage pool не готов или его eligible nodes перестали удовлетворять требованиям после того, как конфигурация была принята. Принятая конфигурация продолжает действовать: новые тома получают её, существующие сохраняют, но реплики можно разместить только на узлах, которые storage pool ещё предоставляет, поэтому новый том может не сформироваться | Восстановить LVMVolumeGroup или узлы пула; причина — в `StoragePoolReady` или в сообщении. Если новый том не формируется, смотрите его conditions `Scheduled` и `MembershipLayoutConverged` |
 | `InvalidConfiguration` | `False/InvalidConfiguration` | `spec` некорректен, например отсутствует `storage` | Исправить `spec` |
+| `InvalidConfiguration` | `False/StorageClassConflict` | Имя класса уже занято StorageClass другого провижинера. Модуль не трогает этот StorageClass и не создаёт свой | Удалить чужой StorageClass или пересоздать класс под другим именем |
 | `Terminating` | — | Класс удаляется; сообщение называет число томов, которые он ещё ждёт | Удалить оставшиеся тома |
 
 Conditions класса:

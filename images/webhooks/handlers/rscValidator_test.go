@@ -18,10 +18,16 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
+	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -330,5 +336,67 @@ func TestRSCValidate_DeletingClassIsNotValidated(t *testing.T) {
 	}
 	if !got.Valid {
 		t.Fatalf("RSCValidate() = %+v, want a class being deleted to be valid", got)
+	}
+}
+
+func Test_validateStorageClassName(t *testing.T) {
+	scWith := func(name, provisioner string) *storagev1.StorageClass {
+		return &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: name}, Provisioner: provisioner}
+	}
+
+	tests := []struct {
+		name      string
+		objects   []runtime.Object
+		getErr    error
+		wantValid bool
+		wantErr   bool
+	}{
+		{
+			name:      "free name",
+			wantValid: true,
+		},
+		{
+			name:      "StorageClass of the replicated provisioner",
+			objects:   []runtime.Object{scWith("rsc", replicatedCSIProvisioner)},
+			wantValid: true,
+		},
+		{
+			name:      "StorageClass of another provisioner",
+			objects:   []runtime.Object{scWith("rsc", "e2e.example.com/foreign")},
+			wantValid: false,
+		},
+		{
+			name:    "StorageClass read fails",
+			getErr:  apierrors.NewServiceUnavailable("apiserver is down"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cl := fake.NewClientset(tt.objects...)
+			if tt.getErr != nil {
+				cl.PrependReactor("get", "storageclasses", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+
+			got, err := validateStorageClassName(context.Background(), cl, "rsc")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("validateStorageClassName() = %+v, want an error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateStorageClassName() error = %v", err)
+			}
+			if got.Valid != tt.wantValid {
+				t.Fatalf("Valid = %v, want %v (message %q)", got.Valid, tt.wantValid, got.Message)
+			}
+			if !tt.wantValid && !strings.Contains(got.Message, "e2e.example.com/foreign") {
+				t.Errorf("Message = %q, want it to name the provisioner", got.Message)
+			}
+		})
 	}
 }
