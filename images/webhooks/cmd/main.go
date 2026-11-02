@@ -27,6 +27,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
@@ -62,6 +63,7 @@ const (
 	RSPValidatorID = "RSPValidator"
 	SCValidatorID  = "SCValidator"
 	PVCValidatorID = "PVCValidator"
+	LVGValidatorID = "LVGValidator"
 )
 
 func main() {
@@ -101,11 +103,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	lvgValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LVGValidate, LVGValidatorID, &snc.LVMVolumeGroup{}, kwhLog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating lvgValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
 	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
+	mux.Handle("/lvg-validate", lvgValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	log.Info("listening", "address", port)

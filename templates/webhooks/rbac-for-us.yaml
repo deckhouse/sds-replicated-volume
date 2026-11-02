@@ -20,6 +20,9 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["list"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedstoragepools", "replicatedstorageclasses"]
+    verbs: ["list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
