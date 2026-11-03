@@ -102,12 +102,12 @@ func GetValidatingWebhookHandler(validationFunc func(ctx context.Context, _ *mod
 		Logger:    logger,
 	}
 
-	mutationWebhook, err := kwhvalidating.NewWebhook(validatingWebhookConfig)
+	validatingWebhook, err := kwhvalidating.NewWebhook(validatingWebhookConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	mutationWebhookHandler, err := kwhhttp.HandlerFor(kwhhttp.HandlerConfig{Webhook: mutationWebhook, Logger: logger})
+	validatingWebhookHandler, err := kwhhttp.HandlerFor(kwhhttp.HandlerConfig{Webhook: validatingWebhook, Logger: logger})
 
-	return mutationWebhookHandler, err
+	return validatingWebhookHandler, err
 }
