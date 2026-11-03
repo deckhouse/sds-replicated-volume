@@ -6,7 +6,7 @@ replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261101165458-cdb3589edada
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.35.1

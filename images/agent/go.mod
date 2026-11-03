@@ -6,7 +6,7 @@ replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go
 
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261101165458-cdb3589edada
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-20260818081835-2e871a30aeb7
 	github.com/go-logr/logr v1.4.3

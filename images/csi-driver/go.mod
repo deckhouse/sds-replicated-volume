@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261101165458-cdb3589edada
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/container-storage-interface/spec v1.12.0
 	github.com/deckhouse/deckhouse/pkg/metrics-storage v0.3.0
