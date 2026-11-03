@@ -5,7 +5,8 @@ summary: ""
 highlights: []
 
 # Необязательные разделы — пустые не оставлять, а удалять.
-# new_features: []
+new_features:
+  - "В DKP 1.78 и новее роли доступа модуля следуют схеме RBAC capability/scope (возможность/область действия): ClusterRole `d8:system-capability:sds-replicated-volume:view` и `d8:system-capability:sds-replicated-volume:edit` дают доступ только на чтение и полный доступ к `ReplicatedStorageClass`, `ReplicatedStoragePool`, `ReplicatedVolume`, `ReplicatedVolumeReplica`, `ReplicatedVolumeAttachment`, `DRBDResource`, `DRBDResourceOperation`, `DRBDNodeOperation` и `DRBDMapper`. В версиях ниже 1.78 модуль сохраняет роли `d8:manage:permission:module:sds-replicated-volume:view` и `:edit`."
 improvements:
   - "Новый алерт `D8DrbdResourceIOSuspended` срабатывает, когда I/O DRBD-ресурса приостановлен 5 минут по причине, отличной от потери кворума (недоступна ни одна реплика с актуальными данными, fencing или `drbdsetup suspend-io`). I/O к такому тому зависает, а не завершается ошибкой, и раньше алерт был только на потерю кворума. В описании алерта сказано, как узнать причину и что делать."
   - "Удаление thin pool из `spec.thinPools` LVMVolumeGroup теперь отклоняется, пока его использует ReplicatedStoragePool или ReplicatedStorageClass. sds-node-configurator удаляет убранный из spec thin pool, как только он опустел, и реплики размещались бы в thin pool, которого больше нет. Пока вебхук модуля недоступен, проверка не блокирует изменения LVMVolumeGroup."
@@ -15,7 +16,8 @@ fixes:
   - "В старой плоскости управления на LINSTOR `ReplicatedStorageClass`, имя которого занято StorageClass другого провижинера, теперь переходит в фазу `InvalidConfiguration` с сообщением, в котором названы StorageClass и его провижинер. Раньше конфликт только записывался в лог контроллера, а статус не менялся."
 # security: []
 # breaking: []
-# upgrade_notes: []
+upgrade_notes:
+  - "В DKP 1.78 и новее ClusterRole `d8:manage:permission:module:sds-replicated-volume:view` и `:edit` заменяются на `d8:system-capability:sds-replicated-volume:view` и `:edit`. Привязки, которые ссылаются на старые имена ролей напрямую, нужно перевести на новые."
 # known_issues: []
 # docs: []
 # dependencies:
