@@ -26,3 +26,5 @@ upgrade_notes:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+  - "`DeleteVolume` навсегда отказывал в удалении тома, если ReplicatedVolumeAttachment пережил VolumeAttachment своего узла: финализатор CSI-контроллера на нём снимает только `ControllerUnpublishVolume`, которую external-attacher после исчезновения VolumeAttachment больше не вызывает, и PersistentVolume оставался `Released`. Теперь `DeleteVolume` сначала освобождает такие attachment, если их устройство не используется."

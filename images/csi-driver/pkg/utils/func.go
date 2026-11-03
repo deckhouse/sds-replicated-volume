@@ -22,6 +22,8 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -457,6 +459,88 @@ func CheckNoRVAsExist(ctx context.Context, kc client.Client, log logger.Logger, 
 	}
 	log.Named("CheckNoRVAsExist").Info(fmt.Sprintf("[traceID:%s][volumeID:%s] No RVAs found, safe to proceed with deletion", traceID, volumeName))
 	return nil
+}
+
+// ReleaseOrphanRVAs deletes the RVAs of a volume that no Kubernetes
+// VolumeAttachment stands behind any more.
+//
+// The csi-controller finalizer on an RVA is only removed by DeleteRVA, which
+// runs from ControllerUnpublishVolume. Once the VolumeAttachment of a node is
+// gone, the external-attacher never calls ControllerUnpublishVolume for it
+// again, so such an RVA outlives its attachment for good and makes
+// CheckNoRVAsExist refuse every DeleteVolume of the volume. DeleteVolume is only
+// called for a released PersistentVolume, so an RVA without a VolumeAttachment
+// has nothing left to serve. An RVA whose device is still in use is left alone.
+func ReleaseOrphanRVAs(ctx context.Context, kc client.Client, log logger.Logger, traceID, driverName, volumeName string) error {
+	log = log.Named("ReleaseOrphanRVAs")
+
+	rvas := &srv.ReplicatedVolumeAttachmentList{}
+	if err := kc.List(ctx, rvas); err != nil {
+		return fmt.Errorf("list ReplicatedVolumeAttachments: %w", err)
+	}
+
+	var (
+		vas     *storagev1.VolumeAttachmentList
+		pvNames map[string]struct{}
+	)
+	for _, rva := range rvas.Items {
+		if rva.Spec.ReplicatedVolumeName != volumeName {
+			continue
+		}
+		if vas == nil {
+			var err error
+			if pvNames, err = persistentVolumeNamesForHandle(ctx, kc, driverName, volumeName); err != nil {
+				return err
+			}
+			vas = &storagev1.VolumeAttachmentList{}
+			if err := kc.List(ctx, vas); err != nil {
+				return fmt.Errorf("list VolumeAttachments: %w", err)
+			}
+		}
+		if hasVolumeAttachment(vas.Items, driverName, pvNames, rva.Spec.NodeName) {
+			continue
+		}
+		if rva.Status.InUse != nil && *rva.Status.InUse {
+			log.Warn(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] RVA %s has no VolumeAttachment but its device is in use, leaving it", traceID, volumeName, rva.Spec.NodeName, rva.Name))
+			continue
+		}
+		log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s][node:%s] RVA %s has no VolumeAttachment, releasing it", traceID, volumeName, rva.Spec.NodeName, rva.Name))
+		if err := DeleteRVA(ctx, kc, log, traceID, volumeName, rva.Spec.NodeName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// persistentVolumeNamesForHandle returns the names of the PersistentVolumes of
+// this driver that carry the volume, since a VolumeAttachment refers to the
+// PersistentVolume by name and that name is not always the volume ID.
+func persistentVolumeNamesForHandle(ctx context.Context, kc client.Client, driverName, volumeName string) (map[string]struct{}, error) {
+	pvs := &corev1.PersistentVolumeList{}
+	if err := kc.List(ctx, pvs); err != nil {
+		return nil, fmt.Errorf("list PersistentVolumes: %w", err)
+	}
+	names := map[string]struct{}{volumeName: {}}
+	for _, pv := range pvs.Items {
+		if csi := pv.Spec.CSI; csi != nil && csi.Driver == driverName && csi.VolumeHandle == volumeName {
+			names[pv.Name] = struct{}{}
+		}
+	}
+	return names, nil
+}
+
+func hasVolumeAttachment(vas []storagev1.VolumeAttachment, driverName string, pvNames map[string]struct{}, nodeName string) bool {
+	for _, va := range vas {
+		if va.Spec.Attacher != driverName || va.Spec.NodeName != nodeName {
+			continue
+		}
+		if pv := va.Spec.Source.PersistentVolumeName; pv != nil {
+			if _, ok := pvNames[*pv]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RVAWaitError represents a failure to observe RVA Ready=True.

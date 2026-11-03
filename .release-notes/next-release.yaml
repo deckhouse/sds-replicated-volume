@@ -26,3 +26,5 @@ upgrade_notes:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+  - "`DeleteVolume` refused a volume for good when a ReplicatedVolumeAttachment of it outlived the VolumeAttachment of its node: the CSI controller finalizer on the attachment is removed only by `ControllerUnpublishVolume`, which the external-attacher never calls again once the VolumeAttachment is gone, and the PersistentVolume stayed `Released`. `DeleteVolume` now releases such attachments first, unless their device is still in use."

@@ -234,6 +234,11 @@ func (d *Driver) DeleteVolume(ctx context.Context, request *csi.DeleteVolumeRequ
 		return nil, status.Error(codes.InvalidArgument, "Volume ID cannot be empty")
 	}
 
+	if err := utils.ReleaseOrphanRVAs(ctx, d.cl, d.log, traceID, d.name, request.VolumeId); err != nil {
+		log.Error(fmt.Sprintf("[traceID:%s][volumeID:%s] error releasing RVAs without a VolumeAttachment", traceID, request.VolumeId), logger.Err(err))
+		return nil, status.Errorf(codes.Internal, "%v", err)
+	}
+
 	if err := utils.CheckNoRVAsExist(ctx, d.cl, d.log, traceID, request.VolumeId); err != nil {
 		log.Error(fmt.Sprintf("[traceID:%s][volumeID:%s] cannot delete volume while RVAs exist", traceID, request.VolumeId), logger.Err(err))
 		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)

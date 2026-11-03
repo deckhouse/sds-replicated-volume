@@ -25,6 +25,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -534,5 +535,78 @@ func TestCreateVolume_FreshCreate_WaitFails_DeletionTimestamp_DoesNotDelete(t *t
 	}
 	if !csiFinalizerFound {
 		t.Fatalf("CSI finalizer must be preserved when CreateVolume skips Delete, finalizers=%v", got.Finalizers)
+	}
+}
+
+// An RVA whose VolumeAttachment is already gone is never unpublished again, so
+// DeleteVolume has to release it itself instead of refusing the volume forever.
+func TestDeleteVolume_ReleasesRVAWithoutVolumeAttachment(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	volumeID := "pvc-orphan"
+	nodeID := "node-1"
+	rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeID, nodeID)
+
+	cl := newTestFakeClient()
+	rva := &v1alpha1.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: rvaName, Finalizers: []string{v1alpha1.CSIControllerFinalizer}},
+		Spec:       v1alpha1.ReplicatedVolumeAttachmentSpec{ReplicatedVolumeName: volumeID, NodeName: nodeID},
+	}
+	if err := cl.Create(ctx, rva); err != nil {
+		t.Fatalf("create rva: %v", err)
+	}
+
+	d := newTestDriver(t, cl, 5*time.Second)
+	d.name = DefaultDriverName
+
+	if _, err := d.DeleteVolume(ctx, &csi.DeleteVolumeRequest{VolumeId: volumeID}); err != nil {
+		t.Fatalf("DeleteVolume: unexpected error: %v", err)
+	}
+	if err := cl.Get(ctx, client.ObjectKey{Name: rvaName}, &v1alpha1.ReplicatedVolumeAttachment{}); err == nil {
+		t.Fatalf("RVA %s still present after DeleteVolume", rvaName)
+	}
+}
+
+// An RVA that a VolumeAttachment still refers to is being handled by the
+// external-attacher, so DeleteVolume must keep refusing until it is unpublished.
+func TestDeleteVolume_KeepsRVAWithVolumeAttachment(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	volumeID := "pvc-attached"
+	nodeID := "node-1"
+	rvaName := v1alpha1.FormatReplicatedVolumeAttachmentName(volumeID, nodeID)
+
+	cl := newTestFakeClient()
+	rva := &v1alpha1.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: rvaName, Finalizers: []string{v1alpha1.CSIControllerFinalizer}},
+		Spec:       v1alpha1.ReplicatedVolumeAttachmentSpec{ReplicatedVolumeName: volumeID, NodeName: nodeID},
+	}
+	if err := cl.Create(ctx, rva); err != nil {
+		t.Fatalf("create rva: %v", err)
+	}
+	pvName := volumeID
+	va := &storagev1.VolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "csi-" + volumeID + "-" + nodeID},
+		Spec: storagev1.VolumeAttachmentSpec{
+			Attacher: DefaultDriverName,
+			NodeName: nodeID,
+			Source:   storagev1.VolumeAttachmentSource{PersistentVolumeName: &pvName},
+		},
+	}
+	if err := cl.Create(ctx, va); err != nil {
+		t.Fatalf("create va: %v", err)
+	}
+
+	d := newTestDriver(t, cl, 5*time.Second)
+	d.name = DefaultDriverName
+
+	_, err := d.DeleteVolume(ctx, &csi.DeleteVolumeRequest{VolumeId: volumeID})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("DeleteVolume: expected FailedPrecondition, got %v", err)
+	}
+	if err := cl.Get(ctx, client.ObjectKey{Name: rvaName}, &v1alpha1.ReplicatedVolumeAttachment{}); err != nil {
+		t.Fatalf("RVA %s must survive DeleteVolume while a VolumeAttachment exists: %v", rvaName, err)
 	}
 }
