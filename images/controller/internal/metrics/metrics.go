@@ -37,6 +37,7 @@ const (
 	LabelRV                = "rv"
 	LabelNode              = "node"
 	LabelStorageClass      = "storage_class"
+	LabelStoragePool       = "storage_pool"
 	LabelConfigurationMode = "configuration_mode"
 	LabelPhase             = "phase"
 	LabelType              = "type"

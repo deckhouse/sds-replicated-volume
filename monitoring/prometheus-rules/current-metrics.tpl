@@ -26,9 +26,9 @@
         plk_grouped_by__d8_sds_replicated_volume_current_metrics: "D8SdsReplicatedVolumeCurrentMetrics,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: Current metrics of the sds-replicated-volume controller are unavailable
         description: |
-          The leader replica of the sds-replicated-volume controller has not exported current metrics (the state of ReplicatedVolumes, replicas and attachments) for at least 5 minutes. Either the metrics collector fails (`sds_metrics_collector_up` is 0), or no leader collector is scraped at all: the controller is down, no replica holds the leader lease, or Prometheus cannot scrape the controller.
+          The leader replica of the sds-replicated-volume controller has not exported current metrics (the state of ReplicatedVolumes, replicas, attachments, storage pools and storage classes) for at least 5 minutes. Either the metrics collector fails (`sds_metrics_collector_up` is 0), or no leader collector is scraped at all: the controller is down, no replica holds the leader lease, or Prometheus cannot scrape the controller.
 
-          While current metrics are unavailable, alerts built on them cannot fire, and the ones that are firing resolve, for example `D8ReplicatedVolumeNotReady` and `D8ReplicatedVolumeLayoutDegraded`. The volumes themselves are not affected. Once current metrics return, this alert keeps firing for 5 more minutes, while the alerts built on them wait out their own `for` before firing again.
+          While current metrics are unavailable, alerts built on them cannot fire, and the ones that are firing resolve, for example `D8ReplicatedVolumeNotReady`, `D8ReplicatedVolumeLayoutDegraded` and `D8ReplicatedStoragePoolNotReady`. The volumes themselves are not affected. Once current metrics return, this alert keeps firing for 5 more minutes, while the alerts built on them wait out their own `for` before firing again.
 
           The recommended course of action:
 

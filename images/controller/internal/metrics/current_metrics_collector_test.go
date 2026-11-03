@@ -148,7 +148,7 @@ func TestCurrentMetricsCollectorIsRegisteredOnLeaderOnly(t *testing.T) {
 
 func TestCurrentMetricsCollectorExportsExpectedMetricFamilies(t *testing.T) {
 	collector := newCurrentMetricsCollector(nil, logr.Discard())
-	descriptions := make(chan *prometheus.Desc, 16)
+	descriptions := make(chan *prometheus.Desc, 32)
 	collector.Describe(descriptions)
 	close(descriptions)
 
@@ -169,6 +169,8 @@ func TestCurrentMetricsCollectorExportsExpectedMetricFamilies(t *testing.T) {
 		"sds_deleting_oldest_timestamp_seconds",
 		"sds_metrics_collector_objects",
 		"sds_metrics_collector_up",
+		"sds_rsc_condition_problem_timestamp_seconds",
+		"sds_rsp_condition_problem_timestamp_seconds",
 		"sds_rv_auto_configuration_blocked",
 		"sds_rv_condition_count",
 		"sds_rv_condition_problem_timestamp_seconds",
@@ -1279,8 +1281,8 @@ func TestCurrentMetricsCollectorReportsWhetherCollectionSucceeded(t *testing.T) 
 
 	// An empty cluster has no metrics of its objects, but the collector did succeed and reports
 	// the zero object counts of every kind.
-	if up, others := collectUp(listStubReader{}); !slices.Equal(up, []float64{1}) || others != 5 {
-		t.Fatalf("expected %s=1 and 5 object counts on success, got %v and %d other metrics", metricNameCollectorUp, up, others)
+	if up, others := collectUp(listStubReader{}); !slices.Equal(up, []float64{1}) || others != 6 {
+		t.Fatalf("expected %s=1 and 6 object counts on success, got %v and %d other metrics", metricNameCollectorUp, up, others)
 	}
 	up, others := collectUp(listStubReader{err: errors.New("cache is not synced")})
 	if !slices.Equal(up, []float64{0}) || others != 0 {

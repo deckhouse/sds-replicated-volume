@@ -1,0 +1,112 @@
+# Alerts on the readiness of ReplicatedStoragePools and ReplicatedStorageClasses (new control plane).
+#
+# Like replicated-volume-health.yaml, this is a plain static .yaml with no Helm templating and no
+# newControlPlane gate: the sds_rsp_* and sds_rsc_* series are exported only by the new control plane
+# controller, so on the old control plane the expressions yield an empty vector.
+#
+# A series exists only while the Ready condition of the object is not True (deleting objects are not
+# exported), and its value is the lastTransitionTime of the condition. An object without the Ready
+# condition is reported with the reason Absent since its creation. The status and the reason are left
+# out of the alert labels, so that a change of reason does not become a new alert.
+- name: kubernetes.replicated.storage.health
+  rules:
+    - alert: D8ReplicatedStoragePoolNotReady
+      expr: max by (name) (sds_rsp_condition_problem_timestamp_seconds{condition="Ready"})
+      for: 5m
+      # Bridges the short gap in current metrics on a controller restart or a leader change, as in
+      # replicated-volume-health.yaml.
+      keep_firing_for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "name"
+        plk_create_group_if_not_exists__d8_replicated_storage_health: "D8ReplicatedStorageHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_health: "D8ReplicatedStorageHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: ReplicatedStoragePool is not Ready
+        description: |
+          The ReplicatedStoragePool `{{ $labels.name }}` is not `Ready`: the controller cannot compute the nodes and LVMVolumeGroups the pool offers, so the ReplicatedStorageClasses that use it cannot accept a new configuration, and the nodes that the pool should offer are not added. The pool keeps the eligible nodes it computed last. The `Ready` condition last changed its status at {{ $value | humanizeTimestamp }}.
+
+          The reason is reported by the `Ready` condition of the pool:
+
+          - `LVMVolumeGroupNotFound` — an LVMVolumeGroup listed in `spec.lvmVolumeGroups` does not exist.
+          - `InvalidLVMVolumeGroup` — an LVMVolumeGroup does not match the pool, for example a pool of type `LVMThin` names a thin pool that is not in `spec.thinPools` of the LVMVolumeGroup.
+          - `InvalidNodeLabelSelector` — `spec.nodeLabelSelector` or `spec.zones` cannot be turned into a node selector.
+          - `Absent` — the controller has not published any status for the pool since it was created.
+
+          The recommended course of action:
+
+          1. Read the reason and the message of the `Ready` condition, and the ReplicatedStorageClasses that use the pool:
+
+             ```shell
+             kubectl get rsp {{ $labels.name }}
+             kubectl get rsp {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             kubectl get rsp {{ $labels.name }} -o jsonpath='{.status.usedBy.replicatedStorageClassNames}{"\n"}'
+             ```
+
+          2. Compare `spec.lvmVolumeGroups` of the pool with the LVMVolumeGroups in the cluster and their thin pools; create the missing ones or fix the references:
+
+             ```shell
+             kubectl get rsp {{ $labels.name }} -o jsonpath='{range .spec.lvmVolumeGroups[*]}{.name} {.thinPoolName}{"\n"}{end}'
+             kubectl get lvg
+             ```
+
+          3. For `InvalidNodeLabelSelector`, fix `spec.nodeLabelSelector` or `spec.zones` of the pool.
+
+          4. For `Absent`, check that the controller is running (`kubectl -n d8-sds-replicated-volume get pods -l app=controller`) and look for errors about the pool in its logs.
+
+          The alert resolves once the pool is `Ready` again. While it fires, `D8ReplicatedStorageClassNotReady` is not raised for the classes of this pool.
+
+    - alert: D8ReplicatedStorageClassNotReady
+      # A class whose storage pool is not Ready is reported only by D8ReplicatedStoragePoolNotReady,
+      # so one broken pool does not raise an alert per class.
+      expr: |
+        max by (name, storage_pool) (sds_rsc_condition_problem_timestamp_seconds{condition="Ready"})
+        unless on (storage_pool)
+        label_replace(sds_rsp_condition_problem_timestamp_seconds{condition="Ready"}, "storage_pool", "$1", "name", "(.+)")
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_labels_as_annotations: "name,storage_pool"
+        plk_create_group_if_not_exists__d8_replicated_storage_health: "D8ReplicatedStorageHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_health: "D8ReplicatedStorageHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: ReplicatedStorageClass is not Ready
+        description: |
+          The ReplicatedStorageClass `{{ $labels.name }}` is not `Ready`. Depending on the reason, its current configuration is not accepted (new volumes may not be created, or are created with the previously accepted configuration), or the class keeps working on its accepted configuration but can no longer guarantee it. The `Ready` condition last changed its status at {{ $value | humanizeTimestamp }}.
+
+          The reason is reported by the `Ready` condition of the class:
+
+          - `InvalidConfiguration` — the spec of the class is invalid.
+          - `StorageClassConflict` — a StorageClass of another provisioner holds the name of the class.
+          - `InsufficientEligibleNodes` — the storage pool `{{ $labels.storage_pool }}` does not offer enough nodes (or zones) for the replication and topology of the class.
+          - `Degraded` — the class keeps its accepted configuration, but the nodes of the pool no longer satisfy it.
+          - `WaitingForStoragePool` — the storage pool has not accepted the configuration of the class yet.
+          - `Absent` — the controller has not published any status for the class since it was created.
+
+          The recommended course of action:
+
+          1. Read the phase of the class and the reason and the message of the `Ready` condition:
+
+             ```shell
+             kubectl get rsc {{ $labels.name }}
+             kubectl get rsc {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}/{.reason}: {.message}{"\n"}{end}'
+             ```
+
+          2. For `InsufficientEligibleNodes` and `Degraded`, compare the eligible nodes of the pool with the replication and topology of the class; return the nodes that are down, or add nodes and LVMVolumeGroups to the pool:
+
+             ```shell
+             kubectl get rsp {{ $labels.storage_pool }} -o jsonpath='{range .status.eligibleNodes[*]}{.nodeName} {.zoneName}{"\n"}{end}'
+             ```
+
+          3. For `StorageClassConflict`, find the StorageClass with the name of the class and its provisioner (`kubectl get sc {{ $labels.name }}`); delete it or give the class another name.
+
+          4. For `InvalidConfiguration`, fix the spec of the class as the message says.
+
+          The alert resolves once the class is `Ready` again.

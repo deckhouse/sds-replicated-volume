@@ -88,10 +88,14 @@ var currentMetricsRVProblemConditionTypes = []string{
 // cross-check the rule expressions against them:
 //   - metricNameRVConditionProblem: monitoring/prometheus-rules/replicated-volume-layout.yaml and
 //     monitoring/prometheus-rules/replicated-volume-health.yaml;
+//   - metricNameRSPConditionProblem and metricNameRSCConditionProblem:
+//     monitoring/prometheus-rules/replicated-storage-health.yaml;
 //   - metricNameCollectorUp: monitoring/prometheus-rules/current-metrics.tpl.
 const (
-	metricNameRVConditionProblem = "sds_rv_condition_problem_timestamp_seconds"
-	metricNameCollectorUp        = "sds_metrics_collector_up"
+	metricNameRVConditionProblem  = "sds_rv_condition_problem_timestamp_seconds"
+	metricNameRSPConditionProblem = "sds_rsp_condition_problem_timestamp_seconds"
+	metricNameRSCConditionProblem = "sds_rsc_condition_problem_timestamp_seconds"
+	metricNameCollectorUp         = "sds_metrics_collector_up"
 )
 
 // Package-level guard: exactly one current metrics collector is registered per process.
@@ -167,6 +171,8 @@ type currentMetricsCollector struct {
 	rvNoPersistentVolumeDesc       *prometheus.Desc
 	rvAutoConfigurationBlockedDesc *prometheus.Desc
 	rvConditionProblemDesc         *prometheus.Desc
+	rspConditionProblemDesc        *prometheus.Desc
+	rscConditionProblemDesc        *prometheus.Desc
 	rvDeletingDesc                 *prometheus.Desc
 	deletingOldestDesc             *prometheus.Desc
 	datameshTransitionOldestDesc   *prometheus.Desc
@@ -269,6 +275,18 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelName, LabelStorageClass, LabelCondition, LabelStatus, LabelReason},
 			nil,
 		),
+		rspConditionProblemDesc: prometheus.NewDesc(
+			metricNameRSPConditionProblem,
+			"Unix time of the last status transition (lastTransitionTime) of the Ready condition of a ReplicatedStoragePool that is not True; time() minus the value is how long the problem lasts. A pool without the Ready condition (no status published yet) is reported with status and reason Absent and its creationTimestamp as the value. A ready or deleting pool produces no series. The reason label carries the condition reason verbatim. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelCondition, LabelStatus, LabelReason},
+			nil,
+		),
+		rscConditionProblemDesc: prometheus.NewDesc(
+			metricNameRSCConditionProblem,
+			"Unix time of the last status transition (lastTransitionTime) of the Ready condition of a ReplicatedStorageClass that is not True; time() minus the value is how long the problem lasts. The storage_pool label is status.storagePoolName, empty while the class has no storage pool. A class without the Ready condition (no status published yet) is reported with status and reason Absent and its creationTimestamp as the value. A ready or deleting class produces no series. The reason label carries the condition reason verbatim. Built from controller cache at scrape time.",
+			[]string{LabelName, LabelStoragePool, LabelCondition, LabelStatus, LabelReason},
+			nil,
+		),
 	}
 }
 
@@ -282,6 +300,8 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvNoPersistentVolumeDesc
 	ch <- c.rvAutoConfigurationBlockedDesc
 	ch <- c.rvConditionProblemDesc
+	ch <- c.rspConditionProblemDesc
+	ch <- c.rscConditionProblemDesc
 	ch <- c.rvDeletingDesc
 	ch <- c.deletingOldestDesc
 	ch <- c.datameshTransitionOldestDesc
@@ -311,6 +331,12 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	var rspList v1alpha1.ReplicatedStoragePoolList
+	if err := c.reader.List(ctx, &rspList, client.UnsafeDisableDeepCopy); err != nil {
+		c.collectError(ch, err, "listing ReplicatedStoragePools for current metrics")
+		return
+	}
+
 	var rvList v1alpha1.ReplicatedVolumeList
 	if err := c.reader.List(ctx, &rvList, client.UnsafeDisableDeepCopy); err != nil {
 		c.collectError(ch, err, "listing ReplicatedVolumes for current metrics")
@@ -335,6 +361,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	collectRVConditionCounts(ch, c.rvConditionCountDesc, rvList.Items)
 	collectRVMigratorLabels(ch, c.rvNoPersistentVolumeDesc, c.rvAutoConfigurationBlockedDesc, rvList.Items)
 	collectRVConditionProblems(ch, c.rvConditionProblemDesc, rvList.Items)
+	collectRSPConditionProblems(ch, c.rspConditionProblemDesc, rspList.Items)
+	collectRSCConditionProblems(ch, c.rscConditionProblemDesc, rscList.Items)
 	collectRVDeleting(ch, c.rvDeletingDesc, rvList.Items)
 	collectDeletingOldest(ch, c.deletingOldestDesc, rvList.Items, rvrList.Items, rvaList.Items)
 	collectDatameshTransitionOldest(ch, c.datameshTransitionOldestDesc, rvList.Items, rvrList.Items)
@@ -350,6 +378,7 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	}{
 		{"node", len(nodeList.Items)},
 		{"rsc", len(rscList.Items)},
+		{"rsp", len(rspList.Items)},
 		{"rv", len(rvList.Items)},
 		{"rvr", len(rvrList.Items)},
 		{"rva", len(rvaList.Items)},
@@ -562,6 +591,63 @@ func isRVConditionProblem(cond *metav1.Condition) bool {
 		return true
 	}
 	return cond.Status != metav1.ConditionTrue
+}
+
+// collectRSPConditionProblems emits one series per ReplicatedStoragePool whose Ready condition is not
+// True, in the same shape as sds_rv_condition_problem_timestamp_seconds.
+func collectRSPConditionProblems(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rsps []v1alpha1.ReplicatedStoragePool,
+) {
+	for i := range rsps {
+		rsp := &rsps[i]
+		if rsp.DeletionTimestamp != nil {
+			continue
+		}
+		since, status, reason, ok := readyProblem(rsp.Status.Conditions, v1alpha1.ReplicatedStoragePoolCondReadyType, rsp.CreationTimestamp)
+		if !ok {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, since,
+			rsp.Name, v1alpha1.ReplicatedStoragePoolCondReadyType, status, reason)
+	}
+}
+
+// collectRSCConditionProblems emits one series per ReplicatedStorageClass whose Ready condition is
+// not True. The storage pool of the class is a label, so that an alert can leave out the classes
+// whose pool is reported on its own.
+func collectRSCConditionProblems(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rscs []v1alpha1.ReplicatedStorageClass,
+) {
+	for i := range rscs {
+		rsc := &rscs[i]
+		if rsc.DeletionTimestamp != nil {
+			continue
+		}
+		since, status, reason, ok := readyProblem(rsc.Status.Conditions, v1alpha1.ReplicatedStorageClassCondReadyType, rsc.CreationTimestamp)
+		if !ok {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, since,
+			rsc.Name, rsc.Status.StoragePoolName, v1alpha1.ReplicatedStorageClassCondReadyType, status, reason)
+	}
+}
+
+// readyProblem reports whether the Ready condition is in a problem state, and since when. A missing
+// Ready means the controller has not published any status yet; it is reported as Absent since the
+// creation of the object, so that an object stuck before its first reconcile is not invisible.
+func readyProblem(conditions []metav1.Condition, readyType string, created metav1.Time) (since float64, status, reason string, ok bool) {
+	cond := meta.FindStatusCondition(conditions, readyType)
+	if cond == nil {
+		return float64(created.Unix()), currentMetricsStatusAbsent, currentMetricsReasonAbsent, true
+	}
+	if cond.Status == metav1.ConditionTrue {
+		return 0, "", "", false
+	}
+	return float64(cond.LastTransitionTime.Unix()), string(cond.Status), cond.Reason, true
 }
 
 func collectRVRCounts(
