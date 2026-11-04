@@ -14,7 +14,7 @@ As for any other configurations, the module may work, but its smooth operation i
 - LVMThin allows for snapshots and overprovisioning; however, it is slower than LVM.
 
 {{< alert level="warning" >}}
-Overprovisioning in LVMThin should be used with caution, monitoring the availability of free space in the pool (The cluster monitoring system generates separate events when the free space in the pool reaches 20%, 10%, 5%, and 1%).
+Overprovisioning of LVMThin pools in this module is limited by LINSTOR, not by the `allocationLimit` field of the thin pool in the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource: that field has no effect on the volumes of `sds-replicated-volume`. Use overprovisioning with caution and monitor the free space in the pool (the cluster monitoring system generates separate alerts when the free space in a LINSTOR storage pool falls below 20%, 10%, 5%, and 1%).
 
 In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
 {{< /alert >}}

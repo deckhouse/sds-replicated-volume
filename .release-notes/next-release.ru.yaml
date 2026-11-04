@@ -16,10 +16,13 @@ improvements:
 fixes:
   - "В новой плоскости управления контроллер больше не удаляет StorageClass другого провижинера с именем `ReplicatedStorageClass`. Раньше он удалял такой StorageClass и создавал на его месте свой. Теперь он не трогает этот StorageClass, а `ReplicatedStorageClass` переходит в фазу `InvalidConfiguration` с `Ready=False`, причиной `StorageClassConflict` и сообщением, в котором названы StorageClass и его провижинер. Когда имя освободится, класс получит свой StorageClass в течение минуты."
   - "В старой плоскости управления на LINSTOR `ReplicatedStorageClass`, имя которого занято StorageClass другого провижинера, теперь переходит в фазу `InvalidConfiguration` с сообщением, в котором названы StorageClass и его провижинер. Раньше конфликт только записывался в лог контроллера, а статус не менялся."
+  - "`DeleteVolume` навсегда отказывал в удалении тома, если ReplicatedVolumeAttachment пережил VolumeAttachment своего узла: финализатор CSI-контроллера на нём снимает только `ControllerUnpublishVolume`, которую external-attacher после исчезновения VolumeAttachment больше не вызывает, и PersistentVolume оставался `Released`. Теперь `DeleteVolume` сначала освобождает такие attachment, если их устройство не используется."
 # security: []
 # breaking: []
 upgrade_notes:
   - "В DKP 1.78 и новее ClusterRole `d8:manage:permission:module:sds-replicated-volume:view` и `:edit` заменяются на `d8:system-capability:sds-replicated-volume:view` и `:edit`. Привязки, которые ссылаются на старые имена ролей напрямую, нужно перевести на новые."
+docs:
+  - "В FAQ указано, что overprovisioning в LVMThin-пулах ограничивает LINSTOR, а поле `allocationLimit` у thin pool в LVMVolumeGroup на тома модуля не влияет."
 # known_issues: []
 # docs: []
 # dependencies:
@@ -28,5 +31,3 @@ upgrade_notes:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
-
-  - "`DeleteVolume` навсегда отказывал в удалении тома, если ReplicatedVolumeAttachment пережил VolumeAttachment своего узла: финализатор CSI-контроллера на нём снимает только `ControllerUnpublishVolume`, которую external-attacher после исчезновения VolumeAttachment больше не вызывает, и PersistentVolume оставался `Released`. Теперь `DeleteVolume` сначала освобождает такие attachment, если их устройство не используется."

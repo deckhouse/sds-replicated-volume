@@ -16,10 +16,13 @@ improvements:
 fixes:
   - "In the new control plane, the controller no longer deletes a StorageClass of another provisioner that has the name of a `ReplicatedStorageClass`. It used to remove such a StorageClass and create its own in its place. Now it leaves the StorageClass alone, and the `ReplicatedStorageClass` goes to the `InvalidConfiguration` phase with `Ready=False`, reason `StorageClassConflict`, and a message naming the StorageClass and its provisioner. Once the name is free, the class gets its StorageClass within a minute."
   - "In the LINSTOR control plane, a `ReplicatedStorageClass` whose name is held by a StorageClass of another provisioner now goes to the `InvalidConfiguration` phase with a message naming the StorageClass and its provisioner. Before, the conflict was only written to the controller log and the status did not change."
+  - "`DeleteVolume` refused a volume for good when a ReplicatedVolumeAttachment of it outlived the VolumeAttachment of its node: the CSI controller finalizer on the attachment is removed only by `ControllerUnpublishVolume`, which the external-attacher never calls again once the VolumeAttachment is gone, and the PersistentVolume stayed `Released`. `DeleteVolume` now releases such attachments first, unless their device is still in use."
 # security: []
 # breaking: []
 upgrade_notes:
   - "On DKP 1.78 and later, the `d8:manage:permission:module:sds-replicated-volume:view` and `:edit` ClusterRoles are replaced by `d8:system-capability:sds-replicated-volume:view` and `:edit`. Bindings that reference the old role names directly have to be switched to the new ones."
+docs:
+  - "The FAQ now says that overprovisioning of LVMThin pools is limited by LINSTOR and that `allocationLimit` of the thin pool in LVMVolumeGroup has no effect on the module's volumes."
 # known_issues: []
 # docs: []
 # dependencies:
@@ -28,5 +31,3 @@ upgrade_notes:
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
-
-  - "`DeleteVolume` refused a volume for good when a ReplicatedVolumeAttachment of it outlived the VolumeAttachment of its node: the CSI controller finalizer on the attachment is removed only by `ControllerUnpublishVolume`, which the external-attacher never calls again once the VolumeAttachment is gone, and the PersistentVolume stayed `Released`. `DeleteVolume` now releases such attachments first, unless their device is still in use."
