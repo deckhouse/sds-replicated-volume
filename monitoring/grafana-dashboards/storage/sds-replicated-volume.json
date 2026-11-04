@@ -1080,6 +1080,653 @@
       }
     },
     {
+      "id": 2078,
+      "type": "row",
+      "title": "Capacity by ReplicatedStorageClass",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "description": "",
+      "panels": [
+        {
+          "id": 2069,
+          "type": "stat",
+          "title": "Raw Capacity",
+          "description": "Total capacity of the storage pool of each class, before replication. Thick (LVM) pools count the size and free space of their volume groups; thin (LVMThin) pools count the allocation limit of their thin pools (thin pool size x allocationLimit of the LVMVolumeGroup), and free space is that limit minus the space allocated to thin volumes. Classes sharing a pool show the same value.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_size_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2070,
+          "type": "stat",
+          "title": "Raw Free",
+          "description": "Free capacity of the storage pool of each class, before replication. Thick (LVM) pools count the size and free space of their volume groups; thin (LVMThin) pools count the allocation limit of their thin pools (thin pool size x allocationLimit of the LVMVolumeGroup), and free space is that limit minus the space allocated to thin volumes.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (clamp_min(max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2071,
+          "type": "stat",
+          "title": "Raw Used",
+          "description": "Share of the capacity of the storage pool of each class that is taken. For thin pools it is the share of the allocation limit allocated to thin volumes, not the share of the thin pool filled with data (see the thin pool panel).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "(1 - (sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (clamp_min(max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) / (sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_size_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})))) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.8
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.9
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2072,
+          "type": "stat",
+          "title": "Usable Capacity",
+          "description": "Raw capacity divided by the number of replicas of the class: how much volume data the pool holds for the class. Usable capacity is raw capacity divided by the number of diskful replicas of the class (failuresToTolerate + guaranteedMinimumDataRedundancy + 1, sds_rsc_replicas). It is an upper bound: replicas of one volume are placed on different nodes and each fits into one volume group, so with unevenly filled nodes less can actually be placed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_size_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) / on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2073,
+          "type": "stat",
+          "title": "Usable Free",
+          "description": "Raw free capacity divided by the number of replicas of the class: roughly how much more volume data the class can take. Usable capacity is raw capacity divided by the number of diskful replicas of the class (failuresToTolerate + guaranteedMinimumDataRedundancy + 1, sds_rsc_replicas). It is an upper bound: replicas of one volume are placed on different nodes and each fits into one volume group, so with unevenly filled nodes less can actually be placed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (clamp_min(max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) / on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2074,
+          "type": "stat",
+          "title": "Replicas",
+          "description": "Number of diskful replicas of the volumes of each class (failuresToTolerate + guaranteedMinimumDataRedundancy + 1) from its accepted configuration; usable capacity is raw capacity divided by it.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 31
+          },
+          "targets": [
+            {
+              "expr": "max by (storage_class) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2075,
+          "type": "timeseries",
+          "title": "Free Capacity by Storage Class",
+          "description": "Raw and usable free capacity of the storage pool of each class over time. Thick (LVM) pools count the size and free space of their volume groups; thin (LVMThin) pools count the allocation limit of their thin pools (thin pool size x allocationLimit of the LVMVolumeGroup), and free space is that limit minus the space allocated to thin volumes. Usable capacity is raw capacity divided by the number of diskful replicas of the class (failuresToTolerate + guaranteedMinimumDataRedundancy + 1, sds_rsc_replicas). It is an upper bound: replicas of one volume are placed on different nodes and each fits into one volume group, so with unevenly filled nodes less can actually be placed.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
+          "targets": [
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (clamp_min(max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} raw",
+              "refId": "A"
+            },
+            {
+              "expr": "(sum by (storage_pool) (max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"})) or sum by (storage_pool) (clamp_min(max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"}))) / on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} usable",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "min",
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 2076,
+          "type": "timeseries",
+          "title": "Thin Pools: Allocation and Data by Storage Class",
+          "description": "Thin (LVMThin) pools of each class, summed over the pool: Allocated is the space allocated to thin volumes, Allocation Limit is the thin pool size multiplied by allocationLimit of the LVMVolumeGroup (new volumes are refused above it), Data Used is the space actually written, and Pool Size is the physical size of the thin pools. Data Used close to Pool Size means the thin pools are about to run out of space whatever the allocation limit allows. Thick classes have no series here.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 35
+          },
+          "targets": [
+            {
+              "expr": "sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} allocated",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} allocation limit",
+              "refId": "B"
+            },
+            {
+              "expr": "sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} data used",
+              "refId": "C"
+            },
+            {
+              "expr": "sum by (storage_pool) (max by (lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes) * on (lvg_name, thin_pool) group_right max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) * on (storage_pool) group_right group by (storage_class, storage_pool) (sds_rsc_replicas{storage_class=~\"$storage_class\"})",
+              "legendFormat": "{{storage_class}} pool size",
+              "refId": "D"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "spanNulls": false,
+                "showPoints": "never"
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "min",
+                "max",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 2077,
+          "type": "table",
+          "title": "Capacity by Node / LVMVolumeGroup",
+          "description": "Every LVMVolumeGroup (and thin pool) of the storage pools of the selected classes. Thick (LVM) pools count the size and free space of their volume groups; thin (LVMThin) pools count the allocation limit of their thin pools (thin pool size x allocationLimit of the LVMVolumeGroup), and free space is that limit minus the space allocated to thin volumes. Used is the share of that capacity taken; Thin Data Used is the share of the thin pool filled with data. An LVMVolumeGroup listed in several pools has a row per pool. Capacity is reported by the sds-node-configurator agent, so a node whose agent is not scraped has no row.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ds_prometheus"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 43
+          },
+          "targets": [
+            {
+              "expr": "(max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes) * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"}) or max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) and on (storage_pool) sds_rsc_replicas{storage_class=~\"$storage_class\"}",
+              "legendFormat": "",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            },
+            {
+              "expr": "(max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"}) or clamp_min(max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) and on (storage_pool) sds_rsc_replicas{storage_class=~\"$storage_class\"}",
+              "legendFormat": "",
+              "refId": "B",
+              "instant": true,
+              "format": "table"
+            },
+            {
+              "expr": "((1 - max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) / max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes)) * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=\"\"}) or (1 - clamp_min(max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes) - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocated_size_bytes), 0) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_allocation_limit_bytes)) * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) and on (storage_pool) sds_rsc_replicas{storage_class=~\"$storage_class\"}",
+              "legendFormat": "",
+              "refId": "C",
+              "instant": true,
+              "format": "table"
+            },
+            {
+              "expr": "(max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes) * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=\"\"})) and on (storage_pool) sds_rsc_replicas{storage_class=~\"$storage_class\"}",
+              "legendFormat": "",
+              "refId": "D",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "node": 0,
+                  "lvg_name": 1,
+                  "thin_pool": 2,
+                  "storage_pool": 3,
+                  "Value #A": 4,
+                  "Value #B": 5,
+                  "Value #C": 6,
+                  "Value #D": 7
+                },
+                "renameByName": {
+                  "node": "Node",
+                  "lvg_name": "LVMVolumeGroup",
+                  "thin_pool": "Thin Pool",
+                  "storage_pool": "Storage Pool",
+                  "Value #A": "Capacity",
+                  "Value #B": "Free",
+                  "Value #C": "Used",
+                  "Value #D": "Thin Data Used"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Used",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Capacity"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Free"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Used"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 0.8
+                        },
+                        {
+                          "color": "red",
+                          "value": 0.9
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Thin Data Used"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 0.8
+                        },
+                        {
+                          "color": "red",
+                          "value": 0.9
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [
+              {
+                "displayName": "Used",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
       "id": 2045,
       "type": "row",
       "title": "Control Plane Throughput",
@@ -1088,7 +1735,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 31
       },
       "description": "",
       "panels": [
@@ -1105,7 +1752,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1154,7 +1801,7 @@
             "h": 4,
             "w": 4,
             "x": 4,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1203,7 +1850,7 @@
             "h": 4,
             "w": 4,
             "x": 8,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1252,7 +1899,7 @@
             "h": 4,
             "w": 4,
             "x": 12,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1316,7 +1963,7 @@
             "h": 4,
             "w": 4,
             "x": 16,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1380,7 +2027,7 @@
             "h": 4,
             "w": 4,
             "x": 20,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -1428,7 +2075,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -1490,7 +2137,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -1546,7 +2193,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 43
+            "y": 44
           },
           "targets": [
             {
@@ -1607,7 +2254,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 43
+            "y": 44
           },
           "targets": [
             {
@@ -1717,7 +2364,7 @@
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 51
+            "y": 52
           },
           "targets": [
             {
@@ -1773,7 +2420,7 @@
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 51
+            "y": 52
           },
           "targets": [
             {
@@ -1824,7 +2471,7 @@
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 51
+            "y": 52
           },
           "targets": [
             {
@@ -1875,7 +2522,7 @@
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 51
+            "y": 52
           },
           "targets": [
             {
@@ -1924,7 +2571,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 32
       },
       "description": "",
       "panels": [
@@ -1941,7 +2588,7 @@
             "h": 4,
             "w": 6,
             "x": 0,
-            "y": 32
+            "y": 33
           },
           "targets": [
             {
@@ -1989,7 +2636,7 @@
             "h": 4,
             "w": 6,
             "x": 6,
-            "y": 32
+            "y": 33
           },
           "targets": [
             {
@@ -2037,7 +2684,7 @@
             "h": 4,
             "w": 6,
             "x": 12,
-            "y": 32
+            "y": 33
           },
           "targets": [
             {
@@ -2085,7 +2732,7 @@
             "h": 4,
             "w": 6,
             "x": 18,
-            "y": 32
+            "y": 33
           },
           "targets": [
             {
@@ -2133,7 +2780,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -2194,7 +2841,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -2250,7 +2897,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -2306,7 +2953,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 44
+            "y": 45
           },
           "targets": [
             {
@@ -2357,7 +3004,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 44
+            "y": 45
           },
           "targets": [
             {
@@ -2408,7 +3055,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 52
+            "y": 53
           },
           "targets": [
             {
@@ -2459,7 +3106,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 52
+            "y": 53
           },
           "targets": [
             {
@@ -2510,7 +3157,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 59
+            "y": 60
           },
           "targets": [
             {
@@ -2566,7 +3213,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 59
+            "y": 60
           },
           "targets": [
             {
@@ -2622,7 +3269,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 59
+            "y": 60
           },
           "targets": [
             {
@@ -2670,7 +3317,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 33
       },
       "description": "",
       "panels": [
@@ -2687,7 +3334,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -2751,7 +3398,7 @@
             "h": 4,
             "w": 4,
             "x": 4,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -2815,7 +3462,7 @@
             "h": 4,
             "w": 4,
             "x": 8,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -2879,7 +3526,7 @@
             "h": 4,
             "w": 4,
             "x": 12,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -2943,7 +3590,7 @@
             "h": 4,
             "w": 4,
             "x": 16,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -3007,7 +3654,7 @@
             "h": 4,
             "w": 4,
             "x": 20,
-            "y": 33
+            "y": 34
           },
           "targets": [
             {
@@ -3071,7 +3718,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 37
+            "y": 38
           },
           "targets": [
             {
@@ -3132,7 +3779,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 37
+            "y": 38
           },
           "targets": [
             {
@@ -3188,7 +3835,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 37
+            "y": 38
           },
           "targets": [
             {
@@ -3298,7 +3945,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 45
+            "y": 46
           },
           "targets": [
             {
@@ -3359,7 +4006,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 45
+            "y": 46
           },
           "targets": [
             {
@@ -3415,7 +4062,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 45
+            "y": 46
           },
           "targets": [
             {
@@ -3525,7 +4172,7 @@
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 53
+            "y": 54
           },
           "targets": [
             {
@@ -3601,7 +4248,7 @@
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 53
+            "y": 54
           },
           "targets": [
             {
@@ -3667,7 +4314,7 @@
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 53
+            "y": 54
           },
           "targets": [
             {
@@ -3777,7 +4424,7 @@
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 53
+            "y": 54
           },
           "targets": [
             {
@@ -3887,7 +4534,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 61
+            "y": 62
           },
           "targets": [
             {
@@ -3948,7 +4595,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 61
+            "y": 62
           },
           "targets": [
             {
@@ -4004,7 +4651,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 61
+            "y": 62
           },
           "targets": [
             {
@@ -4114,7 +4761,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 69
+            "y": 70
           },
           "targets": [
             {
@@ -4175,7 +4822,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 69
+            "y": 70
           },
           "targets": [
             {
@@ -4231,7 +4878,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 69
+            "y": 70
           },
           "targets": [
             {
@@ -4341,7 +4988,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 77
+            "y": 78
           },
           "targets": [
             {
@@ -4397,7 +5044,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 77
+            "y": 78
           },
           "targets": [
             {
@@ -4505,7 +5152,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 34
       },
       "description": "",
       "panels": [
@@ -4522,7 +5169,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 34
+            "y": 35
           },
           "targets": [
             {
@@ -4578,7 +5225,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 34
+            "y": 35
           },
           "targets": [
             {
@@ -4639,7 +5286,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 34
+            "y": 35
           },
           "targets": [
             {
@@ -4695,7 +5342,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 42
+            "y": 43
           },
           "targets": [
             {
@@ -4895,7 +5542,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 42
+            "y": 43
           },
           "targets": [
             {
@@ -5093,7 +5740,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 35
       },
       "description": "",
       "panels": [
@@ -5110,7 +5757,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5170,7 +5817,7 @@
             "h": 4,
             "w": 4,
             "x": 4,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5230,7 +5877,7 @@
             "h": 4,
             "w": 4,
             "x": 8,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5290,7 +5937,7 @@
             "h": 4,
             "w": 4,
             "x": 12,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5350,7 +5997,7 @@
             "h": 4,
             "w": 4,
             "x": 16,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5410,7 +6057,7 @@
             "h": 4,
             "w": 4,
             "x": 20,
-            "y": 35
+            "y": 36
           },
           "targets": [
             {
@@ -5470,7 +6117,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 39
+            "y": 40
           },
           "targets": [
             {
@@ -5535,7 +6182,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 39
+            "y": 40
           },
           "targets": [
             {
@@ -5585,7 +6232,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 47
+            "y": 48
           },
           "targets": [
             {
@@ -5630,7 +6277,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 47
+            "y": 48
           },
           "targets": [
             {
@@ -5689,7 +6336,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 55
+            "y": 56
           },
           "targets": [
             {
@@ -5734,7 +6381,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 55
+            "y": 56
           },
           "targets": [
             {
@@ -5779,7 +6426,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 63
+            "y": 64
           },
           "targets": [
             {
@@ -5824,7 +6471,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 63
+            "y": 64
           },
           "targets": [
             {
@@ -5869,7 +6516,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 71
+            "y": 72
           },
           "targets": [
             {
@@ -5919,7 +6566,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 71
+            "y": 72
           },
           "targets": [
             {
@@ -5969,7 +6616,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 79
+            "y": 80
           },
           "targets": [
             {
@@ -6022,7 +6669,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 79
+            "y": 80
           },
           "targets": [
             {
@@ -6067,7 +6714,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 36
       },
       "panels": [
         {
@@ -6083,7 +6730,7 @@
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -6144,7 +6791,7 @@
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -6195,7 +6842,7 @@
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -6246,7 +6893,7 @@
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 36
+            "y": 37
           },
           "targets": [
             {
@@ -6297,7 +6944,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 44
+            "y": 45
           },
           "targets": [
             {
@@ -6497,7 +7144,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 44
+            "y": 45
           },
           "targets": [
             {
@@ -6548,7 +7195,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 52
+            "y": 53
           },
           "targets": [
             {
@@ -6604,7 +7251,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 52
+            "y": 53
           },
           "targets": [
             {
@@ -6655,7 +7302,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 52
+            "y": 53
           },
           "targets": [
             {

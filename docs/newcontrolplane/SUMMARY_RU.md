@@ -275,3 +275,32 @@ d8 k annotate replicatedstorageclass <name> storage.deckhouse.io/ext4-reserved-p
 Изменение аннотации приводит к пересозданию StorageClass контроллером, поскольку поле `parameters` у существующего StorageClass в Kubernetes иммутабельно. На уже созданные тома и PVC это не влияет.
 
 На legacy-плоскости управления (LINSTOR) та же аннотация применяется через property `FileSystem/MkfsParameters` ресурс-дефиниции LINSTOR. Единственное исключение — аварийный путь, создающий файловую систему, когда LINSTOR её не создал: там всегда действует значение по умолчанию 0%, поскольку процент до этого кода не доходит.
+
+<!--
+Where: docs/FAQ_RU.md, текст раздела «Как получить информацию об используемом пространстве?»
+Replaced by: ответ, отсылающий к дашборду «LINSTOR/DRBD» и `linstor storage-pool list`
+-->
+
+Откройте в Grafana «Dashboards» → «Storage» → «SDS Replicated Volume» и разверните строку «Capacity by ReplicatedStorageClass». Классы выбираются в списке «Storage Class» вверху дашборда, и каждая панель строки показывает каждый выбранный класс отдельно:
+
+- «Raw Capacity», «Raw Free» и «Raw Used» показывают ёмкость пула хранения класса без учёта репликации. Для толстого пула (`LVM`) это размер и свободное место его групп томов (Volume Group). Для тонкого пула (`LVMThin`) это лимит выделения его thin-пулов, то есть размер thin-пула, умноженный на `allocationLimit` LVMVolumeGroup (по умолчанию 150 %), а свободное место — этот лимит за вычетом места, уже выделенного тонким томам.
+- «Usable Capacity» и «Usable Free» показывают те же значения, делённые на число реплик класса («Replicas»): `failuresToTolerate + guaranteedMinimumDataRedundancy + 1`, то есть 1 для `None`, 2 для `Availability` и `Consistency` и 3 для `ConsistencyAndAvailability`. Это объём данных томов, который поместится в класс. Оценка сверху: реплики одного тома размещаются на разных узлах, и каждая целиком помещается в одну группу томов, поэтому при неравномерно заполненных узлах фактически поместится меньше.
+- «Thin Pools: Allocation and Data by Storage Class» показывает для thin-пулов выделенное место в сравнении с лимитом выделения и фактически записанные данные в сравнении с физическим размером thin-пулов. Если записанные данные приближаются к физическому размеру, место в thin-пулах скоро закончится, сколько бы ни разрешал лимит выделения.
+- «Capacity by Node / LVMVolumeGroup» перечисляет все LVMVolumeGroup (и thin-пулы) пулов хранения выбранных классов: узел, ёмкость, свободное место и занятую долю.
+
+Классы с одинаковыми настройками хранения используют один пул хранения (`status.storagePoolName`) и делят его ёмкость: значения без учёта репликации у них совпадают, а место, занятое одним классом, другим уже недоступно.
+
+Ёмкость LVMVolumeGroup берётся из метрик модуля `sds-node-configurator` (`sds_node_configurator_lvg_*`). Контроллер `sds-replicated-volume` экспортирует, какие LVMVolumeGroup входят в пул хранения и сколько реплик у класса:
+
+- `sds_rsp_lvg_info{storage_pool, lvg_name, thin_pool}` — значение 1 для каждой LVMVolumeGroup (и thin-пула) из `spec.lvmVolumeGroups` ReplicatedStoragePool; у пулов `LVM` метка `thin_pool` пустая.
+- `sds_rsc_replicas{storage_class, storage_pool}` — число diskful-реплик (реплик с данными) у томов класса и пул хранения, в котором они размещаются; оба значения берутся из принятой конфигурации класса (`status.configuration`).
+
+Например, свободное место для данных томов у классов с толстыми пулами:
+
+```text
+sum by (storage_pool) (
+  max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes)
+  * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+)
+/ on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas)
+```

@@ -275,3 +275,32 @@ The reserve applies only to volumes created after the annotation was set — fil
 Changing the annotation makes the controller recreate the StorageClass, because `parameters` of an existing StorageClass are immutable in Kubernetes. Existing volumes and PVCs are not affected.
 
 On the legacy LINSTOR control plane the same annotation is honoured through the `FileSystem/MkfsParameters` property of the LINSTOR resource definition. The one exception there is the rescue path that formats a volume when LINSTOR did not: it always uses the module default of 0%, because the percentage does not reach it.
+
+<!--
+Where: docs/FAQ.md, the body of "How do I get info about the space used?"
+Replaced by: the answer pointing at the "LINSTOR/DRBD" dashboard and `linstor storage-pool list`
+-->
+
+Open "Dashboards" → "Storage" → "SDS Replicated Volume" in Grafana and expand the "Capacity by ReplicatedStorageClass" row. Pick the classes in the "Storage Class" selector at the top of the dashboard; every panel of the row shows each selected class separately:
+
+- "Raw Capacity", "Raw Free" and "Raw Used" show the capacity of the storage pool of the class before replication. A thick (`LVM`) pool counts the size and the free space of its Volume Groups. A thin (`LVMThin`) pool counts the allocation limit of its thin pools, that is the thin pool size multiplied by `allocationLimit` of the LVMVolumeGroup (150% by default), and its free space is that limit minus the space already allocated to thin volumes.
+- "Usable Capacity" and "Usable Free" show the same values divided by the number of replicas of the class ("Replicas"): `failuresToTolerate + guaranteedMinimumDataRedundancy + 1`, which is 1 for `None`, 2 for `Availability` and `Consistency` and 3 for `ConsistencyAndAvailability`. This is how much volume data the class can hold. It is an upper bound: the replicas of a volume are placed on different nodes and each of them fits into one Volume Group, so with unevenly filled nodes less can actually be placed.
+- "Thin Pools: Allocation and Data by Storage Class" shows, for thin pools, the allocated space against the allocation limit and the data actually written against the physical size of the thin pools. Written data close to the physical size means the thin pools are about to run out of space, whatever the allocation limit allows.
+- "Capacity by Node / LVMVolumeGroup" lists every LVMVolumeGroup (and thin pool) of the storage pools of the selected classes with its node, capacity, free space and the share used.
+
+Classes with identical storage settings use one storage pool (`status.storagePoolName`) and share its capacity: their raw values are the same, and space taken by one class is no longer available to the others.
+
+The capacity of LVMVolumeGroups comes from the metrics of the `sds-node-configurator` module (`sds_node_configurator_lvg_*`). The controller of `sds-replicated-volume` exports which LVMVolumeGroups belong to a storage pool and how many replicas a class has:
+
+- `sds_rsp_lvg_info{storage_pool, lvg_name, thin_pool}`: value 1 for every LVMVolumeGroup (and thin pool) listed in `spec.lvmVolumeGroups` of a ReplicatedStoragePool; `thin_pool` is empty for `LVM` pools.
+- `sds_rsc_replicas{storage_class, storage_pool}`: the number of diskful replicas of the volumes of a class and the storage pool they are placed in, both taken from the accepted configuration of the class (`status.configuration`).
+
+For example, the usable free space of classes with thick pools:
+
+```text
+sum by (storage_pool) (
+  max by (lvg_name) (sds_node_configurator_lvg_vg_free_bytes)
+  * on (lvg_name) group_right max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+)
+/ on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas)
+```

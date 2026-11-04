@@ -90,12 +90,16 @@ var currentMetricsRVProblemConditionTypes = []string{
 //     monitoring/prometheus-rules/replicated-volume-health.yaml;
 //   - metricNameRSPConditionProblem and metricNameRSCConditionProblem:
 //     monitoring/prometheus-rules/replicated-storage-health.yaml;
-//   - metricNameCollectorUp: monitoring/prometheus-rules/current-metrics.tpl.
+//   - metricNameCollectorUp: monitoring/prometheus-rules/current-metrics.tpl;
+//   - metricNameRSPLVGInfo and metricNameRSCReplicas: the capacity panels of
+//     monitoring/grafana-dashboards/storage/sds-replicated-volume.json.
 const (
 	metricNameRVConditionProblem  = "sds_rv_condition_problem_timestamp_seconds"
 	metricNameRSPConditionProblem = "sds_rsp_condition_problem_timestamp_seconds"
 	metricNameRSCConditionProblem = "sds_rsc_condition_problem_timestamp_seconds"
 	metricNameCollectorUp         = "sds_metrics_collector_up"
+	metricNameRSPLVGInfo          = "sds_rsp_lvg_info"
+	metricNameRSCReplicas         = "sds_rsc_replicas"
 )
 
 // Package-level guard: exactly one current metrics collector is registered per process.
@@ -173,6 +177,8 @@ type currentMetricsCollector struct {
 	rvConditionProblemDesc         *prometheus.Desc
 	rspConditionProblemDesc        *prometheus.Desc
 	rscConditionProblemDesc        *prometheus.Desc
+	rspLVGInfoDesc                 *prometheus.Desc
+	rscReplicasDesc                *prometheus.Desc
 	rvDeletingDesc                 *prometheus.Desc
 	deletingOldestDesc             *prometheus.Desc
 	datameshTransitionOldestDesc   *prometheus.Desc
@@ -287,6 +293,18 @@ func newCurrentMetricsCollector(reader client.Reader, log logr.Logger) *currentM
 			[]string{LabelName, LabelStoragePool, LabelCondition, LabelStatus, LabelReason},
 			nil,
 		),
+		rspLVGInfoDesc: prometheus.NewDesc(
+			metricNameRSPLVGInfo,
+			"One series with value 1 per LVMVolumeGroup of a ReplicatedStoragePool (spec.lvmVolumeGroups), with its thin pool for LVMThin pools; thin_pool is empty for LVM pools. Joins the capacity metrics of the sds-node-configurator agent (sds_node_configurator_lvg_*, labeled by lvg_name and thin_pool) to storage_pool. Built from controller cache at scrape time.",
+			[]string{LabelStoragePool, LabelLVGName, LabelThinPool},
+			nil,
+		),
+		rscReplicasDesc: prometheus.NewDesc(
+			metricNameRSCReplicas,
+			"Number of diskful replicas (failuresToTolerate + guaranteedMinimumDataRedundancy + 1) of the volumes of a ReplicatedStorageClass, labeled with the storage pool they are placed in. Both come from the accepted configuration (status.configuration), or, until the first configuration is accepted, from the spec and status.storagePoolName; a class without a storage pool produces no series. The capacity of the pool divided by the value is the capacity of the class in volume bytes. Built from controller cache at scrape time.",
+			[]string{LabelStorageClass, LabelStoragePool},
+			nil,
+		),
 	}
 }
 
@@ -302,6 +320,8 @@ func (c *currentMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.rvConditionProblemDesc
 	ch <- c.rspConditionProblemDesc
 	ch <- c.rscConditionProblemDesc
+	ch <- c.rspLVGInfoDesc
+	ch <- c.rscReplicasDesc
 	ch <- c.rvDeletingDesc
 	ch <- c.deletingOldestDesc
 	ch <- c.datameshTransitionOldestDesc
@@ -363,6 +383,8 @@ func (c *currentMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	collectRVConditionProblems(ch, c.rvConditionProblemDesc, rvList.Items)
 	collectRSPConditionProblems(ch, c.rspConditionProblemDesc, rspList.Items)
 	collectRSCConditionProblems(ch, c.rscConditionProblemDesc, rscList.Items)
+	collectRSPLVGInfo(ch, c.rspLVGInfoDesc, rspList.Items)
+	collectRSCReplicas(ch, c.rscReplicasDesc, rscList.Items)
 	collectRVDeleting(ch, c.rvDeletingDesc, rvList.Items)
 	collectDeletingOldest(ch, c.deletingOldestDesc, rvList.Items, rvrList.Items, rvaList.Items)
 	collectDatameshTransitionOldest(ch, c.datameshTransitionOldestDesc, rvList.Items, rvrList.Items)
@@ -633,6 +655,50 @@ func collectRSCConditionProblems(
 		}
 		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, since,
 			rsc.Name, rsc.Status.StoragePoolName, v1alpha1.ReplicatedStorageClassCondReadyType, status, reason)
+	}
+}
+
+// collectRSPLVGInfo emits one series per LVMVolumeGroup and thin pool of every ReplicatedStoragePool,
+// deleting ones included: their LVMVolumeGroups still hold volumes. A repeated entry is emitted once,
+// because two series with the same labels would fail the whole scrape.
+func collectRSPLVGInfo(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rsps []v1alpha1.ReplicatedStoragePool,
+) {
+	entries := make(map[currentMetricLabels3]float64)
+	for i := range rsps {
+		rsp := &rsps[i]
+		for _, lvg := range rsp.Spec.LVMVolumeGroups {
+			entries[currentMetricLabels3{rsp.Name, lvg.Name, lvg.ThinPoolName}] = 1
+		}
+	}
+
+	for _, key := range sortedCurrentMetricLabels3(entries) {
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, entries[key], key.first, key.second, key.third)
+	}
+}
+
+// collectRSCReplicas emits the number of diskful replicas of every ReplicatedStorageClass with its
+// storage pool. New volumes get the accepted configuration, so it wins over a spec that is not accepted
+// yet; the spec is used only until the first configuration is accepted (or while an old-format one
+// without a pool name waits for migration).
+func collectRSCReplicas(
+	ch chan<- prometheus.Metric,
+	desc *prometheus.Desc,
+	rscs []v1alpha1.ReplicatedStorageClass,
+) {
+	for i := range rscs {
+		rsc := &rscs[i]
+		pool, ftt, gmdr := rsc.Status.StoragePoolName, rsc.Spec.GetFTT(), rsc.Spec.GetGMDR()
+		if cfg := rsc.Status.Configuration; cfg != nil && cfg.ReplicatedStoragePoolName != "" {
+			pool, ftt, gmdr = cfg.ReplicatedStoragePoolName, cfg.FailuresToTolerate, cfg.GuaranteedMinimumDataRedundancy
+		}
+		if pool == "" {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue,
+			float64(v1alpha1.IntendedDiskfulCount(ftt, gmdr)), rsc.Name, pool)
 	}
 }
 

@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -215,5 +216,245 @@ func TestReplicatedStorageHealthRulesMatchTheExportedMetrics(t *testing.T) {
 				t.Fatalf("expected severity_level 4 and tier cluster, got %v", alert.Labels)
 			}
 		})
+	}
+}
+
+func collectCapacityInfo(t *testing.T, rsps []v1alpha1.ReplicatedStoragePool, rscs []v1alpha1.ReplicatedStorageClass) (lvgInfo, replicas []testMetric) {
+	t.Helper()
+
+	lvgInfoDesc := prometheus.NewDesc("test_rsp_lvg_info", "test",
+		[]string{LabelStoragePool, LabelLVGName, LabelThinPool}, nil)
+	replicasDesc := prometheus.NewDesc("test_rsc_replicas", "test",
+		[]string{LabelStorageClass, LabelStoragePool}, nil)
+
+	lvgCh := make(chan prometheus.Metric, 100)
+	go func() {
+		defer close(lvgCh)
+		collectRSPLVGInfo(lvgCh, lvgInfoDesc, rsps)
+	}()
+	lvgInfo = collectTestMetrics(t, lvgCh)
+
+	replicasCh := make(chan prometheus.Metric, 100)
+	go func() {
+		defer close(replicasCh)
+		collectRSCReplicas(replicasCh, replicasDesc, rscs)
+	}()
+	replicas = collectTestMetrics(t, replicasCh)
+	return lvgInfo, replicas
+}
+
+func storagePool(name string, typ v1alpha1.ReplicatedStoragePoolType, lvgs ...v1alpha1.ReplicatedStoragePoolLVMVolumeGroups) v1alpha1.ReplicatedStoragePool {
+	return v1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.ReplicatedStoragePoolSpec{Type: typ, LVMVolumeGroups: lvgs},
+	}
+}
+
+func TestCollectRSPLVGInfoEmitsEveryVolumeGroupOfEveryPool(t *testing.T) {
+	deleteTime := metav1.Now()
+	deleting := storagePool("rsp-c-deleting", v1alpha1.ReplicatedStoragePoolTypeLVM,
+		v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-3"})
+	deleting.DeletionTimestamp = &deleteTime
+	deleting.Finalizers = []string{"test"}
+
+	lvgInfo, _ := collectCapacityInfo(t, []v1alpha1.ReplicatedStoragePool{
+		storagePool("rsp-a-thick", v1alpha1.ReplicatedStoragePoolTypeLVM,
+			v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1"},
+			v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-2"},
+			// A repeated entry must not produce a second series with the same labels.
+			v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1"},
+		),
+		storagePool("rsp-b-thin", v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+			v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1", ThinPoolName: "tp-a"},
+			v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1", ThinPoolName: "tp-b"},
+		),
+		// A deleting pool still holds its volumes, so its capacity is still reported.
+		deleting,
+	}, nil)
+
+	want := []map[string]string{
+		{LabelStoragePool: "rsp-a-thick", LabelLVGName: "lvg-1", LabelThinPool: ""},
+		{LabelStoragePool: "rsp-a-thick", LabelLVGName: "lvg-2", LabelThinPool: ""},
+		{LabelStoragePool: "rsp-b-thin", LabelLVGName: "lvg-1", LabelThinPool: "tp-a"},
+		{LabelStoragePool: "rsp-b-thin", LabelLVGName: "lvg-1", LabelThinPool: "tp-b"},
+		{LabelStoragePool: "rsp-c-deleting", LabelLVGName: "lvg-3", LabelThinPool: ""},
+	}
+	if len(lvgInfo) != len(want) {
+		t.Fatalf("expected %d series, got %d: %#v", len(want), len(lvgInfo), lvgInfo)
+	}
+	for i := range want {
+		assertMetric(t, lvgInfo[i], 1, want[i])
+	}
+}
+
+func TestCollectRSCReplicasFollowsTheAcceptedConfiguration(t *testing.T) {
+	zero, one := byte(0), byte(1)
+	_, replicas := collectCapacityInfo(t, nil, []v1alpha1.ReplicatedStorageClass{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-1-accepted"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: v1alpha1.ReplicationConsistencyAndAvailability},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				StoragePoolName: "rsp-a",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					ReplicatedStoragePoolName: "rsp-a", FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+				},
+			},
+		},
+		{
+			// The spec moved to None on another pool, but the change is not accepted: new volumes still
+			// get two replicas on the old pool.
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-2-pending"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: v1alpha1.ReplicationNone},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				StoragePoolName: "rsp-b",
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					ReplicatedStoragePoolName: "rsp-a", FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 0,
+				},
+			},
+		},
+		{
+			// No configuration accepted yet: the spec and the computed pool are used.
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-3-first-configuration"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: v1alpha1.ReplicationConsistency},
+			Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "rsp-c"},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-4-ftt-gmdr"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{FailuresToTolerate: &zero, GuaranteedMinimumDataRedundancy: &zero},
+			Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "rsp-c"},
+		},
+		{
+			// An unset replication means ConsistencyAndAvailability.
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-5-default"},
+			Status:     v1alpha1.ReplicatedStorageClassStatus{StoragePoolName: "rsp-c"},
+		},
+		{
+			// An old-format configuration has no pool name and is about to be rewritten.
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-6-old-format"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{FailuresToTolerate: &one, GuaranteedMinimumDataRedundancy: &zero},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				StoragePoolName: "rsp-d",
+				Configuration:   &v1alpha1.ReplicatedVolumeConfiguration{Topology: v1alpha1.TopologyIgnored},
+			},
+		},
+		{
+			// An invalid spec may leave the class without a storage pool: nothing to report.
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-7-no-pool"},
+			Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: v1alpha1.ReplicationNone},
+		},
+	})
+
+	want := []struct {
+		class, pool string
+		replicas    float64
+	}{
+		{"rsc-1-accepted", "rsp-a", 3},
+		{"rsc-2-pending", "rsp-a", 2},
+		{"rsc-3-first-configuration", "rsp-c", 2},
+		{"rsc-4-ftt-gmdr", "rsp-c", 1},
+		{"rsc-5-default", "rsp-c", 3},
+		{"rsc-6-old-format", "rsp-d", 2},
+	}
+	if len(replicas) != len(want) {
+		t.Fatalf("expected %d series, got %d: %#v", len(want), len(replicas), replicas)
+	}
+	for i, w := range want {
+		assertMetric(t, replicas[i], w.replicas, map[string]string{LabelStorageClass: w.class, LabelStoragePool: w.pool})
+	}
+}
+
+func TestCapacityInfoFollowsTheCacheSnapshot(t *testing.T) {
+	thick := storagePool("rsp-thick", v1alpha1.ReplicatedStoragePoolTypeLVM,
+		v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1"})
+	thin := storagePool("rsp-thin", v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+		v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-1", ThinPoolName: "tp"})
+	class := func(pool string) v1alpha1.ReplicatedStorageClass {
+		return v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc"},
+			Status: v1alpha1.ReplicatedStorageClassStatus{
+				StoragePoolName: pool,
+				Configuration: &v1alpha1.ReplicatedVolumeConfiguration{
+					ReplicatedStoragePoolName: pool, FailuresToTolerate: 1, GuaranteedMinimumDataRedundancy: 1,
+				},
+			},
+		}
+	}
+
+	_, replicas := collectCapacityInfo(t, []v1alpha1.ReplicatedStoragePool{thick}, []v1alpha1.ReplicatedStorageClass{class("rsp-thick")})
+	if len(replicas) != 1 {
+		t.Fatalf("expected one series, got %d: %#v", len(replicas), replicas)
+	}
+	assertMetric(t, replicas[0], 3, map[string]string{LabelStorageClass: "rsc", LabelStoragePool: "rsp-thick"})
+
+	// Once the class moves to another pool, its series moves with it instead of being duplicated, and
+	// the old pool keeps its own series while it exists.
+	lvgInfo, replicas := collectCapacityInfo(t, []v1alpha1.ReplicatedStoragePool{thick, thin}, []v1alpha1.ReplicatedStorageClass{class("rsp-thin")})
+	if len(replicas) != 1 {
+		t.Fatalf("expected the series to be replaced, got %d: %#v", len(replicas), replicas)
+	}
+	assertMetric(t, replicas[0], 3, map[string]string{LabelStorageClass: "rsc", LabelStoragePool: "rsp-thin"})
+	if len(lvgInfo) != 2 {
+		t.Fatalf("expected a series per pool, got %d: %#v", len(lvgInfo), lvgInfo)
+	}
+
+	// A deleted pool or class is simply absent from the reader, so its series disappears without any
+	// explicit metric removal.
+	lvgInfo, replicas = collectCapacityInfo(t, []v1alpha1.ReplicatedStoragePool{thin}, nil)
+	if len(replicas) != 0 {
+		t.Fatalf("expected no series for a deleted class, got %d: %#v", len(replicas), replicas)
+	}
+	if len(lvgInfo) != 1 {
+		t.Fatalf("expected one series, got %d: %#v", len(lvgInfo), lvgInfo)
+	}
+	assertMetric(t, lvgInfo[0], 1, map[string]string{LabelStoragePool: "rsp-thin", LabelLVGName: "lvg-1", LabelThinPool: "tp"})
+}
+
+// replicatedVolumeDashboardPath points at the Grafana dashboard of the new control plane (read at runtime
+// for the same reason as replicatedVolumeLayoutRulePath).
+const replicatedVolumeDashboardPath = "../../../../monitoring/grafana-dashboards/storage/sds-replicated-volume.json"
+
+func TestCapacityDashboardMatchesTheExportedMetrics(t *testing.T) {
+	data, err := os.ReadFile(replicatedVolumeDashboardPath)
+	if err != nil {
+		t.Fatalf("reading dashboard %q: %v", replicatedVolumeDashboardPath, err)
+	}
+
+	type panel struct {
+		Title   string `json:"title"`
+		Targets []struct {
+			Expr string `json:"expr"`
+		} `json:"targets"`
+		Panels []panel `json:"panels"`
+	}
+	var dashboard struct {
+		Panels []panel `json:"panels"`
+	}
+	if err := json.Unmarshal(data, &dashboard); err != nil {
+		t.Fatalf("unmarshalling dashboard %q: %v", replicatedVolumeDashboardPath, err)
+	}
+
+	var row *panel
+	for i := range dashboard.Panels {
+		if dashboard.Panels[i].Title == "Capacity by ReplicatedStorageClass" {
+			row = &dashboard.Panels[i]
+		}
+	}
+	if row == nil || len(row.Panels) == 0 {
+		t.Fatalf("capacity row not found in %q", replicatedVolumeDashboardPath)
+	}
+
+	// Every capacity panel is filtered by the storage classes selected on the dashboard, and capacity
+	// reaches a class only through the pool membership series.
+	usesLVGInfo := false
+	for _, p := range row.Panels {
+		for _, target := range p.Targets {
+			if !strings.Contains(target.Expr, metricNameRSCReplicas+`{`+LabelStorageClass+`=~"$storage_class"}`) {
+				t.Errorf("panel %q: expression does not select %s by the storage class: %s", p.Title, metricNameRSCReplicas, target.Expr)
+			}
+			usesLVGInfo = usesLVGInfo || strings.Contains(target.Expr, metricNameRSPLVGInfo+`{`+LabelThinPool)
+		}
+	}
+	if !usesLVGInfo {
+		t.Errorf("no capacity panel joins the LVMVolumeGroup capacity through %s", metricNameRSPLVGInfo)
 	}
 }

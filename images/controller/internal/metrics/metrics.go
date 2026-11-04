@@ -38,6 +38,8 @@ const (
 	LabelNode              = "node"
 	LabelStorageClass      = "storage_class"
 	LabelStoragePool       = "storage_pool"
+	LabelLVGName           = "lvg_name"
+	LabelThinPool          = "thin_pool"
 	LabelConfigurationMode = "configuration_mode"
 	LabelPhase             = "phase"
 	LabelType              = "type"
