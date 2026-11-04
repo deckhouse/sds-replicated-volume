@@ -62,7 +62,8 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileRSP [Conditional target evaluation]
 │   └── ensure auto-generated RSP exists with finalizer and usedBy
 ├── reconcileStorageClass [Conditional target evaluation]
-│   └── ensure Kubernetes StorageClass exists; delete+recreate on immutable spec change;
+│   └── ensure Kubernetes StorageClass exists; delete+recreate on immutable spec change,
+│       patch in place on a label/annotation/finalizer change;
 │       an SC of another provisioner → Ready=False StorageClassConflict, requeue after 1 minute
 ├── ensureStoragePool
 │   └── status.storagePoolName + StoragePoolReady condition
@@ -327,6 +328,7 @@ Other counters:
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSP | Prevent RSP deletion while any RSC references it |
 | Finalizer | `storage.deckhouse.io/sds-replicated-volume` | StorageClass | Prevent SC deletion by external actors while RSC exists |
 | Label | `storage.deckhouse.io/managed-by=sds-replicated-volume` | StorageClass | Mark SC as managed by this controller |
+| Annotation | `storage.deckhouse.io/volumesnapshotclass=sds-replicated-volume` | StorageClass | Name the module's VolumeSnapshotClass for snapshots of the SC volumes (the storage-foundation VolumeSnapshot webhook defaults `volumeSnapshotClassName` from it); a value set by hand is replaced |
 | Status field | `status.phase` | RSC | Operational state summary |
 | Status field | `status.message` | RSC | Human-readable description of the current phase |
 

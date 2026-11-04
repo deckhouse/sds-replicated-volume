@@ -34,4 +34,12 @@ const (
 	// in the spec of every ReplicatedVolume it creates. Absent when the class does
 	// not wipe its volumes.
 	CSIParamVolumeCleanupKey = "replicated.csi.storage.deckhouse.io/volumeCleanup"
+
+	// StorageClassVolumeSnapshotClassAnnotationKey is the StorageClass annotation
+	// that names the VolumeSnapshotClass for snapshots of its volumes.
+	StorageClassVolumeSnapshotClassAnnotationKey = "storage.deckhouse.io/volumesnapshotclass"
+
+	// VolumeSnapshotClassName is the name of the VolumeSnapshotClass the module
+	// ships for its CSI driver (templates/csi/volume-snapshot-class.yaml).
+	VolumeSnapshotClassName = "sds-replicated-volume"
 )
