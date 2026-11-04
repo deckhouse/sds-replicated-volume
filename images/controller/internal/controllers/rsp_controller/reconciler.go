@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -54,6 +55,9 @@ type Reconciler struct {
 	// (sdsReplicatedVolume.dataNodes.nodeSelector). Only nodes matching it may
 	// become eligible nodes. A nil/empty set means "match all nodes".
 	dataNodeSelector labels.Set
+	// recorder records an Event on the RSP when a status patch moves its Ready
+	// condition. BuildController sets it; nil records nothing.
+	recorder conditions.EventRecorder
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
@@ -595,12 +599,25 @@ func (r *Reconciler) getRSP(ctx context.Context, name string) (*v1alpha1.Replica
 }
 
 // patchRSPStatus patches the RSP status subresource.
+//
+// A patch that moves the Ready condition away from what base holds records one
+// Event on the RSP: Warning when Ready turns False, Normal otherwise, with the
+// reason of the condition. The Event follows the patch, so a patch that fails
+// on a conflict announces nothing, and a pass that only re-words the message —
+// the count of eligible nodes in it — records nothing.
 func (r *Reconciler) patchRSPStatus(
 	ctx context.Context,
 	rsp *v1alpha1.ReplicatedStoragePool,
 	base *v1alpha1.ReplicatedStoragePool,
 ) error {
-	return r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	if err := r.cl.Status().Patch(ctx, rsp, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return err
+	}
+	if cur := conditions.Get(rsp.Status.Conditions, v1alpha1.ReplicatedStoragePoolCondReadyType); cur != nil {
+		prev := conditions.Get(base.Status.Conditions, v1alpha1.ReplicatedStoragePoolCondReadyType)
+		conditions.RecordTransition(r.recorder, rsp, prev, *cur)
+	}
+	return nil
 }
 
 // --- LVMVolumeGroup (LVG) ---

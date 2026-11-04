@@ -105,6 +105,12 @@ Indicates whether the storage pool eligible nodes have been calculated successfu
 | False | InvalidLVMVolumeGroup | RSP/LVG validation failed (e.g., thin pool not found) |
 | False | InvalidNodeLabelSelector | NodeLabelSelector or Zones parsing failed |
 
+A status patch that changes the status or the reason of Ready records one Kubernetes Event on the
+RSP (`patchRSPStatus`, `conditions.RecordTransition` of sds-common-lib): `Warning` when Ready turns
+False, `Normal` otherwise, with the reason of the condition. A change of the message alone — the
+count of eligible nodes — records nothing. The RSP is cluster-scoped, so its Events are in the
+`default` namespace.
+
 ### Phase
 
 Quick operational state summary. Set by `applyPhase` alongside the Ready condition.

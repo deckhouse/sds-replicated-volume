@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/fsreserve"
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -51,6 +52,9 @@ import (
 
 type Reconciler struct {
 	cl client.Client
+	// recorder records an Event on the RSC when a status patch moves its Ready
+	// condition. BuildController sets it; nil records nothing.
+	recorder conditions.EventRecorder
 }
 
 // storageClassConflictRequeueInterval is how often an RSC whose name is held by
@@ -2063,12 +2067,25 @@ func (r *Reconciler) patchRSC(
 }
 
 // patchRSCStatus patches the RSC status subresource.
+//
+// A patch that moves the Ready condition away from what base holds records one
+// Event on the RSC: Warning when Ready turns False, Normal otherwise, with the
+// reason of the condition. The Event follows the patch, so a patch that fails
+// on a conflict announces nothing, and a pass that only re-words the message
+// records nothing.
 func (r *Reconciler) patchRSCStatus(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	base *v1alpha1.ReplicatedStorageClass,
 ) error {
-	return r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	if err := r.cl.Status().Patch(ctx, rsc, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return err
+	}
+	if cur := conditions.Get(rsc.Status.Conditions, v1alpha1.ReplicatedStorageClassCondReadyType); cur != nil {
+		prev := conditions.Get(base.Status.Conditions, v1alpha1.ReplicatedStorageClassCondReadyType)
+		conditions.RecordTransition(r.recorder, rsc, prev, *cur)
+	}
+	return nil
 }
 
 // createRSP creates an RSP.

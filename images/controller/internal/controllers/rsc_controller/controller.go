@@ -43,6 +43,7 @@ func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
 
 	rec := NewReconciler(cl)
+	rec.recorder = mgr.GetEventRecorder(RSCControllerName)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RSCControllerName).

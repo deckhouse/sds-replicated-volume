@@ -150,6 +150,12 @@ metadata.generation`; that is the gate `rv_controller` uses to hand the configur
 | False | InsufficientEligibleNodes | Not accepted: RSP eligible nodes do not meet topology and FTT/GMDR requirements (message starts with `Pending: …`) |
 | False | Degraded | Accepted, but the RSP is not ready (cause in `StoragePoolReady`) or its eligible nodes no longer meet the requirements (cause in the message); the message ends with `configuration generation N stays in effect` |
 
+A status patch that changes the status or the reason of Ready records one Kubernetes Event on the
+RSC (`patchRSCStatus`, `conditions.RecordTransition` of sds-common-lib): `Warning` when Ready turns
+False, `Normal` otherwise, with the reason of the condition. A change of the message alone records
+nothing, and neither does a change of the other conditions. The RSC is cluster-scoped, so its Events
+are in the `default` namespace.
+
 ### StoragePoolReady
 
 Indicates whether the associated storage pool exists and is ready.
