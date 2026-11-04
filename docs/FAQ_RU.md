@@ -653,7 +653,7 @@ kubectl apply -f ./backup/
   kubectl -n d8-sds-replicated-volume get secret d8-sds-replicated-volume-controller-config  -o jsonpath='{.data.config}' | base64 --decode
   ```
 
-- В секрете `d8-sds-replicated-volume-controller-config` должны быть селекторы, которые указаны в настройках модуля, а так же дополнительно селектор `kubernetes.io/os: linux`.
+- В секрете `d8-sds-replicated-volume-controller-config` должен быть ровно тот селектор, который указан в настройках модуля, или `kubernetes.io/os: linux`, если параметр не задан.
 
 - Необходимо проверить, что на нужном узле есть все указанные в секрете `d8-sds-replicated-volume-controller-config` метки:
 
@@ -726,7 +726,7 @@ kubectl apply -f ./backup/
 
 6. Создайте ресурс ModuleConfig для `sds-replicated-volume`:
 
-   > **Внимание.** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `linstor`. Если этот параметр не указан и там, то только в этом случае он останется пустым и все узлы кластера будут считаться узлами для хранения данных.
+   > **Внимание.** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `linstor`. Если этот параметр не указан и там, используется значение по умолчанию `kubernetes.io/os: linux` и все узлы кластера с Linux будут считаться узлами для хранения данных.
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -828,7 +828,7 @@ StorageClass'ы в данном модуле управляются через �
 
 4. Создайте ресурс ModuleConfig для `sds-replicated-volume`:
 
-   > **Внимание.** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `sds-drbd`. Если этот параметр не указан и там, то только в этом случае он останется пустым и все узлы кластера будут считаться узлами для хранения данных.
+   > **Внимание.** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `sds-drbd`. Если этот параметр не указан и там, используется значение по умолчанию `kubernetes.io/os: linux` и все узлы кластера с Linux будут считаться узлами для хранения данных.
 
    ```yaml
    kubectl apply -f - <<EOF

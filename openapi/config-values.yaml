@@ -42,11 +42,15 @@ properties:
         additionalProperties:
           type: string
         description: |
-          The same as in the Pods `spec.nodeSelector` parameter in Kubernetes.
+          The same as the Pod `spec.nodeSelector` parameter in Kubernetes.
 
-          If parameter is omitted, Linstor nodes will be placed on all nodes.
+          Nodes that match the selector get the `storage.deckhouse.io/sds-replicated-volume-node: ""` label. Module components, including the LINSTOR satellite and the CSI node, run on nodes with this label.
 
-          **Caution!** Changing this parameter does not result in data redistribution. If node with data no longer matches the `nodeSelector`, data on that node will become inaccessible.
+          The default value `kubernetes.io/os: linux` selects all Linux nodes. A custom value replaces the default one and is not merged with it.
+
+          **Caution!** Set this parameter when enabling the module. If you change it later, including disabling the module and enabling it again with a different selector, the nodes that have already been selected keep the `storage.deckhouse.io/sds-replicated-volume-*` labels and module components keep running on them. The labels are not removed and the data is not moved to other nodes.
+
+          To remove the module from such a node, follow the FAQ section [Example of removing resources from a node without removing the node itself](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself), then remove the labels from the node manually.
   storageClassLabelIgnoredPrefixes:
     type: array
     default:

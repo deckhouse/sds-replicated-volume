@@ -23,6 +23,7 @@ upgrade_notes:
   - "On DKP 1.78 and later, the `d8:manage:permission:module:sds-replicated-volume:view` and `:edit` ClusterRoles are replaced by `d8:system-capability:sds-replicated-volume:view` and `:edit`. Bindings that reference the old role names directly have to be switched to the new ones."
 docs:
   - "The FAQ now says that overprovisioning of LVMThin pools is limited by LINSTOR and that `allocationLimit` of the thin pool in LVMVolumeGroup has no effect on the module's volumes."
+  - "The description of the `dataNodes.nodeSelector` parameter and the FAQ now say what the parameter does: nodes that match it get the `storage.deckhouse.io/sds-replicated-volume-node` label and module components run on them, and a custom value replaces the default `kubernetes.io/os: linux`. Changing the selector later, including disabling the module and enabling it again with a different one, does not remove the labels from nodes that have already been selected and does not move data; the description links to the FAQ procedure for removing the module from such a node."
 # known_issues: []
 # docs: []
 # dependencies:

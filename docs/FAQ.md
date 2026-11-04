@@ -618,7 +618,7 @@ Most likely this is due to node labels.
   kubectl -n d8-sds-replicated-volume get secret d8-sds-replicated-volume-controller-config  -o jsonpath='{.data.config}' | base64 --decode
   ```
 
-- The `d8-sds-replicated-volume-controller-config` secret should contain the selectors that are specified in the module settings, as well as the `kubernetes.io/os: linux` selector.
+- The `d8-sds-replicated-volume-controller-config` secret should contain exactly the selector specified in the module settings, or `kubernetes.io/os: linux` if the parameter is not set.
 
 - Make sure that the target node has all the labels specified in the `d8-sds-replicated-volume-controller-config` secret:
 
@@ -691,7 +691,7 @@ Note that the `LINSTOR` control-plane and its CSI will be unavailable during the
 
 6. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, the default value `kubernetes.io/os: linux` is used and all Linux nodes in the cluster will be treated as storage nodes.
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -793,7 +793,7 @@ Note that the module control-plane and its CSI will be unavailable during the mi
 
 4. Create a ModuleConfig resource for `sds-replicated-volume`.
 
-   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+   > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, the default value `kubernetes.io/os: linux` is used and all Linux nodes in the cluster will be treated as storage nodes.
 
    ```yaml
    kubectl apply -f - <<EOF
