@@ -92,6 +92,7 @@ GOWORK=off go -C "${root_dir}/hack/tools" build -o "${tools_dir}" \
     github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher
 
 cd "${root_dir}/api"
+export GOWORK=off
 
 echo "Rendering the CRDs"
 "${tools_dir}/controller-gen" crd:crdVersions=v1 \
