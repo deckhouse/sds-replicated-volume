@@ -317,6 +317,50 @@ func TestCreateVolume_AlreadyExists_StillForming_WaitSucceeds(t *testing.T) {
 	}
 }
 
+// TestCreateVolume_RecordsVolumeCleanup ensures that the volume cleanup method
+// of the StorageClass is recorded in the spec of the ReplicatedVolume, which is
+// what fixes it for the volume, and that a class without one records none.
+func TestCreateVolume_RecordsVolumeCleanup(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+	}{
+		{name: "class with a method", method: "RandomFillSinglePass"},
+		{name: "class without a method"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			volumeID := "rv-cleanup"
+			cl := newTestFakeClient()
+			d := newTestDriver(t, cl, 5*time.Second)
+
+			req := newCreateVolumeRequest(volumeID)
+			if tt.method != "" {
+				req.Parameters[v1alpha1.CSIParamVolumeCleanupKey] = tt.method
+			}
+
+			done := formRVAsync(ctx, t, cl, volumeID, 100*time.Millisecond)
+			_, err := d.CreateVolume(ctx, req)
+			<-done
+			if err != nil {
+				t.Fatalf("CreateVolume: unexpected error: %v", err)
+			}
+
+			rv := &v1alpha1.ReplicatedVolume{}
+			if err := cl.Get(ctx, client.ObjectKey{Name: volumeID}, rv); err != nil {
+				t.Fatalf("get RV: %v", err)
+			}
+			if got := string(rv.Spec.VolumeCleanup); got != tt.method {
+				t.Fatalf("RV spec.volumeCleanup = %q, want %q", got, tt.method)
+			}
+		})
+	}
+}
+
 // TestCreateVolume_AlreadyExists_StillForming_WaitFails_DeletesGarbage ensures
 // that when we fall through into Wait for a pre-existing, still-forming RV and
 // Wait fails, the RV is garbage-collected. A not-past-Formation RV carries no

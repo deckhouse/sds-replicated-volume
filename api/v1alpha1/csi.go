@@ -28,4 +28,10 @@ const (
 	// CSIParamVolumeBindingModeKey is the StorageClass parameter key that
 	// tells the CSI driver which volume binding mode is in effect.
 	CSIParamVolumeBindingModeKey = "replicated.csi.storage.deckhouse.io/volume-binding-mode"
+
+	// CSIParamVolumeCleanupKey is the StorageClass parameter key that carries
+	// ReplicatedStorageClass spec.volumeCleanup to the CSI driver, which records it
+	// in the spec of every ReplicatedVolume it creates. Absent when the class does
+	// not wipe its volumes.
+	CSIParamVolumeCleanupKey = "replicated.csi.storage.deckhouse.io/volumeCleanup"
 )

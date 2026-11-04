@@ -99,6 +99,43 @@ var _ = Describe("reconcileStorageClass", func() {
 		Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.CSIParamRSCNameKey, rsc.Name))
 	})
 
+	It("passes the volume cleanup method to the CSI driver as a parameter", func() {
+		rsc.Spec.VolumeCleanup = v1alpha1.VolumeCleanupRandomFillSinglePass
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rsc.Name}, &sc)).To(Succeed())
+		Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.CSIParamVolumeCleanupKey, "RandomFillSinglePass"))
+	})
+
+	It("leaves the volume cleanup parameter out when the class has no method", func() {
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rsc.Name}, &sc)).To(Succeed())
+		Expect(sc.Parameters).NotTo(HaveKey(v1alpha1.CSIParamVolumeCleanupKey))
+	})
+
+	It("recreates the StorageClass when the volume cleanup method changes", func() {
+		rsc.Spec.VolumeCleanup = v1alpha1.VolumeCleanupRandomFillSinglePass
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		rsc.Spec.VolumeCleanup = v1alpha1.VolumeCleanupDiscard
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		var sc storagev1.StorageClass
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rsc.Name}, &sc)).To(Succeed())
+		Expect(sc.Parameters).To(HaveKeyWithValue(v1alpha1.CSIParamVolumeCleanupKey, "Discard"))
+	})
+
 	It("leaves a StorageClass of another provisioner alone and reports the conflict", func() {
 		foreign := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{

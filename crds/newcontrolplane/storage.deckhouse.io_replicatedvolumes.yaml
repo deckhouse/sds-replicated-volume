@@ -214,6 +214,20 @@ spec:
                 x-kubernetes-validations:
                 - message: size must be greater than 0
                   rule: quantity(string(self)).isGreaterThan(quantity('0'))
+              volumeCleanup:
+                description: |-
+                  VolumeCleanup is the method of wiping the data of the volume's backing logical volumes
+                  before they are removed (see ReplicatedStorageClass spec.volumeCleanup). The CSI driver
+                  copies it from the StorageClass when it creates the volume, and every LVMLogicalVolume
+                  created for a replica of the volume carries it, so later changes of the class do not
+                  affect the volume. Not set: the data is not wiped.
+                  Immutable. Applied only in the editions that support it (Enterprise Edition and
+                  Certified Security Edition Pro); in the others it is ignored.
+                enum:
+                - RandomFillThreePass
+                - RandomFillSinglePass
+                - Discard
+                type: string
             required:
             - size
             type: object
@@ -227,6 +241,9 @@ spec:
               rule: self.configurationMode != 'Manual' || (has(self.manualConfiguration)
                 && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName)
                 == 0))
+            - message: spec.volumeCleanup is immutable
+              rule: has(self.volumeCleanup) == has(oldSelf.volumeCleanup) && (!has(self.volumeCleanup)
+                || self.volumeCleanup == oldSelf.volumeCleanup)
           status:
             properties:
               actuallyAttachedTo:

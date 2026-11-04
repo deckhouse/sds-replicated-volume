@@ -640,6 +640,7 @@ flowchart TD
 | `rsc.Spec.VolumeAccess` | `sc.VolumeBindingMode` (Local/EventuallyLocal/PreferablyLocal → WaitForFirstConsumer; Any → Immediate) |
 | CSI provisioner constant | `sc.Provisioner` |
 | `rsc.Name` | `sc.Parameters[replicated.csi.storage.deckhouse.io/replicatedStorageClassName]` |
+| `rsc.Spec.VolumeCleanup` (when set) | `sc.Parameters[replicated.csi.storage.deckhouse.io/volumeCleanup]` |
 | Managed-by label + finalizer | SC metadata |
 
 ### reconcileRSP Release Details

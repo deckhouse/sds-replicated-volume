@@ -315,15 +315,18 @@ func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.Repli
 	return kc.Update(ctx, rv)
 }
 
-// BuildReplicatedVolumeSpec builds ReplicatedVolumeSpec from parameters
+// BuildReplicatedVolumeSpec builds ReplicatedVolumeSpec from parameters.
+// volumeCleanup is recorded in the spec, which fixes it for the volume.
 func BuildReplicatedVolumeSpec(
 	size resource.Quantity,
 	rscName string,
+	volumeCleanup string,
 ) srv.ReplicatedVolumeSpec {
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		ReplicatedStorageClassName: rscName,
 		MaxAttachments:             ptr.To(byte(2)),
+		VolumeCleanup:              srv.VolumeCleanupMethod(volumeCleanup),
 	}
 }
 

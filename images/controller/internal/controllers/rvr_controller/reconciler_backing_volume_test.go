@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/feature"
 )
 
 var _ = Describe("computeActualBackingVolume", func() {
@@ -1493,6 +1494,90 @@ var _ = Describe("newLLV", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(obju.HasLabelValue(llv, v1alpha1.ReplicatedStorageClassLabelKey, "rsc-1")).To(BeTrue())
+	})
+
+	It("carries the volume's cleanup method where the edition can wipe", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec:       v1alpha1.ReplicatedVolumeSpec{VolumeCleanup: v1alpha1.VolumeCleanupRandomFillThreePass},
+		}
+		bv := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			ThinPoolName:       "thinpool-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+
+		llv, err := newLLV(scheme, rvr, rv, bv)
+
+		Expect(err).NotTo(HaveOccurred())
+		if feature.VolumeCleanupEnabled() {
+			Expect(llv.Spec.VolumeCleanup).To(HaveValue(Equal("RandomFillThreePass")))
+		} else {
+			Expect(llv.Spec.VolumeCleanup).To(BeNil())
+		}
+	})
+
+	It("leaves the cleanup method unset for a volume without one", func() {
+		rvr := &v1alpha1.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1", UID: "uid-1"},
+		}
+		rv := &v1alpha1.ReplicatedVolume{ObjectMeta: metav1.ObjectMeta{Name: "rv-1"}}
+		bv := &backingVolume{
+			LLVName:            "llv-1",
+			LVMVolumeGroupName: "lvg-1",
+			Size:               resource.MustParse("10Gi"),
+		}
+
+		llv, err := newLLV(scheme, rvr, rv, bv)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(llv.Spec.VolumeCleanup).To(BeNil())
+	})
+})
+
+var _ = Describe("computeLLVVolumeCleanup", func() {
+	rvWith := func(method v1alpha1.VolumeCleanupMethod) *v1alpha1.ReplicatedVolume {
+		return &v1alpha1.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+			Spec:       v1alpha1.ReplicatedVolumeSpec{VolumeCleanup: method},
+		}
+	}
+
+	DescribeTable("in an edition that can wipe",
+		func(method v1alpha1.VolumeCleanupMethod, thin bool, want string) {
+			got := computeLLVVolumeCleanup(rvWith(method), thin, true)
+			if want == "" {
+				Expect(got).To(BeNil())
+				return
+			}
+			Expect(got).To(HaveValue(Equal(want)))
+		},
+		Entry("no method, thick", v1alpha1.VolumeCleanupMethod(""), false, ""),
+		Entry("no method, thin", v1alpha1.VolumeCleanupMethod(""), true, ""),
+		Entry("RandomFillSinglePass, thick", v1alpha1.VolumeCleanupRandomFillSinglePass, false, "RandomFillSinglePass"),
+		Entry("RandomFillSinglePass, thin", v1alpha1.VolumeCleanupRandomFillSinglePass, true, "RandomFillSinglePass"),
+		Entry("RandomFillThreePass, thick", v1alpha1.VolumeCleanupRandomFillThreePass, false, "RandomFillThreePass"),
+		Entry("RandomFillThreePass, thin", v1alpha1.VolumeCleanupRandomFillThreePass, true, "RandomFillThreePass"),
+		Entry("Discard, thick", v1alpha1.VolumeCleanupDiscard, false, "Discard"),
+		Entry("Discard, thin: refused by the LVMLogicalVolume CRD", v1alpha1.VolumeCleanupDiscard, true, ""),
+	)
+
+	It("hands on no method where the edition cannot wipe", func() {
+		for _, method := range []v1alpha1.VolumeCleanupMethod{
+			v1alpha1.VolumeCleanupRandomFillSinglePass,
+			v1alpha1.VolumeCleanupRandomFillThreePass,
+			v1alpha1.VolumeCleanupDiscard,
+		} {
+			Expect(computeLLVVolumeCleanup(rvWith(method), false, false)).To(BeNil(), "method %s", method)
+		}
+	})
+
+	It("hands on no method without a volume", func() {
+		Expect(computeLLVVolumeCleanup(nil, false, true)).To(BeNil())
 	})
 })
 

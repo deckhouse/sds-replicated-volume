@@ -560,9 +560,9 @@ The backing volume size is taken as `max(AlignTo4Ki(rv.Spec.Size), AlignTo4Ki(rv
 ### Lifecycle
 
 1. **Wait for old deletion**: If the intended LLV exists but is being deleted (from a previous RVR incarnation) and the RVR is not yet a datamesh member, remove our finalizer and wait for full deletion before creating a new one
-2. **Create**: When intended LLV does not exist, create it with ownerRef, finalizer, and labels
+2. **Create**: When intended LLV does not exist, create it with ownerRef, finalizer, and labels. `spec.volumeCleanup` is taken from `rv.Spec.VolumeCleanup` (fixed when the volume was created), and only in the editions where sds-node-configurator can wipe (`lib/go/common/feature`); `Discard` is not set on a thin LLV, which the LLV CRD refuses it for
 3. **Resize**: When LLV is ready but actual size < intended size, patch spec.size
-4. **Delete**: Remove finalizer, then delete LLV
+4. **Delete**: Remove finalizer, then delete LLV. sds-node-configurator wipes the LV (when `spec.volumeCleanup` is set) and removes it only once its own finalizer is the last one left; the agent of this module keeps a finalizer on the LLV for as long as DRBD has the LV attached, so the wipe never runs under DRBD
 
 ## Managed Metadata
 

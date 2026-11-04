@@ -65,6 +65,10 @@ spec:
                     volumeAccess:
                       description: |
                         Режим доступа к тому. Может быть: Local, EventuallyLocal, PreferablyLocal, Any.
+                volumeCleanup:
+                  description: |
+                    Метод очистки данных логических томов тома перед их удалением (см. spec.volumeCleanup ресурса ReplicatedStorageClass). CSI-драйвер копирует его из StorageClass при создании тома, и его получает каждый ресурс LVMLogicalVolume, создаваемый для реплики тома, поэтому последующие изменения класса на том не влияют. Не задан — данные не очищаются.
+                    Неизменяемый. Применяется только в редакциях, которые поддерживают очистку (Enterprise Edition и Certified Security Edition Pro); в остальных игнорируется.
                 maxAttachments:
                   description: |
                     Максимальное число узлов, к которым том может быть подключён одновременно.

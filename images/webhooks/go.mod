@@ -6,6 +6,7 @@ require (
 	github.com/deckhouse/sds-common-lib v0.17.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
+	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 	github.com/slok/kubewebhook/v2 v2.7.0
 	k8s.io/api v0.35.1
@@ -82,7 +83,6 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
-	github.com/evanphx/json-patch v5.9.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
@@ -286,3 +286,5 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/onsi/ginkgo/v2/ginkgo
 )
+
+replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common

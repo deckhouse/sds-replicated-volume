@@ -103,6 +103,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
 		request.Parameters[ReplicatedStorageClassParamNameKey],
+		request.Parameters[srv.CSIParamVolumeCleanupKey],
 	)
 
 	log.Info(fmt.Sprintf("[traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))

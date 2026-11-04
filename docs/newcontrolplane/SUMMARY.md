@@ -79,6 +79,7 @@ Replaced by: the paragraph saying that the StorageClass parameters cannot be cha
 - the replication settings (`replication`, `failuresToTolerate`, `guaranteedMinimumDataRedundancy`) change the intended layout of the volumes — for example the r3→r2 migration below;
 - `storage`, `zones`, `nodeLabelSelector` and `eligibleNodesPolicy` make up the identity of the storage pool of the class, so a change moves the class to a new storage pool;
 - `reclaimPolicy` makes the module recreate the StorageClass with the new policy;
+- `volumeCleanup` makes the module recreate the StorageClass as well; the new method applies only to volumes created after the change (see the FAQ, "How do I wipe the data of deleted volumes?");
 - `configurationRolloutStrategy` and `eligibleNodesConflictResolutionStrategy` control how the changes reach existing volumes.
 
 **Moving to a new storage pool.** Classes with the same `storage`, `zones`, `nodeLabelSelector`, `systemNetworkNames` and `eligibleNodesPolicy` share one automatically created storage pool (`status.storagePoolName`). After a change to any of them the class gets a new pool, and its volumes follow `configurationRolloutStrategy`: under `RollingUpdate` they are rolled out to the new pool (if their replicas are already on eligible nodes of the new pool, no data is moved), under `NewVolumesOnly` the existing volumes stay on the previous pool and only new volumes are created in the new one. The previous pool is released once no volume uses it. After a module update that changes how the pool name is built, existing classes stay on their pools; a class moves to the new pool on its first `spec` change of **any** field, including `reclaimPolicy` or `replication`, and its volumes follow `configurationRolloutStrategy` as above. A replica left on a node or LVMVolumeGroup that the new pool does not include is reported as a conflict (`VolumesSatisfyEligibleNodes`); the automatic repair of such conflicts is not implemented yet (see the limitations below), so move the replica manually.
@@ -253,7 +254,7 @@ Where: docs/FAQ.md, the answer to "I am unable to update the fields in the Repli
 Replaced by: the answer saying that changing the spec is not supported
 -->
 
-Only for a few fields. `topology`, `volumeAccess` and, once set, `systemNetworkNames` are immutable, and updates to them are rejected with an error that names the field — to change them, recreate the resource. All other fields **can** be changed on an existing resource. Editing `replication` (or `failuresToTolerate`/`guaranteedMinimumDataRedundancy`) is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); editing `storage`, `zones`, `nodeLabelSelector` or `eligibleNodesPolicy` moves the class to a new storage pool; editing `reclaimPolicy` recreates the StorageClass with the new policy. See the "Updating the ReplicatedStorageClass resource" section of the usage guide.
+Only for a few fields. `topology`, `volumeAccess` and, once set, `systemNetworkNames` are immutable, and updates to them are rejected with an error that names the field — to change them, recreate the resource. All other fields **can** be changed on an existing resource. Editing `replication` (or `failuresToTolerate`/`guaranteedMinimumDataRedundancy`) is how volumes are migrated between layouts — for example from `ConsistencyAndAvailability` (`3D`) to `Availability` (`2D+1TB`); editing `storage`, `zones`, `nodeLabelSelector` or `eligibleNodesPolicy` moves the class to a new storage pool; editing `reclaimPolicy` recreates the StorageClass with the new policy; editing `volumeCleanup` recreates the StorageClass too and applies only to volumes created after the change. See the "Updating the ReplicatedStorageClass resource" section of the usage guide.
 
 <!--
 Where: docs/FAQ.md, the body of "How much of a volume is reserved for the superuser?"
@@ -304,3 +305,48 @@ sum by (storage_pool) (
 )
 / on (storage_pool) group_right max by (storage_class, storage_pool) (sds_rsc_replicas)
 ```
+
+<!--
+Where: docs/FAQ.md, a section of its own after "How much of a volume is reserved for the superuser?"
+Replaced by: nothing
+-->
+
+## How do I wipe the data of deleted volumes?
+
+By default the data of a deleted volume is not wiped: the space of its logical volumes returns to the volume group (or thin pool) as it is, and nothing guarantees that a volume created there later cannot read it. To have the data overwritten before the space is released, set the method in `spec.volumeCleanup` of the `ReplicatedStorageClass`:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageClass
+metadata:
+  name: <name>
+spec:
+  volumeCleanup: RandomFillSinglePass
+  # ...
+```
+
+The methods are those of [sds-node-configurator](https://deckhouse.io/modules/sds-node-configurator/), which performs the wipe:
+
+- `RandomFillSinglePass` — the logical volume is overwritten with random data once;
+- `RandomFillThreePass` — the logical volume is overwritten with random data three times;
+- `Discard` — all blocks of the logical volume are marked as free with the `discard` system call. Only for thick volumes (`storage.type: LVM`) on solid-state drives: the class is rejected with `Discard` on thin storage.
+
+Both `RandomFill` methods wear solid-state drives and are not recommended for them. For thin volumes they overwrite only the space in use at the moment of removal.
+
+What to take into account:
+
+- **Editions.** The wipe is available only in the Enterprise Edition and in the Certified Security Edition Pro. In the other editions a `ReplicatedStorageClass` with `volumeCleanup` is rejected by the validating webhook.
+- **The method is fixed when the volume is created.** It is recorded in `spec.volumeCleanup` of the `ReplicatedVolume` and cannot be changed there. Changing the field of the class makes the module recreate the StorageClass and affects only volumes created after the change; existing volumes keep their method. Volumes created before the field was set are not wiped. To check what a volume uses:
+
+  ```shell
+  d8 k get replicatedvolume <pv-name> -o jsonpath='{.spec.volumeCleanup}{"\n"}'
+  ```
+
+- **Every copy is wiped, not only on deletion.** The method applies to the logical volumes of all replicas of the volume, including replicas created later, and they are wiped whenever they are removed: when the volume is deleted, and also when a replica moves to another node or storage, becomes diskless or is removed. The wipe never starts while DRBD still uses the logical volume.
+- **Time.** Overwriting takes time proportional to the size of the volume and is repeated for every replica (three times over for `RandomFillThreePass`). A deleted volume and its PersistentVolume are gone only after all its logical volumes are wiped; while a wipe runs, the `LVMLogicalVolume` is in the `Cleaning` phase:
+
+  ```shell
+  d8 k get lvmlogicalvolume -l sds-replicated-volume.deckhouse.io/replicated-volume=<pv-name>
+  ```
+
+  The space of a volume is released only after its wipe, so free space in the pool returns later than without a wipe.

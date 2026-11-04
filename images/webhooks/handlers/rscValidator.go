@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/feature"
 )
 
 const (
@@ -66,6 +68,10 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	// fail on every reconcile of this object.
 	if _, err := fsreserve.FromMap(rsc.Annotations); err != nil {
 		return &kwhvalidating.ValidatorResult{Valid: false, Message: err.Error()}, nil
+	}
+
+	if r, err := validateVolumeCleanupEdition(arReview, rsc, feature.VolumeCleanupEnabled()); err != nil || !r.Valid {
+		return r, err
 	}
 
 	// Determine control plane type based on environment variable.
@@ -154,6 +160,34 @@ func validateStorageClassName(ctx context.Context, cl kubernetes.Interface, name
 	return &kwhvalidating.ValidatorResult{Valid: true}, nil
 }
 
+// validateVolumeCleanupEdition rejects a spec.volumeCleanup the edition cannot
+// honour. The wipe is done by the agent of sds-node-configurator, which in such an
+// edition fails the deletion of every LVMLogicalVolume that asks for it, so the
+// deletions of the class's volumes would never finish. A value the class already
+// holds is let through, so a class written before the cluster moved to such an
+// edition stays editable; the controller does not hand the method to the backing
+// volumes there (see images/controller rvr_controller newLLV).
+func validateVolumeCleanupEdition(ar *model.AdmissionReview, rsc *srv.ReplicatedStorageClass, enabled bool) (*kwhvalidating.ValidatorResult, error) {
+	if enabled || rsc.Spec.VolumeCleanup == "" {
+		return &kwhvalidating.ValidatorResult{Valid: true}, nil
+	}
+
+	if ar.Operation == model.OperationUpdate {
+		oldRSC := &srv.ReplicatedStorageClass{}
+		if err := json.Unmarshal(ar.OldObjectRaw, oldRSC); err != nil {
+			return nil, fmt.Errorf("unable to decode the old ReplicatedStorageClass: %w", err)
+		}
+		if oldRSC.Spec.VolumeCleanup == rsc.Spec.VolumeCleanup {
+			return &kwhvalidating.ValidatorResult{Valid: true}, nil
+		}
+	}
+
+	return &kwhvalidating.ValidatorResult{Valid: false,
+		Message: fmt.Sprintf("spec.volumeCleanup %s is not supported in this edition; "+
+			"volume cleanup is available in the Enterprise Edition and the Certified Security Edition Pro",
+			rsc.Spec.VolumeCleanup)}, nil
+}
+
 // validateLegacySpecFields rejects spec fields that are only for new control plane.
 //
 // Because this rejects an RSC whenever these fields are SET, they MUST NOT get
@@ -199,6 +233,10 @@ func validateLegacySpecFields(rsc *srv.ReplicatedStorageClass) *kwhvalidating.Va
 	if spec.EligibleNodesPolicy != nil {
 		return &kwhvalidating.ValidatorResult{Valid: false,
 			Message: "spec.eligibleNodesPolicy cannot be set for legacy control plane"}
+	}
+	if spec.VolumeCleanup != "" {
+		return &kwhvalidating.ValidatorResult{Valid: false,
+			Message: "spec.volumeCleanup cannot be set for legacy control plane"}
 	}
 
 	return &kwhvalidating.ValidatorResult{Valid: true}

@@ -83,6 +83,8 @@ func (rv *ReplicatedVolume) IsUnderMaintenance() bool { return rv.Spec.Maintenan
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Auto' || (has(self.replicatedStorageClassName) && size(self.replicatedStorageClassName) > 0 && !has(self.manualConfiguration))",message="Auto mode requires replicatedStorageClassName and must not have manualConfiguration."
 // Manual mode requires manualConfiguration, forbids RSC name:
 // +kubebuilder:validation:XValidation:rule="self.configurationMode != 'Manual' || (has(self.manualConfiguration) && (!has(self.replicatedStorageClassName) || size(self.replicatedStorageClassName) == 0))",message="Manual mode requires manualConfiguration and must not have replicatedStorageClassName."
+// volumeCleanup is fixed when the volume is created (transition rule; evaluated on update only):
+// +kubebuilder:validation:XValidation:rule="has(self.volumeCleanup) == has(oldSelf.volumeCleanup) && (!has(self.volumeCleanup) || self.volumeCleanup == oldSelf.volumeCleanup)",message="spec.volumeCleanup is immutable"
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// Requested size of the volume.
@@ -107,6 +109,17 @@ type ReplicatedVolumeSpec struct {
 	// Required when configurationMode is Manual. Must not be set when configurationMode is Auto.
 	// +optional
 	ManualConfiguration *ReplicatedVolumeConfiguration `json:"manualConfiguration,omitempty"`
+
+	// VolumeCleanup is the method of wiping the data of the volume's backing logical volumes
+	// before they are removed (see ReplicatedStorageClass spec.volumeCleanup). The CSI driver
+	// copies it from the StorageClass when it creates the volume, and every LVMLogicalVolume
+	// created for a replica of the volume carries it, so later changes of the class do not
+	// affect the volume. Not set: the data is not wiped.
+	// Immutable. Applied only in the editions that support it (Enterprise Edition and
+	// Certified Security Edition Pro); in the others it is ignored.
+	// +kubebuilder:validation:Enum=RandomFillThreePass;RandomFillSinglePass;Discard
+	// +optional
+	VolumeCleanup VolumeCleanupMethod `json:"volumeCleanup,omitempty"`
 
 	// MaxAttachments is the maximum number of nodes this volume can be attached to simultaneously.
 	//

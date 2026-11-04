@@ -432,6 +432,33 @@ spec:
                 - PreferablyLocal
                 - Any
                 type: string
+              volumeCleanup:
+                description: |-
+                  Only meaningful with the new control-plane.
+
+                  The method of wiping the data of a volume's backing logical volumes before they are
+                  removed: when the volume is deleted, and also when a replica of the volume gives up its
+                  disk (it is moved to another node or storage, becomes diskless or is removed). If the field
+                  is not set, the data is not wiped, and there is no guarantee that it is completely deleted.
+                  Might be:
+                  - RandomFillSinglePass — the logical volume is overwritten with random data once before it is removed. Not recommended for solid-state drives, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of removal is overwritten.
+                  - RandomFillThreePass — the logical volume is overwritten with random data three times before it is removed. Not recommended for solid-state drives, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of removal is overwritten.
+                  - Discard — before removal, all blocks of the logical volume are marked as free with the `discard` system call. Applicable only to solid-state drives and thick volumes (storage.type LVM).
+
+                  > The method is fixed for a volume when the volume is created: it is recorded in the
+                  > ReplicatedVolume's spec.volumeCleanup and applies to every replica of the volume, including
+                  > replicas created later. Changing the field affects only volumes created after the change.
+
+                  > The wipe is done by sds-node-configurator and is available only in the Enterprise Edition
+                  > and in the Certified Security Edition Pro; in other editions a non-empty value is rejected.
+
+                  > Overwriting takes time proportional to the size of the volume, so a deleted volume (and
+                  > its PersistentVolume) is gone only after the backing volumes of all its replicas are wiped.
+                enum:
+                - RandomFillThreePass
+                - RandomFillSinglePass
+                - Discard
+                type: string
               zones:
                 description: |-
                   The list of zones the StorageClass's volumes are replicated in. The controller puts a label
@@ -494,6 +521,13 @@ spec:
                 plane (spec.storagePool); it requires the new control plane (spec.storage).
               rule: has(self.storage) || !has(self.replication) || self.replication
                 != 'Consistency'
+            - message: spec.volumeCleanup is not supported by the legacy control plane
+                (spec.storagePool); it requires the new control plane (spec.storage).
+              rule: has(self.storage) || !has(self.volumeCleanup)
+            - message: volumeCleanup Discard is supported only for thick volumes (storage.type
+                LVM).
+              rule: '!has(self.storage) || !has(self.volumeCleanup) || self.volumeCleanup
+                != ''Discard'' || self.storage.type == ''LVM'''
             - message: TransZonal topology requires zones to be specified.
               rule: '!has(self.storage) || self.topology != ''TransZonal'' || (has(self.zones)
                 && size(self.zones) > 0)'

@@ -33,6 +33,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/drbd_size"
 	rvrllvname "github.com/deckhouse/sds-replicated-volume/images/controller/internal/rvr_llv_name"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/feature"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -540,12 +541,35 @@ func newLLV(scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v
 			PoolName: bv.ThinPoolName,
 		}
 	}
+	llv.Spec.VolumeCleanup = computeLLVVolumeCleanup(rv, bv.ThinPoolName != "", feature.VolumeCleanupEnabled())
 
 	if _, err := obju.SetControllerRef(llv, rvr, scheme); err != nil {
 		return nil, fmt.Errorf("setting controller reference: %w", err)
 	}
 
 	return llv, nil
+}
+
+// computeLLVVolumeCleanup returns the method sds-node-configurator wipes a new backing
+// volume of rv with before removing it, or nil for no wipe. The method is the volume's
+// own (rv.Spec.VolumeCleanup), fixed when the volume was created, so every replica gets the
+// same one whenever it is created.
+//
+// enabled tells whether the edition can wipe at all (feature.VolumeCleanupEnabled): where
+// it cannot, the agent of sds-node-configurator fails the deletion of a backing volume that
+// asks for a wipe, so the method is not handed on. Discard is not handed to a thin backing
+// volume, which the LVMLogicalVolume CRD refuses it for: the class admits Discard only on
+// thick storage, but a volume keeps its method when the class later moves to thin storage,
+// where removing the logical volume already returns its blocks to the thin pool.
+func computeLLVVolumeCleanup(rv *v1alpha1.ReplicatedVolume, thin, enabled bool) *string {
+	if !enabled || rv == nil || rv.Spec.VolumeCleanup == "" {
+		return nil
+	}
+	if thin && rv.Spec.VolumeCleanup == v1alpha1.VolumeCleanupDiscard {
+		return nil
+	}
+	method := string(rv.Spec.VolumeCleanup)
+	return &method
 }
 
 // isLLVReady checks if LLV is ready (Status != nil and Phase == "Created").

@@ -1949,6 +1949,13 @@ func computeTargetStorageClass(
 		sc.Parameters[fsreserve.ParameterKey] = strconv.Itoa(reservedPercent)
 	}
 
+	// The CSI driver records the method in the spec of every volume it creates, which
+	// is what fixes it for the volume: a later change recreates the StorageClass and
+	// reaches only the volumes created from then on.
+	if rsc.Spec.VolumeCleanup != "" {
+		sc.Parameters[v1alpha1.CSIParamVolumeCleanupKey] = string(rsc.Spec.VolumeCleanup)
+	}
+
 	if oldSC != nil {
 		sc.Labels = maps.Clone(oldSC.Labels)
 		sc.Annotations = maps.Clone(oldSC.Annotations)

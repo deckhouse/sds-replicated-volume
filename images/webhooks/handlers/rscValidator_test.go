@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -131,6 +132,14 @@ func Test_validateLegacySpecFields(t *testing.T) {
 			},
 			wantValid:   false,
 			wantMessage: "spec.eligibleNodesPolicy cannot be set for legacy control plane",
+		},
+		{
+			name: "VolumeCleanup set is rejected",
+			spec: srv.ReplicatedStorageClassSpec{
+				VolumeCleanup: srv.VolumeCleanupRandomFillSinglePass,
+			},
+			wantValid:   false,
+			wantMessage: "spec.volumeCleanup cannot be set for legacy control plane",
 		},
 		{
 			name:      "minimal valid legacy spec",
@@ -400,3 +409,74 @@ func Test_validateStorageClassName(t *testing.T) {
 		})
 	}
 }
+
+func Test_validateVolumeCleanupEdition(t *testing.T) {
+	rscWith := func(method srv.VolumeCleanupMethod) *srv.ReplicatedStorageClass {
+		return &srv.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc"},
+			Spec:       srv.ReplicatedStorageClassSpec{VolumeCleanup: method},
+		}
+	}
+	rawOf := func(t *testing.T, method srv.VolumeCleanupMethod) []byte {
+		t.Helper()
+		raw, err := json.Marshal(rscWith(method))
+		if err != nil {
+			t.Fatalf("marshal the old ReplicatedStorageClass: %v", err)
+		}
+		return raw
+	}
+
+	tests := []struct {
+		name      string
+		enabled   bool
+		op        model.AdmissionReviewOp
+		old       *srv.VolumeCleanupMethod
+		method    srv.VolumeCleanupMethod
+		wantValid bool
+	}{
+		{name: "supported edition, create with a method", enabled: true, op: model.OperationCreate,
+			method: srv.VolumeCleanupRandomFillThreePass, wantValid: true},
+		{name: "supported edition, update that sets a method", enabled: true, op: model.OperationUpdate,
+			old: ptrMethod(""), method: srv.VolumeCleanupDiscard, wantValid: true},
+		{name: "unsupported edition, create without a method", op: model.OperationCreate, wantValid: true},
+		{name: "unsupported edition, create with a method", op: model.OperationCreate,
+			method: srv.VolumeCleanupRandomFillSinglePass, wantValid: false},
+		{name: "unsupported edition, update that sets a method", op: model.OperationUpdate,
+			old: ptrMethod(""), method: srv.VolumeCleanupRandomFillSinglePass, wantValid: false},
+		{name: "unsupported edition, update that changes the method", op: model.OperationUpdate,
+			old: ptrMethod(srv.VolumeCleanupRandomFillSinglePass), method: srv.VolumeCleanupRandomFillThreePass, wantValid: false},
+		{name: "unsupported edition, update that keeps the method", op: model.OperationUpdate,
+			old: ptrMethod(srv.VolumeCleanupRandomFillSinglePass), method: srv.VolumeCleanupRandomFillSinglePass, wantValid: true},
+		{name: "unsupported edition, update that removes the method", op: model.OperationUpdate,
+			old: ptrMethod(srv.VolumeCleanupRandomFillSinglePass), wantValid: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ar := &model.AdmissionReview{Operation: tt.op}
+			if tt.old != nil {
+				ar.OldObjectRaw = rawOf(t, *tt.old)
+			}
+
+			got, err := validateVolumeCleanupEdition(ar, rscWith(tt.method), tt.enabled)
+			if err != nil {
+				t.Fatalf("validateVolumeCleanupEdition() error = %v", err)
+			}
+			if got.Valid != tt.wantValid {
+				t.Fatalf("Valid = %v, want %v (message %q)", got.Valid, tt.wantValid, got.Message)
+			}
+			if !tt.wantValid && !strings.Contains(got.Message, "not supported in this edition") {
+				t.Errorf("Message = %q, want it to name the edition as the reason", got.Message)
+			}
+		})
+	}
+
+	t.Run("undecodable old object", func(t *testing.T) {
+		ar := &model.AdmissionReview{Operation: model.OperationUpdate, OldObjectRaw: []byte("{")}
+		if _, err := validateVolumeCleanupEdition(ar, rscWith(srv.VolumeCleanupDiscard), false); err == nil {
+			t.Fatal("validateVolumeCleanupEdition() error = nil, want a decode error")
+		}
+	})
+}
+
+func ptrMethod(m srv.VolumeCleanupMethod) *srv.VolumeCleanupMethod { return &m }

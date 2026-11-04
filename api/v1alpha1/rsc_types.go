@@ -124,7 +124,15 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // for every topology instead of the TransZonal-only lower bound above.
 // +kubebuilder:validation:XValidation:rule="has(self.storage) || !has(self.replication) || self.replication != 'Consistency'",message="Replication Consistency is not supported by the legacy control plane (spec.storagePool); it requires the new control plane (spec.storage)."
 //
+// The legacy control plane has no way to wipe a deleted volume: LINSTOR removes the logical
+// volumes itself. The legacy webhook rejects the field as well (validateLegacySpecFields).
+// +kubebuilder:validation:XValidation:rule="has(self.storage) || !has(self.volumeCleanup)",message="spec.volumeCleanup is not supported by the legacy control plane (spec.storagePool); it requires the new control plane (spec.storage)."
+//
 // New control plane rules (spec.storage is set).
+//
+// Discard is refused for thin volumes by the LVMLogicalVolume CRD of sds-node-configurator,
+// so a class that would hand it to thin backing volumes is rejected up front.
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || !has(self.volumeCleanup) || self.volumeCleanup != 'Discard' || self.storage.type == 'LVM'",message="volumeCleanup Discard is supported only for thick volumes (storage.type LVM)."
 //
 // TransZonal needs an explicit zone list: the replicas are distributed over exactly these
 // zones, and the per-layout zone counts below are checked against it.
@@ -200,6 +208,29 @@ type ReplicatedStorageClassSpec struct {
 	// > control-plane the StorageClass is recreated with the new policy.
 	// +kubebuilder:validation:Enum=Delete;Retain
 	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
+	// Only meaningful with the new control-plane.
+	//
+	// The method of wiping the data of a volume's backing logical volumes before they are
+	// removed: when the volume is deleted, and also when a replica of the volume gives up its
+	// disk (it is moved to another node or storage, becomes diskless or is removed). If the field
+	// is not set, the data is not wiped, and there is no guarantee that it is completely deleted.
+	// Might be:
+	// - RandomFillSinglePass — the logical volume is overwritten with random data once before it is removed. Not recommended for solid-state drives, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of removal is overwritten.
+	// - RandomFillThreePass — the logical volume is overwritten with random data three times before it is removed. Not recommended for solid-state drives, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of removal is overwritten.
+	// - Discard — before removal, all blocks of the logical volume are marked as free with the `discard` system call. Applicable only to solid-state drives and thick volumes (storage.type LVM).
+	//
+	// > The method is fixed for a volume when the volume is created: it is recorded in the
+	// > ReplicatedVolume's spec.volumeCleanup and applies to every replica of the volume, including
+	// > replicas created later. Changing the field affects only volumes created after the change.
+	//
+	// > The wipe is done by sds-node-configurator and is available only in the Enterprise Edition
+	// > and in the Certified Security Edition Pro; in other editions a non-empty value is rejected.
+	//
+	// > Overwriting takes time proportional to the size of the volume, so a deleted volume (and
+	// > its PersistentVolume) is gone only after the backing volumes of all its replicas are wiped.
+	// +kubebuilder:validation:Enum=RandomFillThreePass;RandomFillSinglePass;Discard
+	// +optional
+	VolumeCleanup VolumeCleanupMethod `json:"volumeCleanup,omitempty"`
 	// Deprecated: in the new control-plane, use failuresToTolerate and
 	// guaranteedMinimumDataRedundancy instead; the field is mutually exclusive with them.
 	//
@@ -397,6 +428,25 @@ const (
 
 func (p ReplicatedStorageClassReclaimPolicy) String() string {
 	return string(p)
+}
+
+// VolumeCleanupMethod enumerates the methods of wiping a backing volume before it is removed.
+// The values are those of LVMLogicalVolume spec.volumeCleanup in sds-node-configurator,
+// which performs the wipe.
+type VolumeCleanupMethod string
+
+// VolumeCleanup values for [ReplicatedStorageClass] and [ReplicatedVolume] spec.volumeCleanup fields.
+const (
+	// VolumeCleanupRandomFillSinglePass overwrites the volume with random data once.
+	VolumeCleanupRandomFillSinglePass VolumeCleanupMethod = "RandomFillSinglePass"
+	// VolumeCleanupRandomFillThreePass overwrites the volume with random data three times.
+	VolumeCleanupRandomFillThreePass VolumeCleanupMethod = "RandomFillThreePass"
+	// VolumeCleanupDiscard discards all blocks of the volume; thick volumes only.
+	VolumeCleanupDiscard VolumeCleanupMethod = "Discard"
+)
+
+func (m VolumeCleanupMethod) String() string {
+	return string(m)
 }
 
 // ReplicatedStorageClassReplication enumerates possible values for ReplicatedStorageClass spec.replication field.
