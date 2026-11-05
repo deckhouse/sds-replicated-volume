@@ -9,6 +9,8 @@ fixes:
 # Optional sections — delete rather than leave empty.
 # security: []
 # breaking: []
+docs:
+  - "The FAQ explains what happens to snapshots and restored volumes when one of them is deleted: snapshots are taken on every replica of an LVMThin volume, any order of deletion is allowed, a restored volume depends neither on its snapshot nor on the source, and the free space LINSTOR reports for an LVMThin pool already includes the space snapshots take."
 # known_issues: []
 # docs: []
 # dependencies:

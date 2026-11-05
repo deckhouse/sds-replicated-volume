@@ -19,6 +19,14 @@ Overprovisioning of LVMThin pools in this module is limited by LINSTOR, not by t
 In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
 {{< /alert >}}
 
+## What happens to snapshots and restored volumes when one of them is deleted?
+
+Snapshots are available for volumes in LVMThin pools only.
+
+- A snapshot is taken on every replica of the volume, and each replica keeps the data of its snapshot in its own thin pool.
+- Any order of deletion is allowed. Deleting the PVC of a volume that has snapshots removes the replicas of the volume, and its snapshots can still be restored. A VolumeSnapshot can be deleted while a volume restored from it exists: the restored volume depends neither on the snapshot nor on the volume it was taken from. A restored volume can be snapshotted and restored in turn.
+- In a thin pool, a block that a snapshot shares with its volume is freed when no volume or snapshot uses it any more. The free space LINSTOR reports for an LVMThin pool already includes the space snapshots take.
+
 ## Supported disk configurations and performance
 
 ### Supported disk types
