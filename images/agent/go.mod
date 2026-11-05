@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/agent
 
 go 1.27.3
-
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
