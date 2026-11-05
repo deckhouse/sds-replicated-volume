@@ -3,6 +3,8 @@
 date: "2026-xx-xx"
 summary: ""
 highlights: []
+fixes:
+  - "В плоскости управления LINSTOR лейблы `ReplicatedStorageClass`, ключи которых начинаются с префиксов из `storageClassLabelIgnoredPrefixes` (по умолчанию `argocd.argoproj.io/`, `kustomize.toolkit.fluxcd.io/`, `helm.toolkit.fluxcd.io/`, `fleet.cattle.io/`) или из системного списка (`app.kubernetes.io/managed-by`, `app.kubernetes.io/instance`), снова не копируются в её StorageClass. Начиная с v0.9.5 этот список не доходил до контроллера плоскости управления LINSTOR, и он копировал все лейблы, поэтому StorageClass получал лейбл отслеживания Argo CD и отображался как лишний ресурс приложения. После обновления контроллер снимет такие лейблы с существующих StorageClass без их пересоздания."
 
 # Необязательные разделы — пустые не оставлять, а удалять.
 # security: []
