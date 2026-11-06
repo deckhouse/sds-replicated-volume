@@ -3,14 +3,10 @@
 date: "2026-xx-xx"
 summary: ""
 highlights: []
-fixes:
-  - "In the LINSTOR control plane, labels of a `ReplicatedStorageClass` whose keys match `storageClassLabelIgnoredPrefixes` (by default `argocd.argoproj.io/`, `kustomize.toolkit.fluxcd.io/`, `helm.toolkit.fluxcd.io/`, `fleet.cattle.io/`) or the system list (`app.kubernetes.io/managed-by`, `app.kubernetes.io/instance`) are again not copied to its StorageClass. Since v0.9.5 the list did not reach the controller of the LINSTOR control plane, so it copied every label, and the StorageClass inherited the tracking label of Argo CD and was shown as an extra resource of the application. After the update the controller removes such labels from existing StorageClasses without recreating them."
 
 # Optional sections — delete rather than leave empty.
 # security: []
 # breaking: []
-docs:
-  - "The FAQ explains what happens to snapshots and restored volumes when one of them is deleted: snapshots are taken on every replica of an LVMThin volume, any order of deletion is allowed, a restored volume depends neither on its snapshot nor on the source, and the free space LINSTOR reports for an LVMThin pool already includes the space snapshots take."
 # known_issues: []
 # docs: []
 # dependencies:

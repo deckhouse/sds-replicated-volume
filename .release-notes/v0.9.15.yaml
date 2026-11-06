@@ -1,0 +1,23 @@
+date: "2026-11-06"
+
+summary: "The DRBD kernel module of the new control plane compiles again, the node agent no longer rewrites the DRBD metadata of a replica when it fails to read it, and labels of the LINSTOR control plane are filtered again."
+
+highlights:
+  - "DRBD of the new control plane moves to 9.2.19-flant.22: 9.2.19-flant.21, which v0.9.14 sets by default, does not compile."
+  - "In the new control plane, the node agent no longer writes new DRBD metadata over a replica whose on-node state it failed to read, so a slow or saturated disk no longer costs a replica its data."
+  - "In the LINSTOR control plane, the labels listed in `storageClassLabelIgnoredPrefixes` are again not copied from a `ReplicatedStorageClass` to its StorageClass, so Argo CD no longer shows the StorageClass as an extra resource of the application."
+
+fixes:
+  - "In the new control plane, the DRBD kernel module of version 9.2.19-flant.21, which v0.9.14 sets by default, does not compile: two functions named `node_id_to_mask` with different arguments clash. Version 9.2.19-flant.22 renames one of them and carries the same fixes otherwise. The LINSTOR control plane uses its own DRBD version and is not affected."
+  - "In the new control plane, the node agent no longer acts on a replica whose on-node DRBD state it could not read. When `drbdmeta dump-md` failed for a reason other than missing metadata, for example when it was stopped by its 10-second timeout on a saturated disk, the agent treated the backing volume as having no metadata and ran `create-md --force` over it. On nodes rebooted one after another this rewrote the metadata of replicas that held data. Now the agent reports the error in the `Configured` condition of the `DRBDResource` and retries on the next reconcile."
+  - "In the new control plane, the node agent no longer applies the disk options of DRBD resources on thin pools again and again. It asked DRBD for `rs-discard-granularity` equal to the discard granularity of the backing device, while DRBD caps the value at 1 MiB and at the largest discard of the device. On thin pools with chunks larger than 1 MiB the agent saw a difference on every pass and ran `drbdsetup disk-options` about 200 times a minute per node, each run pausing writes. The agent now asks for the value DRBD keeps."
+  - "In the LINSTOR control plane, labels of a `ReplicatedStorageClass` whose keys match `storageClassLabelIgnoredPrefixes` (by default `argocd.argoproj.io/`, `kustomize.toolkit.fluxcd.io/`, `helm.toolkit.fluxcd.io/`, `fleet.cattle.io/`) or the system list (`app.kubernetes.io/managed-by`, `app.kubernetes.io/instance`) are again not copied to its StorageClass. Since v0.9.5 the list did not reach the controller of the LINSTOR control plane, so it copied every label, and the StorageClass inherited the tracking label of Argo CD and was shown as an extra resource of the application. After the update the controller removes such labels from existing StorageClasses without recreating them."
+
+docs:
+  - "The FAQ explains what happens to snapshots and restored volumes when one of them is deleted: snapshots are taken on every replica of an LVMThin volume, any order of deletion is allowed, a restored volume depends neither on its snapshot nor on the source, and the free space LINSTOR reports for an LVMThin pool already includes the space snapshots take."
+
+dependencies:
+  - name: DRBD
+    from: "9.2.19-flant.21"
+    to: "9.2.19-flant.22"
+    notes: "New control plane only. Fixes the build of the kernel module."
