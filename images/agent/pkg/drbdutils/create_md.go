@@ -26,7 +26,6 @@ import (
 
 var (
 	ErrNoValidMetadata = errors.New("no valid metadata found")
-	ErrUncleanMetadata = errors.New("metadata is unclean (activity log not applied)")
 )
 
 // CreateMDArgs returns arguments for drbdmeta create-md command.
@@ -45,27 +44,28 @@ var CreateMDArgs = func(minor uint, backingDev string) []string {
 	}
 }
 
-// DumpMDArgs returns arguments for drbdmeta dump-md command.
-var DumpMDArgs = func(minor uint, backingDev string) []string {
+// CheckMDArgs returns arguments for the drbdmeta command that probes a backing
+// device for DRBD metadata. dstate reads only the superblock; dump-md also
+// prints the whole bitmap, which takes about a minute on a 1.5 TiB volume on
+// a rotational disk and never fits in ExecTimeout.
+var CheckMDArgs = func(minor uint, backingDev string) []string {
 	return []string{
 		strconv.FormatUint(uint64(minor), 10),
 		"v09",
 		backingDev,
 		"internal",
-		"dump-md",
+		"dstate",
 	}
 }
 
-// DumpMDKnownErrors classifies drbdmeta dump-md failures by exit code + stderr.
+// CheckMDKnownErrors classifies drbdmeta dstate failures by exit code + stderr.
 // drbdmeta exits 1 for these on drbd-utils <= 9.31.0, whose main() returned
 // "!!rv" (normalizing the internal "return -1" to 1), and 255 on >= 9.32.0,
 // whose main() returns "rv" directly (so -1 reaches the shell as 255). Match
 // both exit codes so the probe stays correct whichever way drbd-utils lands.
-var DumpMDKnownErrors = []KnownError{
+var CheckMDKnownErrors = []KnownError{
 	{ExitCode: 1, OutputSubstring: "No valid meta data found", JoinErr: ErrNoValidMetadata},
 	{ExitCode: 255, OutputSubstring: "No valid meta data found", JoinErr: ErrNoValidMetadata},
-	{ExitCode: 1, OutputSubstring: "unclean", JoinErr: ErrUncleanMetadata},
-	{ExitCode: 255, OutputSubstring: "unclean", JoinErr: ErrUncleanMetadata},
 }
 
 // ExecuteCreateMD creates DRBD metadata on a backing device.
@@ -77,18 +77,16 @@ func ExecuteCreateMD(ctx context.Context, minor uint, backingDev string) error {
 
 // ExecuteCheckMD checks if DRBD metadata exists on a backing device.
 // Returns (true, nil) if metadata exists, (false, nil) if not, or error on failure.
-// Metadata with a dirty activity log ("unclean") is still counted as existing.
+// A dirty activity log does not make dstate fail; the attach path replays it
+// with apply-al.
 func ExecuteCheckMD(ctx context.Context, minor uint, backingDev string) (bool, error) {
-	cmd := ExecCommandContext(ctx, DRBDMetaCommand, DumpMDArgs(minor, backingDev)...)
-	_, err := executeCommand(cmd, DumpMDKnownErrors)
+	cmd := ExecCommandContext(ctx, DRBDMetaCommand, CheckMDArgs(minor, backingDev)...)
+	_, err := executeCommand(cmd, CheckMDKnownErrors)
 	if err == nil {
 		return true, nil
 	}
 	if errors.Is(err, ErrNoValidMetadata) {
 		return false, nil
-	}
-	if errors.Is(err, ErrUncleanMetadata) {
-		return true, nil
 	}
 	return false, err
 }

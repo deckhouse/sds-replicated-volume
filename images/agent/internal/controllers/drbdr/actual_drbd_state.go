@@ -855,7 +855,7 @@ func observeActualDRBDState(ctx context.Context, drbdResName string, caches *Cac
 // When intendedBackingDev is non-empty, the function probes the backing device:
 //   - If the disk is attached and statusDeviceUUID is empty, reads the device UUID
 //     via drbdmeta read-dev-uuid (uses "-" minor, always safe).
-//   - If the disk is not attached, probes metadata existence via drbdmeta dump-md
+//   - If the disk is not attached, probes metadata existence via drbdmeta dstate
 //     (needs the real minor) and reads device UUID via read-dev-uuid ("-" minor).
 func observeActualDiskState(ctx context.Context, state *actualState, intendedBackingDev string, statusDeviceUUID string) error {
 	if intendedBackingDev == "" {
@@ -877,7 +877,7 @@ func observeActualDiskState(ctx context.Context, state *actualState, intendedBac
 		return nil
 	}
 
-	// Determine minor for drbdmeta dump-md (has is_attached guard, unlike
+	// Determine minor for drbdmeta dstate (has is_attached guard, unlike
 	// read-dev-uuid which bypasses it). Prefer the actual allocated minor;
 	// fall back to 0 when no volumes exist yet.
 	var checkMDMinor uint

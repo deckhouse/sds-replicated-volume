@@ -455,7 +455,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				showCmd(configuredShow(testDRBDResName)),
 				{
 					Name:         drbdutils.DRBDMetaCommand,
-					Args:         drbdutils.DumpMDArgs(1000, "/dev/test-vg/"+testLLVName),
+					Args:         drbdutils.CheckMDArgs(1000, "/dev/test-vg/"+testLLVName),
 					ResultOutput: []byte{},
 					ResultErr:    fakedrbdutils.ExitErr{Code: -1},
 				},
