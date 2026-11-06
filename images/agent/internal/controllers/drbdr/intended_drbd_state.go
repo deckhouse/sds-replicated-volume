@@ -85,7 +85,7 @@ type IntendedDRBDState interface {
 	// DiscardZeroesIfAligned returns the intended setting. Always false.
 	DiscardZeroesIfAligned() bool
 
-	// RsDiscardGranularity returns the intended rs-discard-granularity. Always 8192.
+	// RsDiscardGranularity returns the intended rs-discard-granularity, as the kernel stores it.
 	RsDiscardGranularity() uint
 
 	// SymlinkName returns the K8S name used for the stable device symlink path.

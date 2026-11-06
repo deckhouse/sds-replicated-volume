@@ -24,9 +24,14 @@ import (
 	"strings"
 )
 
-// ReadDiscardGranularity returns the discard_granularity (in bytes) for
-// the block device at devPath by reading /sys/block/<dev>/queue/discard_granularity.
-// devPath is typically /dev/<vg>/<lv> (a device-mapper symlink).
+// rsDiscardGranularityMax mirrors DRBD_RS_DISCARD_GRANULARITY_MAX from
+// drbd_limits.h: the kernel never keeps an rs-discard-granularity above it.
+const rsDiscardGranularityMax = 1 << 20
+
+// ReadDiscardGranularity returns the rs-discard-granularity (in bytes) the
+// DRBD kernel keeps for the block device at devPath when asked for the
+// device's discard_granularity. devPath is typically /dev/<vg>/<lv> (a
+// device-mapper symlink).
 //
 // Returns 0 when the device does not support discard, sysfs is unreadable,
 // or the value cannot be parsed. Zero is the safe default: DRBD kernel
@@ -39,17 +44,51 @@ func ReadDiscardGranularity(devPath string) uint {
 	}
 
 	devName := filepath.Base(realPath)
-	sysPath := fmt.Sprintf("/sys/block/%s/queue/discard_granularity", devName)
-
-	data, err := os.ReadFile(sysPath)
-	if err != nil {
+	granularity, ok := readQueueLimit(devName, "discard_granularity")
+	if !ok {
 		return 0
+	}
+	maxDiscardBytes, ok := readQueueLimit(devName, "discard_max_bytes")
+	if !ok {
+		return 0
+	}
+
+	return SanitizeRsDiscardGranularity(granularity, granularity, maxDiscardBytes)
+}
+
+// SanitizeRsDiscardGranularity returns the rs-discard-granularity the DRBD
+// kernel stores when asked for value on a backing device with the given
+// discard_granularity and discard_max_bytes, following sanitize_disk_conf()
+// in drbd_nl.c. Asking for anything else makes the reconciler see a drift on
+// every pass: a thin pool with 2 MiB chunks reports a discard_granularity of
+// 2 MiB, which the kernel caps at 1 MiB.
+func SanitizeRsDiscardGranularity(value, granularity, maxDiscardBytes uint64) uint {
+	if value == 0 || granularity == 0 || maxDiscardBytes == 0 {
+		return 0
+	}
+
+	sanitized := (value + granularity - 1) / granularity * granularity
+
+	maxSectors := min(maxDiscardBytes>>9, rsDiscardGranularityMax>>9)
+	sanitized = min(sanitized>>9, maxSectors) << 9
+
+	if sanitized == 0 || (sanitized < granularity && granularity%sanitized != 0) {
+		return 0
+	}
+
+	return uint(sanitized)
+}
+
+func readQueueLimit(devName, limit string) (uint64, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/sys/block/%s/queue/%s", devName, limit))
+	if err != nil {
+		return 0, false
 	}
 
 	val, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
-		return 0
+		return 0, false
 	}
 
-	return uint(val)
+	return val, true
 }

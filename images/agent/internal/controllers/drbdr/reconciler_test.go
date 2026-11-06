@@ -440,6 +440,28 @@ func TestReconciler_Reconcile(t *testing.T) {
 				showCmd(configuredShow(testDRBDResName)),
 			},
 		},
+		{
+			name:  "state up, diskful, metadata probe killed - no create-md over the disk",
+			drbdr: drbdrDiskfulUp(testNodeName, testLLVName),
+			objs: []client.Object{
+				testLLVWithFinalizer(testLLVName),
+				&snc.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-lvg"},
+					Spec:       snc.LVMVolumeGroupSpec{ActualVGNameOnTheNode: "test-vg"},
+				},
+			},
+			storeState: configuredStatus(testDRBDResName),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				showCmd(configuredShow(testDRBDResName)),
+				{
+					Name:         drbdutils.DRBDMetaCommand,
+					Args:         drbdutils.DumpMDArgs(1000, "/dev/test-vg/"+testLLVName),
+					ResultOutput: []byte{},
+					ResultErr:    fakedrbdutils.ExitErr{Code: -1},
+				},
+			},
+			expectedReconcileErr: "probing backing device metadata",
+		},
 	}
 
 	sch, err := scheme.New()
@@ -801,6 +823,18 @@ func drbdrDiskfulDown(nodeName, specLLV, statusLLV string) *v1alpha1.DRBDResourc
 			LVMLogicalVolumeName:   statusLLV,
 			LLVFinalizersToRelease: []string{statusLLV},
 		}
+	}
+	return dr
+}
+
+func drbdrDiskfulUp(nodeName, specLLV string) *v1alpha1.DRBDResource {
+	dr := baseDRBDR()
+	dr.Spec.NodeName = nodeName
+	dr.Spec.State = v1alpha1.DRBDResourceStateUp
+	dr.Spec.Type = v1alpha1.DRBDResourceTypeDiskful
+	dr.Spec.LVMLogicalVolumeName = specLLV
+	dr.Status.ActiveConfiguration = &v1alpha1.DRBDResourceActiveConfiguration{
+		LLVFinalizersToRelease: []string{specLLV},
 	}
 	return dr
 }

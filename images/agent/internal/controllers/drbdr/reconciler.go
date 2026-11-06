@@ -237,8 +237,11 @@ func (r *Reconciler) reconcileDRBDR(
 			aErr = ConfiguredReasonError(diskErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 		}
 	}
-	iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
-	targetActions := computeTargetDRBDActions(iState, aState)
+	var targetActions DRBDActions
+	if aErr == nil {
+		iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
+		targetActions = computeTargetDRBDActions(iState, aState)
+	}
 	refreshNeeded, drbdErr := convergeDRBDState(rf.Ctx(), targetActions, maintenanceMode)
 	drbdErr = ensureLocalPortConflictResolved(rf.Ctx(), drbdr, drbdErr, r.portRegistry.Allocate)
 
