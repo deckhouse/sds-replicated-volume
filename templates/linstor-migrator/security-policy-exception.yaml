@@ -1,4 +1,4 @@
-{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (.Values.global.enabledModules | has "admission-policy-engine-crd") }}
+{{- if and .Values.sdsReplicatedVolume.internal.newControlPlane (.Values.global.enabledModules | has "admission-policy-engine") }}
 {{- if not (contains "all_completed" (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration)) }}
 ---
 apiVersion: deckhouse.io/v1alpha1

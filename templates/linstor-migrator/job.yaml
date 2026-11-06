@@ -12,7 +12,7 @@ spec:
   template:
     metadata:
       {{- include "helm_lib_module_labels" (list . (dict "app" "control-plane-migrator")) | nindent 6 }}
-        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        {{- if .Values.global.enabledModules | has "admission-policy-engine" }}
         security.deckhouse.io/security-policy-exception: control-plane-migrator
         {{- end }}
     spec:

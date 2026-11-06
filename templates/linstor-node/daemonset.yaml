@@ -93,7 +93,7 @@ spec:
       namespace: d8-{{ .Chart.Name }}
       labels:
         app: linstor-node
-        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        {{- if .Values.global.enabledModules | has "admission-policy-engine" }}
         security.deckhouse.io/security-policy-exception: linstor-node
         {{- end }}
       annotations:

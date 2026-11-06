@@ -1,33 +1,93 @@
 {{- if eq (include "sds-replicated-volume.rbacv2_new_scheme" .) "true" }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    heritage: deckhouse
-    module: sds-replicated-volume
-    rbac.deckhouse.io/aggregate-to-storage-as: viewer
-    rbac.deckhouse.io/kind: capability
-    rbac.deckhouse.io/capability: "system-capability.sds-replicated-volume.view"
-    rbac.deckhouse.io/scope: system
-    rbac.deckhouse.io/namespace: d8-sds-replicated-volume
   name: d8:system-capability:sds-replicated-volume:view
+  {{- include "helm_lib_module_labels" (list . (dict "rbac.deckhouse.io/aggregate-to-storage-as" "viewer" "rbac.deckhouse.io/capability" "system-capability.sds-replicated-volume.view" "rbac.deckhouse.io/kind" "capability" "rbac.deckhouse.io/namespace" "d8-sds-replicated-volume" "rbac.deckhouse.io/scope" "system")) | nindent 2 }}
   annotations:
-    en.meta.deckhouse.io/title: "Module sds-replicated-volume: view cluster resources"
-    ru.meta.deckhouse.io/title: "Модуль sds-replicated-volume: просмотр кластерных ресурсов"
-    en.meta.deckhouse.io/description: "Read-only access to the cluster-scoped resources of the sds-replicated-volume module (DRBDMapper, DRBDNodeOperation, DRBDResourceOperation, DRBDResource, ReplicatedStorageClass, ReplicatedStoragePool, ReplicatedVolumeAttachment, ReplicatedVolumeReplica, ReplicatedVolume)."
-    ru.meta.deckhouse.io/description: "Доступ только на чтение к кластерным ресурсам модуля sds-replicated-volume (DRBDMapper, DRBDNodeOperation, DRBDResourceOperation, DRBDResource, ReplicatedStorageClass, ReplicatedStoragePool, ReplicatedVolumeAttachment, ReplicatedVolumeReplica, ReplicatedVolume)."
+    en.meta.deckhouse.io/description: "Read-only access to the sds-replicated-volume module configuration."
+    en.meta.deckhouse.io/title: "Module sds-replicated-volume: view configuration"
+    ru.meta.deckhouse.io/description: "Доступ только на чтение к конфигурации модуля sds-replicated-volume."
+    ru.meta.deckhouse.io/title: "Модуль sds-replicated-volume: просмотр конфигурации"
 rules:
+- apiGroups:
+  - deckhouse.io
+  resources:
+  - moduleconfigs
+  resourceNames:
+  - sds-replicated-volume
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.deckhouse.io
   resources:
   - drbdmappers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - drbdnodeoperations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - drbdresourceoperations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - drbdresources
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - replicatedstorageclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - replicatedstoragepools
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - replicatedvolumeattachments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - replicatedvolumereplicas
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - replicatedvolumes
   verbs:
   - get

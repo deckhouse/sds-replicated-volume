@@ -1,0 +1,540 @@
+# The module RBAC declaration, read from the RBAC objects the module renders. Review it: every TODO is a
+# decision "dmt lint" reports; then run "dmt lint --linter rbac --fix" to bring the templates in line with it.
+# Objects rendered only under values other than the defaults are not here: lint with --values-file (or
+# --matrix) before the first --fix of the templates if the module has such templates, and declare them with when.
+#
+# Notes:
+# - Role/controller (templates/controller/rbac-for-us.yaml, under `.Values.sdsReplicatedVolume.internal.newControlPlane`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - RoleBinding/controller (templates/controller/rbac-for-us.yaml, under `.Values.sdsReplicatedVolume.internal.newControlPlane`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - ServiceAccount/controller (templates/controller/rbac-for-us.yaml, under `.Values.sdsReplicatedVolume.internal.newControlPlane`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRole with the computed name d8:{{ .Chart.Name }}:controller (templates/controller/rbac-for-us.yaml, under `.Values.sdsReplicatedVolume.internal.newControlPlane`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRole with the computed name d8:{{ .Chart.Name }}:replicatedvolume-manager (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRole with the computed name d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRole with the computed name d8:{{ .Chart.Name }}:replicatedvolumereplica-reader (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRoleBinding with the computed name d8:{{ .Chart.Name }}:controller (templates/controller/rbac-for-us.yaml, under `.Values.sdsReplicatedVolume.internal.newControlPlane`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRoleBinding with the computed name d8:{{ .Chart.Name }}:csi:rbac-proxy (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRoleBinding with the computed name d8:{{ .Chart.Name }}:replicatedvolume-manager-binding (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRoleBinding with the computed name d8:{{ .Chart.Name }}:replicatedvolumeattachment-manager-binding (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - a ClusterRoleBinding with the computed name d8:{{ .Chart.Name }}:replicatedvolumereplica-reader-binding (templates/csi/rbac-for-us.yaml, under `and .Values.sdsReplicatedVolume.internal.newControlPlane (not (has (default "" .Values.sdsReplicatedVolume.internal.controlPlaneMigration) (list "not_started" "stage1_started" "stage1_completed")))`) is in the templates but did not render with the linter's values, so this declaration does not hold it -- add it (with its `when`), or lint with --values-file values that render it, before --fix rewrites the templates
+# - ServiceAccount agent mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount linstor-affinity-controller mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount linstor-controller mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount linstor-node mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount linstor-scheduler-extender mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount metadata-backup mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount webhooks mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+#
+# Not described by the declaration (stays hand-written, as it is):
+# - ClusterRole/d8:sds-replicated-volume:controller (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRole/d8:sds-replicated-volume:csi:controller:external-attacher (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRole/d8:sds-replicated-volume:csi:controller:external-provisioner (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRole/d8:sds-replicated-volume:csi:controller:external-resizer (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRole/d8:sds-replicated-volume:csi:controller:external-snapshotter (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRole/d8:sds-replicated-volume:rsc-watcher (templates/csi/rbac-for-us.yaml): shares templates/csi/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+# - ClusterRole/d8:sds-replicated-volume:storagepool-reader (templates/csi/rbac-for-us.yaml): shares templates/csi/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+# - ClusterRoleBinding/d8:sds-replicated-volume:controller (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:controller:rbac-proxy (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:csi:controller:external-attacher (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:csi:controller:external-provisioner (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:csi:controller:external-resizer (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:csi:controller:external-snapshotter (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:rsc-read-access (templates/csi/rbac-for-us.yaml): shares templates/csi/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+# - ClusterRoleBinding/d8:sds-replicated-volume:storagepool-reader-binding (templates/csi/rbac-for-us.yaml): shares templates/csi/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+# - d8-sds-replicated-volume/Role/controller (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/Role/csi:controller:external-attacher (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/Role/csi:controller:external-provisioner (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/Role/csi:controller:external-resizer (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/Role/csi:controller:external-snapshotter (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/RoleBinding/controller (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/RoleBinding/csi:controller:external-attacher (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/RoleBinding/csi:controller:external-provisioner (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/RoleBinding/csi:controller:external-resizer (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/RoleBinding/csi:controller:external-snapshotter (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/ServiceAccount/controller (templates/oldcontroller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-replicated-volume/ServiceAccount/csi (templates/csi/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-replicated-volume:controller-rbac-proxy (templates/controller/rbac-for-us.yaml): binds d8:rbac-proxy, which is not a plain ClusterRole of this module the declaration describes
+# - default/RoleBinding/d8:sds-replicated-volume:controller:events (templates/controller/rbac-for-us.yaml): binds Role/d8:sds-replicated-volume:controller:events outside the module's own Roles
+# - default/Role/d8:sds-replicated-volume:controller:events (templates/controller/rbac-for-us.yaml): bound to nothing the declaration describes
+# - ServiceAccount control-plane-migrator and its roles and bindings (templates/linstor-migrator/rbac-for-us.yaml): the declaration would rename its Role and RoleBinding
+# - the Prometheus access Roles and RoleBindings (templates/rbac-to-us.yaml, templates/*/rbac-to-us.yaml): the old and the new control plane render them under different conditions, which one prometheusAccess entry cannot carry, and the declaration would fold them into one renamed Role
+apiVersion: rbac.deckhouse.io/v1alpha1
+resources:
+  - group: storage.deckhouse.io
+    resource: drbdmappers
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: drbdnodeoperations
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: drbdresourceoperations
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: drbdresources
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedstorageclasses
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedstoragepools
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedvolumeattachments
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedvolumereplicas
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedvolumes
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: replicatedstoragemetadatabackups
+    noAccess: 'the encoded backups of the LINSTOR database; restoring or deleting them is an operation of the cluster administrator (see the FAQ), not of a storage user'
+serviceAccounts:
+  - name: agent
+    path: agent
+    when: .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: agent
+    clusterRules:
+      - apiGroups:
+          - '*'
+        resources:
+          - '*'
+        verbs:
+          - '*'
+    bindClusterRoles:
+      - name: d8:rbac-proxy
+        bindingName: d8:sds-replicated-volume:agent-rbac-proxy
+    automountServiceAccountToken: true
+  - name: linstor-affinity-controller
+    path: linstor-affinity-controller
+    when: not .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: linstor-affinity-controller
+    clusterRules:
+      - apiGroups:
+          - ""
+        resources:
+          - persistentvolumes
+        verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+      - apiGroups:
+          - storage.k8s.io
+        resources:
+          - storageclasses
+        verbs:
+          - get
+      - apiGroups:
+          - events.k8s.io
+        resources:
+          - events
+        verbs:
+          - create
+          - patch
+    namespaceRules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - create
+          - get
+          - update
+    automountServiceAccountToken: true
+  - name: linstor-controller
+    path: linstor-controller
+    when: not .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: linstor-controller
+    clusterRules:
+      - apiGroups:
+          - apiextensions.k8s.io
+        resources:
+          - customresourcedefinitions
+        verbs:
+          - get
+          - list
+          - create
+          - delete
+          - update
+          - patch
+          - watch
+      - apiGroups:
+          - internal.linstor.linbit.com
+        resources:
+          - '*'
+        verbs:
+          - get
+          - list
+          - create
+          - delete
+          - deletecollection
+          - update
+          - patch
+    namespaceRules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - get
+          - watch
+          - list
+          - delete
+          - update
+          - create
+      - apiGroups:
+          - ""
+        resources:
+          - endpoints
+          - endpoints/restricted
+        verbs:
+          - create
+          - patch
+          - update
+    bindClusterRoles:
+      - name: d8:rbac-proxy
+        bindingName: d8:sds-replicated-volume:linstor-controller-rbac-proxy
+    automountServiceAccountToken: true
+  - name: linstor-node
+    path: linstor-node
+    when: not .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: linstor-node
+    clusterRules:
+      - apiGroups:
+          - security.openshift.io
+        resources:
+          - securitycontextconstraints
+        resourceNames:
+          - privileged
+        verbs:
+          - use
+    bindClusterRoles:
+      - name: d8:rbac-proxy
+        bindingName: d8:sds-replicated-volume:linstor-node-rbac-proxy
+    automountServiceAccountToken: true
+  - name: linstor-scheduler-extender
+    path: linstor-scheduler-extender
+    when: not .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: linstor-scheduler-extender
+    namespaceRules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - create
+          - get
+          - update
+    bindClusterRoles:
+      - name: system:kube-scheduler
+        bindingName: d8:sds-replicated-volume:linstor-scheduler-extender-kube-scheduler
+      - name: system:volume-scheduler
+        bindingName: d8:sds-replicated-volume:linstor-scheduler-extender-volume-scheduler
+    bindRoles:
+      - namespace: kube-system
+        name: extension-apiserver-authentication-reader
+    automountServiceAccountToken: true
+  - name: metadata-backup
+    path: metadata-backup
+    when: not .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: metadata-backup
+    clusterRules:
+      - apiGroups:
+          - apiextensions.k8s.io
+        resources:
+          - customresourcedefinitions
+        verbs:
+          - get
+          - list
+          - create
+          - delete
+          - update
+          - patch
+          - watch
+      - apiGroups:
+          - internal.linstor.linbit.com
+        resources:
+          - '*'
+        verbs:
+          - get
+          - list
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - replicatedstoragemetadatabackups
+        verbs:
+          - get
+          - list
+          - create
+          - delete
+          - watch
+          - update
+          - patch
+    namespaceRules:
+      - apiGroups:
+          - ""
+        resources:
+          - secrets
+        verbs:
+          - get
+          - list
+          - create
+          - patch
+          - update
+          - delete
+    bindClusterRoles:
+      - name: d8:rbac-proxy
+        bindingName: d8:sds-replicated-volume:metadata-backup-rbac-proxy
+    automountServiceAccountToken: true
+  - name: webhooks
+    path: webhooks
+    when: .Values.sdsReplicatedVolume.internal.newControlPlane
+    labels:
+      app: webhooks
+    clusterRules:
+      - apiGroups:
+          - storage.k8s.io
+        resources:
+          - storageclasses
+        verbs:
+          - get
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - list
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - replicatedstoragepools
+          - replicatedstorageclasses
+        verbs:
+          - list
+    automountServiceAccountToken: true
+access:
+  - name: admin-kubeconfig
+    subjects:
+      - kind: Group
+        name: kubeadm:cluster-admins
+    clusterRules:
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - drbdmappers
+          - drbdnodeoperations
+          - drbdresourceoperations
+          - drbdresources
+          - replicatedstorageclasses
+          - replicatedstoragepools
+          - replicatedvolumeattachments
+          - replicatedvolumereplicas
+          - replicatedvolumes
+        verbs:
+          - get
+          - list
+          - watch
+          - create
+          - delete
+          - deletecollection
+          - patch
+          - update

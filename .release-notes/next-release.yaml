@@ -4,6 +4,12 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+improvements:
+  - "On DKP 1.78 and later, the `d8:system-capability:sds-replicated-volume:view` and `d8:system-capability:sds-replicated-volume:edit` roles also give read access to the `sds-replicated-volume` ModuleConfig, and `edit` write access to it, and carry the standard titles and descriptions of the platform, as every capability of the DKP 1.78 role model does. The RBAC of the module is now declared in `rbac.yaml`, and the RBACv2 templates are written from it; clusters below DKP 1.78 keep the roles they had."
+
+fixes:
+  - "The `D8ObsoleteLinstorBackupPresents` alert named itself as its group in the `plk_create_group_if_not_exists` and `plk_grouped_by` annotations. It is now grouped into `D8ObsoleteLinstorBackupPresentsGroup`."
+
 # Optional sections — delete rather than leave empty.
 # security: []
 # breaking: []

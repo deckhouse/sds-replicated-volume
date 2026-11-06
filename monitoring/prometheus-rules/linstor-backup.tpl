@@ -10,8 +10,8 @@
       annotations:
         plk_markup_format: "markdown"
         plk_protocol_version: "1"
-        plk_create_group_if_not_exists__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresents,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        plk_grouped_by__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresents,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_create_group_if_not_exists__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresentsGroup,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresentsGroup,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: LINSTOR obsolete backups presents in cluster
         description: |
           There is obsolete LINSTOR metadata backups in cluster

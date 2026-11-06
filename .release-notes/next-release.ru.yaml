@@ -4,6 +4,12 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+improvements:
+  - "В DKP 1.78 и новее роли `d8:system-capability:sds-replicated-volume:view` и `d8:system-capability:sds-replicated-volume:edit` дают также доступ на чтение к ModuleConfig `sds-replicated-volume`, а `edit` — и на запись, и несут стандартные заголовки и описания платформы, как все capability ролевой модели DKP 1.78. RBAC модуля теперь описан в `rbac.yaml`, и шаблоны RBACv2 пишутся из него; кластеры ниже DKP 1.78 сохраняют прежние роли."
+
+fixes:
+  - "Алерт `D8ObsoleteLinstorBackupPresents` указывал себя же как группу в аннотациях `plk_create_group_if_not_exists` и `plk_grouped_by`. Теперь он группируется в `D8ObsoleteLinstorBackupPresentsGroup`."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # security: []
 # breaking: []
