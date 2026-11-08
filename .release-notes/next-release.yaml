@@ -10,6 +10,9 @@ improvements:
 fixes:
   - "The `D8ObsoleteLinstorBackupPresents` alert named itself as its group in the `plk_create_group_if_not_exists` and `plk_grouped_by` annotations. It is now grouped into `D8ObsoleteLinstorBackupPresentsGroup`."
 
+docs:
+  - "The module documentation says that nodes hosting data need access to the OS package repositories (or a mirror of them in an air-gapped environment) to build DRBD: the requirements list the packages installed per OS family and state that the kernel headers package must exist for the running kernel, and that Secure Boot is not supported. The FAQ has a new entry for the case when DRBD is not built because the headers package or the repository is unavailable, with the commands that check it on the node."
+
 # Optional sections — delete rather than leave empty.
 # security: []
 # breaking: []

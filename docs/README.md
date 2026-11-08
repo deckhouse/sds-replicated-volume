@@ -332,6 +332,19 @@ Applicable to both single-zone clusters and clusters using multiple availability
   {{< alert level="info" >}}
   After changing the `drbdPortRange` settings, restart the LINSTOR controller for the new settings to take effect. Existing DRBD resources will retain their assigned ports.
   {{< /alert >}}
+- Nodes that host module data (nodes labeled `storage.deckhouse.io/sds-replicated-volume-node`) need access to the operating system package repositories, or, in an air-gapped environment, to a mirror of those repositories. The module builds `DRBD` on the node from source, so the `NodeGroupConfiguration` script installs packages from the OS repositories during the build. Without access to the repositories, `DRBD` cannot be built on the node and the `linstor-node` pod will not start.
+  - The package with kernel headers must exist in the repository for the kernel currently running on the node (`uname -r`). A node booted into a kernel whose headers are no longer in the repository cannot build `DRBD`. On ALT Linux this requirement is softer: the script installs the headers of the latest kernel of the same flavour, and if they do not match the running kernel, it updates the kernel and requests a reboot of the node (with manual approval of disruptions, the reboot has to be approved).
+  - The repositories are needed while `DRBD` is being built or rebuilt on the node (the first enabling of the module, a `DRBD` version update in the module). If the desired `DRBD` version is already loaded on the node, the script exits before installing any packages.
+  - The script installs the following packages:
+
+    | OS family | Kernel headers | Build tools |
+    | --- | --- | --- |
+    | Debian/Ubuntu-like (`ubuntu-lts`, `debian`, `astra`) | `linux-headers-<running kernel version>` | `make`, `bind9-host`, `patch`, `mokutil`, `gcc` (`gcc-12` if the running kernel was built with `gcc-12`) |
+    | CentOS/RHEL-like (`centos`, `redos`) | `kernel-devel-<running kernel version>` (`kernel-lt-devel-<version>` for `kernel-lt` kernels) | `make`, `gcc`, `bind-utils`, `patch`, `mokutil` |
+    | ALT Linux-like (`altlinux`) | `kernel-headers-modules-<kernel flavour>` | `make`, `gcc`, `bind-utils`, `patch`, `mokutil` |
+
+  - Secure Boot is not supported: the `DRBD` module built on the node is not signed. If Secure Boot is enabled, the script skips the build and asks you to install `DRBD` manually. For details, see the [FAQ](./faq.html#linstor-node-fail-to-start-because-the-drbd-module-cannot-be-loaded).
+  - To check that the packages are available and to see what to do if the build fails, see the [FAQ](./faq.html#drbd-is-not-built-no-kernel-headers-package-or-no-access-to-the-repository).
 
 ### Recommendations
 

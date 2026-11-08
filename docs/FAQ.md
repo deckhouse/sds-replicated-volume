@@ -441,6 +441,51 @@ The most likely reasons why bashible is unable to load the kernel module:
   Since the DRBD module is compiled dynamically for your kernel (similar to dkms), it is not digitally signed.
   Currently, running the DRBD module with a Secure Boot enabled is not supported.
 
+- The kernel headers package is not available in the OS repository, or the node has no access to the repository.
+  See [DRBD is not built: no kernel headers package or no access to the repository](#drbd-is-not-built-no-kernel-headers-package-or-no-access-to-the-repository).
+
+### DRBD is not built: no kernel headers package or no access to the repository
+
+The module builds `DRBD` on the node from source. For this, the `NodeGroupConfiguration` script installs the kernel headers package for the running kernel and the build tools from the OS repositories (see the list in the ["System requirements and recommendations"](./readme.html#system-requirements-and-recommendations) section).
+
+Symptoms:
+
+- with the LINSTOR control plane, the `linstor-node` pod on the node is stuck in the `Init` state;
+- the `/proc/drbd` file is missing on the node;
+- the bashible logs contain package installation errors (`apt`, `dnf`) or a message that a package is not found.
+
+Check the bashible logs on the node:
+
+```shell
+journalctl -u bashible --no-pager | tail -n 200
+```
+
+Check that the headers package for the running kernel is available in the repository (on ALT Linux, run `apt-get update` first):
+
+- Debian/Ubuntu-like:
+
+  ```shell
+  apt-cache policy linux-headers-$(uname -r)
+  ```
+
+- CentOS/RHEL-like. The script derives the package name from the package that owns the kernel modules directory (`kernel` and `kernel-core` give `kernel-devel`, `kernel-lt` and `kernel-lt-core` give `kernel-lt-devel`):
+
+  ```shell
+  pkg="$(rpm -qf --qf '%{NAME}' /lib/modules/$(uname -r) | sed 's/\(-modules-core\)\?$//; s/\(-core\)\?$/-devel/')"
+  dnf list "${pkg}-$(uname -r)"
+  ```
+
+- ALT Linux-like. The script extracts the kernel flavour from `uname -r`:
+
+  ```shell
+  flavour="$(uname -r | sed -E 's/^[^-]+-(.+)-alt[0-9]+.*$/\1/')"
+  apt-cache policy kernel-headers-modules-${flavour}
+  ```
+
+  On ALT Linux, the package version may differ from the running kernel: if `/lib/modules/$(uname -r)/build` is missing after the headers are installed, the script updates the kernel and requests a reboot of the node; if the node group requires manual approval of disruptions, the reboot has to be approved.
+
+If the package is not found and the node is booted into an old kernel whose headers are no longer in the repository, restore access to the required repositories or mirror, or boot the node into a kernel whose headers are in the repository. If Secure Boot is enabled, building `DRBD` is not supported; see the [previous section](#linstor-node-fail-to-start-because-the-drbd-module-cannot-be-loaded).
+
 ### The Pod cannot start due to the FailedMount error
 
 #### The Pod is stuck at the ContainerCreating phase
