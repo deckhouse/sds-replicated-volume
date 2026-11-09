@@ -536,9 +536,7 @@ var _ = Describe("Formation restart configuration preservation", func() {
 //
 
 // r2Configuration asks for the 2D+1TB layout (FTT=1, GMDR=0) — the shape an r3→r2 edit produces,
-// and the one an r2→r3 edit can never leave on its own: the tie-breaker r3 does not ask for is a
-// surplus, which puts the mismatch outside the convergence whitelist (the diskful heal requires
-// actualTB <= intendedTB). Remove the tie-breaker by hand and the third copy is healed for you.
+// while r2→r3 normally promotes the TB in place (or completes an existing add-first upsize via P3/P4).
 func r2Configuration() *v1alpha1.ReplicatedVolumeConfiguration {
 	return &v1alpha1.ReplicatedVolumeConfiguration{
 		Topology:                        v1alpha1.TopologyIgnored,
@@ -1251,12 +1249,10 @@ var _ = Describe("reconcileRVConfiguration rollout budget", func() {
 			ReasonEqual(v1alpha1.ReplicatedVolumeCondConfigurationReadyReasonInvalidConfiguration).Eval()).To(BeTrue())
 	})
 
-	It("limits the blast radius of a configuration no volume can converge on", func(ctx SpecContext) {
-		// The class is edited the wrong way round: every volume runs 4D+1TB and the new
-		// configuration asks for 3D, which convergence can never reach (it never removes a copy —
-		// P1 needs a tie-breaker deficit and P4 needs the copies to match). The volumes that adopt
-		// it are stuck with it forever, so the budget is the only thing that keeps the damage down
-		// to two volumes out of four.
+	It("limits the blast radius while diskful removal is blocked by redundancy guards", func(ctx SpecContext) {
+		// Every volume has a surplus copy, but none of its replicas reports UpToDate.
+		// P5 must refuse removal under GMDR, and that CannotConverge verdict must
+		// retain the rollout slot just as an unsupported transition used to.
 		rsc := newRolloutRSC(2, newConfiguration(), maxParallelStrategy(2))
 		rvs := make([]*v1alpha1.ReplicatedVolume, 0, 4)
 		names := make([]string, 0, 4)
@@ -1277,8 +1273,10 @@ var _ = Describe("reconcileRVConfiguration rollout budget", func() {
 		expectRolledOut(stuck, newConfiguration())
 		Expect(obju.StatusCondition(stuck, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType).
 			IsFalse().
-			ReasonEqual(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported).Eval()).
-			To(BeTrue(), "rv-0 must be stuck on a layout it cannot reach")
+			ReasonEqual(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge).Eval()).
+			To(BeTrue(), "rv-0 must retain its slot while GMDR blocks removal")
+		Expect(obju.GetStatusCondition(stuck, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType).Message).
+			To(ContainSubstring("would violate GMDR"))
 
 		expectRolledOut(storedRV(ctx, cl, "rv-1"), newConfiguration())
 		expectQueued(storedRV(ctx, cl, "rv-2"), r2Configuration())

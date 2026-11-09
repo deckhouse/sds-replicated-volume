@@ -501,14 +501,13 @@ func makeDatameshSingleStepTransition(
 //     once the copies match the configuration and every one of them is UpToDate. Deleting the RVR
 //     is the whole action — the replica controller turns it into a Leave request and the datamesh
 //     removes the member under its own guards.
+//   - P5 diskful surplus: delete one unattached Diskful replica when the tie-breaker count
+//     is sufficient and the datamesh's removal guards permit it under the new configuration.
 //
-// Safety invariant: convergence NEVER deletes a copy or its data. It DOES take away a tie-breaker
-// the configuration no longer asks for (P4): a tie-breaker holds no data, and its removal is
-// reversible — P2 creates one back the moment the configuration asks for it again. Shrinking the
-// copy count and replacing a copy whose member is still alive therefore stay manual. The older
-// invariant "convergence never creates a Diskful replica" was lifted deliberately: the criterion
-// that replaced it is the whitelist rule below — repeating the action must provably end in the
-// intended layout. The decision is a pure compute helper (computeTargetLayoutAction), reused
+// Safety invariant: convergence removes only surplus members under the datamesh's guards,
+// through normal RVR deletion, and waits for a departure before choosing another removal.
+// Repeating each whitelisted action must end in the intended layout.
+// The decision is a pure compute helper (computeTargetLayoutAction), reused
 // by the MembershipLayoutConverged condition writer (reconcileLayoutStatus) so the condition and
 // the action stay in agreement; convergence itself never writes the condition (single-writer
 // invariant) and therefore discards the report half of that decision.
@@ -615,7 +614,7 @@ func (r *Reconciler) reconcileLayoutConvergence(
 		rf.Log().Info("Converging layout: created replica", "type", replicaType, "rvr", rvr.Name)
 		return rf.ContinueAndRequeue()
 
-	// The only deletion convergence performs. Deleting the RVR is the whole action: the RV
+	// Deleting the RVR is the whole removal action: the RV
 	// controller finalizer holds the object, the replica controller turns the deletion timestamp
 	// into a Leave request, the datamesh runs the tiebreaker/v1 removal plan under its guards, and
 	// the DRBD resource is torn down after the member has left. deleteRVR stamps the local copy, so
@@ -640,6 +639,23 @@ func (r *Reconciler) reconcileLayoutConvergence(
 			return rf.Failf(err, "deleting surplus TieBreaker RVR %s", rvr.Name)
 		}
 		rf.Log().Info("Converging layout: deleted surplus TieBreaker replica", "rvr", rvr.Name)
+		return rf.ContinueAndRequeue()
+
+	case layoutActionRemoveDiskful:
+		rvr := findRVRByName(*rvrs, targetAction.removeRVRName)
+		if rvr == nil {
+			// Candidate vanished from the snapshot; recompute instead of choosing another.
+			return rf.ContinueAndRequeue()
+		}
+		if err := r.deleteRVR(rf.Ctx(), rvr); err != nil {
+			if apierrors.IsConflict(err) {
+				rf.Log().Info("Converging layout: surplus diskful was replaced under the same name, requeuing",
+					"rvr", rvr.Name)
+				return rf.ContinueAndRequeue()
+			}
+			return rf.Failf(err, "deleting surplus Diskful RVR %s", rvr.Name)
+		}
+		rf.Log().Info("Converging layout: deleted surplus Diskful replica", "rvr", rvr.Name)
 		return rf.ContinueAndRequeue()
 
 	default: // layoutActionNone
@@ -668,6 +684,8 @@ const (
 	layoutActionCreateDiskful
 	// layoutActionRemoveTieBreaker deletes one surplus TieBreaker replica (P4).
 	layoutActionRemoveTieBreaker
+	// layoutActionRemoveDiskful deletes one surplus Diskful replica (P5).
+	layoutActionRemoveDiskful
 	// layoutActionRetypeToDiskful reserves the existing TB for in-place R2 -> R3.
 	layoutActionRetypeToDiskful
 )
@@ -683,8 +701,7 @@ type targetLayoutAction struct {
 	// retypeRVRName identifies the replica whose spec type changes, including
 	// cancellation of an unstarted promotion reservation.
 	retypeRVRName string
-	// removeRVRName is the tie-breaker RVR chosen for a P4 removal (set only for
-	// layoutActionRemoveTieBreaker).
+	// removeRVRName is the RVR chosen for a P4 or P5 removal.
 	removeRVRName string
 }
 
@@ -705,7 +722,8 @@ type membershipLayoutConvergedReport struct {
 //
 // Decision order (fixed — each earlier step wins over the later ones):
 //  1. RV deletion → Unknown/VolumeDeleting, no action.
-//  2. An active layout-changing transition → Converging, no action. This precedes the
+//  2. An active layout-changing transition → no action (with a named departure report
+//     when a counted copy is deleting, otherwise Converging). This precedes the
 //     actual/intended comparison on purpose: mid-flight D→TB makes the counted layout equal the
 //     intended one for one step (the member is already a TieBreaker while the transition is still
 //     running), and reporting Converged there would flip the condition True and back.
@@ -723,18 +741,19 @@ type membershipLayoutConvergedReport struct {
 //     replacement yet) → create the replacement (strict create-first). This also precedes the
 //     actual/intended comparison: the raw layout still counts the terminating tie-breaker, so the
 //     comparison alone would report Converged while the only tie-breaker is leaving.
-//  5. Comparison of actual against intended: equal AND no diskful replica in flight → Converged;
-//     otherwise the whitelist below. The in-flight term belongs here for the same reason steps
-//     3 and 4 precede the comparison — see "Diskful replicas in flight" below.
+//  5. A deleting counted copy at matching D counts → CannotConverge (deletion cannot
+//     be rolled back); at surplus D counts → Converging, naming the departure and its
+//     datamesh message. Promotion, retypes and TB replacement retain priority; a real
+//     copy deficit still reaches P3 and its creation-in-flight handling.
+//  6. Comparison of actual against intended: equal AND no diskful creation in flight →
+//     Converged; otherwise the whitelist below.
 //
 // Whitelist (in-place promotion/recovery is considered before these general patterns; all
-// other mismatches are reported but
-// never acted upon). The criterion for membership is that REPEATING the action provably ends in
-// the intended layout; it is also what explains P1's dead end below, which without it reads as
-// an unmotivated concession:
+// other mismatches are reported but never acted upon). Repeating each action must
+// end in the intended layout:
 //   - P1 retype (r3→r2): actualD > intendedD && actualTB < intendedTB — convert one Diskful voter
-//     into the missing tie-breaker. It never removes the extra diskful voters, so a 4D volume at
-//     an r2 config becomes 3D+1TB after one retype and is then reported TransitionUnsupported.
+//     into the missing tie-breaker. A 4D volume at an r2 config becomes 3D+1TB,
+//     then P5 trims the remaining surplus copy.
 //   - P2 tie-breaker deficit: actualD == intendedD && actualTB < intendedTB — create the missing
 //     tie-breaker.
 //   - P3 heal (diskful deficit): actualD < intendedD — create the missing diskful copy
@@ -742,19 +761,23 @@ type membershipLayoutConvergedReport struct {
 //     over after an add-first growth is handled by P4.
 //   - P4 tie-breaker surplus: actualD == intendedD && actualTB > intendedTB —
 //     delete one tie-breaker replica, but only once every counted copy is UpToDate
-//     (computeTargetSurplusTieBreakerRemoval). A tie-breaker carries no data, so this is the one
-//     deletion convergence performs, and it is reversible by P2.
+//     (computeTargetSurplusTieBreakerRemoval).
+//   - P5 diskful surplus: actualD > intendedD && actualTB >= intendedTB — delete one
+//     unattached Diskful replica allowed by the datamesh removal guards. Departures
+//     and orphans block a second removal; non-UpToDate copies are preferred.
 //
 // P3 and P4 complete an add-first upsize when a copy was already placed before
-// the TB could be reserved. Healthy 2D+TB → 3D uses the in-place promotion instead. The four patterns are mutually exclusive by the sign of the
-// diskful deficit and, at an equal one, by the sign of the tie-breaker deficit, so the order of
-// the case arms carries no meaning.
+// the TB could be reserved. Healthy 2D+TB → 3D uses the in-place promotion instead.
+// The five patterns are mutually exclusive: D deficits belong to P3; equal D counts
+// split by TB deficit/surplus into P2/P4; D surpluses split into P1 when TB is missing
+// and P5 otherwise. Thus the order of the case arms carries no meaning.
 //
 // Idempotency across the split-client cache is handled by counting in-flight work: a retype whose
 // spec was already flipped (pendingRetypeToTieBreakerMemberNames / pendingRetypeToDiskfulMemberNames,
 // step 3), a tie-breaker RVR already created but not yet a member (countPendingTieBreakerCreations)
 // or a diskful RVR the layout does not count yet (countPendingDiskfulCreations) is reported without
-// issuing a second action.
+// issuing a second action. A deleting counted copy similarly owns its departure
+// until membership changes (computeDiskfulRemovalPendingReport).
 //
 // # Diskful replicas in flight
 //
@@ -764,8 +787,7 @@ type membershipLayoutConvergedReport struct {
 // first enters the member as Access (the vestibule), where the replica IS a member while the layout
 // still does not count it. The invariant that must hold is that counted copies plus copies in
 // flight never exceed the intended copy count through convergence's own doing; the leak breaks it,
-// and the cost is a copy too many, a full resync spent for nothing, and a permanent
-// TransitionUnsupported.
+// and the cost is an unnecessary resync followed by a P5 removal.
 //
 // The gate is "at least one in flight", NOT "one per missing copy" as it is for tie-breakers. For a
 // tie-breaker the deficit is structurally at most one, so the two formulas are indistinguishable
@@ -776,12 +798,10 @@ type membershipLayoutConvergedReport struct {
 // occupies a node (any RVR with a node counts as occupying it), takes a volume-group reservation
 // and gets a logical volume, so capacity is allocated up front and sits idle.
 //
-// The in-flight term in step 5 is what keeps an unplaceable copy from becoming unrecoverable: a
-// configuration widened and then reverted leaves the counts matching while the copy still exists,
-// and Converged there means that once a node appears the copy joins, the layout overshoots the
-// intended copy count, no pattern applies, and the volume is terminal forever. No dispatch guard
-// refuses a join that overshoots. The replica itself costs almost nothing while it hangs (without a
-// volume group it is not placed, so no logical volume is created) — only its identifier.
+// The in-flight term in step 6 keeps a pending creation visible when a configuration
+// is widened and then reverted. Once a node appears the copy can join and overshoot
+// the intended count, requiring a P5 removal; no dispatch guard refuses that join.
+// Without a volume group the replica has no logical volume yet — only its identifier.
 func computeTargetLayoutAction(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
@@ -804,9 +824,14 @@ func computeTargetLayoutAction(
 	// The self-heal artifacts, and with them every step P3 owns.
 	inFlightDiskful := countPendingDiskfulCreations(rv, rvrs)
 	pendingRetypeToDiskful := pendingRetypeToDiskfulMemberNames(rv, rvrs)
+	diskfulRemovalReport, diskfulRemovalPending := computeDiskfulRemovalPendingReport(
+		rv, rvrs, actualD, intendedD, actualLayout, intendedLayout)
 
-	// 2. A layout-changing transition is already moving the composition → Converging, no new action.
+	// 2. A layout-changing transition is already moving the composition → no new action.
 	if hasLayoutChangingTransition(rv) {
+		if diskfulRemovalPending {
+			return targetLayoutAction{kind: layoutActionNone}, diskfulRemovalReport
+		}
 		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
 			status:  metav1.ConditionFalse,
 			reason:  v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
@@ -890,10 +915,16 @@ func computeTargetLayoutAction(
 		return action, report
 	}
 
-	// 5. Converged: actual matches intended and no copy is still in flight. A copy in flight at
-	// matching counts is the reverted-configuration case: reporting Converged there is the one
-	// unrecoverable mistake this function can make (see "Diskful replicas in flight" above), so
-	// the in-flight report — the scheduler's verdict, or progress — wins over the comparison.
+	// 5. A deleting counted copy is still a member, even when an operator deleted it.
+	// Check after promotion/retype and TB replacement so their recovery steps retain priority,
+	// but before equality and P4/P5: matching counts cannot mean Converged while a copy leaves,
+	// and no second removal may race it. Real deficits fall through to P3 and its in-flight gate.
+	if diskfulRemovalPending {
+		return targetLayoutAction{kind: layoutActionNone}, diskfulRemovalReport
+	}
+
+	// 6. Converged: actual matches intended and no copy is still being created.
+	// A pending creation at matching counts still needs its scheduling/progress report.
 	if actualD == intendedD && actualTB == intendedTB {
 		if inFlightDiskful > 0 {
 			return targetLayoutAction{kind: layoutActionNone},
@@ -982,6 +1013,10 @@ func computeTargetLayoutAction(
 			rv, rvrs, rvas, intendedD, actualLayout, intendedLayout,
 		)
 
+	// P5: a copy surplus with no tie-breaker deficit. P1 owns the complementary case.
+	case actualD > intendedD && actualTB >= intendedTB:
+		return computeTargetSurplusDiskfulRemoval(rv, rvrs, rvas, actualLayout, intendedLayout)
+
 	// Outside the whitelist: report honestly, take no action.
 	default:
 		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
@@ -992,6 +1027,158 @@ func computeTargetLayoutAction(
 				actualLayout, intendedLayout),
 		}
 	}
+}
+
+// departingVoterMemberNames returns the sorted names of voter members on their way out:
+// deleting ones, whose RVR carries a deletion timestamp, and orphans, whose RVR is gone and
+// which the datamesh force-removes on its own.
+func departingVoterMemberNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (deleting, orphans []string) {
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if !m.Type.IsVoter() {
+			continue
+		}
+		switch rvr := findRVRByName(rvrs, m.Name); {
+		case rvr == nil:
+			orphans = append(orphans, m.Name)
+		case rvr.DeletionTimestamp != nil:
+			deleting = append(deleting, m.Name)
+		}
+	}
+	slices.Sort(deleting)
+	slices.Sort(orphans)
+	return deleting, orphans
+}
+
+// computeDiskfulRemovalPendingReport owns departures of counted copies (D and D∅),
+// including manual deletions. Counts stay raw until membership changes. A real
+// deficit is left to P3; a surplus waits, and matching D counts need intervention
+// because Kubernetes deletion cannot be cancelled by restoring the configuration.
+func computeDiskfulRemovalPendingReport(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	actualD, intendedD int,
+	actualLayout, intendedLayout string,
+) (membershipLayoutConvergedReport, bool) {
+	if actualD < intendedD {
+		return membershipLayoutConvergedReport{}, false
+	}
+	leaving, _ := departingVoterMemberNames(rv, rvrs)
+	if len(leaving) == 0 {
+		return membershipLayoutConvergedReport{}, false
+	}
+	for i, name := range leaving {
+		for _, request := range rv.Status.DatameshReplicaRequests {
+			if request.Name == name && request.Message != "" {
+				leaving[i] += ": " + request.Message
+				break
+			}
+		}
+	}
+	slices.Sort(leaving)
+	report := membershipLayoutConvergedReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		message: fmt.Sprintf("diskful replica %s is terminating: waiting for it to leave the datamesh (have %s, want %s)",
+			strings.Join(leaving, "; "), actualLayout, intendedLayout),
+	}
+	if actualD == intendedD {
+		report.reason = v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge
+		report.message = fmt.Sprintf("diskful replica %s is terminating while the diskful count already matches the intended one (have %s, want %s); "+
+			"likely a reverted configuration change or manual deletion; the deletion is not rolled back automatically",
+			strings.Join(leaving, "; "), actualLayout, intendedLayout)
+	}
+	return report, true
+}
+
+// computeTargetSurplusDiskfulRemoval takes away one surplus copy under the new
+// configuration. Departures are handled before the whitelist; orphans likewise
+// hold P5 back because the datamesh will force-remove them without our help.
+func computeTargetSurplusDiskfulRemoval(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+	actualLayout, intendedLayout string,
+) (targetLayoutAction, membershipLayoutConvergedReport) {
+	if _, orphans := departingVoterMemberNames(rv, rvrs); len(orphans) > 0 {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+			message: fmt.Sprintf("diskful replica %s has no replica object: waiting for the datamesh to force-remove it (have %s, want %s)",
+				strings.Join(orphans, ", "), actualLayout, intendedLayout),
+		}
+	}
+	name, reason := selectSurplusDiskfulCandidate(rv, rvrs, rvas)
+	if name == "" {
+		return targetLayoutAction{kind: layoutActionNone}, membershipLayoutConvergedReport{
+			status: metav1.ConditionFalse,
+			reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge,
+			message: fmt.Sprintf("cannot remove surplus diskful replica (have %s, want %s): %s",
+				actualLayout, intendedLayout, reason),
+		}
+	}
+	return targetLayoutAction{kind: layoutActionRemoveDiskful, removeRVRName: name}, membershipLayoutConvergedReport{
+		status: metav1.ConditionFalse,
+		reason: v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging,
+		message: fmt.Sprintf("removing surplus diskful replica %s: have %s, want %s",
+			name, actualLayout, intendedLayout),
+	}
+}
+
+// selectSurplusDiskfulCandidate prefers a non-UpToDate copy, then the
+// lexicographically last name. Only exact Diskful members with Diskful RVRs are
+// eligible. Attachment (including active RVAs) is checked before the datamesh's
+// own removal guards; no redundancy/quorum arithmetic is duplicated here.
+// Inputs are read-only, and both the choice and refusal diagnostics are stable.
+func selectSurplusDiskfulCandidate(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rvas []*v1alpha1.ReplicatedVolumeAttachment,
+) (name, reason string) {
+	var upToDate, notUpToDate string
+	var refusals []string
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if m.Type != v1alpha1.DatameshMemberTypeDiskful {
+			continue
+		}
+		rvr := findRVRByName(rvrs, m.Name)
+		switch {
+		case rvr == nil:
+			refusals = append(refusals, m.Name+": replica object is missing")
+			continue
+		case rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful:
+			refusals = append(refusals, m.Name+": replica spec.type is not Diskful")
+			continue
+		case rvr.DeletionTimestamp != nil:
+			refusals = append(refusals, m.Name+": replica is terminating")
+			continue
+		case isMemberAttached(m, rvas):
+			refusals = append(refusals, m.Name+": replica is attached")
+			continue
+		}
+		ready, isUpToDate, message := datamesh.DiskfulRemovalReadiness(rv, rvrs, m.Name)
+		if !ready {
+			refusals = append(refusals, m.Name+": "+message)
+			continue
+		}
+		if isUpToDate {
+			upToDate = max(upToDate, m.Name)
+		} else {
+			notUpToDate = max(notUpToDate, m.Name)
+		}
+	}
+	if name := cmp.Or(notUpToDate, upToDate); name != "" {
+		return name, ""
+	}
+	if len(refusals) == 0 {
+		return "", "no Diskful members to remove"
+	}
+	slices.Sort(refusals)
+	return "", strings.Join(refusals, "; ")
 }
 
 // computeTargetPendingPromotionRecovery handles changes to the input layout
@@ -1257,9 +1444,8 @@ func deletingTieBreakerMemberNames(
 // It is only reached with no tie-breaker leaving (computeTargetTieBreakerReplacement owns the whole
 // departure window at a correct diskful count) and with a genuine surplus.
 //
-// Removal is a deletion, and the safety invariant permits exactly this one: a tie-breaker holds no
-// data, and taking it away is reversible — P2 creates one back the moment the configuration asks
-// for it again. Removing a COPY stays outside the whitelist.
+// A tie-breaker holds no data; P2 creates one back if the configuration asks for it
+// again. Surplus data copies have their own guarded removal path in P5.
 //
 // Three gates stand before the action, and each of them reports Converging rather than
 // CannotConverge, because each is a state that resolves itself:
@@ -1659,7 +1845,7 @@ func applyRVRRetypeToTieBreaker(rvr *v1alpha1.ReplicatedVolumeReplica) {
 
 // isMemberAttached reports whether the given member is currently attached: either the datamesh
 // member is marked Attached (published / DRBD Primary) or an active (non-deleting) RVA targets its
-// node. Attached replicas are excluded as retype candidates to avoid disrupting live I/O, and an
+// node. Attached replicas are excluded as retype and diskful-removal candidates to protect live I/O; an
 // attached tie-breaker has its removal deferred (the datamesh guard guardNotAttached would block
 // the Leave anyway).
 func isMemberAttached(m *v1alpha1.DatameshMember, rvas []*v1alpha1.ReplicatedVolumeAttachment) bool {
@@ -2632,7 +2818,7 @@ type layoutReport struct {
 // computeLayoutReport produces the status.membershipLayout string and the MembershipLayoutConverged report by
 // reusing the convergence decision (computeTargetLayoutAction), so the reported reason always
 // matches what reconcileLayoutConvergence does this pass:
-//   - actual == intended                                   → True / Converged
+//   - actual == intended, with no pending layout work       → True / Converged
 //   - a membership transition or a queued action is moving  → False / Converging
 //     the layout (retype requested / TB creation pending)
 //   - a whitelist pattern applies but no admissible candidate → False / CannotConverge
@@ -3268,8 +3454,8 @@ func (r *Reconciler) patchRVAStatus(ctx context.Context, obj, base *v1alpha1.Rep
 
 // --- RVR ---
 
-// getRVRsSorted lists ReplicatedVolumeReplicas for the given RV name,
-// sorted by ID (deterministic, ascending).
+// getRVRsSorted lists ReplicatedVolumeReplicas from the cache for the given RV name,
+// sorted by node name and ID (deterministic, ascending).
 func (r *Reconciler) getRVRsSorted(ctx context.Context, rvName string) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	var list v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &list,

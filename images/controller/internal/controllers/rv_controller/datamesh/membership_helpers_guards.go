@@ -264,6 +264,49 @@ func guardNotAttached(_ *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 //
 // Preconditions for removing a D voter (RemoveReplica(D), ChangeReplicaType(D→...)).
 
+// removeDiskfulGuards are the guards every remove-diskful plan registers, besides
+// its voter-parity and QMR guards. DiskfulRemovalReadiness evaluates this list.
+var removeDiskfulGuards = slices.Concat(commonRemoveGuards, loseVoterGuards)
+
+// DiskfulRemovalReadiness checks the RemoveReplica(D) safety guards against the
+// current configuration without mutating inputs. Layout convergence uses the same
+// guards as dispatch, so it cannot delete an RVR whose removal is already known
+// to violate redundancy or zone quorum. The caller also checks active RVAs.
+// upToDate reports whether the replica counts as an UpToDate copy (isUpToDateDiskful).
+func DiskfulRemovalReadiness(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	name string,
+) (ready, upToDate bool, message string) {
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	gctx := p.Global()
+	for i := range gctx.allReplicas {
+		rctx := &gctx.allReplicas[i]
+		if rctx.name != name {
+			continue
+		}
+		if rctx.member == nil || rctx.member.Type != v1alpha1.DatameshMemberTypeDiskful ||
+			rctx.rvr == nil || rctx.rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
+			return false, false, "member and replica must both be Diskful"
+		}
+		upToDate = isUpToDateDiskful(rctx)
+		lastCopy := upToDate && upToDateDiskfulCount(gctx) == 1
+		// The plan builder accepts only this shape in a replica-scoped plan.
+		for _, guard := range removeDiskfulGuards {
+			result := guard.(func(*globalContext, *ReplicaContext) dmte.GuardResult)(gctx, rctx)
+			if !result.Blocked {
+				continue
+			}
+			if lastCopy && result.Message == guardGMDRPreserved(gctx, rctx).Message {
+				result.Message = "would lose the last UpToDate copy; " + result.Message
+			}
+			return false, upToDate, result.Message
+		}
+		return true, upToDate, ""
+	}
+	return false, false, "diskful replica is missing"
+}
+
 // guardVolumeAccessLocalForDemotion blocks if the member is attached and
 // volumeAccess is Local (Diskful must stay on attached node in Local mode).
 func guardVolumeAccessLocalForDemotion(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {

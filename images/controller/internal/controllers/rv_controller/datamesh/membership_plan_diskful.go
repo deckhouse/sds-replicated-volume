@@ -363,8 +363,7 @@ func registerDiskfulPlans(
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
-		Guards(commonRemoveGuards...).
-		Guards(loseVoterGuards...).
+		Guards(removeDiskfulGuards...).
 		Guards(guardVotersOdd).
 		Steps(
 			mrStep("D → D∅",
@@ -384,8 +383,7 @@ func registerDiskfulPlans(
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
-		Guards(commonRemoveGuards...).
-		Guards(loseVoterGuards...).
+		Guards(removeDiskfulGuards...).
 		Guards(guardVotersOdd, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",
@@ -412,8 +410,7 @@ func registerDiskfulPlans(
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
-		Guards(commonRemoveGuards...).
-		Guards(loseVoterGuards...).
+		Guards(removeDiskfulGuards...).
 		Guards(guardVotersEven).
 		Steps(
 			mrStep("D → D∅",
@@ -441,8 +438,7 @@ func registerDiskfulPlans(
 		Group(v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership).
 		Init(setReplicaType(v1alpha1.ReplicaTypeDiskful)).
 		DisplayName("Removing diskful replica").
-		Guards(commonRemoveGuards...).
-		Guards(loseVoterGuards...).
+		Guards(removeDiskfulGuards...).
 		Guards(guardVotersEven, guardQMRLowerNeeded).
 		Steps(
 			mgStep("qmr↓",

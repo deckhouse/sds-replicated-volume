@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -4769,12 +4770,13 @@ var _ = Describe("reconcileLayoutStatus", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		rec = NewReconciler(newClientBuilder(scheme).Build(), scheme)
+		cl := newClientBuilder(scheme).Build()
+		rec = NewReconciler(cl, scheme)
 	})
 
 	It("sets status.membershipLayout and the MembershipLayoutConverged condition", func(ctx SpecContext) {
-		// A copy too many: convergence never removes a copy, so the mismatch stays unsupported.
-		rv := layoutRV(1, 1, layoutMembers(4, 1), false) // r3 config, actual 4D+1TB → unsupported
+		// A surplus copy without UpToDate reports cannot pass the P5 redundancy guards.
+		rv := layoutRV(1, 1, layoutMembers(4, 1), false)
 		members := rv.Status.Datamesh.Members
 		outcome := rec.reconcileLayoutStatus(ctx, rv, layoutRVRs(members), nil)
 
@@ -4785,7 +4787,8 @@ var _ = Describe("reconcileLayoutStatus", func() {
 		cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+		Expect(cond.Message).To(ContainSubstring("would violate GMDR"))
 	})
 
 	It("does not flap on repeated reconciles (idempotent, no patch churn)", func(ctx SpecContext) {
@@ -4980,6 +4983,340 @@ func convergenceFixture(gmdr byte, diskful, tb int) (*v1alpha1.ReplicatedVolume,
 	rv.Status.Datamesh.Members = members
 	return rv, rvrs
 }
+
+// diskfulRemovalFixture supplies UpToDate reports for the counted copies so the
+// datamesh's removal guards can evaluate redundancy from the same inputs as P5.
+func diskfulRemovalFixture(ftt, gmdr byte, diskful, tb int) (*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica) {
+	rv, rvrs := convergenceFixture(gmdr, diskful, tb)
+	rv.Status.Configuration.FailuresToTolerate = ftt
+	rv.Status.EffectiveLayout.UpToDateVoters = int8(diskful)
+	for _, rvr := range rvrs[:diskful] {
+		rvr.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{State: v1alpha1.DiskStateUpToDate}
+	}
+	return rv, rvrs
+}
+
+var _ = Describe("P5 diskful removal", func() {
+	DescribeTable("chooses mutually exclusive convergence patterns",
+		func(ftt, gmdr byte, diskful, tb int, want layoutActionKind) {
+			rv, rvrs := diskfulRemovalFixture(ftt, gmdr, diskful, tb)
+			action, report := computeTargetLayoutAction(rv, rvrs, nil)
+			Expect(action.kind).To(Equal(want))
+			if want == layoutActionNone {
+				Expect(report.status).To(Equal(metav1.ConditionTrue))
+			} else {
+				Expect(report.status).To(Equal(metav1.ConditionFalse))
+				Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+			}
+			if want == layoutActionRemoveDiskful {
+				Expect(action.removeRVRName).To(Equal(fmt.Sprintf("rv-1-%d", diskful-1)))
+			}
+		},
+		Entry("3D to 2D", byte(0), byte(1), 3, 0, layoutActionRemoveDiskful),
+		Entry("3D to 1D", byte(0), byte(0), 3, 0, layoutActionRemoveDiskful),
+		Entry("2D to 1D", byte(0), byte(0), 2, 0, layoutActionRemoveDiskful),
+		Entry("2D+TB to 1D removes a copy first", byte(0), byte(0), 2, 1, layoutActionRemoveDiskful),
+		Entry("1D+TB to 1D finishes through P4", byte(0), byte(0), 1, 1, layoutActionRemoveTieBreaker),
+		Entry("extra manual copy at r2", byte(1), byte(0), 3, 1, layoutActionRemoveDiskful),
+		Entry("4D to r2 starts through P1", byte(1), byte(0), 4, 0, layoutActionRetypeToTieBreaker),
+		Entry("P2 supplies the missing TB", byte(1), byte(0), 2, 0, layoutActionCreateTieBreaker),
+		Entry("P3 heals a missing copy", byte(1), byte(1), 2, 0, layoutActionCreateDiskful),
+		Entry("P4 removes the extra TB", byte(1), byte(1), 3, 1, layoutActionRemoveTieBreaker),
+		Entry("matching layout", byte(0), byte(1), 2, 0, layoutActionNone),
+	)
+
+	DescribeTable("filters and orders candidates",
+		func(mutate func(*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment, want, reason string) {
+			rv, rvrs := diskfulRemovalFixture(0, 1, 4, 0)
+			rvas := mutate(rv, rvrs)
+			beforeRV := rv.DeepCopy()
+			beforeRVRs := make([]*v1alpha1.ReplicatedVolumeReplica, len(rvrs))
+			for i, rvr := range rvrs {
+				beforeRVRs[i] = rvr.DeepCopy()
+			}
+			name, refusal := selectSurplusDiskfulCandidate(rv, rvrs, rvas)
+			Expect(name).To(Equal(want))
+			if reason == "" {
+				Expect(refusal).To(BeEmpty())
+			} else {
+				Expect(refusal).To(ContainSubstring(reason))
+			}
+			Expect(rv).To(Equal(beforeRV))
+			Expect(rvrs).To(Equal(beforeRVRs))
+			// Reordering both inputs must not change selection or diagnostics.
+			slices.Reverse(rv.Status.Datamesh.Members)
+			slices.Reverse(rvrs)
+			for range 3 {
+				next, nextReason := selectSurplusDiskfulCandidate(rv, rvrs, rvas)
+				Expect(next).To(Equal(name))
+				Expect(nextReason).To(Equal(refusal))
+			}
+		},
+		Entry("lexicographically last among UpToDate copies", func(_ *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			return nil
+		}, "rv-1-3", ""),
+		Entry("non-UpToDate wins before name", func(_ *v1alpha1.ReplicatedVolume, rs []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rs[0].Status.BackingVolume.State = v1alpha1.DiskStateInconsistent
+			return nil
+		}, "rv-1-0", ""),
+		Entry("last name among copies with no UpToDate report", func(_ *v1alpha1.ReplicatedVolume, rs []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rs[0].Status.BackingVolume = nil
+			rs[1].Status.BackingVolume.State = v1alpha1.DiskStateInconsistent
+			return nil
+		}, "rv-1-1", ""),
+		Entry("LiminalDiskful is not a candidate", func(rv *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rv.Status.Datamesh.Members[3].Type = v1alpha1.DatameshMemberTypeLiminalDiskful
+			return nil
+		}, "rv-1-2", ""),
+		Entry("ShadowDiskful is not a candidate", func(rv *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rv.Status.Datamesh.Members[3].Type = v1alpha1.DatameshMemberTypeShadowDiskful
+			return nil
+		}, "rv-1-2", ""),
+		Entry("spec must still be Diskful", func(_ *v1alpha1.ReplicatedVolume, rs []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rs[3].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
+			return nil
+		}, "rv-1-2", ""),
+		Entry("member attachment excludes a copy", func(rv *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			rv.Status.Datamesh.Members[3].Attached = true
+			return nil
+		}, "rv-1-2", ""),
+		Entry("active RVA excludes a copy", func(_ *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			return []*v1alpha1.ReplicatedVolumeAttachment{{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-3"}}}
+		}, "rv-1-2", ""),
+		Entry("deleting RVA does not exclude a copy", func(_ *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			return []*v1alpha1.ReplicatedVolumeAttachment{{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: new(metav1.Now())}, Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-3"}}}
+		}, "rv-1-3", ""),
+		Entry("all attached", func(rv *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			for i := range rv.Status.Datamesh.Members {
+				rv.Status.Datamesh.Members[i].Attached = true
+			}
+			return nil
+		}, "", "replica is attached"),
+		Entry("no exact Diskful member", func(rv *v1alpha1.ReplicatedVolume, _ []*v1alpha1.ReplicatedVolumeReplica) []*v1alpha1.ReplicatedVolumeAttachment {
+			for i := range rv.Status.Datamesh.Members {
+				rv.Status.Datamesh.Members[i].Type = v1alpha1.DatameshMemberTypeLiminalDiskful
+			}
+			return nil
+		}, "", "no Diskful members"),
+	)
+
+	DescribeTable("uses the datamesh removal guards",
+		func(ftt, gmdr byte, zones []string, states []v1alpha1.DiskState, tbZone, reason string) {
+			tb := 0
+			if tbZone != "" {
+				tb = 1
+			}
+			rv, rvrs := diskfulRemovalFixture(ftt, gmdr, len(states), tb)
+			for i, state := range states {
+				rvrs[i].Status.BackingVolume.State = state
+				// Isolate the last candidate so each refusal proves that guard alone.
+				rv.Status.Datamesh.Members[i].Attached = i < len(states)-1
+			}
+			if len(zones) > 0 {
+				rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
+				for i, zone := range zones {
+					rv.Status.Datamesh.Members[i].Zone = zone
+				}
+			}
+			if tb != 0 {
+				rv.Status.Datamesh.Members[len(states)].Zone = tbZone
+			}
+			subject := rvrs[len(states)-1].Name
+			ready, _, message := datamesh.DiskfulRemovalReadiness(rv, rvrs, subject)
+			name, refusal := selectSurplusDiskfulCandidate(rv, rvrs, nil)
+			if reason == "" {
+				Expect(ready).To(BeTrue(), message)
+				Expect(name).To(Equal(subject))
+				Expect(refusal).To(BeEmpty())
+			} else {
+				Expect(ready).To(BeFalse())
+				Expect(message).To(ContainSubstring(reason))
+				Expect(name).To(BeEmpty())
+				Expect(refusal).To(ContainSubstring(message))
+			}
+		},
+		Entry("GMDR refuses the last UpToDate copy", byte(0), byte(0), nil,
+			[]v1alpha1.DiskState{v1alpha1.DiskStateInconsistent, v1alpha1.DiskStateUpToDate}, "", "last UpToDate copy"),
+		Entry("GMDR does not subtract a degraded subject", byte(0), byte(0), nil,
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateInconsistent}, "", ""),
+		Entry("GMDR preserves more than the configured minimum", byte(0), byte(1), nil,
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateInconsistent, v1alpha1.DiskStateUpToDate}, "", "would violate GMDR"),
+		Entry("FTT refuses at the intended voter count", byte(1), byte(0), nil,
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "", "would violate FTT"),
+		Entry("zone GMDR refuses concentration in one surviving zone", byte(0), byte(0), []string{"a", "a", "b"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "", "zone GMDR"),
+		Entry("zone GMDR refuses plain 3D to 2D", byte(0), byte(1), []string{"a", "b", "c"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "", "zone GMDR"),
+		Entry("zone FTT needs a surviving TB", byte(1), byte(0), []string{"a", "b", "c"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "a", "zone FTT"),
+		Entry("zone FTT uses removal, not retype arithmetic", byte(1), byte(0), []string{"a", "b", "c"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "", "zone FTT"),
+		Entry("TB in the removed subject zone preserves zone quorum", byte(1), byte(0), []string{"a", "b", "c"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate}, "c", ""),
+		Entry("degraded subject does not reduce zone GMDR", byte(1), byte(0), []string{"a", "b", "c"},
+			[]v1alpha1.DiskState{v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateUpToDate, v1alpha1.DiskStateInconsistent}, "c", ""),
+	)
+
+	DescribeTable("attributes a last-copy refusal only to the GMDR guard",
+		func(attached bool, reason string) {
+			rv, rvrs := diskfulRemovalFixture(0, 0, 2, 0)
+			rvrs[0].Status.BackingVolume.State = v1alpha1.DiskStateInconsistent
+			rv.Status.Datamesh.Members[1].Attached = attached
+			rv.Status.Configuration.VolumeAccess = v1alpha1.VolumeAccessLocal
+
+			ready, _, message := datamesh.DiskfulRemovalReadiness(rv, rvrs, rvrs[1].Name)
+			Expect(ready).To(BeFalse())
+			Expect(message).To(Equal(reason))
+		},
+		Entry("attached sole UpToDate subject reports the attachment guard", true,
+			"replica is attached, detach required first"),
+		Entry("detached sole UpToDate subject reports the last-copy GMDR refusal", false,
+			"would lose the last UpToDate copy; would violate GMDR (ADR=0, need > 0)"),
+	)
+
+	DescribeTable("reports departures without deleting a second copy",
+		func(reverted, active bool, memberType v1alpha1.DatameshMemberType) {
+			rv, rvrs := diskfulRemovalFixture(0, 1, 3, 0)
+			rvrs[0].DeletionTimestamp = new(metav1.Now()) // manual deletion, not the preferred candidate
+			rv.Status.Datamesh.Members[0].Type = memberType
+			if reverted {
+				rv.Status.Configuration.FailuresToTolerate = 1
+			}
+			rv.Status.DatameshReplicaRequests = []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{{
+				Name: rvrs[0].Name, Message: "datamesh blocked: guardFTTPreserved",
+			}}
+			if active {
+				rv.Status.DatameshTransitions = []v1alpha1.ReplicatedVolumeDatameshTransition{{
+					Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeRemoveReplica,
+					ReplicaType: v1alpha1.ReplicaTypeDiskful, ReplicaName: rvrs[0].Name,
+				}}
+			}
+			for range 2 {
+				action, report := computeTargetLayoutAction(rv, rvrs, nil)
+				Expect(action.kind).To(Equal(layoutActionNone))
+				Expect(report.status).To(Equal(metav1.ConditionFalse))
+				Expect(report.message).To(ContainSubstring("rv-1-0"))
+				Expect(report.message).To(ContainSubstring("datamesh blocked: guardFTTPreserved"))
+				if reverted {
+					Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+					Expect(report.message).To(ContainSubstring("deletion is not rolled back automatically"))
+				} else {
+					Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+				}
+				layout := computeLayoutReport(rv, rvrs, nil)
+				Expect(layout.membershipLayout).To(Equal(new("3D")))
+				Expect(layout.converged).To(Equal(report))
+			}
+		},
+		Entry("manual deletion counts until departure", false, false, v1alpha1.DatameshMemberTypeDiskful),
+		Entry("active removal still names its subject", false, true, v1alpha1.DatameshMemberTypeDiskful),
+		Entry("liminal removal still counts", false, true, v1alpha1.DatameshMemberTypeLiminalDiskful),
+		Entry("reverted configuration cannot cancel deletion", true, false, v1alpha1.DatameshMemberTypeDiskful),
+		Entry("reverted configuration during removal", true, true, v1alpha1.DatameshMemberTypeDiskful),
+	)
+
+	It("waits for an orphan before choosing another copy", func() {
+		rv, rvrs := diskfulRemovalFixture(0, 1, 4, 0)
+		action, report := computeTargetLayoutAction(rv, rvrs[1:], nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+		Expect(report.message).To(ContainSubstring("rv-1-0 has no replica object"))
+		Expect(report.message).To(ContainSubstring("force-remove"))
+	})
+
+	It("reports attached-only as CannotConverge", func() {
+		rv, rvrs := diskfulRemovalFixture(0, 1, 3, 0)
+		for i := range rv.Status.Datamesh.Members {
+			rv.Status.Datamesh.Members[i].Attached = true
+		}
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+		Expect(report.message).To(ContainSubstring("replica is attached"))
+	})
+
+	It("refuses to remove the last UpToDate copy with an actionable report", func() {
+		rv, rvrs := diskfulRemovalFixture(0, 0, 2, 0)
+		rvrs[0].Status.BackingVolume.State = v1alpha1.DiskStateInconsistent
+		rv.Status.Datamesh.Members[0].Attached = true
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+		Expect(report.message).To(ContainSubstring("rv-1-1: would lose the last UpToDate copy"))
+	})
+
+	DescribeTable("recovers a pending deletion under the actual datamesh guards",
+		func(addReplacement bool) {
+			rv, rvrs := diskfulRemovalFixture(1, 1, 3, 0)
+			rvrs[0].DeletionTimestamp = new(metav1.Now())
+			ready, _, message := datamesh.DiskfulRemovalReadiness(rv, rvrs, rvrs[0].Name)
+			Expect(ready).To(BeFalse())
+			Expect(message).To(ContainSubstring("would violate FTT"))
+			if addReplacement {
+				// The added copy has joined; the already pending departure remains the only removal.
+				rv.Status.Datamesh.Members = append(rv.Status.Datamesh.Members, v1alpha1.DatameshMember{Name: "rv-1-3", Type: v1alpha1.DatameshMemberTypeDiskful})
+				rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{Name: "rv-1-3"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeDiskful},
+				})
+			} else {
+				rv.Status.Configuration.FailuresToTolerate = 0
+			}
+			ready, _, message = datamesh.DiskfulRemovalReadiness(rv, rvrs, rvrs[0].Name)
+			Expect(ready).To(BeTrue(), message)
+			action, report := computeTargetLayoutAction(rv, rvrs, nil)
+			Expect(action.kind).To(Equal(layoutActionNone))
+			Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+			Expect(report.message).To(ContainSubstring("rv-1-0 is terminating"))
+		},
+		Entry("restore the smaller configuration", false),
+		Entry("join a replacement under the retained larger configuration", true),
+	)
+
+	It("shrinks 3D+TB to 1D one departure at a time, then removes the TB", func() {
+		rv, rvrs := diskfulRemovalFixture(0, 0, 3, 1)
+		for _, name := range []string{"rv-1-2", "rv-1-1", "rv-1-3"} {
+			action, _ := computeTargetLayoutAction(rv, rvrs, nil)
+			Expect(action.removeRVRName).To(Equal(name))
+			if name == "rv-1-3" {
+				Expect(action.kind).To(Equal(layoutActionRemoveTieBreaker))
+			} else {
+				Expect(action.kind).To(Equal(layoutActionRemoveDiskful))
+			}
+			findRVRByName(rvrs, name).DeletionTimestamp = new(metav1.Now())
+			action, report := computeTargetLayoutAction(rv, rvrs, nil)
+			Expect(action.kind).To(Equal(layoutActionNone))
+			Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
+			// Only the datamesh leaving completes the removal, not the deletion timestamp.
+			rv.Status.Datamesh.Members = slices.DeleteFunc(rv.Status.Datamesh.Members, func(m v1alpha1.DatameshMember) bool { return m.Name == name })
+			rvrs = slices.DeleteFunc(rvrs, func(rvr *v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Name == name })
+		}
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.status).To(Equal(metav1.ConditionTrue))
+		Expect(report.message).To(Equal("layout converged: 1D"))
+	})
+
+	It("keeps TB replacement ahead of a matching-count diskful departure", func() {
+		rv, rvrs := diskfulRemovalFixture(1, 0, 2, 1)
+		rvrs[0].DeletionTimestamp = new(metav1.Now())
+		rvrs[2].DeletionTimestamp = new(metav1.Now())
+		action, _ := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionCreateTieBreaker))
+	})
+
+	It("leaves a genuine deficit and a pending copy to P3", func() {
+		rv, rvrs := diskfulRemovalFixture(1, 1, 2, 0)
+		rvrs[0].DeletionTimestamp = new(metav1.Now())
+		action, _ := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionCreateDiskful))
+		rvrs = append(rvrs, &v1alpha1.ReplicatedVolumeReplica{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-2"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{Type: v1alpha1.ReplicaTypeDiskful}})
+		action, report := computeTargetLayoutAction(rv, rvrs, nil)
+		Expect(action.kind).To(Equal(layoutActionNone))
+		Expect(report.message).To(ContainSubstring("diskful replica creation pending"))
+	})
+})
 
 // promotionLayoutFixture has the current connected reports required to reserve
 // the sole tie-breaker for the three-node conversion.
@@ -5210,16 +5547,12 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("tie-breaker creation pending: have 2D, want 2D+1TB"))
 	})
 
-	It("reports TransitionUnsupported outside the whitelist (4D+1TB at an r2 config, a copy too many)", func() {
-		// The boundary after P4: a copy surplus is the one mismatch left that no pattern touches.
-		// P1 needs a tie-breaker deficit (there is none), P4 needs the copies to match, and a copy
-		// is never deleted — so this stays the layout that asks for a human.
-		rv, rvrs := convergenceFixture(0, 4, 1) // r2 config wants 2D+1TB, actual 4D+1TB
+	It("P5: trims an extra copy added by hand (4D+1TB at an r2 config)", func() {
+		rv, rvrs := diskfulRemovalFixture(1, 0, 4, 1)
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
-		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 4D+1TB, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+		Expect(action.kind).To(Equal(layoutActionRemoveDiskful))
+		Expect(action.removeRVRName).To(Equal("rv-1-3"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	// ── №9: the scheduler's verdict on a pending tie-breaker ──────────────────
@@ -5489,8 +5822,10 @@ var _ = Describe("computeTargetLayoutAction", func() {
 
 		action, report := computeTargetLayoutAction(rv, rvrs, nil)
 		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.status).To(Equal(metav1.ConditionTrue))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverged))
+		Expect(report.status).To(Equal(metav1.ConditionFalse))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonCannotConverge))
+		Expect(report.message).To(ContainSubstring("rv-1-0"))
+		Expect(report.message).To(ContainSubstring("deletion is not rolled back automatically"))
 	})
 
 	It("replacement: an active layout-changing transition still wins over the deficit", func() {
@@ -5547,20 +5882,17 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		Expect(report.message).To(Equal("creating diskful replica: have 2D+1TB, want 3D"))
 	})
 
-	It("4D at an r2 config: plans exactly one retype, then reports Unsupported at 3D+1TB", func() {
-		// One retype fills the single tie-breaker deficit (never removes the extra diskful voters).
+	It("4D at an r2 config: plans one P1 retype, then a P5 removal at 3D+1TB", func() {
+		// One retype fills the single tie-breaker deficit; P5 then trims the extra copy.
 		rv4, rvrs4 := convergenceFixture(0, 4, 0)
 		action, _ := computeTargetLayoutAction(rv4, rvrs4, nil)
 		Expect(action.kind).To(Equal(layoutActionRetypeToTieBreaker))
 
-		// After the retype resolves the datamesh is 3D+1TB — still not the intended 2D+1TB, but
-		// no whitelisted transition applies, so it is reported honestly.
-		rv3, rvrs3 := convergenceFixture(0, 3, 1)
+		rv3, rvrs3 := diskfulRemovalFixture(1, 0, 3, 1)
 		action, report := computeTargetLayoutAction(rv3, rvrs3, nil)
-		Expect(action.kind).To(Equal(layoutActionNone))
-		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonTransitionUnsupported))
-		Expect(report.message).To(Equal(
-			"layout mismatch: have 3D+1TB, want 2D+1TB; automatic transition is not supported, manual intervention required"))
+		Expect(action.kind).To(Equal(layoutActionRemoveDiskful))
+		Expect(action.removeRVRName).To(Equal("rv-1-2"))
+		Expect(report.reason).To(Equal(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging))
 	})
 
 	// ── P3 heal: diskful deficit (self-heal) ──────────────────────────────────
@@ -5667,8 +5999,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 		// The vestibule (member Access, replica Diskful) is the legal first step of an
 		// add-diskful plan that raises quorum. Counting in flight by MEMBERSHIP ("the replica is
 		// not a member") would miss it, the layout would not count it either, and convergence
-		// would create a copy too many — an overshoot that ends in a permanent
-		// TransitionUnsupported plus one full resync wasted.
+		// would create a copy too many, requiring P5 removal after an unnecessary resync.
 		rv, rvrs := convergenceFixture(1, 3, 0)
 		rv.Status.Datamesh.Members[2].Type = v1alpha1.DatameshMemberTypeAccess
 
@@ -5749,9 +6080,8 @@ var _ = Describe("computeTargetLayoutAction", func() {
 	It("never reports Converged while an unplaceable copy is in flight (flip-flop)", func() {
 		// The configuration was widened to r3, the copy was created, nothing could host it, and
 		// the configuration was switched back to r2. The counts now match by accident. Reporting
-		// Converged here is unrecoverable: when a node finally appears the copy joins, the volume
-		// overshoots to 3D+1TB, no pattern applies, and it is terminal forever — with a full
-		// resync spent on the way.
+		// Converged here would hide pending work: when a node appears the copy joins,
+		// overshoots to 3D+1TB and requires P5 removal after an unnecessary resync.
 		rv, rvrs := convergenceFixture(0, 2, 1) // r2 config, actual 2D+1TB
 		rvrs = pendingDiskfulRVR(rvrs, 3, scheduledCond(metav1.ConditionFalse,
 			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed,
@@ -6037,7 +6367,7 @@ var _ = Describe("computeTargetLayoutAction", func() {
 // decision (a requested retype to diskful) covers the same states for a member-bearing replica and
 // returns first, so at the seam the two formulas — "the layout does not count it" and the leaking
 // "it is not a member" — are indistinguishable. Without this spec, dropping either guard is silent,
-// and the failure mode of dropping both is a copy too many and a permanent TransitionUnsupported.
+// and dropping both creates a surplus copy that P5 must then remove after an unnecessary resync.
 var _ = Describe("countPendingDiskfulCreations", func() {
 	// inFlightRV builds a volume whose single member (rvr-0) has the given type, plus a matching
 	// Diskful RVR — the shape every in-flight question reduces to.
@@ -6159,7 +6489,8 @@ var _ = Describe("reconcileLayoutConvergence", func() {
 		if len(extra) > 0 {
 			b = b.WithInterceptorFuncs(extra[0])
 		}
-		rec := NewReconciler(b.Build(), scheme)
+		cl := b.Build()
+		rec := NewReconciler(cl, scheme)
 		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
 		Expect(err).NotTo(HaveOccurred())
 		return rec, fresh
@@ -6305,8 +6636,8 @@ var _ = Describe("reconcileLayoutConvergence", func() {
 		Expect(live).To(Equal(1))
 	})
 
-	It("takes no action for a mismatch outside the whitelist (4D+1TB at an r2 config)", func(ctx SpecContext) {
-		// A copy too many: convergence never removes a copy, so nothing is touched.
+	It("P5: takes no action when no UpToDate copy can survive removal", func(ctx SpecContext) {
+		// The members have no UpToDate reports, so GMDR blocks every removal candidate.
 		rv, rvrs := convergenceFixture(0, 4, 1) // r2 config wants 2D+1TB, actual 4D+1TB
 		rec, fresh := buildRec(ctx, rvrs)
 
@@ -6397,6 +6728,144 @@ var _ = Describe("reconcileLayoutConvergence", func() {
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(outcome.ShouldReturn()).To(BeFalse()) // ContinueAndRequeue
 		Expect(outcome.ToCtrl()).To(Requeue())
+	})
+
+	DescribeTable("P5: normal deletion preserves finalizers and handles API races",
+		func(ctx SpecContext, result string) {
+			rv, rvrs := diskfulRemovalFixture(0, 0, 3, 1)
+			for _, rvr := range rvrs {
+				rvr.UID = "current-uid"
+			}
+			calls := 0
+			rec, fresh := buildRec(ctx, rvrs, interceptor.Funcs{
+				Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					calls++
+					Expect(obj.GetName()).To(Equal("rv-1-2"))
+					Expect(obj.GetFinalizers()).To(Equal([]string{v1alpha1.RVControllerFinalizer}))
+					options := client.DeleteOptions{}
+					options.ApplyOptions(opts)
+					Expect(options.Preconditions).NotTo(BeNil())
+					Expect(options.Preconditions.UID).NotTo(BeNil())
+					Expect(*options.Preconditions.UID).To(Equal(obj.GetUID()))
+					resource := schema.GroupResource{Group: v1alpha1.SchemeGroupVersion.Group, Resource: "replicatedvolumereplicas"}
+					switch result {
+					case "vanished":
+						return apierrors.NewNotFound(resource, obj.GetName())
+					case "conflict":
+						var stored v1alpha1.ReplicatedVolumeReplica
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(obj), &stored)).To(Succeed())
+						Expect(*options.Preconditions.UID).NotTo(Equal(stored.UID))
+						return apierrors.NewConflict(resource, obj.GetName(), errors.New("UID precondition failed"))
+					case "failure":
+						return errors.New("delete failed")
+					default:
+						return cl.Delete(ctx, obj, opts...)
+					}
+				},
+			})
+			if result == "conflict" {
+				findRVRByName(fresh, "rv-1-2").UID = "old-uid"
+			}
+			outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+			Expect(calls).To(Equal(1))
+			if result == "failure" {
+				Expect(outcome.Error()).To(MatchError(ContainSubstring("deleting surplus Diskful RVR rv-1-2")))
+				return
+			}
+			Expect(outcome.Error()).NotTo(HaveOccurred())
+			Expect(outcome.ShouldReturn()).To(BeFalse())
+			Expect(outcome.ToCtrl()).To(Requeue())
+			var list v1alpha1.ReplicatedVolumeReplicaList
+			Expect(rec.cl.List(ctx, &list)).To(Succeed())
+			Expect(list.Items).To(HaveLen(4))
+			for _, rvr := range list.Items {
+				Expect(rvr.Finalizers).To(Equal([]string{v1alpha1.RVControllerFinalizer}))
+				Expect(rvr.DeletionTimestamp != nil).To(Equal(result == "success" && rvr.Name == "rv-1-2"))
+			}
+			if result == "success" || result == "vanished" {
+				Expect(findRVRByName(fresh, "rv-1-2").DeletionTimestamp).NotTo(BeNil())
+				// Reports in the acting pass already see the locally stamped deletion.
+				Expect(rec.reconcileLayoutStatus(ctx, rv, fresh, nil).Error()).NotTo(HaveOccurred())
+				cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Message).To(ContainSubstring("rv-1-2 is terminating"))
+				Expect(rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil).Error()).NotTo(HaveOccurred())
+				Expect(calls).To(Equal(1), "no second deletion while the chosen copy remains a member")
+			} else {
+				Expect(findRVRByName(fresh, "rv-1-2").DeletionTimestamp).To(BeNil())
+			}
+		},
+		Entry("delete issued", "success"),
+		Entry("candidate vanished from the API server", "vanished"),
+		Entry("UID conflict protects a newer object", "conflict"),
+		Entry("unexpected delete failure is reported", "failure"),
+	)
+
+	DescribeTable("P5: checks cached member departures including manual deletion",
+		func(ctx SpecContext, subject int, vanished, blocks bool) {
+			rv, stale := diskfulRemovalFixture(0, 0, 3, 1)
+			if vanished {
+				stale[subject].Finalizers = nil
+			}
+			rec, fresh := buildRec(ctx, stale)
+			// The operator's deletion is visible at the API server but not in fresh.
+			Expect(rec.cl.Delete(ctx, stale[subject])).To(Succeed())
+			Expect(fresh[subject].DeletionTimestamp).To(BeNil())
+			// Manual deletes are protected once observed by the informer cache.
+			var list v1alpha1.ReplicatedVolumeReplicaList
+			Expect(rec.cl.List(ctx, &list)).To(Succeed())
+			fresh = nil
+			for i := range list.Items {
+				fresh = append(fresh, &list.Items[i])
+			}
+			var deleted []string
+			rec.cl = interceptor.NewClient(rec.cl.(client.WithWatch), interceptor.Funcs{
+				Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					deleted = append(deleted, obj.GetName())
+					return cl.Delete(ctx, obj, opts...)
+				},
+			})
+			outcome := rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil)
+			Expect(outcome.Error()).NotTo(HaveOccurred())
+			Expect(outcome.ShouldReturn()).To(BeFalse())
+			if !blocks {
+				Expect(outcome.ToCtrl()).To(Requeue())
+			}
+			if blocks {
+				Expect(deleted).To(BeEmpty())
+			} else {
+				Expect(deleted).To(Equal([]string{"rv-1-2"}))
+			}
+			Expect(rec.reconcileLayoutStatus(ctx, rv, fresh, nil).Error()).NotTo(HaveOccurred())
+			cond := obju.GetStatusCondition(rv, v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedType)
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(string(v1alpha1.ReplicatedVolumeCondMembershipLayoutConvergedReasonConverging)))
+			if blocks {
+				Expect(cond.Message).To(ContainSubstring(stale[subject].Name))
+				if vanished {
+					Expect(cond.Message).To(ContainSubstring("has no replica object"))
+				} else {
+					Expect(cond.Message).To(ContainSubstring("is terminating"))
+				}
+			}
+		},
+		Entry("another diskful member was deleted by hand", 0, false, true),
+		Entry("the candidate was deleted by hand", 2, false, true),
+		Entry("a diskful RVR is already gone while membership is stale", 0, true, true),
+		Entry("a leaving tie-breaker does not block diskful removal", 3, false, false),
+	)
+
+	It("P5: removes a surplus copy without any additional reads", func(ctx SpecContext) {
+		rv, rvrs := diskfulRemovalFixture(0, 0, 2, 0)
+		rec, fresh := buildRec(ctx, rvrs)
+		rec.cl = interceptor.NewClient(rec.cl.(client.WithWatch), interceptor.Funcs{
+			List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+				Fail("layout convergence must use the already loaded cache snapshot")
+				return nil
+			},
+		})
+		Expect(rec.reconcileLayoutConvergence(ctx, rv, &fresh, nil).Error()).NotTo(HaveOccurred())
+		Expect(findRVRByName(fresh, "rv-1-1").DeletionTimestamp).NotTo(BeNil())
 	})
 
 	// ── P4: the tie-breaker removal side ─────────────────────────────────────

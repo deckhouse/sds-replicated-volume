@@ -25,9 +25,8 @@ The controller manages the full lifecycle of a datamesh:
   backing volume growth and DRBD resize across all diskful members.
 - **Failure recovery** — when a node is permanently lost (removed from
   Kubernetes), the controller automatically force-detaches and force-removes
-  the dead member. Re-creating what was lost is automatic for TieBreakers
-  only; a lost Diskful replica is replaced manually (see
-  [Current limitations](#current-limitations)).
+  the dead member. Layout convergence re-creates missing Diskful and TieBreaker
+  members; placement remains subject to scheduling and resync limits.
 
 All operations are performed as structured, multi-step **transitions** that
 maintain safety guarantees at every intermediate step. See
@@ -38,76 +37,38 @@ see [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §6.
 
 ### Current limitations
 
-The following capabilities are described in this documentation but **not yet
-implemented**. They are planned for the near term:
+- **Replacing a diskful member that is still alive** (lost disk or storage migration) needs a
+  coordinated replacement workflow. Adding a surplus copy by hand now lets P5 trim it automatically,
+  preferring a non-UpToDate copy, so “add then delete the old copy” is not an ordinary replacement
+  recipe. The datamesh transition sequences in [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md)
+  describe mechanics, not a replacement-intent reservation in the convergence controller.
+- **EventuallyLocal VolumeAccess** is not implemented. Its policy must promote a local Access
+  member and choose which existing diskful member to replace.
+- **Downsize constraints:** a target of one copy requires `topology: Ignored`; TransZonal `3D→2D`
+  needs a zone configuration change and is outside automatic downsize scope. Removing an
+  unreachable member waits for the node or a manual `ForceLeave` under the unreachable/detached
+  guards. Layout convergence never forces finalizer removal.
 
-- **Removing a COPY during normal operation.** Convergence never deletes a copy
-  or its data, so two scenarios still need a manual step: lowering the copy
-  count (FTT or GMDR down) and replacing a copy whose member is still alive (a
-  lost disk, or a storage pool migration). To trigger the desired operation it
-  is sufficient to create a replica with the target type, change the type of an
-  existing one, or delete the surplus one — the scheduler will assign the node
-  and storage, and the rest (datamesh membership, DRBD configuration, data
-  synchronization) happens fully automatically.
+### Automatic layout convergence after formation
 
-  A surplus **TieBreaker** is no longer one of them: convergence removes it
-  itself (see below), which is what makes the upsize r2→r3 a single edit of the
-  storage class.
+`rv_controller` creates missing Diskful members (P3), missing or replacement TieBreakers (P2),
+retypes a Diskful to fill a TB deficit (P1), and promotes the existing TB in place for healthy
+R2→R3. Creations are scheduled with normal placement and resync limits, one diskful at a time.
+Access replicas for attachments have their own lifecycle.
 
-  What **is** created automatically after formation:
+P4 removes surplus TieBreakers once D counts match and all counted copies are UpToDate.
+P5 removes surplus Diskful members when `actualD > intendedD && actualTB >= intendedTB`, using
+normal RVR deletion. `DiskfulRemovalReadiness` shares the datamesh's attachment, Local-access,
+GMDR, FTT and TransZonal zone guards with preselection. Surviving UpToDate copies must exceed
+target GMDR (a degraded subject is not subtracted); voter count must exceed the intended count.
+P5 prefers non-UpToDate copies, then the lexicographically last name, and excludes active RVAs.
+It waits for an existing deletion or orphan cleanup before selecting another copy.
 
-  - **Access** replicas for attachment (§9) — created on a node that requests
-    an attachment and has no replica yet, and deleted again once they become
-    unused (no active RVA) or redundant (another member on the same node).
-  - **TieBreaker** replicas, by the layout convergence loop in `rv_controller`:
-    a missing TieBreaker is created whenever the diskful count already matches
-    the intended layout (e.g. a TieBreaker whose RVR is already gone, or an
-    adopted volume that entered normal operation at 2D under an r2
-    configuration), and a TieBreaker whose RVR is being deleted gets its
-    replacement created while the old one is still working (strict
-    create-first, see §8).
-  - **Diskful** replicas, by the same loop — the heal. A copy missing from the
-    membership is re-created with no manual step, whatever removed the member:
-    a graceful Leave, a ForceRemoveReplica, a manual ForceLeave, or the
-    automatic cleanup of an orphan. The replica is created without a node and
-    without storage, the scheduler places it (throttled by the resync-slot
-    limiter) and the add-diskful plan joins it (§6). This covers failure
-    recovery and every layout change that needs more diskful voters, the upsize
-    r2→r3 included. A copy is
-    added one at a time, so a deficit of two is closed over two passes; while
-    one copy is on its way in, no second one is created.
-
-  What **is** removed automatically:
-
-  - **TieBreaker** replicas the configuration no longer asks for, by the same
-    loop. When the copies match the intended layout and a TieBreaker is left
-    over — the second half of the upsize r2→r3, or a second TieBreaker left
-    behind by manual operations — one TieBreaker replica is deleted and leaves
-    through the ordinary `RemoveReplica(TB)` plan under its usual guards. It
-    waits until every counted copy is UpToDate: the quorum arithmetic alone
-    would release the witness as soon as the new voter joins, long before its
-    resync ends. A TieBreaker carries no data, and the removal is reversible —
-    the loop creates one back the moment the configuration asks for it again.
-
-  Convergence also **retypes** one Diskful into the missing TieBreaker on the
-  r3→r2 path (3D → 2D+1TB) — a type change of an existing replica, not a new
-  one. It never deletes a copy or its data; a layout mismatch outside these
-  cases — in practice, a copy too many — is reported as
-  `MembershipLayoutConverged=False/TransitionUnsupported` and waits for manual
-  intervention. For the full decision order and the reported reasons, see the
-  `rv_controller` README, "Layout convergence".
-
-- **EventuallyLocal VolumeAccess mode.** The EventuallyLocal mode (which
-  automatically migrates a Diskful replica to the node where the volume is
-  attached) is not yet implemented. All underlying mechanics are fully
-  ready — the only missing piece is the logic that changes the attached
-  Access replica's type to Diskful (and removes one of the old Diskful
-  replicas). The datamesh transition engine, scheduling, and data
-  synchronization handle the rest.
-
-All other operations described in this documentation — transitions,
-preconditions, quorum management, attachment, network repair — are fully
-implemented and operational.
+A pending deletion at matching D counts is `MembershipLayoutConverged=False/CannotConverge`,
+with the replica name and datamesh blocked message: reverting the configuration does not cancel
+Kubernetes deletion. Restore the smaller configuration, or add a replacement while that specific
+deletion is pending and let the guards release it. See the full constraints and recovery recipe
+in [Layout convergence](../README.md#layout-convergence-reconcilelayoutconvergence).
 
 ---
 
@@ -665,21 +626,19 @@ partially-created layouts with inconsistent quorum settings.
 After formation, configuration changes are accepted and the controller starts
 transitioning to the new layout. Specifically:
 
-- **FTT / GMDR changes** trigger a layout transition (§8). The transition
-  follows the edge-by-edge path through the layout graph, maintaining safety
-  at every intermediate step. Steps that need an additional **Diskful** voter
-  have it created by convergence, as long as the target layout does not also
-  leave a surplus TieBreaker behind (see
-  [Current limitations](#current-limitations)); a missing TieBreaker is created
-  by convergence too, and the r3→r2 step retypes a Diskful into it.
+- **FTT / GMDR changes** drive the whitelisted layout convergence patterns (§8).
+  Missing copies are created by P3, surplus copies removed by P5, and missing/surplus
+  TieBreakers handled by P2/P4. R3→R2 retypes a Diskful into the missing TB; healthy
+  R2→R3 promotes the existing TB in place. All removal decisions remain subject to
+  the new configuration's redundancy and zone guards.
 - **Storage pool changes** are accepted. New replicas are created on the new
   pool. Existing replicas remain on their current pool
   (`SatisfyEligibleNodes` will report the mismatch). Full migration of
   existing replicas between pools is not yet implemented.
 - **Topology changes** are accepted: the new zone requirements apply to every
   placement decision from that moment on (scheduling of new replicas, zone
-  guards). Redistributing the **existing** Diskful replicas across zones needs
-  new Diskful replicas and therefore follows the same manual path (see
+  guards). Redistributing the **existing** Diskful replicas across zones requires
+  a coordinated replacement workflow that accounts for P5 trimming surplus copies (see
   [Current limitations](#current-limitations) and
   [LAYOUTS_PROCEDURES.md](LAYOUTS_PROCEDURES.md) §5).
 - **VolumeAccess changes** affect future attachment decisions and new replica

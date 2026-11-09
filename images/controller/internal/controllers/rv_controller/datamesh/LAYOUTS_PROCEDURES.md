@@ -40,6 +40,12 @@ A replacement = **add** new D (VotingMembership), then **remove** old D
 (VotingMembership). These two transitions execute sequentially
 (VotingMembership is serialized — see [TRANSITIONS.md](TRANSITIONS.md) §11).
 
+These are **datamesh transition sequences**, not an ordinary manual replacement recipe under
+active layout convergence. P5 now trims surplus Diskful copies automatically and prefers a
+non-UpToDate copy, which can be the new replica. A replacement workflow must coordinate its
+intent before adding the copy; normal convergence has no replacement reservation. For recovery
+from an already pending diskful deletion, see the [RV controller recovery recipe](../README.md#diskful-deletion-after-a-configuration-reversal).
+
 ### Vestibule
 
 When adding a voter to odd D (making it even), q must be raised atomically
@@ -740,9 +746,8 @@ going missing, not by what removed it, so a graceful Leave, a
 ForceRemoveReplica, a manual ForceLeave and the orphan cleanup above all lead
 to the same recovery.
 
-The exception is a layout whose restoration would leave a surplus TieBreaker
-behind (see [README.md](README.md), "Current limitations"), and the case where
-the copy cannot be placed at all: the volume then reports
+P4 removes any surplus TieBreaker after the recovered copies synchronize.
+If the missing copy cannot be placed, the volume reports
 `MembershipLayoutConverged=False/CannotConverge` with the scheduler's own
 summary, and it needs a node before it can heal.
 

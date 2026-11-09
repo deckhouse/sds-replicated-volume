@@ -31,14 +31,14 @@
         plk_grouped_by__d8_replicated_volume_layout: "D8ReplicatedVolumeLayout,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: ReplicatedVolume runs with a degraded membership layout
         description: |
-          The ReplicatedVolume `{{ $labels.name }}` runs with a layout that does not match its configuration, and the control plane will not repair it on its own (reason `{{ $labels.reason }}`).
+          The ReplicatedVolume `{{ $labels.name }}` has not converged on its configuration and needs intervention before automatic convergence can finish (reason `{{ $labels.reason }}`).
 
           The volume keeps serving I/O: after a replica is lost, the quorum is lowered automatically. A volume configured for two diskful replicas is therefore left with a **single copy of the data**, so the next failure of that copy means downtime and possibly data loss. This alert fires only for the layouts the control plane will not fix on its own — a volume that is re-creating a lost replica by itself reports `Converging` and does not fire here.
 
           Reasons:
 
-          - `TransitionUnsupported` — the actual layout differs from the intended one and no automatic transition covers this mismatch. The control plane never removes a replica, so this is the reason for a layout with **too many** replicas: an excess diskful replica, or a tie-breaker the configuration no longer asks for. Raising `replication` from r2 to r3 lands here too, because the volume's tie-breaker becomes redundant: remove it by hand and the missing third copy is then added automatically.
-          - `CannotConverge` — an automatic transition does apply, but no admissible candidate is available: most often there is no eligible node left to host the missing replica, or not enough capacity in its storage pool. The condition message carries the scheduler's own summary.
+          - `TransitionUnsupported` — no whitelisted automatic transition covers the mismatch. Surplus diskful replicas and tie-breakers are covered by P5/P4; healthy r2→r3 promotes the tie-breaker in place.
+          - `CannotConverge` — placement failed, no safe removal/retype candidate exists, or a diskful deletion is still pending at matching diskful counts after a configuration reversal or manual deletion. The message identifies the scheduler failure, attachment, redundancy/zone guard, or terminating replica.
 
           The alert compares the actual layout against the one intended by the volume configuration, so a volume that is configured to run on a single replica reports `Converged` and never fires here. A volume under `spec.maintenance` does not fire either: its layout convergence is frozen while reconciliation is paused.
 
@@ -50,7 +50,7 @@
              kubectl get rv {{ $labels.name }} -o wide
              ```
 
-          2. Read the exact arithmetic of the mismatch (`layout mismatch: have ..., want ...`) from the `MembershipLayoutConverged` condition:
+          2. Read the layout progress and any blocking guard from the `MembershipLayoutConverged` condition:
 
              ```shell
              kubectl get rv {{ $labels.name }} -o jsonpath='{range .status.conditions[?(@.type=="MembershipLayoutConverged")]}{.status}/{.reason}: {.message}{"\n"}{end}'
@@ -62,12 +62,8 @@
              kubectl get rvr --field-selector=spec.replicatedVolumeName={{ $labels.name }} -o wide
              ```
 
-          4. If the reason is `CannotConverge`, the replica the volume needs already exists and is waiting for somewhere to live: the control plane created it and the scheduler cannot place it. Read the summary from the condition message above, then make room — bring an eligible node back, add one, or free capacity in the storage pool. No object has to be created by hand; the replica is placed as soon as a candidate appears.
+          4. For a placement failure, make room according to the scheduler's message: restore or add an eligible node, or free pool capacity. The pending replica is placed automatically. For a removal refusal, resolve the named attachment or redundancy/zone constraint; do not delete a second copy.
 
-          5. If the volume has more replicas than intended (`have 3D, want 2D+1TB` and similar), or carries a tie-breaker its configuration no longer asks for (`have 2D+1TB, want 3D`), delete the surplus replica by hand — for a diskful one, pick a replica that is not attached and is not the only up-to-date copy:
-
-             ```shell
-             kubectl delete rvr <replica-name>
-             ```
+          5. Surplus copies are trimmed automatically under the datamesh guards. A terminating diskful replica still counts until it leaves. If counts match because the configuration was reverted, deletion is not rolled back: restore the smaller configuration and let the Leave finish, or add a replacement while that deletion is already pending and let it join under the guards. The existing departure prevents a second automatic removal. An unreachable replica needs its node back or an explicit manual ForceLeave under the unreachable/detached guards. Do not use “add then delete” as an ordinary replacement recipe: P5 may trim the new copy first.
 
           6. Watch the condition go back to `True`/`Converged`; the alert resolves once the layout matches the configuration again. If the layout does not converge, or the reason is `CannotConverge` and no node can be freed, contact tech support.

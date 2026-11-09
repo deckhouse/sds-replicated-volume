@@ -171,7 +171,8 @@ var _ = Describe("reconcileLayoutConvergence: CEL validity of the retype patch",
 		for _, r := range rvrs {
 			objs = append(objs, r)
 		}
-		rec := NewReconciler(newClientBuilder(scheme).WithObjects(objs...).Build(), scheme)
+		cl := newClientBuilder(scheme).WithObjects(objs...).Build()
+		rec := NewReconciler(cl, scheme)
 		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
 		Expect(err).NotTo(HaveOccurred())
 
@@ -209,7 +210,8 @@ var _ = Describe("reconcileLayoutConvergence: CEL validity of the retype patch",
 		for _, r := range rvrs {
 			objs = append(objs, r)
 		}
-		rec := NewReconciler(newClientBuilder(scheme).WithObjects(objs...).Build(), scheme)
+		cl := newClientBuilder(scheme).WithObjects(objs...).Build()
+		rec := NewReconciler(cl, scheme)
 		fresh, err := rec.getRVRsSorted(ctx, "rv-1")
 		Expect(err).NotTo(HaveOccurred())
 
