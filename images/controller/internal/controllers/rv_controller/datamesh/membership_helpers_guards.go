@@ -883,7 +883,7 @@ func guardShadowDiskfulSupported(gctx *globalContext, _ *ReplicaContext) dmte.Gu
 	if !gctx.features.ShadowDiskful {
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: "ShadowDiskful not supported (requires Flant DRBD extension, non-voting disk option)",
+			Message: "ShadowDiskful not supported: not all agents have reported support",
 		}
 	}
 	return dmte.GuardResult{}

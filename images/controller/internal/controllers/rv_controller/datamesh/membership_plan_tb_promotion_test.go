@@ -58,6 +58,24 @@ func promotionFixture() (*v1alpha1.ReplicatedVolume, []*v1alpha1.ReplicatedVolum
 }
 
 var _ = Describe("in-place TB promotion", func() {
+	It("uses tb-to-d/v2 and completes R2 to R3 with ShadowDiskful enabled", func() {
+		rv, rvrs := promotionFixture()
+		rsp := mkRSP("node-0", "node-1", "node-2")
+		features := FeatureFlags{ShadowDiskful: true}
+		ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, features)
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("tb-to-d/v2"))
+		simulateWithPeersAndResync(rv, rvrs)
+		runSettleLoop(rv, rsp, rvrs, nil, features, simulateWithPeersAndResync, nil)
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.Members).To(HaveLen(3))
+		for _, member := range rv.Status.Datamesh.Members {
+			Expect(member.Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		}
+		Expect(rv.Status.Datamesh.QuorumMinimumRedundancy).To(Equal(byte(2)))
+		Expect(rv.Status.BaselineGuaranteedMinimumDataRedundancy).To(Equal(byte(1)))
+	})
+
 	It("restores a lost voter before dispatching a reserved TransZonal promotion", func() {
 		rv, rvrs := promotionFixture()
 		rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal

@@ -191,7 +191,7 @@ type DRBDResourcePeer struct {
 	// Allow reading data from this peer.
 	// +kubebuilder:default=true
 	// +optional
-	AllowRemoteRead bool `json:"allowRemoteRead,omitempty"`
+	AllowRemoteRead bool `json:"allowRemoteRead"` // No omitempty: preserve false against the CRD default of true.
 
 	// Numeric identifier of the peer in DRBD (0 to 31).
 	// +kubebuilder:validation:Required

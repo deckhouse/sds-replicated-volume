@@ -494,10 +494,11 @@ spec:
                       - message: name numeric suffix must be between 0 and 31
                         rule: int(self.name.substring(self.name.lastIndexOf('-') +
                           1)) <= 31
-                      - message: lvmVolumeGroupName can only be set for Diskful or
-                          LiminalDiskful type
+                      - message: lvmVolumeGroupName can only be set for Diskful, LiminalDiskful,
+                          ShadowDiskful or LiminalShadowDiskful type
                         rule: '!has(self.lvmVolumeGroupName) || self.type == ''Diskful''
-                          || self.type == ''LiminalDiskful'''
+                          || self.type == ''LiminalDiskful'' || self.type == ''ShadowDiskful''
+                          || self.type == ''LiminalShadowDiskful'''
                       - message: lvmVolumeGroupThinPoolName requires lvmVolumeGroupName
                           to be set
                         rule: '!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)'

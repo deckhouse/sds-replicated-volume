@@ -26,7 +26,9 @@ import (
 )
 
 const (
-	NodeNameEnvVar = "NODE_NAME"
+	NodeNameEnvVar     = "NODE_NAME"
+	PodNameEnvVar      = "POD_NAME"
+	PodNamespaceEnvVar = "POD_NAMESPACE"
 
 	DRBDMinPortEnvVar = "DRBD_MIN_PORT"
 	DRBDMaxPortEnvVar = "DRBD_MAX_PORT"
@@ -44,9 +46,11 @@ const (
 
 type config struct {
 	commonenv.CommonConfig
-	nodeName    string
-	drbdMinPort uint
-	drbdMaxPort uint
+	nodeName     string
+	podName      string
+	podNamespace string
+	drbdMinPort  uint
+	drbdMaxPort  uint
 }
 
 func (c *config) DRBDMaxPort() uint {
@@ -61,7 +65,17 @@ func (c *config) NodeName() string {
 	return c.nodeName
 }
 
+func (c *config) PodName() string {
+	return c.podName
+}
+
+func (c *config) PodNamespace() string {
+	return c.podNamespace
+}
+
 type Config interface {
+	PodName() string
+	PodNamespace() string
 	NodeName() string
 	DRBDMinPort() uint
 	DRBDMaxPort() uint
@@ -96,6 +110,15 @@ func loadConfig() (Config, error) {
 			return nil, fmt.Errorf("getting hostname: %w", err)
 		}
 		cfg.nodeName = hostName
+	}
+
+	cfg.podName = os.Getenv(PodNameEnvVar)
+	if cfg.podName == "" {
+		return nil, fmt.Errorf("%w: %s is required", commonenv.ErrInvalidConfig, PodNameEnvVar)
+	}
+	cfg.podNamespace = os.Getenv(PodNamespaceEnvVar)
+	if cfg.podNamespace == "" {
+		return nil, fmt.Errorf("%w: %s is required", commonenv.ErrInvalidConfig, PodNamespaceEnvVar)
 	}
 
 	minPortStr := os.Getenv(DRBDMinPortEnvVar)

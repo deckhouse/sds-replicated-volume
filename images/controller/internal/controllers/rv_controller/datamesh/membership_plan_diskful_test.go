@@ -768,6 +768,31 @@ var _ = Describe("AddReplica(D) diskful-q-up-qmr-up/v1", func() {
 //
 
 var _ = Describe("AddReplica(D) diskful-via-sd/v1", func() {
+	It("finishes its persisted via-sD plan after agent support disappears", func() {
+		rv := mkRV(5, []v1alpha1.DatameshMember{
+			mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+			mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+		}, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")}, nil)
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 5), mkRVRUpToDate("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 0),
+		}
+		rsp := mkRSP("node-1", "node-2", "node-3")
+		ProcessTransitions(context.Background(), rv, rsp, rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal("diskful-via-sd/v1"))
+		Expect(rv.Status.DatameshTransitions[0].Steps[0].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		simulateWithPeersAndResync(rv, rvrs)
+		runSettleLoop(rv, rsp, rvrs, nil, FeatureFlags{}, simulateWithPeersAndResync,
+			func(rv *v1alpha1.ReplicatedVolume, _ int) {
+				for _, transition := range rv.Status.DatameshTransitions {
+					Expect(transition.PlanID).To(Equal("diskful-via-sd/v1"))
+				}
+			})
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2").Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Joined datamesh successfully"))
+	})
+
 	It("creates transition, member = sD∅ with BV", func() {
 		rv := mkRV(5,
 			[]v1alpha1.DatameshMember{
@@ -799,6 +824,44 @@ var _ = Describe("AddReplica(D) diskful-via-sd/v1", func() {
 		Expect(t.Steps[2].Name).To(Equal("sD → D"))
 	})
 
+	It("sD∅→sD with Inconsistent backing volume waits before promotion", func() {
+		transition := v1alpha1.ReplicatedVolumeDatameshTransition{
+			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
+			Group:       v1alpha1.ReplicatedVolumeDatameshTransitionGroupVotingMembership,
+			ReplicaName: "rv-1-2", PlanID: "diskful-via-sd/v1",
+			Steps: []v1alpha1.ReplicatedVolumeDatameshTransitionStep{
+				{Name: "✦ → sD∅", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusCompleted, DatameshRevision: 6},
+				{Name: "sD∅ → sD", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive,
+					DatameshRevision: 7, StartedAt: new(metav1.Now())},
+				{Name: "sD → D", Status: v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending},
+			},
+		}
+		rv := mkRV(7,
+			[]v1alpha1.DatameshMember{
+				mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1"),
+				mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"),
+				mkMember("rv-1-2", v1alpha1.DatameshMemberTypeShadowDiskful, "node-3"),
+			},
+			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")},
+			[]v1alpha1.ReplicatedVolumeDatameshTransition{transition},
+		)
+		subject := mkRVR("rv-1-2", "node-3", 7)
+		subject.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{
+			State: v1alpha1.DiskStateInconsistent,
+		}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
+			mkRVRUpToDate("rv-1-0", "node-1", 7), mkRVRUpToDate("rv-1-1", "node-2", 7), subject,
+		}
+
+		ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true})
+
+		Expect(rv.Status.Datamesh.FindMemberByName("rv-1-2").Type).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+		Expect(rv.Status.DatameshRevision).To(Equal(int64(7)))
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		Expect(rv.Status.DatameshTransitions[0].Steps[2].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusPending))
+	})
+
 	It("sD∅→sD confirmed → sD→D applied", func() {
 		t := v1alpha1.ReplicatedVolumeDatameshTransition{
 			Type:        v1alpha1.ReplicatedVolumeDatameshTransitionTypeAddReplica,
@@ -820,9 +883,9 @@ var _ = Describe("AddReplica(D) diskful-via-sd/v1", func() {
 			[]v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkJoinRequestD("rv-1-2")},
 			[]v1alpha1.ReplicatedVolumeDatameshTransition{t},
 		)
-		// Subject confirmed (subjectOnly for step 2).
+		// Subject confirmed the revision and finished synchronizing.
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{
-			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVR("rv-1-2", "node-3", 7),
+			mkRVR("rv-1-0", "node-1", 6), mkRVR("rv-1-1", "node-2", 6), mkRVRUpToDate("rv-1-2", "node-3", 7),
 		}
 
 		changed, _ := ProcessTransitions(context.Background(), rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true})

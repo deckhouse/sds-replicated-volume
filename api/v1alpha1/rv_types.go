@@ -695,7 +695,7 @@ func (a SharedSecretAlg) String() string {
 // +kubebuilder:object:generate=true
 // +kubebuilder:validation:XValidation:rule="self.name.lastIndexOf('-') >= 0",message="name must contain '-' separator"
 // +kubebuilder:validation:XValidation:rule="int(self.name.substring(self.name.lastIndexOf('-') + 1)) <= 31",message="name numeric suffix must be between 0 and 31"
-// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || self.type == 'LiminalDiskful'",message="lvmVolumeGroupName can only be set for Diskful or LiminalDiskful type"
+// +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupName) || self.type == 'Diskful' || self.type == 'LiminalDiskful' || self.type == 'ShadowDiskful' || self.type == 'LiminalShadowDiskful'",message="lvmVolumeGroupName can only be set for Diskful, LiminalDiskful, ShadowDiskful or LiminalShadowDiskful type"
 // +kubebuilder:validation:XValidation:rule="!has(self.lvmVolumeGroupThinPoolName) || has(self.lvmVolumeGroupName)",message="lvmVolumeGroupThinPoolName requires lvmVolumeGroupName to be set"
 type DatameshMember struct {
 	// Name is the member name (used as list map key).

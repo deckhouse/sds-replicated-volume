@@ -32,11 +32,15 @@ import (
 	"github.com/deckhouse/sds-common-lib/logger"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/capabilities"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
 
 type managerConfig interface {
+	PodName() string
+	PodNamespace() string
 	NodeName() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
@@ -91,6 +95,12 @@ func newManager(
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
+	}
+
+	if err := mgr.Add(capabilities.NewReporter(mgr.GetClient(), client.ObjectKey{
+		Name: cfg.PodName(), Namespace: cfg.PodNamespace(),
+	}, drbdutils.FlantExtensionsSupported)); err != nil {
+		return nil, fmt.Errorf("adding agent capability reporter: %w", err)
 	}
 
 	if err := controllers.BuildAll(mgr); err != nil {

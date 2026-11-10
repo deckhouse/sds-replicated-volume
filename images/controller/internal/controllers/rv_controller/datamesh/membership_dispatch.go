@@ -341,7 +341,9 @@ func planChangeTBToD(gctx *globalContext, _ *ReplicaContext) (dmte.PlanID, strin
 			return "", "waiting to restore the original diskful copies before tie-breaker promotion"
 		}
 	}
-	viaSd := gctx.features.ShadowDiskful
+	// The sole TB cannot pass loseTBGuards in the sD plans. v2 admits this
+	// promotion through guardTieBreakerPromotion and waits for the third copy.
+	viaSd := gctx.features.ShadowDiskful && !isR2ToR3Promotion(gctx)
 
 	switch {
 	case !viaSd && voters%2 == 0:

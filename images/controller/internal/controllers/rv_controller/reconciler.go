@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,6 +55,8 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+// NewReconciler requires a client whose Pod reads use the manager cache
+// restricted to app=agent Pods in the module namespace.
 func NewReconciler(cl client.Client, scheme *runtime.Scheme) *Reconciler {
 	return &Reconciler{cl: cl, scheme: scheme, attachedRVAs: newAttachedRVATracker()}
 }
@@ -406,9 +409,19 @@ func (r *Reconciler) reconcileNormalOperation(
 		return outcome
 	}
 
+	agentNodes, err := r.getAgentNodes(rf.Ctx())
+	if err != nil {
+		return rf.Failf(err, "getting agent Nodes")
+	}
+	agentPods, err := r.getAgentPods(rf.Ctx())
+	if err != nil {
+		return rf.Failf(err, "getting agent Pods")
+	}
+	shadowDiskfulSupported := computeShadowDiskfulSupported(agentNodes, agentPods)
+
 	// Run datamesh transition engine: membership, quorum, attachment, network transitions.
 	changed, dmrctxs, completed := datamesh.ProcessTransitionsWithCompleted(
-		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{})
+		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{ShadowDiskful: shadowDiskfulSupported})
 	*completedTransitions = completed
 	if changed {
 		outcome = outcome.ReportChanged()
@@ -429,6 +442,40 @@ func (r *Reconciler) reconcileNormalOperation(
 	// action per pass). Runs last so it sees any transition just created by ProcessTransitions
 	// and no-ops while a membership transition is in flight.
 	return outcome.Merge(r.reconcileLayoutConvergence(rf.Ctx(), rv, rvrs, rvas))
+}
+
+// computeShadowDiskfulSupported requires every labelled agent node to have at
+// least one live agent Pod, with all of its live agent Pods reporting "true".
+// Pod readiness is irrelevant: this is an installed capability, not availability.
+// nodes contains only labelled agent Nodes; pods contains only agent Pods from the agent namespace.
+// No Pod/Node watch is needed: ordinary Diskful plans fall back instead of waiting for support.
+func computeShadowDiskfulSupported(nodes []corev1.Node, pods []corev1.Pod) bool {
+	supportedNodes := make(map[string]bool, len(nodes))
+	for i := range nodes {
+		supportedNodes[nodes[i].Name] = false
+	}
+	if len(supportedNodes) == 0 {
+		return false
+	}
+	for i := range pods {
+		pod := &pods[i]
+		if _, ok := supportedNodes[pod.Spec.NodeName]; !ok {
+			continue
+		}
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if !obju.HasAnnotationValue(pod, v1alpha1.AgentShadowDiskfulSupportedAnnotationKey, "true") {
+			return false
+		}
+		supportedNodes[pod.Spec.NodeName] = true
+	}
+	for _, supported := range supportedNodes {
+		if !supported {
+			return false
+		}
+	}
+	return true
 }
 
 // applyDatameshTransitionStepMessage sets the Message field on a datamesh transition step.
@@ -3547,4 +3594,29 @@ func (r *Reconciler) deleteRVRWithForcedFinalizerRemoval(ctx context.Context, ob
 	}
 
 	return r.deleteRVR(ctx, obj)
+}
+
+// --- Node ---
+
+// getAgentNodes returns an unordered slice of labelled agent Nodes from the cache.
+func (r *Reconciler) getAgentNodes(ctx context.Context) ([]corev1.Node, error) {
+	var unsafeNodes corev1.NodeList
+	if err := r.cl.List(ctx, &unsafeNodes,
+		client.HasLabels{v1alpha1.AgentNodeLabelKey}, client.UnsafeDisableDeepCopy,
+	); err != nil {
+		return nil, err
+	}
+	return unsafeNodes.Items, nil
+}
+
+// --- Pod ---
+
+// getAgentPods returns an unordered slice of agent Pods from the cache.
+// The manager cache restricts Pod reads to app=agent in the module namespace.
+func (r *Reconciler) getAgentPods(ctx context.Context) ([]corev1.Pod, error) {
+	var unsafePods corev1.PodList
+	if err := r.cl.List(ctx, &unsafePods, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	return unsafePods.Items, nil
 }

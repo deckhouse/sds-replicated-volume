@@ -221,7 +221,7 @@ var _ = Describe("integration: topology switch", func() {
 				rv.Status.Configuration.Topology = ""
 				rv.Status.DatameshTransitions = nil
 
-				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, simulateWithPeersAndResync, assertSafetyInvariants)
 
 				var voters int
 				for _, m := range rv.Status.Datamesh.Members {
@@ -362,7 +362,7 @@ var _ = Describe("integration: topology switch", func() {
 				rv.Status.Configuration.Topology = v1alpha1.TopologyTransZonal
 				rv.Status.DatameshTransitions = nil
 
-				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, simulateWithPeersAndResync, assertSafetyInvariants)
 
 				// TransZonal: zone-c is a new zone, 1+1+1 distribution is balanced → passes.
 				var voters int
@@ -460,7 +460,7 @@ var _ = Describe("integration: topology switch", func() {
 					mkRVR("rv-1-3", "node-3", 0),
 				)
 
-				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, simulateWithPeersAndResync, assertSafetyInvariants)
 
 				// Final: 2D + 1TB, q=2 unchanged.
 				var dCount, tbCount int
@@ -534,7 +534,7 @@ var _ = Describe("integration: topology switch", func() {
 					mkRVR("rv-1-5", "node-5", 0),
 				)
 
-				runSettleLoop(rv, rsp, rvrs, nil, ff, nil, assertSafetyInvariants)
+				runSettleLoop(rv, rsp, rvrs, nil, ff, simulateWithPeersAndResync, assertSafetyInvariants)
 
 				// Final: 4D + 1TB, q=3 unchanged.
 				var dCount, tbCount int

@@ -2774,7 +2774,7 @@ var _ = Describe("ChangeReplicaType + ChangeQuorum for qmr", func() {
 // E2E settle: dispatch → all steps → completion
 //
 // One representative test per step-count family. Uses runSettleLoop with
-// default simulateRevisionBump (sufficient for all membership confirms).
+// simulateWithPeersAndResync for via-sD plans; other plans use revision acknowledgements.
 
 var _ = Describe("ChangeReplicaType e2e settle", func() {
 	It("a-to-tb/v1: 1-step (A → TB)", func() {
@@ -2872,7 +2872,7 @@ var _ = Describe("ChangeReplicaType e2e settle", func() {
 			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5), mkRVR("rv-1-2", "node-3", 5),
 		}
 
-		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+		runSettleLoop(rv, mkRSP("node-1", "node-2", "node-3"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, simulateWithPeersAndResync, assertSafetyInvariants)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-2")
@@ -2898,7 +2898,7 @@ var _ = Describe("ChangeReplicaType e2e settle", func() {
 			mkRVR("rv-1-0", "node-1", 5), mkRVR("rv-1-1", "node-2", 5),
 		}
 
-		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil, assertSafetyInvariants)
+		runSettleLoop(rv, mkRSP("node-1", "node-2"), rvrs, nil, FeatureFlags{ShadowDiskful: true}, simulateWithPeersAndResync, assertSafetyInvariants)
 
 		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
 		m := rv.Status.Datamesh.FindMemberByName("rv-1-1")
@@ -2907,4 +2907,38 @@ var _ = Describe("ChangeReplicaType e2e settle", func() {
 		Expect(rv.Status.Datamesh.Quorum).To(Equal(byte(2))) // was 1, raised mid-plan
 		Expect(rv.Status.DatameshReplicaRequests[0].Message).To(Equal("Replica type changed successfully"))
 	})
+})
+
+var _ = Describe("A to D via ShadowDiskful synchronization", func() {
+	DescribeTable("waits for the shadow copy before promotion", func(ctx SpecContext, diskfulCount int, planID string) {
+		members := []v1alpha1.DatameshMember{mkMember("rv-1-0", v1alpha1.DatameshMemberTypeDiskful, "node-1")}
+		rvrs := []*v1alpha1.ReplicatedVolumeReplica{mkRVRUpToDate("rv-1-0", "node-1", 5)}
+		if diskfulCount == 2 {
+			members = append(members, mkMember("rv-1-1", v1alpha1.DatameshMemberTypeDiskful, "node-2"))
+			rvrs = append(rvrs, mkRVRUpToDate("rv-1-1", "node-2", 5))
+		}
+		members = append(members, mkMember("rv-1-2", v1alpha1.DatameshMemberTypeAccess, "node-3"))
+		subject := mkRVR("rv-1-2", "node-3", 5)
+		subject.Status.BackingVolume = &v1alpha1.ReplicatedVolumeReplicaStatusBackingVolume{State: v1alpha1.DiskStateInconsistent}
+		rvrs = append(rvrs, subject)
+		rv := mkRV(5, members, []v1alpha1.ReplicatedVolumeDatameshReplicaRequest{mkChangeRoleRequest(subject.Name, v1alpha1.ReplicaTypeDiskful)}, nil)
+		rsp := mkRSP("node-1", "node-2", "node-3")
+		features := FeatureFlags{ShadowDiskful: true}
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, features)
+		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
+		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal(planID))
+		simulateWithPeers(rv, rvrs)
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, features)
+		simulateWithPeers(rv, rvrs)
+		ProcessTransitions(ctx, rv, rsp, rvrs, nil, features)
+		Expect(rv.Status.Datamesh.FindMemberByName(subject.Name).Type).To(Equal(v1alpha1.DatameshMemberTypeShadowDiskful))
+		Expect(rv.Status.DatameshTransitions[0].Steps[1].Status).To(Equal(v1alpha1.ReplicatedVolumeDatameshTransitionStepStatusActive))
+		simulateWithPeersAndResync(rv, rvrs)
+		runSettleLoop(rv, rsp, rvrs, nil, features, simulateWithPeersAndResync, assertSafetyInvariants)
+		Expect(rv.Status.DatameshTransitions).To(BeEmpty())
+		Expect(rv.Status.Datamesh.FindMemberByName(subject.Name).Type).To(Equal(v1alpha1.DatameshMemberTypeDiskful))
+	},
+		Entry("even voters", 2, "a-to-d-via-sd/v1"),
+		Entry("odd voters", 1, "a-to-d-via-sd-q-up/v1"),
+	)
 })

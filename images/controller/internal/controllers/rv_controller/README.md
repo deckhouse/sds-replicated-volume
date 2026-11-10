@@ -20,9 +20,19 @@ The controller reconciles `ReplicatedVolume` with:
 | ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones for formation and attach eligibility |
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync, quorum, attachment) |
 | ← input | ReplicatedVolumeAttachment | Reads attachment intent (determines which nodes should be attached) |
+| ← input | Node with the agent label, agent Pod in the agent namespace | Reads installed ShadowDiskful capability from live agent Pods on every agent node |
 | → manages | ReplicatedVolumeReplica | Creates/deletes during formation, normal operation (Access replicas), and deletion |
 | → manages | ReplicatedVolumeAttachment | Manages finalizers; updates conditions (Attached, ReplicaReady, Ready), phase, and message during normal operation and deletion |
 | → manages | DRBDResourceOperation | Creates for data bootstrap during formation |
+
+ShadowDiskful paths for ordinary Diskful replicas are enabled only when at least one node
+has `storage.deckhouse.io/sds-replicated-volume-node` and every such node has a live agent Pod,
+with every live agent Pod reporting `sds-replicated-volume.deckhouse.io/shadow-diskful-supported: "true"`.
+Missing reports (including older agents) or `"false"` select the classic paths. Terminating,
+Succeeded and Failed Pods are ignored; Pod readiness is not required. Pods on unlabelled
+nodes do not affect the result. This capability is read on every normal reconcile without
+additional Pod/Node watches: classic paths never wait for it, and active transitions finish
+using their persisted plans even if support disappears.
 
 ## Algorithm
 

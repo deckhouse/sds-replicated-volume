@@ -115,7 +115,7 @@ func killAndRecover(
 	}
 	rv.Status.DatameshReplicaRequests = requests
 
-	runSettleLoop(rv, rsp, rvrs, nil, features, nil, assertSafetyInvariants)
+	runSettleLoop(rv, rsp, rvrs, nil, features, simulateWithPeersAndResync, assertSafetyInvariants)
 
 	// Assert final state: recovered to original layout.
 	var dCount, tbCount int

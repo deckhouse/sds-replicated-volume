@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -67,6 +68,9 @@ func Requeue() OmegaMatcher {
 
 // newClientBuilder creates a fake.ClientBuilder with required indexes.
 func newClientBuilder(scheme *runtime.Scheme) *fake.ClientBuilder {
+	if err := corev1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
 	b := fake.NewClientBuilder().WithScheme(scheme)
 	b = testhelpers.WithRVAByReplicatedVolumeNameIndex(b)
 	b = testhelpers.WithRVRByReplicatedVolumeNameIndex(b)

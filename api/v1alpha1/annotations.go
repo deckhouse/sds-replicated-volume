@@ -19,6 +19,10 @@ package v1alpha1
 const annotationPrefix = "sds-replicated-volume.deckhouse.io/"
 
 const (
+	// AgentShadowDiskfulSupportedAnnotationKey reports whether the agent Pod supports
+	// ShadowDiskful replicas ("true" or "false").
+	AgentShadowDiskfulSupportedAnnotationKey = annotationPrefix + "shadow-diskful-supported"
+
 	// LVMVolumeGroupUnschedulableAnnotationKey marks an LVMVolumeGroup as unschedulable
 	// for new ReplicatedVolumeReplicas.
 	LVMVolumeGroupUnschedulableAnnotationKey = annotationPrefix + "unschedulable"

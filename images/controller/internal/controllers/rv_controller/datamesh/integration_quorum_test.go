@@ -238,7 +238,7 @@ func addD(
 		mkJoinRequestD(name),
 	}
 
-	runSettleLoop(rv, rsp, *rvrs, nil, features, nil, assertSafetyInvariants)
+	runSettleLoop(rv, rsp, *rvrs, nil, features, simulateWithPeersAndResync, assertSafetyInvariants)
 
 	// Clear requests after completion.
 	rv.Status.DatameshReplicaRequests = nil

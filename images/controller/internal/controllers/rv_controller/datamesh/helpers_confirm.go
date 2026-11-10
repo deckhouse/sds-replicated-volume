@@ -17,6 +17,7 @@ limitations under the License.
 package datamesh
 
 import (
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
@@ -39,6 +40,17 @@ func confirmSubjectOnly(_ *globalContext, rctx *ReplicaContext, stepRevision int
 		confirmed.Add(rctx.ID())
 	}
 	return dmte.ConfirmResult{MustConfirm: mustConfirm, Confirmed: confirmed}
+}
+
+// confirmSubjectSynchronized also requires the subject's backing volume to be UpToDate, including non-voting sD members.
+// Used by: sD∅→sD in D-bound via-sD plans, so bulk sync finishes in sD before promotion or disk detach.
+func confirmSubjectSynchronized(gctx *globalContext, rctx *ReplicaContext, stepRevision int64) dmte.ConfirmResult {
+	res := confirmSubjectOnly(gctx, rctx, stepRevision)
+	if rctx.rvr == nil || rctx.rvr.Status.BackingVolume == nil ||
+		rctx.rvr.Status.BackingVolume.State != v1alpha1.DiskStateUpToDate {
+		res.Confirmed.Remove(rctx.ID())
+	}
+	return res
 }
 
 // confirmSubjectOnlyLeaving checks confirmation for subject-only leaving steps.

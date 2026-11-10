@@ -23,12 +23,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
 )
 
-// FeatureFlags describes cluster-level feature availability for transition path resolution.
+// FeatureFlags describes agent-reported cluster capabilities for new transition paths.
 type FeatureFlags struct {
-	// ShadowDiskful indicates whether ShadowDiskful (sD) replicas are supported.
-	// Requires the Flant DRBD kernel extension with the non-voting disk option.
-	// When true, sD-based paths are used for D transitions (faster resync via pre-sync).
-	// When false, A-based vestibule paths are used as fallback.
+	// ShadowDiskful reports that every agent supports ShadowDiskful members.
+	// When true, eligible D transitions use sD pre-sync paths; when false, classic paths.
+	// Already active transitions keep their persisted plan if support changes.
 	ShadowDiskful bool
 }
 
