@@ -205,7 +205,7 @@ index 73c8c30..95ac9d7 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -157,13 +218,21 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -157,13 +218,22 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  	}()
  	encoder := json.NewEncoder(w)
  
@@ -218,6 +218,7 @@ index 73c8c30..95ac9d7 100644
  	}
  
 +	// block added by flant.com
++	respondWithNodeNames := args.NodeNames != nil
 +	if err = fillNodesByNames(&args.ExtenderArgs); err != nil {
 +		log.Errorf("[filter] Cannot fill nodes: %s", err.Error())
 +		http.Error(w, "[filter] Cannot fill nodes", http.StatusBadRequest)
@@ -228,7 +229,7 @@ index 73c8c30..95ac9d7 100644
  	pod := args.Pod
  	if pod == nil {
  		msg := "Empty pod received in filter request"
-@@ -176,23 +245,38 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -176,23 +246,38 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		if vol.PersistentVolumeClaim == nil {
  			continue
  		}
@@ -274,7 +275,7 @@ index 73c8c30..95ac9d7 100644
  	for _, node := range args.Nodes.Items {
  		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
  	}
-@@ -202,8 +286,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -202,8 +287,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  
  	if err != nil {
  		msg := fmt.Sprintf("Error getting volumes for Pod for driver: %v", err)
@@ -285,7 +286,7 @@ index 73c8c30..95ac9d7 100644
  		if _, ok := err.(*volume.ErrPVCPending); ok {
  			http.Error(w, "Waiting for PVC to be bound", http.StatusBadRequest)
  			return
-@@ -226,9 +310,9 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -226,9 +311,9 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  				if !onlineNodeFound && len(volumeInfo.DataNodes) > 0 {
  					// Volume has a list of DataNodes where it has a replica present and none of
  					// those nodes are online
@@ -297,7 +298,7 @@ index 73c8c30..95ac9d7 100644
  					http.Error(w, msg, http.StatusBadRequest)
  					return
  				}
-@@ -280,8 +364,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -280,8 +365,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  				} else {
  					msg = "No node found with storage driver"
  				}
@@ -308,7 +309,28 @@ index 73c8c30..95ac9d7 100644
  				http.Error(w, msg, http.StatusBadRequest)
  				return
  			}
-@@ -385,9 +469,27 @@ func (e *Extender) collectExtenderMetrics() error {
+@@ -297,10 +382,16 @@
+ 	for _, node := range filteredNodes {
+ 		log.Debugf("%v %+v", node.Name, node.Status.Addresses)
+ 	}
+-	response := &schedulerapi.ExtenderFilterResult{
+-		Nodes: &v1.NodeList{
+-			Items: filteredNodes,
+-		},
++	response := &schedulerapi.ExtenderFilterResult{}
++	// Preserve the request representation so the scheduler can reuse cached NodeInfo.
++	if respondWithNodeNames {
++		names := make([]string, 0, len(filteredNodes))
++		for _, node := range filteredNodes {
++			names = append(names, node.Name)
++		}
++		response.NodeNames = &names
++	} else {
++		response.Nodes = &v1.NodeList{Items: filteredNodes}
+ 	}
+ 	if err := encoder.Encode(response); err != nil {
+ 		storklog.PodLog(pod).Errorf("Error encoding filter response: %+v : %v", response, err)
+@@ -385,9 +476,27 @@ func (e *Extender) collectExtenderMetrics() error {
  		return nil
  	}
  
@@ -339,7 +361,7 @@ index 73c8c30..95ac9d7 100644
  	}
  	return nil
  }
-@@ -461,6 +563,16 @@ type localityInfo struct {
+@@ -461,6 +564,16 @@ type localityInfo struct {
  }
  
  func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Request) {
@@ -356,7 +378,7 @@ index 73c8c30..95ac9d7 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -469,13 +581,21 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -469,13 +582,21 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
  	}()
  	encoder := json.NewEncoder(w)
  
@@ -379,7 +401,7 @@ index 73c8c30..95ac9d7 100644
  	pod := args.Pod
  	storklog.PodLog(pod).Debugf("Nodes in prioritize request:")
  	for _, node := range args.Nodes.Items {
-@@ -495,7 +615,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -495,7 +616,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
  
  	// Score all nodes the same if hyperconvergence is disabled
  	disableHyperconvergence := false
@@ -387,7 +409,7 @@ index 73c8c30..95ac9d7 100644
  	if pod.Annotations != nil {
  		if value, ok := pod.Annotations[disableHyperconvergenceAnnotation]; ok {
  			if disableHyperconvergence, err = strconv.ParseBool(value); err != nil {
-@@ -511,8 +630,8 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -511,8 +631,8 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
  		driverVolumes, _, err := e.Driver.GetPodVolumes(&pod.Spec, pod.Namespace, true)
  		if err != nil {
  			msg := fmt.Sprintf("Error getting volumes for Pod for driver: %v", err)
@@ -398,7 +420,7 @@ index 73c8c30..95ac9d7 100644
  			if _, ok := err.(*volume.ErrPVCPending); ok {
  				http.Error(w, "Waiting for PVC to be bound", http.StatusBadRequest)
  				return
-@@ -632,3 +751,77 @@ sendResponse:
+@@ -632,3 +752,77 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
@@ -476,3 +498,114 @@ index 73c8c30..95ac9d7 100644
 +}
 +
 +// end of flant.com block
+diff --git a/pkg/extender/filter_response_test.go b/pkg/extender/filter_response_test.go
+new file mode 100644
+--- /dev/null
++++ b/pkg/extender/filter_response_test.go
+@@ -0,0 +1,106 @@
++//go:build unittest
++// +build unittest
++
++package extender
++
++import (
++	"bytes"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"reflect"
++	"testing"
++
++	"github.com/libopenstorage/stork/drivers/volume"
++	"github.com/libopenstorage/stork/drivers/volume/mock"
++	"github.com/portworx/sched-ops/k8s/core"
++	v1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	kubernetes "k8s.io/client-go/kubernetes/fake"
++	"k8s.io/client-go/tools/record"
++	schedulerapi "k8s.io/kube-scheduler/extender/v1"
++)
++
++func TestFilterResponseRepresentation(t *testing.T) {
++	for _, withVolume := range []bool{false, true} {
++		for _, useNames := range []bool{false, true} {
++			name := "nodes"
++			if useNames {
++				name = "nodeNames"
++			}
++			if withVolume {
++				name += "/filtered"
++			} else {
++				name += "/noPVC"
++			}
++			t.Run(name, func(t *testing.T) {
++				nodes := &v1.NodeList{Items: []v1.Node{
++					{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
++					{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
++				}}
++				client := kubernetes.NewSimpleClientset(&nodes.Items[0], &nodes.Items[1])
++				previous := core.Instance()
++				core.SetInstance(core.New(client))
++				t.Cleanup(func() { core.SetInstance(previous) })
++				driver := &mock.Driver{}
++				if err := driver.CreateCluster(2, nodes); err != nil {
++					t.Fatal(err)
++				}
++				pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"}}
++				wantNames := []string{"node2", "node1"}
++				if withVolume {
++					if err := driver.ProvisionVolume("disk", []int{0}, 1, nil); err != nil {
++						t.Fatal(err)
++					}
++					pvc := driver.NewPVC("disk")
++					pvc.Namespace = pod.Namespace
++					if _, err := core.Instance().CreatePersistentVolumeClaim(pvc); err != nil {
++						t.Fatal(err)
++					}
++					pod.Spec.Volumes = []v1.Volume{{VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "disk"}}}}
++					if err := driver.UpdateNodeStatus(1, volume.NodeOffline); err != nil {
++						t.Fatal(err)
++					}
++					wantNames = []string{"node1"}
++				}
++				args := schedulerapi.ExtenderArgs{Pod: pod}
++				if useNames {
++					names := []string{"node2", "node1"}
++					args.NodeNames = &names
++				} else {
++					args.Nodes = nodes
++				}
++				body, err := json.Marshal(args)
++				if err != nil {
++					t.Fatal(err)
++				}
++				e := &Extender{Driver: driver, Recorder: record.NewFakeRecorder(10)}
++				w := httptest.NewRecorder()
++				e.processFilterRequest(w, httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body)))
++				if w.Code != http.StatusOK {
++					t.Fatalf("status %d: %s", w.Code, w.Body)
++				}
++				var result schedulerapi.ExtenderFilterResult
++				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
++					t.Fatal(err)
++				}
++				if useNames {
++					if result.Nodes != nil || result.NodeNames == nil || !reflect.DeepEqual(*result.NodeNames, wantNames) {
++						t.Fatalf("want only NodeNames %v, got %s", wantNames, w.Body)
++					}
++				} else {
++					if result.NodeNames != nil || result.Nodes == nil {
++						t.Fatalf("want only Nodes, got %s", w.Body)
++					}
++					var gotNames []string
++					for _, node := range result.Nodes.Items {
++						gotNames = append(gotNames, node.Name)
++					}
++					if !reflect.DeepEqual(gotNames, wantNames) {
++						t.Fatalf("want nodes %v, got %v", wantNames, gotNames)
++					}
++				}
++			})
++		}
++	}
++}

@@ -43,6 +43,9 @@ shell:
     - cd /usr/local/go/stork
     - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
     - git apply /patches/stork/*.patch
+    # Use Stork's vendored test dependencies; the linker flag supports their
+    # legacy syscall linknames on newer Go versions and affects only tests.
+    - GOWORK=off go test -mod=vendor -tags unittest -ldflags=-checklinkname=0 ./pkg/extender -run '^(TestFilterResponseRepresentation|TestDryRunSkipsEvent)$' -count=1
 
   setup:
     - cd /usr/local/go/{{ $.ImageName }}

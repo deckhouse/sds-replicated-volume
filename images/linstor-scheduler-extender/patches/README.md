@@ -61,6 +61,9 @@ order. All stork changes are kept in this one patch: a second patch for
   for PVC, node and pod lookups.
 - Trace logging of each request; `nodenames` requests (`nodeCacheCapable`) are
   filled with the Node objects.
+- Filter responses preserve the request format: `NodeNames` requests receive
+  filtered names so the scheduler can reuse its cached node information;
+  `Nodes` requests receive filtered Node objects for compatibility.
 - Dry run: the Deckhouse kube-scheduler sets `"dryRun": true` in `filter` and
   `prioritize` requests while it simulates scheduling (`POST /simulate`, for
   example for the descheduler). The Pod in such a request is a copy of a real Pod
