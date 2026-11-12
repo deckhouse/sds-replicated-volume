@@ -4,17 +4,6 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
-improvements:
-  - "On DKP 1.78 and later, the `d8:system-capability:sds-replicated-volume:view` and `d8:system-capability:sds-replicated-volume:edit` roles also give read access to the `sds-replicated-volume` ModuleConfig, and `edit` write access to it, and carry the standard titles and descriptions of the platform, as every capability of the DKP 1.78 role model does. The RBAC of the module is now declared in `rbac.yaml`, and the RBACv2 templates are written from it; clusters below DKP 1.78 keep the roles they had."
-  - "When an online resize of an ext4 filesystem fails, the CSI driver of the new control plane reads the superblock with `dumpe2fs -h` (read-only), and if the filesystem is marked as having errors, puts before the error in the pod events the reason (the kernel refuses to resize such a filesystem while it is mounted) and what to do: stop the pods that use the volume and check the filesystem with `e2fsck -f` while it is not mounted, see the FAQ. Nothing is repaired automatically; the original error text is kept."
-
-fixes:
-  - "The `D8ObsoleteLinstorBackupPresents` alert named itself as its group in the `plk_create_group_if_not_exists` and `plk_grouped_by` annotations. It is now grouped into `D8ObsoleteLinstorBackupPresentsGroup`."
-
-docs:
-  - "The module documentation says that nodes hosting data need access to the OS package repositories (or a mirror of them in an air-gapped environment) to build DRBD: the requirements list the packages installed per OS family and state that the kernel headers package must exist for the running kernel, and that Secure Boot is not supported. The FAQ has a new entry for the case when DRBD is not built because the headers package or the repository is unavailable, with the commands that check it on the node."
-  - "The FAQ has a new entry for the failure of a PVC expansion with `resize2fs: Permission denied to resize filesystem … on-line resizing required` (an ext4 filesystem marked as having errors): the cause, the checks with `dumpe2fs -h` and `dmesg`, and, for the LINSTOR control plane, the fix with `e2fsck -f` on a node with a replica that holds data while the volume is not in use."
-
 # Optional sections — delete rather than leave empty.
 # security: []
 # breaking: []

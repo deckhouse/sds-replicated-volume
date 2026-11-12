@@ -1,0 +1,39 @@
+date: "2026-11-12"
+
+summary: "The new control plane removes surplus diskful replicas by itself, pre-syncs new diskful replicas outside the quorum and attaches detached replicas on slow disks again, the LINSTOR scheduler extender no longer makes kube-scheduler score busy nodes as empty, and the CSI driver explains a failed resize of an ext4 filesystem with errors."
+
+highlights:
+  - "In the new control plane, a volume that has more diskful replicas than its configuration asks for, for example after `replication` of its class is lowered, converges by itself: the controller removes one surplus unattached replica at a time, as long as the remaining copies keep the redundancy of the new configuration."
+  - "In the new control plane, a detached diskful replica on a large volume on a slow disk attaches again: the node agent no longer reads the whole DRBD bitmap to check the metadata, which the 10-second timeout stopped every time."
+  - "In the LINSTOR control plane, `linstor-scheduler-extender` answers kube-scheduler with node names, so on Kubernetes 1.33 and later nodes that already run Pods are no longer scored as empty when any Pod is scheduled."
+
+new_features:
+  - "In the new control plane, a volume that has more diskful replicas than its configuration asks for now converges by itself, for example after `replication` of its `ReplicatedStorageClass` is lowered from three replicas to two or from two to one, or after a diskful replica was added by hand. The controller removes one surplus diskful replica at a time, never an attached one, and only while the copies that remain `UpToDate` keep the redundancy and the zone guarantees of the new configuration; a copy that is not `UpToDate` is chosen first. Before, such a volume kept the surplus replicas and fired `D8ReplicatedVolumeLayoutDegraded` with `TransitionUnsupported` until a replica was deleted by hand. When no replica can be removed safely, the `MembershipLayoutConverged` condition of the `ReplicatedVolume` is `False` with the reason `CannotConverge` and names the attachment or the guard that blocks the removal; the alert description is updated accordingly."
+
+improvements:
+  - "In the new control plane, a new diskful replica, and in most cases an access or tie-breaker replica that becomes diskful, first copies the data as a non-voting `ShadowDiskful` member that does not count toward quorum, and joins the quorum as a `Diskful` replica only once its backing volume is `UpToDate`. This is used only when the agent Pod on every node of the module reports `sds-replicated-volume.deckhouse.io/shadow-diskful-supported: \"true\"`, that is, when DRBD on the node has the Flant non-voting extension; otherwise replicas are added as before. Transitions already in progress finish with the plan they started with. There is no setting for it."
+  - "On DKP 1.78 and later, the `d8:system-capability:sds-replicated-volume:view` and `d8:system-capability:sds-replicated-volume:edit` roles also give read access to the `sds-replicated-volume` ModuleConfig, and `edit` write access to it, and carry the standard titles and descriptions of the platform, as every capability of the DKP 1.78 role model does. The RBAC of the module is now declared in `rbac.yaml`, and the RBACv2 templates are written from it; clusters below DKP 1.78 keep the roles they had."
+  - "When an online resize of an ext4 filesystem fails, the CSI driver of the new control plane reads the superblock with `dumpe2fs -h` (read-only), and if the filesystem is marked as having errors, puts before the error in the pod events the reason (the kernel refuses to resize such a filesystem while it is mounted) and what to do: stop the pods that use the volume and check the filesystem with `e2fsck -f` while it is not mounted, see the FAQ. Nothing is repaired automatically; the original error text is kept."
+
+fixes:
+  - "In the new control plane, the node agent checks the DRBD metadata of a detached backing volume with `drbdmeta dstate`, which reads only the superblock, instead of `drbdmeta dump-md`, which reads the whole bitmap. On a 1.5 TiB volume on a rotational disk `dump-md` took about a minute, so its 10-second timeout stopped every check, the replica stayed at `Configured=False` with `StateQueryFailed` and never attached again, and every retry read the bitmap again from a disk already busy with resyncs. A backing volume without metadata still gets new metadata, and a check that fails for another reason still leaves the replica untouched."
+  - "In the LINSTOR control plane, `linstor-scheduler-extender` now answers a filter request that carries node names, which is how the Deckhouse kube-scheduler calls it, with the filtered node names. It used to answer with Node objects, from which kube-scheduler builds node information without the Pods, resource requests and images already on the node. Since Kubernetes 1.33 the scoring plugins use that information, so busy nodes could be scored as empty and Pods placed unevenly. Pods without LINSTOR volumes were affected as well, because the extender is called for every Pod. Requests that carry Node objects get Node objects back, as before."
+  - "The `D8ObsoleteLinstorBackupPresents` alert named itself as its group in the `plk_create_group_if_not_exists` and `plk_grouped_by` annotations. It is now grouped into `D8ObsoleteLinstorBackupPresentsGroup`."
+
+upgrade_notes:
+  - "In the new control plane, a diskful replica added by hand on top of what the configuration asks for is now removed automatically, and the controller may pick the new copy while it is still syncing. Adding a replica and then deleting the old one is therefore no longer a way to move a replica. If the configuration is raised back while a surplus replica is being removed, the removal is not rolled back: until the replica leaves, the `MembershipLayoutConverged` condition reports `CannotConverge` and names it, and the missing copy is created after that."
+  - "Pre-sync through `ShadowDiskful` turns on by itself once the agents on all nodes of the module run this version and report support; nothing has to be done by hand."
+
+docs:
+  - "The module documentation says that nodes hosting data need access to the OS package repositories (or a mirror of them in an air-gapped environment) to build DRBD: the requirements list the packages installed per OS family and state that the kernel headers package must exist for the running kernel, and that Secure Boot is not supported. The FAQ has a new entry for the case when DRBD is not built because the headers package or the repository is unavailable, with the commands that check it on the node."
+  - "The FAQ has a new entry for the failure of a PVC expansion with `resize2fs: Permission denied to resize filesystem … on-line resizing required` (an ext4 filesystem marked as having errors): the cause, the checks with `dumpe2fs -h` and `dmesg`, and, for the LINSTOR control plane, the fix with `e2fsck -f` on a node with a replica that holds data while the volume is not in use."
+
+dependencies:
+  - name: base images
+    from: "v4.0.7"
+    to: "v4.0.12"
+    notes: "Every image of the module is rebuilt on the current base images."
+  - name: Go
+    from: "1.27.3"
+    to: "1.27.4"
+    notes: "The toolchain the Go components of the module are built with."
