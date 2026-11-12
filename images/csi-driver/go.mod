@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/csi-driver
 
-go 1.27.3
+go 1.27.4
 require (
 	github.com/deckhouse/sds-common-lib v0.17.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b

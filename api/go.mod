@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/api
 
-go 1.27.3
+go 1.27.4
 require (
 	k8s.io/api v0.35.1
 	k8s.io/apimachinery v0.35.2
