@@ -486,6 +486,49 @@ Check that the headers package for the running kernel is available in the reposi
 
 If the package is not found and the node is booted into an old kernel whose headers are no longer in the repository, restore access to the required repositories or mirror, or boot the node into a kernel whose headers are in the repository. If Secure Boot is enabled, building `DRBD` is not supported; see the [previous section](#linstor-node-fail-to-start-because-the-drbd-module-cannot-be-loaded).
 
+### PVC expansion fails with `resize2fs: Permission denied to resize filesystem … on-line resizing required`
+
+The PVC size is already increased, but the volume is not expanded, and the pod has a `VolumeResizeFailed` event (or `FailedMount`, if the expansion runs when the volume is mounted) with an error like this:
+
+```text
+resize2fs: Permission denied to resize filesystem … on-line resizing required
+```
+
+The cause is an ext4 filesystem that is marked as having errors. The kernel refuses to resize such a filesystem while it is mounted (`EPERM`) and writes the reason only to the node kernel log. With the new control plane of the module the CSI driver adds this explanation to the error; with the LINSTOR control plane the steps below are the only way to find it out.
+
+To check it, find the device of the volume on the node where the pod runs and inspect it:
+
+```shell
+findmnt -o SOURCE,TARGET | grep <PV name>
+dumpe2fs -h /dev/drbdNNNN | grep -E 'Filesystem state|FS Error count'
+dmesg | grep EXT4-fs
+```
+
+The state `clean with errors` (or `not clean with errors`) or a non-zero `FS Error count` confirms the cause, and `dmesg` shows a line like `EXT4-fs warning (device drbdNNNN): ext4_resize_begin:NN: There are errors in the filesystem, so online resizing is not allowed`. While the volume is mounted, the superblock that `dumpe2fs` reads may not show the errors yet, so rely on `dmesg` as well.
+
+To fix it with the LINSTOR control plane:
+
+1. Stop the pod (for a StatefulSet, scale it down) so that the volume is unmounted. Do not run `e2fsck` on a mounted filesystem.
+1. Make sure that the volume is not in use on any node, and find a node with a replica that holds data and the device of the volume on it:
+
+   ```shell
+   alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+   linstor resource list -r <PV name>
+   linstor resource list-volumes -r <PV name>
+   ```
+
+   No node may be marked `InUse`.
+
+1. On a node with a replica in the `UpToDate` state, check and repair the filesystem. DRBD makes the device Primary while `e2fsck` keeps it open and returns it to Secondary afterwards:
+
+   ```shell
+   e2fsck -f /dev/drbdNNNN
+   ```
+
+1. Start the pod. The expansion is retried by the kubelet and the CSI driver and completes when the volume is mounted.
+
+With the new control plane DRBD does not make a device Primary when it is opened, so `e2fsck` cannot open the device of a stopped volume; the steps above apply to the LINSTOR control plane only.
+
 ### The Pod cannot start due to the FailedMount error
 
 #### The Pod is stuck at the ContainerCreating phase

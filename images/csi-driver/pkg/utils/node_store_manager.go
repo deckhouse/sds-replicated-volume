@@ -357,7 +357,7 @@ func (s *Store) ResizeFS(mountTarget string) error {
 	_, err = mountutils.NewResizeFs(s.NodeStorage.Exec).Resize(devicePath, mountTarget)
 	if err != nil {
 		s.Log.Error("Failed to resize filesystem", logger.Err(err), slog.Any("devicePath", devicePath), slog.Any("mountTarget", mountTarget))
-		return fmt.Errorf("failed to resize filesystem %s on device %s: %w", mountTarget, devicePath, err)
+		return fmt.Errorf("failed to resize filesystem %s on device %s: %w", mountTarget, devicePath, s.explainResizeError(devicePath, err))
 	}
 
 	s.Log.Info("Filesystem resized successfully", "devicePath", devicePath)

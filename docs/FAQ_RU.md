@@ -509,6 +509,49 @@ journalctl -u bashible --no-pager | tail -n 200
 
 Если пакет не найден, а узел загружен со старым ядром, заголовков которого в репозитории уже нет, восстановите доступ к нужным репозиториям или зеркалу либо загрузите узел с ядром, для которого заголовки есть в репозитории. Если включен Secure Boot, сборка `DRBD` не поддерживается — см. [предыдущий раздел](#linstor-node-не-может-запуститься-из-за-невозможности-загрузки-drbd-модуля).
 
+### Расширение PVC не проходит: `resize2fs: Permission denied to resize filesystem … on-line resizing required`
+
+Размер PVC уже увеличен, но том не расширяется, а у пода есть событие `VolumeResizeFailed` (или `FailedMount`, если расширение выполняется при монтировании тома) с ошибкой вида:
+
+```text
+resize2fs: Permission denied to resize filesystem … on-line resizing required
+```
+
+Причина — файловая система ext4, помеченная как имеющая ошибки. Ядро не даёт расширять такую ФС, пока она смонтирована (`EPERM`), а причину пишет только в журнал ядра узла. С новым control plane (управляющим слоем) модуля CSI-драйвер сам добавляет это пояснение к ошибке; с control plane LINSTOR узнать причину можно только шагами ниже.
+
+Чтобы проверить, найдите устройство тома на узле, где запущен под, и проверьте его:
+
+```shell
+findmnt -o SOURCE,TARGET | grep <имя PV>
+dumpe2fs -h /dev/drbdNNNN | grep -E 'Filesystem state|FS Error count'
+dmesg | grep EXT4-fs
+```
+
+Состояние `clean with errors` (или `not clean with errors`) либо ненулевой `FS Error count` подтверждают причину, а в `dmesg` будет строка вида `EXT4-fs warning (device drbdNNNN): ext4_resize_begin:NN: There are errors in the filesystem, so online resizing is not allowed`. Пока том смонтирован, суперблок (служебная область ФС), который читает `dumpe2fs`, может ещё не отражать ошибки, поэтому ориентируйтесь и на `dmesg`.
+
+Как исправить с control plane LINSTOR:
+
+1. Остановите под (для StatefulSet — уменьшите число реплик), чтобы том был размонтирован. Не запускайте `e2fsck` на смонтированной ФС.
+1. Убедитесь, что том не используется ни на одном узле, и найдите узел с репликой, хранящей данные, и устройство тома на нём:
+
+   ```shell
+   alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+   linstor resource list -r <имя PV>
+   linstor resource list-volumes -r <имя PV>
+   ```
+
+   Ни один узел не должен быть отмечен как `InUse`.
+
+1. На узле с репликой в состоянии `UpToDate` (данные актуальны) проверьте и исправьте ФС. DRBD сам переводит устройство в роль Primary (основная реплика, через которую идёт запись), пока `e2fsck` держит его открытым, и возвращает в роль Secondary (вторичная реплика) после завершения:
+
+   ```shell
+   e2fsck -f /dev/drbdNNNN
+   ```
+
+1. Запустите под. Расширение будет повторено kubelet и CSI-драйвером и завершится после монтирования тома.
+
+С новым control plane DRBD не переводит устройство в роль Primary при открытии, поэтому `e2fsck` не сможет открыть устройство остановленного тома; шаги выше относятся только к control plane LINSTOR.
+
 ### Под не может запуститься из-за ошибки FailedMount
 
 #### Под завис на стадии ContainerCreating
