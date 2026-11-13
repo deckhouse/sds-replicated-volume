@@ -35,6 +35,10 @@ const (
 	// (sdsReplicatedVolume.dataNodes.nodeSelector) serialized as a JSON object
 	// of string labels. An empty/unset value means "match all nodes".
 	DataNodeSelectorEnvVar = "DATA_NODE_SELECTOR"
+	// StorageClassLabelIgnoredPrefixesEnvVar holds the label-key prefixes that are
+	// not copied from a ReplicatedStorageClass to its StorageClass, serialized as a
+	// JSON array of strings. An empty/unset value means "copy every label".
+	StorageClassLabelIgnoredPrefixesEnvVar = "STORAGE_CLASS_LABEL_IGNORED_PREFIXES"
 
 	// defaults are different for each app, do not merge them.
 	// The controller runs in the pod network, so these ports hold nothing on the
@@ -53,6 +57,12 @@ type Config struct {
 	podNamespace         string
 	schedulerExtenderURL string
 	dataNodeSelector     labels.Set
+
+	storageClassLabelIgnoredPrefixes []string
+}
+
+func (c *Config) StorageClassLabelIgnoredPrefixes() []string {
+	return c.storageClassLabelIgnoredPrefixes
 }
 
 func (c *Config) PodNamespace() string {
@@ -74,6 +84,7 @@ type ConfigProvider interface {
 	PodNamespace() string
 	SchedulerExtenderURL() string
 	DataNodeSelector() labels.Set
+	StorageClassLabelIgnoredPrefixes() []string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 	IsControllerEnabled(name string) bool
@@ -117,6 +128,12 @@ func loadConfig() (*Config, error) {
 	}
 	cfg.dataNodeSelector = dataNodeSelector
 
+	ignoredPrefixes, err := parseStorageClassLabelIgnoredPrefixes(os.Getenv(StorageClassLabelIgnoredPrefixesEnvVar))
+	if err != nil {
+		return nil, err
+	}
+	cfg.storageClassLabelIgnoredPrefixes = ignoredPrefixes
+
 	cfg.Load(DefaultHealthProbeBindAddress, DefaultMetricsBindAddress)
 
 	return cfg, nil
@@ -149,4 +166,18 @@ func parseDataNodeSelector(raw string) (labels.Set, error) {
 	}
 
 	return set, nil
+}
+
+func parseStorageClassLabelIgnoredPrefixes(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil, nil
+	}
+
+	var prefixes []string
+	if err := json.Unmarshal([]byte(raw), &prefixes); err != nil {
+		return nil, fmt.Errorf("%w: %s must be a JSON array of strings: %w",
+			commonenv.ErrInvalidConfig, StorageClassLabelIgnoredPrefixesEnvVar, err)
+	}
+	return prefixes, nil
 }

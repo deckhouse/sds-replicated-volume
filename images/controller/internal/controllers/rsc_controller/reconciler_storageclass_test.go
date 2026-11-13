@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -44,7 +45,7 @@ var _ = Describe("reconcileStorageClass", func() {
 		rsc *v1alpha1.ReplicatedStorageClass
 	)
 
-	newClient := func(objs ...client.Object) client.Client {
+	newClient := func(objs ...client.Object) client.WithWatch {
 		scheme := runtime.NewScheme()
 		Expect(storagev1.AddToScheme(scheme)).To(Succeed())
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
@@ -64,6 +65,124 @@ var _ = Describe("reconcileStorageClass", func() {
 				VolumeAccess:  v1alpha1.VolumeAccessLocal,
 			},
 		}
+	})
+
+	getSC := func() storagev1.StorageClass {
+		var sc storagev1.StorageClass
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rsc.Name}, &sc)).To(Succeed())
+		return sc
+	}
+
+	It("marks the StorageClass with the module name", func() {
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(getSC().Labels).To(HaveKeyWithValue("storage.deckhouse.io/managed-by", "sds-replicated-volume"))
+	})
+
+	It("copies the labels of the RSC to the StorageClass", func() {
+		rsc.Labels = map[string]string{"team": "payments", "tier": "gold"}
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(getSC().Labels).To(Equal(map[string]string{
+			"team":                     "payments",
+			"tier":                     "gold",
+			v1alpha1.ManagedByLabelKey: v1alpha1.ManagedByLabelValue,
+		}))
+	})
+
+	It("does not copy labels with an ignored prefix", func() {
+		rsc.Labels = map[string]string{"team": "payments", "argocd.argoproj.io/instance": "app", "helm.toolkit.fluxcd.io/name": "x"}
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+		rec.ignoredLabelPrefixes = []string{"argocd.argoproj.io/", "", "helm.toolkit.fluxcd.io/"}
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(getSC().Labels).To(Equal(map[string]string{
+			"team":                     "payments",
+			v1alpha1.ManagedByLabelKey: v1alpha1.ManagedByLabelValue,
+		}))
+	})
+
+	It("keeps managed-by at the module name when the RSC carries its own", func() {
+		rsc.Labels = map[string]string{v1alpha1.ManagedByLabelKey: "someone-else"}
+		cl = newClient(rsc)
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(getSC().Labels).To(HaveKeyWithValue(v1alpha1.ManagedByLabelKey, v1alpha1.ManagedByLabelValue))
+	})
+
+	It("updates the labels in place without recreating the StorageClass", func() {
+		rsc.Labels = map[string]string{"team": "payments", "tier": "gold"}
+		base := newClient(rsc)
+		cl = base
+		rec = NewReconciler(cl)
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		deletes, creates := 0, 0
+		cl = interceptor.NewClient(base, interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				deletes++
+				return c.Delete(ctx, obj, opts...)
+			},
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				creates++
+				return c.Create(ctx, obj, opts...)
+			},
+		})
+		rec = NewReconciler(cl)
+
+		rsc.Labels = map[string]string{"team": "billing", "env": "prod"}
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(deletes).To(BeZero())
+		Expect(creates).To(BeZero())
+		sc := getSC()
+		Expect(sc.Labels).To(Equal(map[string]string{
+			"team":                     "billing",
+			"env":                      "prod",
+			v1alpha1.ManagedByLabelKey: v1alpha1.ManagedByLabelValue,
+		}))
+		Expect(sc.Finalizers).To(ContainElement(v1alpha1.StorageClassFinalizer))
+	})
+
+	It("restores managed-by on an existing StorageClass without recreating it", func() {
+		own := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       rsc.Name,
+				Finalizers: []string{v1alpha1.StorageClassFinalizer},
+				Labels:     map[string]string{"stale": "true"},
+			},
+			Provisioner: v1alpha1.CSIProvisioner,
+		}
+		target, err := computeTargetStorageClass(rsc, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
+		own.Parameters = target.Parameters
+		own.ReclaimPolicy = target.ReclaimPolicy
+		own.VolumeBindingMode = target.VolumeBindingMode
+		own.AllowVolumeExpansion = target.AllowVolumeExpansion
+
+		deletes := 0
+		cl = interceptor.NewClient(newClient(rsc, own), interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				deletes++
+				return c.Delete(ctx, obj, opts...)
+			},
+		})
+		rec = NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(deletes).To(BeZero())
+		Expect(getSC().Labels).To(Equal(map[string]string{v1alpha1.ManagedByLabelKey: v1alpha1.ManagedByLabelValue}))
 	})
 
 	It("creates the StorageClass when the name is free", func() {

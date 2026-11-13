@@ -31,6 +31,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
@@ -40,9 +41,15 @@ const (
 )
 
 func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+
 	cl := mgr.GetClient()
 
 	rec := NewReconciler(cl)
+	rec.ignoredLabelPrefixes = cfg.StorageClassLabelIgnoredPrefixes()
 	rec.recorder = mgr.GetEventRecorder(RSCControllerName)
 
 	return builder.ControllerManagedBy(mgr).

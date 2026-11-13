@@ -112,6 +112,8 @@ spec:
               value: "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099"
             - name: DATA_NODE_SELECTOR
               value: {{ .Values.sdsReplicatedVolume.dataNodes.nodeSelector | toJson | quote }}
+            - name: STORAGE_CLASS_LABEL_IGNORED_PREFIXES
+              value: {{ concat (default (list) .Values.sdsReplicatedVolume.internal.storageClassLabelIgnoredPrefixesSystem) (default (list) .Values.sdsReplicatedVolume.storageClassLabelIgnoredPrefixes) | uniq | toJson | quote }}
         - name: kube-rbac-proxy
           {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" dict | nindent 10 }}
           image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}

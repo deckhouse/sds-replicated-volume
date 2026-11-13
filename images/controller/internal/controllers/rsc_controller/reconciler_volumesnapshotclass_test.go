@@ -72,7 +72,7 @@ var _ = Describe("reconcileStorageClass volume snapshot class annotation", func(
 	// existingSC returns the StorageClass the controller would create for rsc,
 	// with the given annotations in place of the computed ones.
 	existingSC := func(annotations map[string]string) *storagev1.StorageClass {
-		sc, err := computeTargetStorageClass(rsc, nil)
+		sc, err := computeTargetStorageClass(rsc, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		sc.UID = types.UID("sc-uid")
 		sc.Annotations = annotations

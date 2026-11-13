@@ -40,30 +40,30 @@ var _ = Describe("computeTargetStorageClass reserved percent", func() {
 	}
 
 	It("leaves the parameter out when the annotation is absent", func() {
-		sc, err := computeTargetStorageClass(newRSC(nil), nil)
+		sc, err := computeTargetStorageClass(newRSC(nil), nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc.Parameters).NotTo(HaveKey(fsreserve.ParameterKey))
 	})
 
 	It("leaves the parameter out for an explicit zero", func() {
-		sc, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "0"}), nil)
+		sc, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "0"}), nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc.Parameters).NotTo(HaveKey(fsreserve.ParameterKey))
 	})
 
 	It("carries a percentage into the parameters", func() {
-		sc, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "5"}), nil)
+		sc, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "5"}), nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc.Parameters).To(HaveKeyWithValue(fsreserve.ParameterKey, "5"))
 	})
 
 	It("fails the reconcile on an out-of-range value instead of every volume", func() {
-		_, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "300"}), nil)
+		_, err := computeTargetStorageClass(newRSC(map[string]string{fsreserve.AnnotationKey: "300"}), nil, nil)
 		Expect(err).To(HaveOccurred())
 	})
 
 	It("ignores unrelated annotations", func() {
-		sc, err := computeTargetStorageClass(newRSC(map[string]string{"example.com/other": "nonsense"}), nil)
+		sc, err := computeTargetStorageClass(newRSC(map[string]string{"example.com/other": "nonsense"}), nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc.Parameters).NotTo(HaveKey(fsreserve.ParameterKey))
 	})

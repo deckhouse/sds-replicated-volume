@@ -55,6 +55,7 @@ type Reconciler struct {
 	// recorder records an Event on the RSC when a status patch moves its Ready
 	// condition. BuildController sets it; nil records nothing.
 	recorder conditions.EventRecorder
+	ignoredLabelPrefixes []string
 }
 
 // storageClassConflictRequeueInterval is how often an RSC whose name is held by
@@ -1862,7 +1863,7 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 		return rf.DoneAndRequeueAfter(storageClassConflictRequeueInterval)
 	}
 
-	targetSC, err := computeTargetStorageClass(rsc, oldSC)
+	targetSC, err := computeTargetStorageClass(rsc, oldSC, r.ignoredLabelPrefixes)
 	if err != nil {
 		return rf.Fail(err)
 	}
@@ -1905,11 +1906,14 @@ func (r *Reconciler) reconcileStorageClass(ctx context.Context, rsc *v1alpha1.Re
 }
 
 // computeTargetStorageClass builds the target StorageClass from RSC spec.
-// If oldSC is non-nil, existing labels/annotations/finalizers are preserved
+// The labels are those of the RSC without the ignored prefixes, plus managed-by,
+// which the RSC cannot override; a label dropped from the RSC leaves the StorageClass.
+// If oldSC is non-nil, existing annotations/finalizers are preserved
 // (our values are added on top).
 func computeTargetStorageClass(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	oldSC *storagev1.StorageClass,
+	ignoredLabelPrefixes []string,
 ) (*storagev1.StorageClass, error) {
 	allowVolumeExpansion := true
 	reclaimPolicy := corev1.PersistentVolumeReclaimPolicy(rsc.Spec.ReclaimPolicy)
@@ -1960,8 +1964,8 @@ func computeTargetStorageClass(
 		sc.Parameters[v1alpha1.CSIParamVolumeCleanupKey] = string(rsc.Spec.VolumeCleanup)
 	}
 
+	sc.Labels = filterLabelsForStorageClass(rsc.Labels, ignoredLabelPrefixes)
 	if oldSC != nil {
-		sc.Labels = maps.Clone(oldSC.Labels)
 		sc.Annotations = maps.Clone(oldSC.Annotations)
 		sc.Finalizers = slices.Clone(oldSC.Finalizers)
 	}
@@ -1974,6 +1978,26 @@ func computeTargetStorageClass(
 	objutilv1.SetAnnotation(sc, v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey, v1alpha1.VolumeSnapshotClassName)
 
 	return sc, nil
+}
+
+func filterLabelsForStorageClass(rscLabels map[string]string, ignoredLabelPrefixes []string) map[string]string {
+	out := make(map[string]string, len(rscLabels)+1)
+	for k, v := range rscLabels {
+		if hasIgnoredLabelPrefix(k, ignoredLabelPrefixes) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func hasIgnoredLabelPrefix(key string, ignoredLabelPrefixes []string) bool {
+	for _, prefix := range ignoredLabelPrefixes {
+		if prefix != "" && strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isStorageClassSpecInSync(targetSC, oldSC *storagev1.StorageClass) bool {

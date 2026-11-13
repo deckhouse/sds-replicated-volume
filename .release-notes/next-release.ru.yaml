@@ -4,6 +4,9 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+improvements:
+  - "В новом control plane `StorageClass`, создаваемый для `ReplicatedStorageClass`, теперь получает метки этого `ReplicatedStorageClass`, как в LINSTOR control plane и в остальных модулях хранения: `ClusterResourceGrantPolicy` может выбирать класс через `allowedSelector` и `deniedSelector`, а метки ставятся на `ReplicatedStorageClass`, потому что вебхук не принимает изменение меток у `StorageClass`. Метки, ключи которых начинаются с префикса из `storageClassLabelIgnoredPrefixes` (системный список и список из `ModuleConfig`), не переносятся, `storage.deckhouse.io/managed-by: sds-replicated-volume` переопределить нельзя, метка, убранная с `ReplicatedStorageClass`, исчезает и со `StorageClass`, а изменение меток обновляет `StorageClass` на месте, без пересоздания."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # security: []
 # breaking: []

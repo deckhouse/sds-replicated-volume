@@ -8,7 +8,7 @@ The controller reconciles `ReplicatedStorageClass` status with:
 
 1. **Spec defaulting** — fills controller-managed optional spec fields (`systemNetworkNames`, `configurationRolloutStrategy`, `eligibleNodesConflictResolutionStrategy`, `eligibleNodesPolicy`) with defaults when not set by the user
 2. **Storage pool management** — auto-generates and manages an RSP based on `spec.storage` configuration
-3. **StorageClass management** — creates and manages a Kubernetes `StorageClass` with the same name as the RSC; deletes and recreates the SC when immutable spec fields change
+3. **StorageClass management** — creates and manages a Kubernetes `StorageClass` with the same name as the RSC; deletes and recreates the SC when immutable spec fields change. The SC carries the labels of the RSC except those with an ignored prefix (`STORAGE_CLASS_LABEL_IGNORED_PREFIXES`) plus `storage.deckhouse.io/managed-by`; a label change updates the SC in place.
 4. **Configuration snapshot** — resolved configuration from spec, stored in `status.configuration`
 5. **Generations/Revisions** — for quick change detection between RSC and RSP
 6. **Conditions** — 4 conditions describing the current state
