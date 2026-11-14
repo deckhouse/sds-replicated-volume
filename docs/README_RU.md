@@ -41,7 +41,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Для снимков томов требуется модуль, поставляющий CRD группы `snapshot.storage.k8s.io`, — например [snapshot-controller](/modules/snapshot-controller/). Без него остальная функциональность модуля работает штатно, а VolumeSnapshotClass не создается.
+Для работы со снимками томов требуется модуль [storage-foundation](/modules/storage-foundation/). Без него остальная функциональность модуля работает штатно, а VolumeSnapshotClass не создается.
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.

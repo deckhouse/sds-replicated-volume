@@ -10,6 +10,9 @@ improvements:
 security:
   - "Вебхук, который разрешает создавать `PersistentVolumeClaim` с `ReadWriteMany` в классе модуля только перечисленным сервисным аккаунтам, теперь определяет класс так же, как Kubernetes: сначала по аннотации `volume.beta.kubernetes.io/storage-class`, затем по `spec.storageClassName`. Раньше можно было указать класс модуля в аннотации, а другой класс — в `spec`, пройти проверку и получить том модуля. `PersistentVolumeClaim` с `storageClassName: \"\"` запрашивает том без класса и больше не сверяется с классом по умолчанию, а из нескольких классов по умолчанию берётся самый новый, как в Kubernetes."
 
+docs:
+  - "Документация называет модуль `storage-foundation`, а не `snapshot-controller`, модулем, который требуется для снимков томов, и больше не предлагает включать `snapshot-controller`."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # breaking: []
 # known_issues: []
