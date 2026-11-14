@@ -7,8 +7,10 @@ highlights: []
 improvements:
   - "In the new control plane, the `StorageClass` created for a `ReplicatedStorageClass` now carries the labels of that `ReplicatedStorageClass`, as in the LINSTOR control plane and in the other storage modules, so a `ClusterResourceGrantPolicy` can select the class by `allowedSelector` and `deniedSelector`; the labels are set on the `ReplicatedStorageClass`, because the webhook does not accept label changes on the `StorageClass`. Labels whose keys start with a prefix from `storageClassLabelIgnoredPrefixes` (the system list and the one in the `ModuleConfig`) are not copied, `storage.deckhouse.io/managed-by: sds-replicated-volume` cannot be overridden, a label removed from the `ReplicatedStorageClass` leaves the `StorageClass`, and a change of labels updates the `StorageClass` in place without recreating it."
 
+security:
+  - "The webhook that allows only listed service accounts to create a `ReadWriteMany` `PersistentVolumeClaim` in a class of the module now reads the class the way Kubernetes does: from the `volume.beta.kubernetes.io/storage-class` annotation first, then from `spec.storageClassName`. Before, a claim could name a class of the module in the annotation and another class in `spec`, pass the check and get a volume of the module. A claim with `storageClassName: \"\"` asks for no class and is no longer checked against the default class, and of several default classes the newest is taken, as Kubernetes does."
+
 # Optional sections — delete rather than leave empty.
-# security: []
 # breaking: []
 # known_issues: []
 # docs: []

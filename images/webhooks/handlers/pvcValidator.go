@@ -112,25 +112,43 @@ func pvcRequestsRWX(pvc *v1.PersistentVolumeClaim) bool {
 }
 
 func resolvePVCStorageClass(ctx context.Context, cl client.Client, pvc *v1.PersistentVolumeClaim) (*storagev1.StorageClass, error) {
-	// Explicit StorageClassName.
-	if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
-		scName := *pvc.Spec.StorageClassName
-		return getStorageClass(ctx, cl, scName)
+	if class, ok := pvc.Annotations[v1.BetaStorageClassAnnotation]; ok {
+		if class == "" {
+			return nil, nil
+		}
+		return getStorageClass(ctx, cl, class)
 	}
 
-	// Try default StorageClass to avoid bypass via omitting storageClassName.
+	if pvc.Spec.StorageClassName != nil {
+		if *pvc.Spec.StorageClassName == "" {
+			return nil, nil
+		}
+		return getStorageClass(ctx, cl, *pvc.Spec.StorageClassName)
+	}
+
 	var scList storagev1.StorageClassList
 	if err := cl.List(ctx, &scList); err != nil {
 		return nil, err
 	}
+	var def *storagev1.StorageClass
 	for i := range scList.Items {
 		sc := &scList.Items[i]
-		if isDefaultStorageClass(sc) {
-			return sc, nil
+		if !isDefaultStorageClass(sc) {
+			continue
+		}
+		if def == nil || newerStorageClass(sc, def) {
+			def = sc
 		}
 	}
 
-	return nil, nil
+	return def, nil
+}
+
+func newerStorageClass(a, b *storagev1.StorageClass) bool {
+	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+		return b.CreationTimestamp.Before(&a.CreationTimestamp)
+	}
+	return a.Name < b.Name
 }
 
 func isDefaultStorageClass(sc *storagev1.StorageClass) bool {

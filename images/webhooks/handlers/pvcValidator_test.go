@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -178,6 +179,88 @@ func Test_PVCValidate(t *testing.T) {
 			username:       "user",
 			groups:         []string{},
 			wantValid:      true,
+		},
+		{
+			name: "RWX PVC naming the replicated class in the beta annotation and another class in spec denied",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc", Annotations: map[string]string{v1.BetaStorageClassAnnotation: "replicated"}},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+					StorageClassName: stringPtr("other"),
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "replicated"}, Provisioner: replicatedProvisioner},
+				{ObjectMeta: metav1.ObjectMeta{Name: "other"}, Provisioner: otherProvisioner},
+			},
+			username:    "user",
+			groups:      []string{},
+			wantValid:   false,
+			wantMessage: "Creating PVC with accessMode ReadWriteMany using StorageClass \"replicated\" (provisioner \"replicated.csi.storage.deckhouse.io\") is not allowed for user \"user\".",
+		},
+		{
+			name: "RWX PVC with an empty beta annotation and the replicated class in spec allowed",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc", Annotations: map[string]string{v1.BetaStorageClassAnnotation: ""}},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+					StorageClassName: stringPtr("replicated"),
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "replicated"}, Provisioner: replicatedProvisioner},
+			},
+			username:  "user",
+			groups:    []string{},
+			wantValid: true,
+		},
+		{
+			name: "RWX PVC with an explicitly empty class allowed while the replicated class is the default",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+					StorageClassName: stringPtr(""),
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "replicated", Annotations: map[string]string{"storageclass.kubernetes.io/is-default-class": "true"}}, Provisioner: replicatedProvisioner},
+			},
+			username:  "user",
+			groups:    []string{},
+			wantValid: true,
+		},
+		{
+			name: "RWX PVC without a class allowed when the newest default class is not replicated",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "a-replicated", CreationTimestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), Annotations: map[string]string{"storageclass.kubernetes.io/is-default-class": "true"}}, Provisioner: replicatedProvisioner},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b-other", CreationTimestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)), Annotations: map[string]string{"storageclass.beta.kubernetes.io/is-default-class": "true"}}, Provisioner: otherProvisioner},
+			},
+			username:  "user",
+			groups:    []string{},
+			wantValid: true,
+		},
+		{
+			name: "RWX PVC without a class denied when the newest default class is replicated",
+			obj: &v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+				},
+			},
+			storageClasses: []*storagev1.StorageClass{
+				{ObjectMeta: metav1.ObjectMeta{Name: "a-other", CreationTimestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), Annotations: map[string]string{"storageclass.kubernetes.io/is-default-class": "true"}}, Provisioner: otherProvisioner},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b-replicated", CreationTimestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)), Annotations: map[string]string{"storageclass.kubernetes.io/is-default-class": "true"}}, Provisioner: replicatedProvisioner},
+			},
+			username:  "user",
+			groups:    []string{},
+			wantValid: false,
 		},
 		{
 			name: "Non-PVC object",
