@@ -1,8 +1,7 @@
 # The renderer of the release-notes pages lives in sds-common-lib: it is the same for
 # every storage module, and the copy that used to sit in `hack/` here came with a
-# committed 2.4-3.6 MB binary that the image depended on. Bump the pin below to pick up a
+# committed 2.4-3.6 MB binary that the image depended on. Bump the pin in .werf/tools/go.mod to pick up a
 # new renderer; the module keeps only its notes.
-{{- $_ := set $ "ReleaseNotesTool" "github.com/deckhouse/sds-common-lib/cmd/release-notes-docs@v0.16.0" }}
 {{- $_ := set $ "GO_PRIVATE_TOKEN" (env "FOX_GO_TOKEN" (env "CI_JOB_TOKEN" "")) }}
 {{- if not $.GOPROXY }}{{- $_ := set $ "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}{{- end }}
 ---
@@ -16,6 +15,11 @@ git:
     includePaths:
       - .release-notes
       - CHANGELOG
+    stageDependencies:
+      setup:
+        - "**/*"
+  - add: /.werf/tools
+    to: /release-notes-tools
     stageDependencies:
       setup:
         - "**/*"
@@ -36,11 +40,11 @@ shell:
     - cd /
     - mkdir -p /docs
     - |
-      GOPROXY="$(cat /run/secrets/GOPROXY)" go run {{ $.ReleaseNotesTool }} \
+      GOPROXY="$(cat /run/secrets/GOPROXY)" go -C /release-notes-tools tool release-notes-docs \
         --root / \
         --out-en /docs/RELEASE_NOTES.md \
         --out-ru /docs/RELEASE_NOTES.ru.md
-    - rm -rf .release-notes CHANGELOG
+    - rm -rf .release-notes CHANGELOG release-notes-tools
     - cat /docs/RELEASE_NOTES.md
     - cat /docs/RELEASE_NOTES.ru.md
 
