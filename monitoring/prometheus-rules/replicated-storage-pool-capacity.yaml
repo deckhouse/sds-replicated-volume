@@ -1,0 +1,297 @@
+- name: kubernetes.replicated.storage_pool.capacity
+  rules:
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan20Percent
+      expr: |
+        (1 - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes)) * 100
+          * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=""})
+          < 20
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Thin pool of a ReplicatedStoragePool running out of free space
+        description: |
+          The thin pool `{{ $labels.thin_pool }}` of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` uses, has less than 20% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          Thin volumes take space from the pool as data is written to them, and a snapshot keeps the blocks it shares with its volume. When the thin pool is full, writes to every volume with a replica in it stop, the volumes that already exist included.
+
+          The recommended course of action:
+
+          1. Check the size and the usage of the thin pool and the free space left in its volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='{range .status.thinPools[?(@.name=="{{ $labels.thin_pool }}")]}actualSize={.actualSize} usedSize={.usedSize} allocatedSize={.allocatedSize}{"\n"}{end}vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName,THIN_POOL:.spec.lvmVolumeGroupThinPoolName
+             ```
+
+          3. Free space in the pool: delete the PersistentVolumeClaims and VolumeSnapshots that are no longer needed. Or grow the thin pool: raise its `size` in `spec.thinPools` of the LVMVolumeGroup; if the volume group has no free space (`vgFree`) for it, first add block devices to the volume group through `spec.blockDeviceSelector` (a thin pool sized in percent grows with the volume group by itself).
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan20Percent
+      expr: |
+        max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * 100 / max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes)
+          * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+          < 20
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "7"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVM thick ReplicatedStoragePool running out of free space
+        description: |
+          The volume group of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` (LVM thick) uses, has less than 20% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          A thick volume takes all of its space when it is created, so the volumes already in this pool keep working, writes included. What runs out is room for new volumes: a replica that does not fit in the free space cannot be placed on this LVMVolumeGroup, and a volume with a replica here cannot be grown beyond it.
+
+          The recommended course of action:
+
+          1. Check the size and the free space of the volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='vgSize={.status.vgSize} vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName
+             ```
+
+          3. Free space: delete the PersistentVolumeClaims that are no longer needed, or add block devices to the volume group through `spec.blockDeviceSelector` of the LVMVolumeGroup. To place new replicas elsewhere, add LVMVolumeGroups of other nodes to `spec.lvmVolumeGroups` of the ReplicatedStoragePool.
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan10Percent
+      expr: |
+        (1 - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes)) * 100
+          * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=""})
+          < 10
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Thin pool of a ReplicatedStoragePool running out of free space
+        description: |
+          The thin pool `{{ $labels.thin_pool }}` of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` uses, has less than 10% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          Thin volumes take space from the pool as data is written to them, and a snapshot keeps the blocks it shares with its volume. When the thin pool is full, writes to every volume with a replica in it stop, the volumes that already exist included.
+
+          The recommended course of action:
+
+          1. Check the size and the usage of the thin pool and the free space left in its volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='{range .status.thinPools[?(@.name=="{{ $labels.thin_pool }}")]}actualSize={.actualSize} usedSize={.usedSize} allocatedSize={.allocatedSize}{"\n"}{end}vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName,THIN_POOL:.spec.lvmVolumeGroupThinPoolName
+             ```
+
+          3. Free space in the pool: delete the PersistentVolumeClaims and VolumeSnapshots that are no longer needed. Or grow the thin pool: raise its `size` in `spec.thinPools` of the LVMVolumeGroup; if the volume group has no free space (`vgFree`) for it, first add block devices to the volume group through `spec.blockDeviceSelector` (a thin pool sized in percent grows with the volume group by itself).
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan10Percent
+      expr: |
+        max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * 100 / max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes)
+          * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+          < 10
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVM thick ReplicatedStoragePool running out of free space
+        description: |
+          The volume group of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` (LVM thick) uses, has less than 10% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          A thick volume takes all of its space when it is created, so the volumes already in this pool keep working, writes included. What runs out is room for new volumes: a replica that does not fit in the free space cannot be placed on this LVMVolumeGroup, and a volume with a replica here cannot be grown beyond it.
+
+          The recommended course of action:
+
+          1. Check the size and the free space of the volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='vgSize={.status.vgSize} vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName
+             ```
+
+          3. Free space: delete the PersistentVolumeClaims that are no longer needed, or add block devices to the volume group through `spec.blockDeviceSelector` of the LVMVolumeGroup. To place new replicas elsewhere, add LVMVolumeGroups of other nodes to `spec.lvmVolumeGroups` of the ReplicatedStoragePool.
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan5Percent
+      expr: |
+        (1 - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes)) * 100
+          * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=""})
+          < 5
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "3"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Thin pool of a ReplicatedStoragePool running out of free space
+        description: |
+          The thin pool `{{ $labels.thin_pool }}` of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` uses, has less than 5% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          Thin volumes take space from the pool as data is written to them, and a snapshot keeps the blocks it shares with its volume. When the thin pool is full, writes to every volume with a replica in it stop, the volumes that already exist included.
+
+          The recommended course of action:
+
+          1. Check the size and the usage of the thin pool and the free space left in its volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='{range .status.thinPools[?(@.name=="{{ $labels.thin_pool }}")]}actualSize={.actualSize} usedSize={.usedSize} allocatedSize={.allocatedSize}{"\n"}{end}vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName,THIN_POOL:.spec.lvmVolumeGroupThinPoolName
+             ```
+
+          3. Free space in the pool: delete the PersistentVolumeClaims and VolumeSnapshots that are no longer needed. Or grow the thin pool: raise its `size` in `spec.thinPools` of the LVMVolumeGroup; if the volume group has no free space (`vgFree`) for it, first add block devices to the volume group through `spec.blockDeviceSelector` (a thin pool sized in percent grows with the volume group by itself).
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan5Percent
+      expr: |
+        max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * 100 / max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes)
+          * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+          < 5
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "5"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVM thick ReplicatedStoragePool running out of free space
+        description: |
+          The volume group of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` (LVM thick) uses, has less than 5% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          A thick volume takes all of its space when it is created, so the volumes already in this pool keep working, writes included. What runs out is room for new volumes: a replica that does not fit in the free space cannot be placed on this LVMVolumeGroup, and a volume with a replica here cannot be grown beyond it.
+
+          The recommended course of action:
+
+          1. Check the size and the free space of the volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='vgSize={.status.vgSize} vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName
+             ```
+
+          3. Free space: delete the PersistentVolumeClaims that are no longer needed, or add block devices to the volume group through `spec.blockDeviceSelector` of the LVMVolumeGroup. To place new replicas elsewhere, add LVMVolumeGroups of other nodes to `spec.lvmVolumeGroups` of the ReplicatedStoragePool.
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan1Percent
+      expr: |
+        (1 - max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_used_size_bytes) / max by (node, lvg_name, thin_pool) (sds_node_configurator_lvg_thin_pool_actual_size_bytes)) * 100
+          * on (lvg_name, thin_pool) group_right (node) max by (storage_pool, lvg_name, thin_pool) (sds_rsp_lvg_info{thin_pool!=""})
+          < 1
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "1"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Thin pool of a ReplicatedStoragePool running out of free space
+        description: |
+          The thin pool `{{ $labels.thin_pool }}` of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` uses, has less than 1% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          Thin volumes take space from the pool as data is written to them, and a snapshot keeps the blocks it shares with its volume. When the thin pool is full, writes to every volume with a replica in it stop, the volumes that already exist included.
+
+          The recommended course of action:
+
+          1. Check the size and the usage of the thin pool and the free space left in its volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='{range .status.thinPools[?(@.name=="{{ $labels.thin_pool }}")]}actualSize={.actualSize} usedSize={.usedSize} allocatedSize={.allocatedSize}{"\n"}{end}vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName,THIN_POOL:.spec.lvmVolumeGroupThinPoolName
+             ```
+
+          3. Free space in the pool: delete the PersistentVolumeClaims and VolumeSnapshots that are no longer needed. Or grow the thin pool: raise its `size` in `spec.thinPools` of the LVMVolumeGroup; if the volume group has no free space (`vgFree`) for it, first add block devices to the volume group through `spec.blockDeviceSelector` (a thin pool sized in percent grows with the volume group by itself).
+
+    - alert: D8ReplicatedStoragePoolFreeCapacityLessThan1Percent
+      expr: |
+        max by (node, lvg_name) (sds_node_configurator_lvg_vg_free_bytes) * 100 / max by (node, lvg_name) (sds_node_configurator_lvg_vg_size_bytes)
+          * on (lvg_name) group_right (node) max by (storage_pool, lvg_name) (sds_rsp_lvg_info{thin_pool=""})
+          < 1
+      for: 5m
+      keep_firing_for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_replicated_storage_pool_capacity: "D8ReplicatedStoragePoolCapacity,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVM thick ReplicatedStoragePool running out of free space
+        description: |
+          The volume group of the LVMVolumeGroup `{{ $labels.lvg_name }}` on node `{{ $labels.node }}`, which the ReplicatedStoragePool `{{ $labels.storage_pool }}` (LVM thick) uses, has less than 1% of its space left. Current free space: {{ printf "%.1f" $value }}%.
+
+          A thick volume takes all of its space when it is created, so the volumes already in this pool keep working, writes included. What runs out is room for new volumes: a replica that does not fit in the free space cannot be placed on this LVMVolumeGroup, and a volume with a replica here cannot be grown beyond it.
+
+          The recommended course of action:
+
+          1. Check the size and the free space of the volume group:
+
+             ```shell
+             kubectl get lvg {{ $labels.lvg_name }} -o jsonpath='vgSize={.status.vgSize} vgFree={.status.vgFree}{"\n"}'
+             ```
+
+          2. Find the replicas placed on the node and their LVMVolumeGroups:
+
+             ```shell
+             kubectl get rvr --field-selector=spec.nodeName={{ $labels.node }} -o custom-columns=NAME:.metadata.name,VOLUME:.spec.replicatedVolumeName,TYPE:.spec.type,LVG:.spec.lvmVolumeGroupName
+             ```
+
+          3. Free space: delete the PersistentVolumeClaims that are no longer needed, or add block devices to the volume group through `spec.blockDeviceSelector` of the LVMVolumeGroup. To place new replicas elsewhere, add LVMVolumeGroups of other nodes to `spec.lvmVolumeGroups` of the ReplicatedStoragePool.

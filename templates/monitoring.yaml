@@ -8,4 +8,14 @@
 {{- include "helm_lib_grafana_dashboard_definitions_recursion" (list . "monitoring/linstor-grafana-dashboards") }}
   {{- end }}
 {{- end }}
-{{- include "helm_lib_prometheus_rules" (list . "d8-sds-replicated-volume") }}
+{{- $otherControlPlaneRules := list "monitoring/prometheus-rules/replicated-storage-pool-capacity.yaml" }}
+{{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+  {{- $otherControlPlaneRules = list "monitoring/prometheus-rules/linstor-storage-pools.yaml" }}
+{{- end }}
+{{- $rules := list }}
+{{- range $path, $_ := .Files.Glob "monitoring/prometheus-rules/**.{yaml,tpl}" }}
+  {{- if not (has $path $otherControlPlaneRules) }}
+    {{- $rules = append $rules $path }}
+  {{- end }}
+{{- end }}
+{{- include "helm_lib_prometheus_rules" (list . "d8-sds-replicated-volume" $rules) }}

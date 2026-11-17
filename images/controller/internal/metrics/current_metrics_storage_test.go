@@ -219,6 +219,78 @@ func TestReplicatedStorageHealthRulesMatchTheExportedMetrics(t *testing.T) {
 	}
 }
 
+const replicatedStoragePoolCapacityRulePath = "../../../../monitoring/prometheus-rules/replicated-storage-pool-capacity.yaml"
+
+func TestReplicatedStoragePoolCapacityRulesMatchTheExportedMetrics(t *testing.T) {
+	data, err := os.ReadFile(replicatedStoragePoolCapacityRulePath)
+	if err != nil {
+		t.Fatalf("reading rule file %q: %v", replicatedStoragePoolCapacityRulePath, err)
+	}
+
+	var groups []prometheusRuleGroup
+	if err := yaml.Unmarshal(data, &groups); err != nil {
+		t.Fatalf("unmarshalling rule file %q: %v", replicatedStoragePoolCapacityRulePath, err)
+	}
+	rules := map[string]prometheusAlertRule{}
+	for _, g := range groups {
+		for _, r := range g.Rules {
+			key := r.Alert + "/" + strings.Join(strings.Fields(r.Expr), " ")
+			if _, ok := rules[key]; ok {
+				t.Fatalf("rule %s with expr %q is defined twice", r.Alert, r.Expr)
+			}
+			rules[key] = r
+		}
+	}
+
+	thin := "(1 - max by (node, " + LabelLVGName + ", " + LabelThinPool + ") (sds_node_configurator_lvg_thin_pool_used_size_bytes)" +
+		" / max by (node, " + LabelLVGName + ", " + LabelThinPool + ") (sds_node_configurator_lvg_thin_pool_actual_size_bytes)) * 100" +
+		" * on (" + LabelLVGName + ", " + LabelThinPool + ") group_right (node)" +
+		" max by (" + LabelStoragePool + ", " + LabelLVGName + ", " + LabelThinPool + ") (" + metricNameRSPLVGInfo + `{` + LabelThinPool + `!=""})`
+	thick := "max by (node, " + LabelLVGName + ") (sds_node_configurator_lvg_vg_free_bytes) * 100" +
+		" / max by (node, " + LabelLVGName + ") (sds_node_configurator_lvg_vg_size_bytes)" +
+		" * on (" + LabelLVGName + ") group_right (node)" +
+		" max by (" + LabelStoragePool + ", " + LabelLVGName + ") (" + metricNameRSPLVGInfo + `{` + LabelThinPool + `=""})`
+
+	tests := []struct {
+		alert     string
+		threshold string
+		thinSev   string
+		thickSev  string
+	}{
+		{"D8ReplicatedStoragePoolFreeCapacityLessThan20Percent", "20", "6", "7"},
+		{"D8ReplicatedStoragePoolFreeCapacityLessThan10Percent", "10", "4", "6"},
+		{"D8ReplicatedStoragePoolFreeCapacityLessThan5Percent", "5", "3", "5"},
+		{"D8ReplicatedStoragePoolFreeCapacityLessThan1Percent", "1", "1", "4"},
+	}
+	if want := 2 * len(tests); len(rules) != want {
+		t.Fatalf("expected %d rules in %q, got %d", want, replicatedStoragePoolCapacityRulePath, len(rules))
+	}
+	for _, tt := range tests {
+		for _, v := range []struct {
+			kind     string
+			expr     string
+			severity string
+		}{
+			{"thin", thin, tt.thinSev},
+			{"thick", thick, tt.thickSev},
+		} {
+			t.Run(tt.alert+"/"+v.kind, func(t *testing.T) {
+				expr := v.expr + " < " + tt.threshold
+				rule, ok := rules[tt.alert+"/"+expr]
+				if !ok {
+					t.Fatalf("no rule %s with expr %q in %q", tt.alert, expr, replicatedStoragePoolCapacityRulePath)
+				}
+				if rule.For != "5m" || rule.KeepFiringFor != "5m" {
+					t.Fatalf("expected for: 5m and keep_firing_for: 5m, got %q and %q", rule.For, rule.KeepFiringFor)
+				}
+				if rule.Labels["severity_level"] != v.severity || rule.Labels["tier"] != "cluster" {
+					t.Fatalf("expected severity_level %s and tier cluster, got %v", v.severity, rule.Labels)
+				}
+			})
+		}
+	}
+}
+
 func collectCapacityInfo(t *testing.T, rsps []v1alpha1.ReplicatedStoragePool, rscs []v1alpha1.ReplicatedStorageClass) (lvgInfo, replicas []testMetric) {
 	t.Helper()
 

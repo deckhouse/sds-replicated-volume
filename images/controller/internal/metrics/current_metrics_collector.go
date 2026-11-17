@@ -91,6 +91,7 @@ var currentMetricsRVProblemConditionTypes = []string{
 //   - metricNameRSPConditionProblem and metricNameRSCConditionProblem:
 //     monitoring/prometheus-rules/replicated-storage-health.yaml;
 //   - metricNameCollectorUp: monitoring/prometheus-rules/current-metrics.tpl;
+//   - metricNameRSPLVGInfo: monitoring/prometheus-rules/replicated-storage-pool-capacity.yaml;
 //   - metricNameRSPLVGInfo and metricNameRSCReplicas: the capacity panels of
 //     monitoring/grafana-dashboards/storage/sds-replicated-volume.json.
 const (
