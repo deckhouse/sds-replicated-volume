@@ -21,7 +21,12 @@ docs:
   - "Документация называет модуль `storage-foundation`, а не `snapshot-controller`, модулем, который требуется для снимков томов, и больше не предлагает включать `snapshot-controller`."
 
 fixes:
+  - "`VolumeSnapshot` для `PersistentVolumeClaim` класса с пулом `LVM` (thick, толстые тома), `PersistentVolumeClaim`, восстанавливаемый из `VolumeSnapshot` в такой класс, и клон `PersistentVolumeClaim` из такого класса или в такой класс теперь отклоняются при создании с сообщением, в котором названы `StorageClass`, его пул и требование `LVMThin`. Раньше они принимались, и CSI-драйвер повторял их бесконечно: снапшоты и клоны, которые делаются через снапшот, существуют только в тонких пулах. Тип пула — это `spec.type` ресурса `ReplicatedStoragePool` в LINSTOR control plane и `spec.storage.type` ресурса `ReplicatedStorageClass` в новом control plane. `VolumeSnapshot`, привязанный к существующему `VolumeSnapshotContent`, не проверяется."
+  - "У `StorageClass` для `ReplicatedStorageClass` с пулом `LVM` (thick) больше нет аннотации `storage.deckhouse.io/volumesnapshotclass`, поэтому `storage-foundation` больше не подставляет `VolumeSnapshotClass` модуля в снапшоты его томов; у классов с пулом `LVMThin` аннотация остается."
   - "В LINSTOR-контуре `ReplicatedStorageClass` с `replication: None` теперь задаёт в `StorageClass` `auto-quorum: disabled` и `auto-add-quorum-tiebreaker: false`, а контроллер выставляет `auto-quorum: disabled` в группе ресурсов LINSTOR у существующих однореплицных классов. Единственная копия не может разойтись сама с собой, но отключившийся diskless-участник включал кворум и останавливал ввод-вывод на исправной реплике. Существующие однореплицные тома теряют кворум, когда LINSTOR в следующий раз пересчитает их определение ресурса."
+
+upgrade_notes:
+  - "При обновлении модуль снимает аннотацию `storage.deckhouse.io/volumesnapshotclass` с существующих `StorageClass` классов с пулом `LVM` (thick), в том числе значение, поставленное вручную; `StorageClass` обновляется на месте, не пересоздается, тома не затрагиваются. `VolumeSnapshot` такого тома без `volumeSnapshotClassName` больше не получает класс модуля."
 
 # Необязательные разделы — пустые не оставлять, а удалять.
 # breaking: []

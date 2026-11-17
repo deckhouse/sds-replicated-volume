@@ -27,6 +27,21 @@ Overprovisioning в LVMThin-пулах этого модуля ограничи�
 - Удалять можно в любом порядке. Удаление PVC тома, у которого есть снапшоты, удаляет реплики тома, а его снапшоты по-прежнему можно восстановить. VolumeSnapshot можно удалить, пока существует восстановленный из него том: восстановленный том не зависит ни от снапшота, ни от тома, с которого снят снапшот. С восстановленного тома тоже можно снять снапшот и восстановить его.
 - В thin pool блок, который снапшот делит со своим томом, освобождается, когда его больше не использует ни один том или снапшот. Свободное место, которое LINSTOR показывает для пула LVMThin, уже учитывает место, занятое снапшотами.
 
+## Что происходит при создании снапшота, восстановлении или клонировании тома в пуле LVM (thick)?
+
+Снапшоты, восстановление PVC из VolumeSnapshot и клонирование PVC (`spec.dataSource` или `spec.dataSourceRef` вида `PersistentVolumeClaim`) доступны только для StorageClass с пулом типа `LVMThin`. Тип пула — это `spec.type` ресурса [ReplicatedStoragePool](./cr.html#replicatedstoragepool), указанного в `spec.storagePool` ресурса [ReplicatedStorageClass](./cr.html#replicatedstorageclass), в LINSTOR control plane и `spec.storage.type` ресурса ReplicatedStorageClass в новом control plane.
+
+Для StorageClass с пулом типа `LVM` (thick, толстые тома):
+
+- У StorageClass нет аннотации `storage.deckhouse.io/volumesnapshotclass`, поэтому VolumeSnapshotClass модуля не подставляется в снапшоты его томов. С таких StorageClass, созданных прежними версиями, модуль снимает аннотацию при обновлении; StorageClass при этом не пересоздается.
+- Модуль отклоняет создание VolumeSnapshot для PVC этого StorageClass, PVC этого StorageClass, восстанавливаемого из VolumeSnapshot или клонируемого из PVC, и клона PVC этого StorageClass. Запрос сразу завершается ошибкой с сообщением такого вида:
+
+  ```text
+  admission webhook "d8-sds-replicated-volume-volumesnapshot-validation.deckhouse.io" denied the request: PersistentVolumeClaim "data" uses StorageClass "replicated-thick", which keeps its volumes in the thick (LVM) ReplicatedStoragePool "thick-pool"; snapshots need a storage pool of type LVMThin.
+  ```
+
+  VolumeSnapshot, создаваемый из существующего VolumeSnapshotContent (`spec.source.volumeSnapshotContentName`), не проверяется.
+
 ## Поддерживаемые дисковые конфигурации и производительность
 
 ### Поддерживаемые типы дисков

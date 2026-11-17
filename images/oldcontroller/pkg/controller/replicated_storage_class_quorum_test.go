@@ -83,7 +83,7 @@ var _ = Describe("StorageClass quorum parameters", func() {
 		current, err := controller.GetStorageClass(context.Background(), cl, rsc.Name)
 		Expect(err).NotTo(HaveOccurred())
 
-		newSC := controller.GetNewStorageClass(rsc, false, nil)
+		newSC := controller.GetNewStorageClass(rsc, false, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		_, err = controller.UpdateStorageClassIfNeeded(context.Background(), cl, logger.NewNop(), newSC, current, nil)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -101,7 +101,7 @@ var _ = Describe("StorageClass quorum parameters", func() {
 		current, err := controller.GetStorageClass(context.Background(), cl, "rsc-x")
 		Expect(err).NotTo(HaveOccurred())
 
-		newSC := controller.GetNewStorageClass(newRSC("rsc-x", controller.ReplicationNone), false, nil)
+		newSC := controller.GetNewStorageClass(newRSC("rsc-x", controller.ReplicationNone), false, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		_, err = controller.UpdateStorageClassIfNeeded(context.Background(), cl, logger.NewNop(), newSC, current, nil)
 		Expect(err).To(HaveOccurred())
 	})

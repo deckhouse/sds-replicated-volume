@@ -60,6 +60,10 @@ rules:
       - replicatedvolumeattachments/status
     verbs: ["patch"]
 
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
+
   # --- Nodes: read + patch labels ---
   - apiGroups: [""]
     resources: ["nodes"]

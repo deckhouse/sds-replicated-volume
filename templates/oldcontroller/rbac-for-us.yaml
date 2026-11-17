@@ -20,6 +20,7 @@
   "clusterRoleRules" (list
     (dict "apiGroups" (list "") "resources" (list "nodes" "persistentvolumes") "verbs" (list "get" "list" "watch" "patch" "update"))
     (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
+    (dict "apiGroups" (list "") "resources" (list "persistentvolumeclaims") "verbs" (list "get"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "replicatedstorageclasses" "lvmvolumegroups" "replicatedstoragepools") "verbs" (list "get" "list" "create" "delete" "watch" "update"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "replicatedstoragepools/status" "replicatedstorageclasses/status") "verbs" (list "get" "update" "patch"))
     (dict "apiGroups" (list "storage.k8s.io") "resources" (list "storageclasses" "csinodes") "verbs" (list "create" "delete" "list" "get" "watch" "update"))

@@ -1,0 +1,21 @@
+{{- $pvcDataSourceWebhookConfig := dict
+  "name" "pvc-data-source-validation"
+  "webhookName" "pvc-data-source-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/pvc-data-source-validate"
+  "rules" (list (dict "apiGroups" (list "") "apiVersions" (list "v1") "operations" (list "CREATE") "resources" (list "persistentvolumeclaims") "scope" "Namespaced"))
+  "matchConditions" (list (dict "name" "has-data-source" "expression" "has(object.spec.dataSource) || has(object.spec.dataSourceRef)"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $pvcDataSourceWebhookConfig) }}
+
+{{- if (include "helm_lib_api_version_exists" (list . "snapshot.storage.k8s.io/v1/VolumeSnapshot")) }}
+{{- $volumeSnapshotWebhookConfig := dict
+  "name" "volumesnapshot-validation"
+  "webhookName" "volumesnapshot-validation"
+  "valuesKey" "sdsReplicatedVolume"
+  "path" "/volumesnapshot-validate"
+  "rules" (list (dict "apiGroups" (list "snapshot.storage.k8s.io") "apiVersions" (list "v1") "operations" (list "CREATE") "resources" (list "volumesnapshots") "scope" "Namespaced"))
+  "matchConditions" (list (dict "name" "from-claim" "expression" "has(object.spec.source) && has(object.spec.source.persistentVolumeClaimName)"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $volumeSnapshotWebhookConfig) }}
+{{- end }}

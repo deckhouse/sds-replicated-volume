@@ -21,7 +21,12 @@ docs:
   - "The documentation names the `storage-foundation` module, not `snapshot-controller`, as the module that volume snapshots require, and no longer asks to enable `snapshot-controller`."
 
 fixes:
+  - "A `VolumeSnapshot` of a `PersistentVolumeClaim` in a class with an `LVM` (thick) pool, a claim restored from a `VolumeSnapshot` into such a class and a clone of a claim from or into such a class are now rejected on creation with a message that names the `StorageClass`, its pool and the `LVMThin` requirement. Before, they were accepted and the CSI driver retried them forever, since snapshots, and clones made through them, exist only in thin pools. The pool type is `spec.type` of the `ReplicatedStoragePool` in the LINSTOR control plane and `spec.storage.type` of the `ReplicatedStorageClass` in the new control plane. A `VolumeSnapshot` bound to an existing `VolumeSnapshotContent` is not checked."
+  - "The `StorageClass` of a `ReplicatedStorageClass` with an `LVM` (thick) pool no longer has the `storage.deckhouse.io/volumesnapshotclass` annotation, so `storage-foundation` no longer fills in the module's `VolumeSnapshotClass` for snapshots of its volumes; classes with an `LVMThin` pool keep it."
   - "In the LINSTOR control plane, a `ReplicatedStorageClass` with `replication: None` now sets `auto-quorum` to `disabled` and `auto-add-quorum-tiebreaker` to `false` in its `StorageClass`, and the controller sets `auto-quorum: disabled` on the LINSTOR resource group of existing single-replica classes. A single copy cannot split the brain, but a disconnected diskless peer used to turn quorum on and suspend I/O on a healthy replica. Existing single-replica volumes lose quorum when LINSTOR next recalculates their resource definition."
+
+upgrade_notes:
+  - "On update, the module removes the `storage.deckhouse.io/volumesnapshotclass` annotation from existing `StorageClass` objects of classes with an `LVM` (thick) pool, a value set by hand included; the `StorageClass` is updated in place and not recreated, and its volumes are not affected. A `VolumeSnapshot` of such a volume that names no `volumeSnapshotClassName` no longer gets the module's class."
 
 # Optional sections — delete rather than leave empty.
 # breaking: []

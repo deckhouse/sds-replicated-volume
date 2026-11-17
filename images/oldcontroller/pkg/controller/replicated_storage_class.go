@@ -176,6 +176,24 @@ func NewReplicatedStorageClass(
 		return nil, err
 	}
 
+	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStoragePool{}, handler.TypedFuncs[*srv.ReplicatedStoragePool, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStoragePool], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			rscList := &srv.ReplicatedStorageClassList{}
+			if err := cl.List(ctx, rscList); err != nil {
+				log.Error("unable to list ReplicatedStorageClasses for a new ReplicatedStoragePool", logger.Err(err))
+				return
+			}
+			for _, rsc := range rscList.Items {
+				if rsc.Spec.StoragePool == e.Object.GetName() {
+					q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: rsc.Namespace, Name: rsc.Name}})
+				}
+			}
+		},
+	}))
+	if err != nil {
+		return nil, err
+	}
+
 	// Watch the controller-config Secret so that a ModuleConfig update to
 	// storageClassLabelIgnoredPrefixes re-renders the Secret via Helm and
 	// triggers re-reconciliation of every existing ReplicatedStorageClass without
@@ -331,7 +349,12 @@ func ReconcileReplicatedStorageClass(
 			"to Local and virtualization module is %t", virtualizationEnabled))
 	}
 
-	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled, ignoredLabelPrefixes)
+	poolType, err := getReplicatedStoragePoolType(ctx, cl, replicatedSC.Spec.StoragePool)
+	if err != nil {
+		return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting ReplicatedStoragePool %s: %w", replicatedSC.Spec.StoragePool, err)
+	}
+
+	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled, ignoredLabelPrefixes, poolType)
 
 	if oldSC == nil {
 		log.Info("StorageClass with name: " +
@@ -805,8 +828,25 @@ func recreateStorageClassIfNeeded(
 	return true, false, nil
 }
 
-func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool, ignoredLabelPrefixes []string) *storagev1.StorageClass {
+func getReplicatedStoragePoolType(ctx context.Context, cl client.Client, name string) (srv.ReplicatedStoragePoolType, error) {
+	if name == "" {
+		return "", nil
+	}
+	rsp := &srv.ReplicatedStoragePool{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: name}, rsp); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return rsp.Spec.Type, nil
+}
+
+func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool, ignoredLabelPrefixes []string, poolType srv.ReplicatedStoragePoolType) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC, ignoredLabelPrefixes)
+	if poolType != srv.ReplicatedStoragePoolTypeLVMThin {
+		delete(newSC.Annotations, RSCStorageClassVolumeSnapshotClassAnnotationKey)
+	}
 	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
 	// has  replicatedstorageclass.storage.deckhouse.io/ignore-local: "true".
 	ignoreLocal, _ := strconv.ParseBool(
@@ -846,6 +886,9 @@ func DoUpdateStorageClass(
 
 	copyAnnotations := maps.Clone(oldSC.Annotations)
 	delete(copyAnnotations, StorageClassVirtualizationAnnotationKey)
+	if _, ok := newSC.Annotations[RSCStorageClassVolumeSnapshotClassAnnotationKey]; !ok {
+		delete(copyAnnotations, RSCStorageClassVolumeSnapshotClassAnnotationKey)
+	}
 
 	// Copy relevant Annotations from oldSC to newSC, excluding StorageClassVirtualizationAnnotationKey
 	if len(copyAnnotations) > 0 {

@@ -81,6 +81,10 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 	BeforeEach(func() {
 		cl = newFakeClientWithStatusSubresource()
+		Expect(cl.Create(ctx, &srv.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: validSpecReplicatedSCTemplate.Spec.StoragePool},
+			Spec:       srv.ReplicatedStoragePoolSpec{Type: srv.ReplicatedStoragePoolTypeLVMThin},
+		})).To(Succeed())
 	})
 
 	It("GenerateStorageClassFromReplicatedStorageClass_Generates_expected_StorageClass", func() {
@@ -140,7 +144,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Name = testName
 
 		virtualizationEnabled := false
-		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		Expect(actualSC).To(Equal(expectedSC))
 	})
 
@@ -206,7 +210,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err := controller.CreateStorageClass(ctx, cl, sc)
 		if err == nil {
 			defer func() {
@@ -394,7 +398,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		scTemplate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		scTemplate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err = controller.CreateStorageClass(ctx, cl, scTemplate)
 		if err == nil {
 			defer func() {
@@ -456,7 +460,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -828,7 +832,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -886,7 +890,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		anotherSC := controller.GetNewStorageClass(&anotherReplicatedSC, virtualizationEnabled, nil)
+		anotherSC := controller.GetNewStorageClass(&anotherReplicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err = controller.CreateStorageClass(ctx, cl, anotherSC)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -933,7 +937,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		delete(oldSC.Parameters, controller.StorageClassParamFSOptsKey)
 		err = controller.CreateStorageClass(ctx, cl, oldSC)
 		Expect(err).NotTo(HaveOccurred())
@@ -964,7 +968,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		virtualizationEnabled := false
-		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		oldSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		err := controller.CreateStorageClass(ctx, cl, oldSC)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1716,7 +1720,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeTrue())
 
-		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		Expect(scResource).NotTo(BeNil())
 		Expect(scResource.Annotations).NotTo(BeNil())
 		Expect(scResource.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
@@ -1788,7 +1792,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
-		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass, nil)
 		Expect(scResourceAfterUpdate).NotTo(BeNil())
 		Expect(scResourceAfterUpdate.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
@@ -1845,7 +1849,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			},
 		}
 
-		storageClassResource := controller.GetNewStorageClass(&replicatedSC, false, nil)
+		storageClassResource := controller.GetNewStorageClass(&replicatedSC, false, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		Expect(storageClassResource).NotTo(BeNil())
 		Expect(storageClassResource.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
 		Expect(storageClassResource.Name).To(Equal(replicatedSC.Name))
@@ -1884,7 +1888,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeTrue())
 
-		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		controller.DoUpdateStorageClass(scResource, storageClass, nil)
 		Expect(scResource).NotTo(BeNil())
 		Expect(scResource.Annotations).NotTo(BeNil())
@@ -1922,7 +1926,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
-		storageClassResource := controller.GetNewStorageClass(&replicatedSC, true, nil)
+		storageClassResource := controller.GetNewStorageClass(&replicatedSC, true, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true", controller.StorageClassVirtualizationAnnotationKey: controller.StorageClassVirtualizationAnnotationValue, controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}
 		err := createConfigMap(ctx, cl, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "true"})
 		Expect(err).NotTo(HaveOccurred())
@@ -1968,7 +1972,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeFalse())
 
-		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil)
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, nil, srv.ReplicatedStoragePoolTypeLVMThin)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass, nil)
 		Expect(scResourceAfterUpdate.Annotations).NotTo(BeNil())
 		Expect(len(scResourceAfterUpdate.Annotations)).To(Equal(2))

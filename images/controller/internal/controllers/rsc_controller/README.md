@@ -334,7 +334,7 @@ Other counters:
 | Finalizer | `sds-replicated-volume.deckhouse.io/rsc-controller` | RSP | Prevent RSP deletion while any RSC references it |
 | Finalizer | `storage.deckhouse.io/sds-replicated-volume` | StorageClass | Prevent SC deletion by external actors while RSC exists |
 | Label | `storage.deckhouse.io/managed-by=sds-replicated-volume` | StorageClass | Mark SC as managed by this controller |
-| Annotation | `storage.deckhouse.io/volumesnapshotclass=sds-replicated-volume` | StorageClass | Name the module's VolumeSnapshotClass for snapshots of the SC volumes (the storage-foundation VolumeSnapshot webhook defaults `volumeSnapshotClassName` from it); a value set by hand is replaced |
+| Annotation | `storage.deckhouse.io/volumesnapshotclass=sds-replicated-volume` | StorageClass | Name the module's VolumeSnapshotClass for snapshots of the SC volumes (the storage-foundation VolumeSnapshot webhook defaults `volumeSnapshotClassName` from it); set only when `spec.storage.type` is `LVMThin`, a value set by hand is replaced, and the annotation is removed from the SC of thick volumes |
 | Status field | `status.phase` | RSC | Operational state summary |
 | Status field | `status.message` | RSC | Human-readable description of the current phase |
 

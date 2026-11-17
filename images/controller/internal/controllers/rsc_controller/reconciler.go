@@ -1975,7 +1975,11 @@ func computeTargetStorageClass(
 	// The storage-foundation VolumeSnapshot webhook takes the class of a snapshot
 	// from this annotation. As in the LINSTOR control plane, the module's value
 	// replaces one set by hand.
-	objutilv1.SetAnnotation(sc, v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey, v1alpha1.VolumeSnapshotClassName)
+	if rsc.Spec.Storage != nil && rsc.Spec.Storage.Type == v1alpha1.ReplicatedStoragePoolTypeLVMThin {
+		objutilv1.SetAnnotation(sc, v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey, v1alpha1.VolumeSnapshotClassName)
+	} else {
+		objutilv1.RemoveAnnotation(sc, v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey)
+	}
 
 	return sc, nil
 }

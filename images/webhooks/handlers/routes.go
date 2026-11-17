@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
@@ -39,6 +40,9 @@ const (
 	SCValidatorID  = "SCValidator"
 	PVCValidatorID = "PVCValidator"
 	LVGValidatorID = "LVGValidator"
+
+	PVCDataSourceValidatorID = "PVCDataSourceValidator"
+	VSValidatorID            = "VolumeSnapshotValidator"
 )
 
 func Handlers(l logger.Logger) (map[string]http.Handler, error) {
@@ -56,6 +60,8 @@ func Handlers(l logger.Logger) (map[string]http.Handler, error) {
 		{"/sc-validate", SCValidatorID, SCValidate, &storagev1.StorageClass{}},
 		{"/pvc-validate", PVCValidatorID, PVCValidate, &corev1.PersistentVolumeClaim{}},
 		{"/lvg-validate", LVGValidatorID, LVGValidate, &snc.LVMVolumeGroup{}},
+		{"/pvc-data-source-validate", PVCDataSourceValidatorID, PVCDataSourceValidate, &corev1.PersistentVolumeClaim{}},
+		{"/volumesnapshot-validate", VSValidatorID, VolumeSnapshotValidate, &unstructured.Unstructured{}},
 	}
 
 	hs := make(map[string]http.Handler, len(routes))

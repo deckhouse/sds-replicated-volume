@@ -27,6 +27,21 @@ Snapshots are available for volumes in LVMThin pools only.
 - Any order of deletion is allowed. Deleting the PVC of a volume that has snapshots removes the replicas of the volume, and its snapshots can still be restored. A VolumeSnapshot can be deleted while a volume restored from it exists: the restored volume depends neither on the snapshot nor on the volume it was taken from. A restored volume can be snapshotted and restored in turn.
 - In a thin pool, a block that a snapshot shares with its volume is freed when no volume or snapshot uses it any more. The free space LINSTOR reports for an LVMThin pool already includes the space snapshots take.
 
+## What happens to a snapshot, a restore or a clone of a volume in an LVM (thick) pool?
+
+Snapshots, restoring a PVC from a VolumeSnapshot and cloning a PVC (a `spec.dataSource` or `spec.dataSourceRef` of kind `PersistentVolumeClaim`) are available only for StorageClasses with a pool of type `LVMThin`. The pool type is `spec.type` of the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) named in `spec.storagePool` of the [ReplicatedStorageClass](./cr.html#replicatedstorageclass) in the LINSTOR control plane, and `spec.storage.type` of the ReplicatedStorageClass in the new control plane.
+
+For a StorageClass with an `LVM` (thick) pool:
+
+- The StorageClass does not have the `storage.deckhouse.io/volumesnapshotclass` annotation, so the module's VolumeSnapshotClass is not filled in for snapshots of its volumes. The module removes the annotation from such StorageClasses created by earlier versions when it is updated; the StorageClass is not recreated.
+- The module rejects creating a VolumeSnapshot of a PVC of this StorageClass, a PVC of this StorageClass restored from a VolumeSnapshot or cloned from a PVC, and a clone of a PVC of this StorageClass. The request fails right away with a message like this:
+
+  ```text
+  admission webhook "d8-sds-replicated-volume-volumesnapshot-validation.deckhouse.io" denied the request: PersistentVolumeClaim "data" uses StorageClass "replicated-thick", which keeps its volumes in the thick (LVM) ReplicatedStoragePool "thick-pool"; snapshots need a storage pool of type LVMThin.
+  ```
+
+  A VolumeSnapshot created from an existing VolumeSnapshotContent (`spec.source.volumeSnapshotContentName`) is not checked.
+
 ## Supported disk configurations and performance
 
 ### Supported disk types

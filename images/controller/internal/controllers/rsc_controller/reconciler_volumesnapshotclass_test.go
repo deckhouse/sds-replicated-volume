@@ -33,9 +33,10 @@ import (
 )
 
 // The storage-foundation VolumeSnapshot webhook takes the class of a snapshot
-// from the StorageClass annotation, so every StorageClass of an RSC must carry
-// it. A StorageClass created before the annotation was set must get it without
-// being recreated: the annotation is metadata, not spec.
+// from the StorageClass annotation, so every StorageClass of an RSC with thin
+// volumes must carry it, and a StorageClass of thick volumes, which cannot be
+// snapshotted, must not. The annotation is metadata, not spec, so it is set or
+// removed without recreating the StorageClass.
 var _ = Describe("reconcileStorageClass volume snapshot class annotation", func() {
 	var (
 		ctx     context.Context
@@ -93,10 +94,13 @@ var _ = Describe("reconcileStorageClass volume snapshot class annotation", func(
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				ReclaimPolicy: "Delete",
 				VolumeAccess:  v1alpha1.VolumeAccessLocal,
+				Storage: &v1alpha1.ReplicatedStorageClassStorage{
+					Type:            v1alpha1.ReplicatedStoragePoolTypeLVMThin,
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "lvg-1", ThinPoolName: "thin"}},
+				},
 			},
 		}
 	})
-
 	It("names the module's VolumeSnapshotClass on a new StorageClass", func() {
 		cl := newClient(rsc)
 		rec := NewReconciler(cl)
@@ -152,6 +156,37 @@ var _ = Describe("reconcileStorageClass volume snapshot class annotation", func(
 		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
 
 		Expect(getSC(cl).ResourceVersion).To(Equal(before.ResourceVersion))
+		Expect(deletes).To(BeZero())
+		Expect(creates).To(BeZero())
+	})
+
+	It("does not name the VolumeSnapshotClass on a new StorageClass of thick volumes", func() {
+		rsc.Spec.Storage.Type = v1alpha1.ReplicatedStoragePoolTypeLVM
+		rsc.Spec.Storage.LVMVolumeGroups[0].ThinPoolName = ""
+		cl := newClient(rsc)
+		rec := NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		Expect(getSC(cl).Annotations).NotTo(HaveKey(v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey))
+		Expect(creates).To(Equal(1))
+	})
+
+	It("removes the annotation from an existing StorageClass of thick volumes in place", func() {
+		rsc.Spec.Storage.Type = v1alpha1.ReplicatedStoragePoolTypeLVM
+		rsc.Spec.Storage.LVMVolumeGroups[0].ThinPoolName = ""
+		cl := newClient(rsc, existingSC(map[string]string{
+			"example.com/note": "kept",
+			v1alpha1.StorageClassVolumeSnapshotClassAnnotationKey: v1alpha1.VolumeSnapshotClassName,
+		}))
+		rec := NewReconciler(cl)
+
+		Expect(rec.reconcileStorageClass(ctx, rsc).ShouldReturn()).To(BeFalse())
+
+		sc := getSC(cl)
+		Expect(sc.Annotations).To(Equal(map[string]string{"example.com/note": "kept"}))
+		Expect(sc.UID).To(Equal(types.UID("sc-uid")))
+		Expect(sc.DeletionTimestamp).To(BeNil())
 		Expect(deletes).To(BeZero())
 		Expect(creates).To(BeZero())
 	})
