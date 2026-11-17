@@ -30,7 +30,9 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/logger"
 	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-common-lib/webhookserver"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
 
 func main() {
@@ -78,6 +80,21 @@ func run(ctx context.Context, log logger.Logger) (err error) {
 	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
+	}
+
+	webhookOpts, webhooksEnabled, err := webhookserver.OptionsFromEnv()
+	if err != nil {
+		return u.LogError(log, fmt.Errorf("reading the webhook server configuration: %w", err))
+	}
+	if webhooksEnabled {
+		hs, err := handlers.Handlers(log.Named("webhooks"))
+		if err != nil {
+			return u.LogError(log, fmt.Errorf("creating the webhook handlers: %w", err))
+		}
+		if err := webhookserver.Add(mgr, webhookOpts, hs); err != nil {
+			return u.LogError(log, fmt.Errorf("adding the webhook server: %w", err))
+		}
+		log.Info("serving the admission webhooks", "port", webhookOpts.Port, "certDir", webhookOpts.CertDir)
 	}
 
 	eg.Go(func() error {

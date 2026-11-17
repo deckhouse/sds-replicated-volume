@@ -73,6 +73,7 @@ func newManager(
 			BindAddress: cfg.MetricsBindAddress(),
 		},
 		Cache: cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
 			ByObject: map[client.Object]cache.ByObject{
 				&v1alpha1.DRBDResource{}:          {Field: nodeNameSelector},
 				&v1alpha1.DRBDMapper{}:            {Field: nodeNameSelector},

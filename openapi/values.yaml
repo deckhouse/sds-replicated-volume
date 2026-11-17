@@ -61,14 +61,15 @@ properties:
         type: integer
         default: 8082
         description: |
-          The port the controller serves its metrics on, bound on 127.0.0.1: the only
-          thing that reaches it is the kube-rbac-proxy of the same pod.
+          Not used: the controller serves its metrics on
+          controllerMetricsProxyPort.
       controllerMetricsProxyPort:
         type: integer
         default: 8080
         description: |
-          The port the kube-rbac-proxy publishes the controller metrics on. Reaching
-          it requires "get" on deployments/prometheus-metrics for the controller.
+          The port the controller serves its metrics on, over HTTPS. Reaching it
+          requires "get" on deployments/prometheus-metrics for the controller,
+          which the controller checks on every scrape.
       oldControllerMetricsProxyPort:
         type: integer
         default: 8080

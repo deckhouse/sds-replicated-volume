@@ -12,8 +12,7 @@ spec:
   selector:
     app: controller
   ports:
-  # The proxy's port, not the controller's: the controller keeps its metrics on
-  # 127.0.0.1 and only the kube-rbac-proxy of the pod can reach them.
+  # The controller serves its metrics here over HTTPS and authorizes every scrape.
   - name: https-metrics
     port: {{ .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort }}
     targetPort: https-metrics

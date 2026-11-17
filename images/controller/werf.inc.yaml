@@ -10,11 +10,13 @@ git:
       - api
       - lib/go
       - images/{{ $.ImageName }}
+      - images/webhooks
     stageDependencies:
       install:
         - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
+      - images/webhooks/werf.inc.yaml
 
 shell:
   install:

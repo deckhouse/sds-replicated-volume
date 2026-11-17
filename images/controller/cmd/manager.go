@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring/metricsauth"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/scheme"
@@ -60,6 +61,7 @@ func newManager(
 	// Configure cache to only watch agent pods in the controller's namespace.
 	// This reduces memory usage and API server load.
 	cacheOpt := cache.Options{
+		DefaultTransform: cache.TransformStripManagedFields(),
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {
 				Namespaces: map[string]cache.Config{
@@ -79,9 +81,9 @@ func newManager(
 		LeaderElectionNamespace: envConfig.PodNamespace(),
 		LeaderElectionID:        "sds-replicated-volume-controller",
 		Cache:                   cacheOpt,
-		Metrics: server.Options{
+		Metrics: metricsauth.ApplyFromEnv(server.Options{
 			BindAddress: envConfig.MetricsBindAddress(),
-		},
+		}),
 	}
 
 	mgr, err := manager.New(config, mgrOpts)

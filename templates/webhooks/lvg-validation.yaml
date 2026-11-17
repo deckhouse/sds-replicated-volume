@@ -9,7 +9,11 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: d8-{{ .Chart.Name }}-lvg-validation
   annotations:
+    {{- if .Values.sdsReplicatedVolume.internal.newControlPlane }}
+    werf.io/deploy-dependency-controller: state=ready,kind=Deployment,name=controller,namespace=d8-{{ .Chart.Name }}
+    {{- else }}
     werf.io/deploy-dependency-webhooks: state=ready,kind=Deployment,name=webhooks,namespace=d8-{{ .Chart.Name }}
+    {{- end }}
     werf.io/deploy-dependency-service: state=present,kind=Service,name=webhooks,namespace=d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 webhooks:

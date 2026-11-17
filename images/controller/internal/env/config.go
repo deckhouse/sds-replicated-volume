@@ -44,11 +44,8 @@ const (
 	// The controller runs in the pod network, so these ports hold nothing on the
 	// host; they stay outside 4200-4299, which is where the modules' host-network
 	// ports live (docs/documentation/_data/deckhouse-ports.yml in deckhouse).
-	// 8080 is taken in the pod by the kube-rbac-proxy.
 	DefaultHealthProbeBindAddress = ":8081"
-	// Loopback, like the agent: the kube-rbac-proxy of the same pod is what
-	// publishes this endpoint, and a wildcard bind would answer unauthenticated
-	// on the pod IP.
+	// Loopback: a wildcard bind would answer unauthenticated on the pod IP.
 	DefaultMetricsBindAddress = "127.0.0.1:8082"
 )
 

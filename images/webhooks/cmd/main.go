@@ -22,13 +22,7 @@ import (
 	"net/http"
 	"os"
 
-	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
-
 	"github.com/deckhouse/sds-common-lib/logger"
-	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
 
@@ -57,14 +51,7 @@ func initFlags() config {
 	return cfg
 }
 
-const (
-	port           = ":8443"
-	RSCValidatorID = "RSCValidator"
-	RSPValidatorID = "RSPValidator"
-	SCValidatorID  = "SCValidator"
-	PVCValidatorID = "PVCValidator"
-	LVGValidatorID = "LVGValidator"
-)
+const port = ":8443"
 
 func main() {
 	// LOG_LEVEL, the numeric 0..4 value lib-helm emits. This webhook used to ignore
@@ -74,47 +61,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
 		os.Exit(1)
 	}
-	kwhLog := kwhlogger.New(log)
-	handlers.SetLogger(log)
-
 	cfg := initFlags()
 
-	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorID, &srv.ReplicatedStoragePool{}, kwhLog)
+	hs, err := handlers.Handlers(log)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating rspValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
-
-	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorID, &srv.ReplicatedStorageClass{}, kwhLog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating rscValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
-
-	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorID, &storagev1.StorageClass{}, kwhLog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating scValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
-
-	pvcValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.PVCValidate, PVCValidatorID, &corev1.PersistentVolumeClaim{}, kwhLog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating pvcValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
-
-	lvgValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LVGValidate, LVGValidatorID, &snc.LVMVolumeGroup{}, kwhLog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating lvgValidatingWebhookHandler: %s", err)
+		fmt.Fprintf(os.Stderr, "error creating the webhook handlers: %s", err)
 		os.Exit(1)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
-	mux.Handle("/sc-validate", scValidatingWebhookHandler)
-	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
-	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
-	mux.Handle("/lvg-validate", lvgValidatingWebhookHandler)
+	for path, h := range hs {
+		mux.Handle(path, h)
+	}
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	log.Info("listening", "address", port)

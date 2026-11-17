@@ -5,14 +5,16 @@ kind: Service
 metadata:
   name: webhooks
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 2 }}
+  annotations:
+    werf.io/deploy-dependency-controller: state=ready,kind=Deployment,name=controller,namespace=d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller" )) | nindent 2 }}
 spec:
   type: ClusterIP
   ports:
     - port: 443
-      targetPort: http
+      targetPort: webhooks
       protocol: TCP
       name: http
   selector:
-    app: webhooks
+    app: controller
 {{- end }}

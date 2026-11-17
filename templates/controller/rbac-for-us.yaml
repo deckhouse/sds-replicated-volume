@@ -161,12 +161,12 @@ roleRef:
 
 ---
 {{- /*
-  The kube-rbac-proxy in front of the controller's metrics port answers every
-  scrape by asking the API server who the caller is (TokenReview) and whether
-  they hold get on the prometheus-metrics subresource (SubjectAccessReview).
-  Both verbs live in d8:rbac-proxy. Without this binding the proxy fails closed
-  with 401 while the pod stays Ready, so the only symptom is up == 0 on the
-  module's job and a TargetDown that never clears.
+  The controller answers every scrape of its metrics port by asking the API
+  server who the caller is (TokenReview) and whether they hold get on the
+  prometheus-metrics subresource (SubjectAccessReview). Both verbs live in
+  d8:rbac-proxy. Without this binding the scrape fails closed with 401 while
+  the pod stays Ready, so the only symptom is up == 0 on the module's job and a
+  TargetDown that never clears.
 */ -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

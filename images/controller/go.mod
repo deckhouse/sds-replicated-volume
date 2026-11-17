@@ -1,10 +1,12 @@
 module github.com/deckhouse/sds-replicated-volume/images/controller
 
 go 1.27.4
+
 require (
-	github.com/deckhouse/sds-common-lib v0.19.0
+	github.com/deckhouse/sds-common-lib v0.22.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
+	github.com/deckhouse/sds-replicated-volume/images/webhooks v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 	github.com/onsi/ginkgo/v2 v2.28.2
@@ -13,11 +15,11 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	golang.org/x/sync v0.24.0
 	golang.org/x/time v0.14.0
-	k8s.io/api v0.35.1
-	k8s.io/apiextensions-apiserver v0.35.0
-	k8s.io/apimachinery v0.35.2
-	k8s.io/apiserver v0.35.0
-	k8s.io/client-go v0.35.1
+	k8s.io/api v0.35.10
+	k8s.io/apiextensions-apiserver v0.35.10
+	k8s.io/apimachinery v0.35.10
+	k8s.io/apiserver v0.35.10
+	k8s.io/client-go v0.35.10
 	k8s.io/component-helpers v0.35.1
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 	sigs.k8s.io/controller-runtime v0.23.3
@@ -27,6 +29,8 @@ require (
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
+
+replace github.com/deckhouse/sds-replicated-volume/images/webhooks => ../webhooks
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
@@ -88,6 +92,7 @@ require (
 	github.com/daixiang0/gci v0.13.7 // indirect
 	github.com/dave/dst v0.27.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/deckhouse/pkg/kube-rbac-auth v0.1.0 // indirect
 	github.com/deckhouse/deckhouse/pkg/log v0.2.1 // indirect
 	github.com/deckhouse/deckhouse/pkg/metrics-storage v0.3.0 // indirect
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
@@ -222,6 +227,7 @@ require (
 	github.com/securego/gosec/v2 v2.26.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/sivchari/containedctx v1.0.3 // indirect
+	github.com/slok/kubewebhook/v2 v2.7.0 // indirect
 	github.com/sonatard/noctx v0.5.1 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/sourcegraph/go-diff v0.8.0 // indirect
@@ -273,12 +279,12 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
-	k8s.io/component-base v0.35.0 // indirect
+	k8s.io/component-base v0.35.10 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect

@@ -3,7 +3,7 @@
 {{- /*
   Reaching the metrics of controller means holding "get" on its
   prometheus-metrics subresource. Only the Prometheus scraper is given it; the
-  kube-rbac-proxy in the pod checks it on every scrape.
+  controller checks it on every scrape.
 */ -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
