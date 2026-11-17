@@ -37,6 +37,44 @@ spec:
       bb-rp-install $MODULE_PACKAGE
     }
 
+    debian_candidate_version() {
+      apt-cache policy "$1" 2>/dev/null | awk '$1 == "Candidate:" && $2 != "(none)" { print $2; exit }'
+    }
+
+    debian_snapshot_get() {
+      local response
+      response="$(mktemp)"
+      if /usr/lib/apt/apt-helper download-file "$1" "$response" >/dev/null 2>&1; then
+        cat "$response"
+        rm -f "$response"
+        return 0
+      fi
+      rm -f "$response"
+      return 1
+    }
+
+    debian_snapshot_headers_sources() {
+      local package="$1"
+      local arch="$2"
+      local codename="$3"
+      local api="http://snapshot.debian.org/mr"
+      local encoded version hash
+      encoded="$(jq -rn --arg v "$package" '$v | @uri')"
+      for version in $(debian_snapshot_get "${api}/binary/${encoded}/" | jq -r '.result[].binary_version'); do
+        hash="$(debian_snapshot_get "${api}/binary/${encoded}/$(jq -rn --arg v "$version" '$v | @uri')/binfiles" | jq -r --arg arch "$arch" 'first(.result[] | select(.architecture == $arch) | .hash) // empty')"
+        if [ -z "$hash" ]; then
+          continue
+        fi
+        debian_snapshot_get "${api}/file/${hash}/info" | jq -r --arg codename "$codename" '
+          [.result[] | select(.archive_name == "debian-security")] as $security
+          | if ($security | length) > 0
+            then $security[] | "debian-security/\(.first_seen)/ \($codename)-security"
+            else .result[] | select(.archive_name == "debian") | "debian/\(.first_seen)/ \($codename)-proposed-updates", "debian/\(.first_seen)/ \($codename)-backports"
+            end
+          | "deb [check-valid-until=no] http://snapshot.debian.org/archive/\(.) main"'
+      done
+    }
+
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
@@ -132,7 +170,47 @@ spec:
     # that already runs it has no business waiting on its repositories.
     # DRBD requires the kernel sources to be installed.
     # Install actual kernel headers
-    bb-apt-install "linux-headers-${kernel_version_in_use}"
+    headers_package="linux-headers-${kernel_version_in_use}"
+    headers_snapshot_list="/etc/apt/sources.list.d/d8-drbd-kernel-headers-snapshot.list"
+    if [ -e "$headers_snapshot_list" ]; then
+      rm -f "$headers_snapshot_list"
+      bb-flag-unset apt-updated
+    fi
+    if ! bb-apt-package? "$headers_package"; then
+      bb-apt-update
+      headers_candidate="$(debian_candidate_version "$headers_package" || true)"
+      if [ -n "$headers_candidate" ]; then
+        bb-log-info "${headers_package} ${headers_candidate} is in the configured repositories"
+      else
+        os_id="$(. /etc/os-release && echo "${ID:-}")"
+        os_codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
+        if [ "$os_id" = "debian" ] && [ -n "$os_codename" ]; then
+          bb-log-info "${headers_package} is not in the configured repositories, looking for it on snapshot.debian.org"
+          bb-set-proxy
+          snapshot_sources="$(debian_snapshot_headers_sources "$headers_package" "$(dpkg --print-architecture)" "$os_codename" | sort -u || true)"
+          bb-unset-proxy
+          if [ -n "$snapshot_sources" ]; then
+            bb-log-info "Adding snapshot.debian.org sources for ${headers_package}: ${snapshot_sources//$'\n'/; }"
+            printf '%s\n' "$snapshot_sources" > "$headers_snapshot_list"
+            bb-flag-unset apt-updated
+            bb-apt-update || true
+          else
+            bb-log-warning "snapshot.debian.org has no ${headers_package} for this architecture or cannot be reached"
+          fi
+        fi
+      fi
+      if [ -z "$(debian_candidate_version "$headers_package" || true)" ]; then
+        rm -f "$headers_snapshot_list"
+        bb-flag-unset apt-updated
+        bb-log-error "${headers_package} for the running kernel is in neither the configured repositories nor the archives the script knows, so DRBD cannot be built on this node. Add a repository or mirror that provides the package, or boot the node into a kernel whose headers are available."
+        exit 1
+      fi
+    fi
+    bb-apt-install "$headers_package"
+    if [ -e "$headers_snapshot_list" ]; then
+      rm -f "$headers_snapshot_list"
+      bb-flag-unset apt-updated
+    fi
 
     # Remove unused kernel-headers
     kernel_version_pattern="$(echo "$kernel_version_in_use" | sed -r 's/([0-9\.-]+)-([^0-9]+)$/^linux-headers-(\1|\1-\2)$/')"

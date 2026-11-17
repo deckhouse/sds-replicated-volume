@@ -1067,7 +1067,7 @@ Check that the headers package for the running kernel is available in the reposi
 
   On ALT Linux, the package version may differ from the running kernel: if `/lib/modules/$(uname -r)/build` is missing after the headers are installed, the script updates the kernel and requests a reboot of the node; if the node group requires manual approval of disruptions, the reboot has to be approved.
 
-If the package is not found and the node is booted into an old kernel whose headers are no longer in the repository, restore access to the required repositories or mirror, or boot the node into a kernel whose headers are in the repository. If Secure Boot is enabled, building `DRBD` is not supported; see the [previous section](#linstor-node-fail-to-start-because-the-drbd-module-cannot-be-loaded).
+If the package is not in the repository, on Debian the script looks for it on `snapshot.debian.org` and on Rocky Linux in the Rocky Linux vault (`dl.rockylinux.org/vault`); the bashible log then shows the archive sources it tried. If the package is not found there either and the node is booted into an old kernel whose headers are no longer in the repository, restore access to the required repositories or mirror, or boot the node into a kernel whose headers are in the repository. If Secure Boot is enabled, building `DRBD` is not supported; see the [previous section](#linstor-node-fail-to-start-because-the-drbd-module-cannot-be-loaded).
 
 ### PVC expansion fails with `resize2fs: Permission denied to resize filesystem … on-line resizing required`
 

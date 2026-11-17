@@ -37,6 +37,20 @@ spec:
       bb-rp-install $MODULE_PACKAGE
     }
 
+    rocky_vault_package_urls() {
+      local package="$1"
+      local kernel="$2"
+      local release arch tree
+      release="$(sed -nE 's/^.*\.el([0-9]+)_([0-9]+).*$/\1.\2/p' <<< "$kernel")"
+      arch="${kernel##*.}"
+      if [ -z "$release" ] || [ "$arch" = "$kernel" ]; then
+        return 1
+      fi
+      for tree in os kickstart; do
+        echo "https://dl.rockylinux.org/vault/rocky/${release}/AppStream/${arch}/${tree}/Packages/${package:0:1}/${package}.rpm"
+      done
+    }
+
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
@@ -138,7 +152,35 @@ spec:
     #   kernel-lt             --> kernel-lt-devel
     #   kernel-lt-core        --> kernel-lt-devel
     package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
-    bb-dnf-install "${package_name}-${kernel_version_in_use}"
+    devel_package="${package_name}-${kernel_version_in_use}"
+    if ! bb-dnf-package? "$devel_package"; then
+      package_manager="$(bb-check-dnf)"
+      if [ "$package_manager" = "dnf" ]; then
+        bb-dnf-update
+      fi
+      bb-set-proxy
+      if "$package_manager" -q list available "$devel_package" >/dev/null 2>&1; then
+        bb-log-info "${devel_package} is in the configured repositories"
+      else
+        os_id="$(. /etc/os-release && echo "${ID:-}")"
+        devel_installed="false"
+        if [ "$os_id" = "rocky" ]; then
+          for url in $(rocky_vault_package_urls "$devel_package" "$kernel_version_in_use" || true); do
+            bb-log-info "${devel_package} is not in the configured repositories, trying ${url}"
+            if "$package_manager" install -y --setopt=localpkg_gpgcheck=True "$url"; then
+              devel_installed="true"
+              break
+            fi
+          done
+        fi
+        if [ "$devel_installed" != "true" ]; then
+          bb-log-error "${devel_package} for the running kernel is in neither the configured repositories nor the archives the script knows, so DRBD cannot be built on this node. Add a repository or mirror that provides the package, or boot the node into a kernel whose headers are available."
+          exit 1
+        fi
+      fi
+      bb-unset-proxy
+    fi
+    bb-dnf-install "$devel_package"
 
     # Remove unused kernel-headers
     packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
