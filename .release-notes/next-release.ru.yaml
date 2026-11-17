@@ -4,6 +4,9 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+new_features:
+  - "Скрипт `srv-node-cleanup.sh` зачищает узел от DRBD и томов модуля, когда кластер недоступен, для обоих control plane. Он останавливает DRBD-ресурсы, выгружает модули ядра `drbd`, удаляет файлы модуля и его правки `lvm.conf`, а с флагами `--delete-volumes` и `--vg` удаляет логические тома модуля только в названных группах томов. По умолчанию это пробный запуск, который печатает, что будет сделано; группы томов, физические тома и thin-пулы скрипт не трогает. Текст скрипта и порядок действий — в разделе FAQ «Как зачистить узел от DRBD и томов модуля, если кластер недоступен?»."
+
 improvements:
   - "В новом control plane `StorageClass`, создаваемый для `ReplicatedStorageClass`, теперь получает метки этого `ReplicatedStorageClass`, как в LINSTOR control plane и в остальных модулях хранения: `ClusterResourceGrantPolicy` может выбирать класс через `allowedSelector` и `deniedSelector`, а метки ставятся на `ReplicatedStorageClass`, потому что вебхук не принимает изменение меток у `StorageClass`. Метки, ключи которых начинаются с префикса из `storageClassLabelIgnoredPrefixes` (системный список и список из `ModuleConfig`), не переносятся, `storage.deckhouse.io/managed-by: sds-replicated-volume` переопределить нельзя, метка, убранная с `ReplicatedStorageClass`, исчезает и со `StorageClass`, а изменение меток обновляет `StorageClass` на месте, без пересоздания."
   - "В LINSTOR control plane алерты `D8LinstorStoragePoolFreeCapacityLessThen*` для пула `LVM` (thick) приходят с меньшей критичностью: 7, 6, 5 и 4 при свободном месте меньше 20 %, 10 %, 5 % и 1 % вместо 6, 4, 3 и 1. Thick-том занимает всё своё место при создании, поэтому заполненный thick-пул мешает созданию новых томов и реплик и расширению томов, но, в отличие от заполненного thin-пула, не останавливает запись в существующие тома. Критичность для пулов `LVMThin`, имена и метки алертов не меняются."
