@@ -17,6 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"encoding/json"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	lapi "github.com/LINBIT/golinstor/client"
@@ -511,4 +517,50 @@ func TestLinstorResourcesWatcher(t *testing.T) {
 
 		assert.ElementsMatch(t, expectedDiff, actualDiff)
 	})
+}
+
+func TestSetAutoQuorum(t *testing.T) {
+	var (
+		props = map[string]string{
+			autoQuorumWithPrefixRGKey: SuspendIo,
+		}
+		modifyBody lapi.ResourceGroupModify
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			if err := json.NewDecoder(r.Body).Decode(&modifyBody); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			maps.Copy(props, modifyBody.OverrideProps)
+			_, _ = w.Write([]byte("[]"))
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(lapi.ResourceGroup{Name: "rg", Props: props})
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	assert.NoError(t, err)
+	lc, err := lapi.NewClient(lapi.BaseURL(u))
+	assert.NoError(t, err)
+
+	r1SC := v1.StorageClass{Parameters: map[string]string{
+		StorageClassParamAutoQuorumKey: AutoQuorumDisabled,
+	}}
+	rg := lapi.ResourceGroup{Props: map[string]string{autoQuorumWithPrefixRGKey: SuspendIo}}
+	assert.Contains(t, getMissMatchedParams(r1SC, rg), autoQuorumWithoutPrefixKey)
+
+	updated, err := setAutoQuorum(context.Background(), lc, r1SC.Parameters[StorageClassParamAutoQuorumKey], "rg")
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{autoQuorumWithPrefixRGKey: AutoQuorumDisabled}, modifyBody.OverrideProps)
+	assert.NotContains(t, getMissMatchedParams(r1SC, updated), autoQuorumWithoutPrefixKey)
+
+	r3SC := v1.StorageClass{Parameters: map[string]string{
+		StorageClassParamAutoQuorumKey: SuspendIo,
+	}}
+	r3RG := lapi.ResourceGroup{Props: map[string]string{autoQuorumWithPrefixRGKey: SuspendIo}}
+	assert.NotContains(t, getMissMatchedParams(r3SC, r3RG), autoQuorumWithoutPrefixKey)
 }

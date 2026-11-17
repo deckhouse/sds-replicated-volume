@@ -13,6 +13,9 @@ security:
 docs:
   - "Документация называет модуль `storage-foundation`, а не `snapshot-controller`, модулем, который требуется для снимков томов, и больше не предлагает включать `snapshot-controller`."
 
+fixes:
+  - "В LINSTOR-контуре `ReplicatedStorageClass` с `replication: None` теперь задаёт в `StorageClass` `auto-quorum: disabled` и `auto-add-quorum-tiebreaker: false`, а контроллер выставляет `auto-quorum: disabled` в группе ресурсов LINSTOR у существующих однореплицных классов. Единственная копия не может разойтись сама с собой, но отключившийся diskless-участник включал кворум и останавливал ввод-вывод на исправной реплике. Существующие однореплицные тома теряют кворум, когда LINSTOR в следующий раз пересчитает их определение ресурса."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # breaking: []
 # known_issues: []

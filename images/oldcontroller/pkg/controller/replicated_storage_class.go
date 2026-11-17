@@ -93,6 +93,7 @@ const (
 	RrConflictRetryConnect                         = "retry-connect"
 	StorageClassParamAutoQuorumKey                 = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-quorum"
 	SuspendIo                                      = "suspend-io"
+	AutoQuorumDisabled                             = "disabled"
 	StorageClassParamAutoAddQuorumTieBreakerKey    = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-add-quorum-tiebreaker"
 	StorageClassParamOnNoQuorumKey                 = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-quorum"
 	StorageClassParamOnNoDataAccessibleKey         = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-data-accessible"
@@ -567,8 +568,6 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamPlacementPolicyKey:            PlacementPolicyAutoPlaceTopology,
 		StorageClassParamNetProtocolKey:                NetProtocolC,
 		StorageClassParamNetRRConflictKey:              RrConflictRetryConnect,
-		StorageClassParamAutoAddQuorumTieBreakerKey:    "true",
-		StorageClassParamOnNoQuorumKey:                 SuspendIo,
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
@@ -583,15 +582,20 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	case ReplicationNone:
 		storageClassParameters[StorageClassPlacementCountKey] = "1"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "1"
-		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[StorageClassParamAutoQuorumKey] = AutoQuorumDisabled
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "false"
 	case ReplicationAvailability:
 		storageClassParameters[StorageClassPlacementCountKey] = "2"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "2"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "true"
+		storageClassParameters[StorageClassParamOnNoQuorumKey] = SuspendIo
 	case ReplicationConsistencyAndAvailability, "":
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[StorageClassParamAutoAddQuorumTieBreakerKey] = "true"
+		storageClassParameters[StorageClassParamOnNoQuorumKey] = SuspendIo
 		storageClassParameters[QuorumMinimumRedundancyWithPrefixSCKey] = "2"
 	}
 
@@ -749,9 +753,15 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	delete(newSCCopy.Parameters, StorageClassParamFSOptsKey)
+	delete(newSCCopy.Parameters, StorageClassParamAutoQuorumKey)
+	delete(newSCCopy.Parameters, StorageClassParamAutoAddQuorumTieBreakerKey)
+	delete(newSCCopy.Parameters, StorageClassParamOnNoQuorumKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	delete(oldSCCopy.Parameters, StorageClassParamFSOptsKey)
+	delete(oldSCCopy.Parameters, StorageClassParamAutoQuorumKey)
+	delete(oldSCCopy.Parameters, StorageClassParamAutoAddQuorumTieBreakerKey)
+	delete(oldSCCopy.Parameters, StorageClassParamOnNoQuorumKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 

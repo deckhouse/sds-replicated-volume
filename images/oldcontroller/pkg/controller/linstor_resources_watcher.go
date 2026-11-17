@@ -45,6 +45,8 @@ const (
 	replicasOnDifferentRGKey                = "replicas_on_different"
 	ReplicatedCSIProvisioner                = "replicated.csi.storage.deckhouse.io"
 	quorumWithPrefixRDKey                   = "DrbdOptions/Resource/quorum"
+	autoQuorumWithoutPrefixKey              = "auto-quorum"
+	autoQuorumWithPrefixRGKey               = "DrbdOptions/auto-quorum"
 	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
 	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
 	QuorumMinimumRedundancyWithPrefixSCKey  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
@@ -212,6 +214,17 @@ func ReconcileParams(
 						rgs[RGName] = rgWithNewValue
 						missMatched = getMissMatchedParams(sc, rgs[RGName])
 					}
+				}
+			}
+
+			if slices.Contains(missMatched, autoQuorumWithoutPrefixKey) && sc.Parameters[StorageClassParamAutoQuorumKey] != "" {
+				log.Info(fmt.Sprintf("the auto-quorum value %s of the Storage Class %s will be set to the Resource Group %s", sc.Parameters[StorageClassParamAutoQuorumKey], sc.Name, rg.Name))
+				rgWithNewValue, err := setAutoQuorum(ctx, lc, sc.Parameters[StorageClassParamAutoQuorumKey], rg.Name)
+				if err != nil {
+					log.Error(fmt.Sprintf("unable to set the auto-quorum value, Resource Group: %s", rg.Name), logger.Err(err))
+				} else {
+					rgs[RGName] = rgWithNewValue
+					missMatched = getMissMatchedParams(sc, rgs[RGName])
 				}
 			}
 
@@ -633,6 +646,19 @@ func setQuorumMinimumRedundancy(ctx context.Context, lc *lapi.Client, value, rgN
 	})
 
 	return err
+}
+
+func setAutoQuorum(ctx context.Context, lc *lapi.Client, value, rgName string) (lapi.ResourceGroup, error) {
+	err := lc.ResourceGroups.Modify(ctx, rgName, lapi.ResourceGroupModify{
+		OverrideProps: map[string]string{
+			autoQuorumWithPrefixRGKey: value,
+		},
+	})
+	if err != nil {
+		return lapi.ResourceGroup{}, err
+	}
+
+	return lc.ResourceGroups.Get(ctx, rgName)
 }
 
 func setLabelsIfNeeded(

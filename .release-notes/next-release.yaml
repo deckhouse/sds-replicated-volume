@@ -13,6 +13,9 @@ security:
 docs:
   - "The documentation names the `storage-foundation` module, not `snapshot-controller`, as the module that volume snapshots require, and no longer asks to enable `snapshot-controller`."
 
+fixes:
+  - "In the LINSTOR control plane, a `ReplicatedStorageClass` with `replication: None` now sets `auto-quorum` to `disabled` and `auto-add-quorum-tiebreaker` to `false` in its `StorageClass`, and the controller sets `auto-quorum: disabled` on the LINSTOR resource group of existing single-replica classes. A single copy cannot split the brain, but a disconnected diskless peer used to turn quorum on and suspend I/O on a healthy replica. Existing single-replica volumes lose quorum when LINSTOR next recalculates their resource definition."
+
 # Optional sections — delete rather than leave empty.
 # breaking: []
 # known_issues: []
