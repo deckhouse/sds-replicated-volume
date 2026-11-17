@@ -425,7 +425,7 @@ Example invocation:
 ## How do I clean a node of DRBD and module volumes when the cluster is unavailable?
 
 {{< alert level="danger" >}}
-The procedure destroys the data of the module's volumes on the node. Use it only for a node that has left the cluster for good or for a cluster that no longer exists. If the cluster is working, evict the resources with `evict.sh` instead, see [How do I evict DRBD resources from a node?](#how-do-i-evict-drbd-resources-from-a-node).
+The procedure destroys the data of the module's volumes on the node. Use it only for a node that has left the cluster for good or for a cluster that no longer exists. If the cluster is working, evict the resources with `evict.sh` instead, see [How do I evict DRBD resources from a node?](#how-to-evict-drbd-resources-from-a-node).
 {{< /alert >}}
 
 The `cleanup_static_node.sh` script of the `node-manager` module does not know about DRBD or LVM: after it runs, the `drbd` kernel module stays loaded, its configuration files stay in `/etc`, and the logical volumes of the module stay in the volume groups. The `srv-node-cleanup.sh` script below removes these leftovers on a node without a running cluster. It works for both control planes of the module (LINSTOR and the new one) and needs nothing but the tools that are installed on the node (`lvm2`, `kmod`, `awk`; `drbdsetup` if DRBD resources are up).
