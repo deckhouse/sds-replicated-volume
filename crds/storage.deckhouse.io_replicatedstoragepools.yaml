@@ -182,16 +182,22 @@ spec:
                   Only meaningful with the new control-plane.
 
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
-                  At least one network name must be specified. Each name is limited to 64 characters.
+                  Specify exactly one network: Internal (the node network) or a SystemNetwork name
+                  in DNS-1123 subdomain format, limited to 253 characters. Defaults to Internal.
+                  Temporarily immutable until network migration is supported.
                 items:
+                  maxLength: 253
                   type: string
                 maxItems: 1
                 minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
-                - message: Only 'Internal' network is currently supported
-                  rule: self.all(n, n == 'Internal')
+                - message: systemNetworkNames is immutable
+                  rule: self == oldSelf
+                - message: Network must be Internal or a DNS-1123 subdomain of at
+                    most 253 characters
+                  rule: self.all(n, n == 'Internal' || (size(n) <= 253 && n.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$')))
               type:
                 description: |-
                   Defines the volumes type. Might be:

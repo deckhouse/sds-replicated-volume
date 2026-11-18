@@ -19,6 +19,7 @@ package scheme
 import (
 	"fmt"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +36,7 @@ func New() (*runtime.Scheme, error) {
 		storagev1.AddToScheme,
 		v1alpha1.AddToScheme,
 		snc.AddToScheme,
+		sdn.AddToScheme,
 	}
 
 	for i, f := range schemeFuncs {

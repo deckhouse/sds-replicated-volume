@@ -102,6 +102,8 @@ spec:
           periodSeconds: 1
           failureThreshold: 3
         env:
+          - name: SDN_ENABLED
+            value: {{ has "sdn-crd" .Values.global.enabledModules | quote }}
           - name: NODE_NAME
             valueFrom:
               fieldRef:

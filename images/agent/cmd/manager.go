@@ -19,11 +19,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -39,6 +44,7 @@ import (
 )
 
 type managerConfig interface {
+	SDNEnabled() bool
 	PodName() string
 	PodNamespace() string
 	NodeName() string
@@ -62,10 +68,26 @@ func newManager(
 	}
 
 	nodeName := cfg.NodeName()
+	httpClient, err := rest.HTTPClientFor(config)
+	if err != nil {
+		return nil, fmt.Errorf("creating discovery HTTP client: %w", err)
+	}
+	mapper, err := apiutil.NewDynamicRESTMapper(config, httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("creating REST mapper: %w", err)
+	}
+	sdnAvailable, err := checkSDNKind(cfg.SDNEnabled(), mapper)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.SDNEnabled() && !sdnAvailable {
+		log.GetLogger().Info("NodeNetworkStatus Kind is unavailable; SDN disabled until agent restart")
+	}
 	nodeNameSelector := fields.SelectorFromSet(fields.Set{"spec.nodeName": nodeName})
 
 	mgrOpts := manager.Options{
 		Scheme:                 scheme,
+		MapperProvider:         func(*rest.Config, *http.Client) (meta.RESTMapper, error) { return mapper, nil },
 		BaseContext:            func() context.Context { return ctx },
 		Logger:                 log.GetLogger(),
 		HealthProbeBindAddress: cfg.HealthProbeBindAddress(),
@@ -84,6 +106,7 @@ func newManager(
 			},
 		},
 	}
+	configureSDNCache(&mgrOpts.Cache, nodeName, sdnAvailable)
 
 	mgr, err := manager.New(config, mgrOpts)
 	if err != nil {
@@ -104,9 +127,31 @@ func newManager(
 		return nil, fmt.Errorf("adding agent capability reporter: %w", err)
 	}
 
-	if err := controllers.BuildAll(mgr); err != nil {
+	if err := controllers.BuildAll(mgr, sdnAvailable); err != nil {
 		return nil, err
 	}
 
 	return mgr, nil
+}
+
+func checkSDNKind(enabled bool, mapper meta.RESTMapper) (bool, error) {
+	if !enabled {
+		return false, nil
+	}
+	_, err := mapper.RESTMapping(sdn.NodeNetworkStatusGVK.GroupKind(), sdn.NodeNetworkStatusGVK.Version)
+	if meta.IsNoMatchError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("discovering NodeNetworkStatus Kind: %w", err)
+	}
+	return true, nil
+}
+
+func configureSDNCache(options *cache.Options, nodeName string, available bool) {
+	if available {
+		// SDN creates NodeNetworkStatus with the node name as metadata.name and uses
+		// the same cache filter; its CRD does not declare spec.nodeName selectable.
+		options.ByObject[&sdn.NodeNetworkStatus{}] = cache.ByObject{Field: fields.OneTermEqualSelector("metadata.name", nodeName)}
+	}
 }

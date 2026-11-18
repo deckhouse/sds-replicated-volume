@@ -19,8 +19,6 @@ package drbdr
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdutils"
 )
@@ -252,18 +250,6 @@ func (p *intendedPath) RemoteIPv4() string        { return p.remoteIPv4 }
 func (p *intendedPath) RemotePort() uint          { return p.remotePort }
 
 var _ IntendedPath = (*intendedPath)(nil)
-
-// systemNetworkToNodeAddressType maps system network names to Kubernetes Node address types.
-func systemNetworkToNodeAddressType(systemNetwork string) corev1.NodeAddressType {
-	switch systemNetwork {
-	case "Internal":
-		return corev1.NodeInternalIP
-	case "External":
-		return corev1.NodeExternalIP
-	default:
-		return corev1.NodeAddressType(systemNetwork + "IP")
-	}
-}
 
 // computeIntendedDRBDState constructs the intended DRBD state from the DRBDResource.
 // It requires addresses to already be computed in drbdr.status.addresses.

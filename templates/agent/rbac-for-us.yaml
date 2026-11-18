@@ -13,9 +13,53 @@ metadata:
   name: d8:{{ .Chart.Name }}:agent
   {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs:  ["*"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["drbdresources", "drbdmappers", "lvmlogicalvolumes"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["drbdresourceoperations", "lvmvolumegroups"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["drbdresources/status", "drbdresourceoperations/status"]
+    verbs: ["patch"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["drbdmappers/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  {{- if has "sdn-crd" .Values.global.enabledModules }}
+  - apiGroups: ["network.deckhouse.io"]
+    resources: ["nodenetworkstatuses"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+rules:
+  # The capability reporter writes its Pod without reading it through the cache.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["patch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: agent
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: Role
+  name: agent
+  apiGroup: rbac.authorization.k8s.io
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

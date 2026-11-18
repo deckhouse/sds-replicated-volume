@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	SDNEnabledEnvVar   = "SDN_ENABLED"
 	NodeNameEnvVar     = "NODE_NAME"
 	PodNameEnvVar      = "POD_NAME"
 	PodNamespaceEnvVar = "POD_NAMESPACE"
@@ -45,6 +46,7 @@ const (
 )
 
 type config struct {
+	sdnEnabled bool
 	commonenv.CommonConfig
 	nodeName     string
 	podName      string
@@ -74,6 +76,7 @@ func (c *config) PodNamespace() string {
 }
 
 type Config interface {
+	SDNEnabled() bool
 	PodName() string
 	PodNamespace() string
 	NodeName() string
@@ -102,6 +105,13 @@ func GetConfig() (Config, error) {
 
 func loadConfig() (Config, error) {
 	cfg := &config{}
+	if value := os.Getenv(SDNEnabledEnvVar); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", SDNEnabledEnvVar, err)
+		}
+		cfg.sdnEnabled = enabled
+	}
 
 	cfg.nodeName = os.Getenv(NodeNameEnvVar)
 	if cfg.nodeName == "" {
@@ -149,3 +159,5 @@ func loadConfig() (Config, error) {
 
 	return cfg, nil
 }
+
+func (c *config) SDNEnabled() bool { return c.sdnEnabled }

@@ -20,9 +20,10 @@ const (
 	// ReplicatedStoragePoolCondReadyType indicates whether the storage pool is ready.
 	//
 	// Reasons describe readiness or failure conditions.
-	ReplicatedStoragePoolCondReadyType                           = "Ready"
-	ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup    = "InvalidLVMVolumeGroup"    // LVMVolumeGroup is invalid.
-	ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector = "InvalidNodeLabelSelector" // NodeLabelSelector is invalid.
-	ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound   = "LVMVolumeGroupNotFound"   // LVMVolumeGroup not found.
-	ReplicatedStoragePoolCondReadyReasonReady                    = "Ready"                    // Storage pool is ready.
+	ReplicatedStoragePoolCondReadyType                                    = "Ready"
+	ReplicatedStoragePoolCondReadyReasonInvalidLVMVolumeGroup             = "InvalidLVMVolumeGroup"             // LVMVolumeGroup is invalid.
+	ReplicatedStoragePoolCondReadyReasonInvalidNodeLabelSelector          = "InvalidNodeLabelSelector"          // NodeLabelSelector is invalid.
+	ReplicatedStoragePoolCondReadyReasonLVMVolumeGroupNotFound            = "LVMVolumeGroupNotFound"            // LVMVolumeGroup not found.
+	ReplicatedStoragePoolCondReadyReasonNoNodesWithRequiredSystemNetworks = "NoNodesWithRequiredSystemNetworks" // No candidate node has every required network.
+	ReplicatedStoragePoolCondReadyReasonReady                             = "Ready"                             // Storage pool is ready.
 )

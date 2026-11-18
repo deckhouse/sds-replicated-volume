@@ -1,13 +1,14 @@
 # rsp_controller
 
-> **TODO(systemnetwork): IMPORTANT!** This controller does not yet support custom SystemNetworkNames.
-> Currently only "Internal" (default node network) is allowed by API validation.
-> When systemnetwork feature stabilizes, the controller must:
-> - Watch NetworkNode resources
-> - Filter eligible nodes based on configured networks availability
-> - Add NetworkNode predicates for Ready condition changes
 >
-> See `controller.go` for detailed TODO comments.
+SDN-backed pools require an existing, non-deleting SystemNetwork with IPAM and a usable
+SystemNetworkIP in each candidate node's NodeNetworkStatus. Network availability is not
+a link-health check and does not depend on the SystemNetwork Ready condition.
+NodeNetworkStatus and SystemNetwork events recalculate affected pools, including excluded
+nodes. Partial exclusions are reported in Ready messages; exclusion of all candidates sets
+`NoNodesWithRequiredSystemNetworks`. Eligible nodes and their revision are updated on failure too.
+Watches and reads require `SDN_ENABLED=true` and both Kinds at startup; otherwise they remain
+disabled until restart. Internal-only pools do not read SDN resources.
 
 This controller manages the `ReplicatedStoragePool` status fields by aggregating information from LVMVolumeGroups, Nodes, and agent Pods.
 

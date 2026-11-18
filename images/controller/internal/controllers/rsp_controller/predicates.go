@@ -19,7 +19,9 @@ package rspcontroller
 import (
 	"maps"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	nodeutil "k8s.io/component-helpers/node/util"
@@ -30,6 +32,33 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
+
+// nodeNetworkStatusPredicates compares published addresses and lifecycle fields only.
+func nodeNetworkStatusPredicates() []predicate.Predicate {
+	return []predicate.Predicate{predicate.Funcs{UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+		old, okOld := e.ObjectOld.(*sdn.NodeNetworkStatus)
+		newObj, okNew := e.ObjectNew.(*sdn.NodeNetworkStatus)
+		if !okOld || !okNew || old == nil || newObj == nil {
+			return true
+		}
+		return old.GetGeneration() != newObj.GetGeneration() ||
+			!apiequality.Semantic.DeepEqual(old.GetDeletionTimestamp(), newObj.GetDeletionTimestamp()) ||
+			!apiequality.Semantic.DeepEqual(old.Status.Addresses, newObj.Status.Addresses)
+	}}}
+}
+
+// systemNetworkPredicates ignores status-only changes: addresses are observed on each node.
+func systemNetworkPredicates() []predicate.Predicate {
+	return []predicate.Predicate{predicate.Funcs{UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+		old, okOld := e.ObjectOld.(*sdn.SystemNetwork)
+		newObj, okNew := e.ObjectNew.(*sdn.SystemNetwork)
+		if !okOld || !okNew || old == nil || newObj == nil {
+			return true
+		}
+		return old.GetGeneration() != newObj.GetGeneration() ||
+			!apiequality.Semantic.DeepEqual(old.GetDeletionTimestamp(), newObj.GetDeletionTimestamp())
+	}}}
+}
 
 // rspPredicates returns predicates for ReplicatedStoragePool events.
 // Filters to only react to generation changes (spec updates).

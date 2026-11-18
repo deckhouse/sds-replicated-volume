@@ -83,8 +83,9 @@ spec:
               > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
               > most fields are rejected, and a change to replication switches the resource to the
               > InvalidConfiguration phase and leaves its StorageClass unchanged.
-              > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames are
-              > immutable. The other fields can be changed on an existing resource: a change to
+              > In the new control-plane topology and volumeAccess are
+              > immutable; systemNetworkNames is temporarily immutable once set until migration is supported.
+              > The other fields can be changed on an existing resource: a change to
               > storage, zones, nodeLabelSelector or eligibleNodesPolicy moves the StorageClass's
               > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
               > with the new policy.
@@ -380,16 +381,21 @@ spec:
                   Only meaningful with the new control-plane.
 
                   SystemNetworkNames specifies network names used for DRBD replication traffic.
-                  At least one network name must be specified. Each name is limited to 64 characters.
+                  Specify exactly one network: Internal (the node network) or a SystemNetwork name
+                  in DNS-1123 subdomain format, limited to 253 characters.
+                  When omitted, the controller fills Internal. Once set, the field is temporarily
+                  immutable until network migration is supported.
                 items:
+                  maxLength: 253
                   type: string
                 maxItems: 1
                 minItems: 1
                 type: array
                 x-kubernetes-list-type: set
                 x-kubernetes-validations:
-                - message: Only 'Internal' network is currently supported
-                  rule: self.all(n, n == 'Internal')
+                - message: Network must be Internal or a DNS-1123 subdomain of at
+                    most 253 characters
+                  rule: self.all(n, n == 'Internal' || (size(n) <= 253 && n.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$')))
               topology:
                 description: |-
                   The topology settings for the volumes in the created Storage class. Might be:
@@ -562,6 +568,9 @@ spec:
                 || !has(self.zones) || size(self.zones) == 0 || self.failuresToTolerate
                 != 1 || self.guaranteedMinimumDataRedundancy != 1 || size(self.zones)
                 == 3'
+            - message: spec.systemNetworkNames is immutable once set
+              rule: '!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames)
+                && self.systemNetworkNames == oldSelf.systemNetworkNames)'
             - message: spec.topology is immutable
               rule: self.topology == oldSelf.topology
             - message: spec.volumeAccess is immutable
@@ -573,9 +582,6 @@ spec:
             - message: spec.reclaimPolicy is immutable for the legacy control plane
               rule: (has(oldSelf.storage) && has(self.storage)) || self.reclaimPolicy
                 == oldSelf.reclaimPolicy
-            - message: spec.systemNetworkNames is immutable once set
-              rule: '!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames)
-                && self.systemNetworkNames == oldSelf.systemNetworkNames)'
           status:
             description: Displays current information about the Storage Class.
             properties:

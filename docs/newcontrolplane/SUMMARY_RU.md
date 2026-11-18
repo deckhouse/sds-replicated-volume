@@ -22,6 +22,95 @@ Fragments keep the heading levels they have in the source document.
 ## USAGE_RU.md
 
 <!--
+Where: docs/USAGE_RU.md, a new section immediately before the application features section
+Replaced by: nothing; this section is withheld until the new control plane is released
+-->
+
+### Выбор сети репликации (новый control plane)
+
+При `settings.newControlPlane: true` сеть репликации выбирается при создании
+ReplicatedStorageClass в поле `spec.systemNetworkNames`. Список принимает ровно
+одну запись:
+
+- `Internal` использует первый `InternalIP` из `status.addresses` каждой Node.
+  Модуль `sdn` для этого не нужен. Если поле RSC не задано, контроллер заполняет
+  его значением `["Internal"]`.
+- Имя SystemNetwork использует соответствующий `SystemNetworkIP`, опубликованный
+  модулем `sdn` в `NodeNetworkStatus/<node>.status.addresses`.
+
+Следующий пример создаёт класс с сетью Internal и тремя заранее настроенными
+LVMVolumeGroup на разных узлах:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageClass
+metadata:
+  name: replicated-internal
+spec:
+  storage:
+    type: LVM
+    lvmVolumeGroups:
+      - name: lvg-1
+      - name: lvg-2
+      - name: lvg-3
+  failuresToTolerate: 1
+  guaranteedMinimumDataRedundancy: 1
+  topology: Ignored
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  systemNetworkNames: [Internal]
+```
+
+Для выделенной сети репликации сначала включите модуль `sdn` и создайте
+SystemNetwork с настроенным `spec.ipam`. Её underlay должен соединять узлы,
+которые будут участвовать в репликации. Дождитесь назначения SDN-адресов этим
+узлам. Затем создайте **отдельный** класс по примеру выше, изменив имя и сеть:
+
+```yaml
+metadata:
+  name: replicated-storage-net
+spec:
+  systemNetworkNames: [storage-net]
+```
+
+Этот фрагмент заменяет соответствующие поля полного примера; он не является
+самостоятельным манифестом или обновлением `replicated-internal`.
+RSC-контроллер автоматически создаст RSP с выбранной сетью.
+При ручном создании RSP задайте такое же поле `spec.systemNetworkNames`
+при создании.
+
+#### Доступность и диагностика
+
+Admission отклоняет RSC, ссылающийся на несуществующую SystemNetwork, сеть
+без `spec.ipam` или SystemNetwork при недоступной поддержке SDN.
+После включения SDN дождитесь обновления подов контроллера, агента и webhook
+с поддержкой SDN, прежде чем создавать класс.
+
+Узел-кандидат подходит для размещения, только если выбранная SystemNetwork
+существует, не удаляется и в NodeNetworkStatus есть пригодный соответствующий
+`SystemNetworkIP`. Готовность самой SystemNetwork не доказывает наличие адреса
+на каждом узле. Проверяйте `status.eligibleNodes`, `status.message` и условие
+Ready у RSP; сообщение отражает и частичное исключение узлов. Если требуемой сети
+нет ни у одного кандидата, Ready имеет статус False с причиной
+`NoNodesWithRequiredSystemNetworks`; RSC также сообщает об ошибке пула.
+Если агент не может получить требуемый адрес при reconcile DRBDResource,
+условие Configured имеет статус False с причиной `SystemNetworkAddressUnavailable`.
+
+#### Текущие ограничения
+
+- После установки `spec.systemNetworkNames` неизменяемо как в RSC, так и в RSP.
+  Удаление установленного поля RSC также отклоняется. Для новых томов с другой
+  сетью создайте отдельный класс, не изменяя существующий.
+- Автоматическая миграция существующих томов между сетями и автоматический
+  сетевой failover не поддерживаются. Наличие опубликованного адреса не является
+  проверкой исправности линка.
+- Не удаляйте SystemNetwork и не выключайте SDN, пока есть использующие эту
+  сеть тома. В этой версии автоматического перевода на Internal нет.
+- Агент читает актуальные адреса при reconcile; изменения NodeNetworkStatus
+  сами по себе не запускают reconcile его DRBDResource. Немедленное применение
+  смены IP не гарантируется.
+
+<!--
 Where: docs/USAGE_RU.md, «Создание ресурса ReplicatedStorageClass», примечание после абзаца о том, что контроллер создаёт StorageClass
 Replaced by: примечание о том, что поля spec нельзя изменить после создания
 -->

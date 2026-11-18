@@ -19,7 +19,9 @@ package rspcontroller
 import (
 	"context"
 	"slices"
+	"strings"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -36,12 +38,14 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/controlleroptions"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/sdnavailability"
 )
 
 const RSPControllerName = "rsp-controller"
 
 // BuildController registers the RSP controller with the manager.
 // It sets up watches on ReplicatedStoragePool, Node, LVMVolumeGroup, and agent Pod resources.
+// SDN integration additionally watches NodeNetworkStatus and SystemNetwork when both Kinds are available.
 func BuildController(mgr manager.Manager) error {
 	cfg, err := env.GetConfig()
 	if err != nil {
@@ -53,8 +57,12 @@ func BuildController(mgr manager.Manager) error {
 
 	rec := NewReconciler(cl, mgr.GetLogger().WithName(RSPControllerName), agentPodNamespace, cfg.DataNodeSelector())
 	rec.recorder = mgr.GetEventRecorder(RSPControllerName)
+	rec.sdnEnabled, err = sdnavailability.Enabled(cfg.SDNEnabled(), mgr.GetRESTMapper(), mgr.GetLogger())
+	if err != nil {
+		return err
+	}
 
-	return builder.ControllerManagedBy(mgr).
+	b := builder.ControllerManagedBy(mgr).
 		Named(RSPControllerName).
 		For(&v1alpha1.ReplicatedStoragePool{}, builder.WithPredicates(rspPredicates()...)).
 		Watches(
@@ -71,29 +79,16 @@ func BuildController(mgr manager.Manager) error {
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(mapAgentPodToRSP(cl, agentPodNamespace)),
 			builder.WithPredicates(agentPodPredicates(agentPodNamespace)...),
-		).
-		// TODO(systemnetwork): IMPORTANT! Watch NetworkNode resources and filter eligible nodes.
-		//
-		// Currently missing:
-		// 1. Watch on NetworkNode resources (requires new index + mapNetworkNodeToRSP mapping function).
-		// 2. Filter eligible nodes to include only nodes where the specified SystemNetworkNames
-		//    are configured (i.e., the node has corresponding NetworkNode resources with ready status).
-		// 3. Add NetworkNode predicates to react on NetworkNode Ready condition changes.
-		//
-		// This is not implemented because the systemnetwork feature is still under active development.
-		// Once systemnetwork stabilizes, this controller MUST be updated to:
-		// - Subscribe to NetworkNode changes
-		// - Validate that RSP's spec.systemNetworkNames are available on each eligible node
-		// - Exclude nodes from EligibleNodes if required networks are not configured/ready
-		//
-		// Current workaround: The only allowed value for spec.systemNetworkNames is "Internal"
-		// (the default node internal network). The API (kubebuilder validation) currently forbids
-		// other values. This means no NetworkNode filtering is needed until custom networks are supported.
-		//
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 10,
-			RateLimiter:             controlleroptions.DefaultRateLimiter(),
-		}).
+		)
+	// Register neither informer when either required CRD is absent at startup.
+	if rec.sdnEnabled {
+		b = b.Watches(&sdn.NodeNetworkStatus{}, handler.EnqueueRequestsFromMapFunc(mapSDNToRSP(cl)), builder.WithPredicates(nodeNetworkStatusPredicates()...)).
+			Watches(&sdn.SystemNetwork{}, handler.EnqueueRequestsFromMapFunc(mapSDNToRSP(cl)), builder.WithPredicates(systemNetworkPredicates()...))
+	}
+	return b.WithOptions(controller.Options{
+		MaxConcurrentReconciles: 10,
+		RateLimiter:             controlleroptions.DefaultRateLimiter(),
+	}).
 		Complete(rec)
 }
 
@@ -202,6 +197,34 @@ func mapLVGToRSP(cl client.Client) handler.MapFunc {
 				NamespacedName: client.ObjectKeyFromObject(&rspList.Items[i]),
 			})
 		}
+		return requests
+	}
+}
+
+// mapSDNToRSP conservatively includes excluded nodes so that address additions restore eligibility.
+// SystemNetwork events are scoped by reference; node address events enqueue all SDN-backed pools.
+func mapSDNToRSP(cl client.Client) handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
+		network, isNetwork := obj.(*sdn.SystemNetwork)
+		if !isNetwork {
+			if _, ok := obj.(*sdn.NodeNetworkStatus); !ok {
+				return nil
+			}
+		}
+		var pools v1alpha1.ReplicatedStoragePoolList
+		if err := cl.List(ctx, &pools); err != nil {
+			log.FromContext(ctx).Error(err, "mapping SDN event to RSPs")
+			return nil
+		}
+		var requests []reconcile.Request
+		for i := range pools.Items {
+			pool := &pools.Items[i]
+			if !hasSDNNetworks(pool) || (isNetwork && !slices.Contains(pool.Spec.SystemNetworkNames, network.Name)) {
+				continue
+			}
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pool)})
+		}
+		slices.SortFunc(requests, func(a, b reconcile.Request) int { return strings.Compare(a.Name, b.Name) })
 		return requests
 	}
 }

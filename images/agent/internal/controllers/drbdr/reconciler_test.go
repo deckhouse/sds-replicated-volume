@@ -583,11 +583,10 @@ func baseDRBDR() *v1alpha1.DRBDResource {
 			Generation: 1,
 		},
 		Spec: v1alpha1.DRBDResourceSpec{
-			NodeName:       testNodeName,
-			State:          v1alpha1.DRBDResourceStateUp,
-			SystemNetworks: []string{"default"},
-			Size:           mustParseQuantity("1Gi"),
-			NodeID:         0,
+			NodeName: testNodeName,
+			State:    v1alpha1.DRBDResourceStateUp,
+			Size:     mustParseQuantity("1Gi"),
+			NodeID:   0,
 		},
 		Status: v1alpha1.DRBDResourceStatus{
 			Conditions: []metav1.Condition{

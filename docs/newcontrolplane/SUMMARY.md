@@ -22,6 +22,95 @@ Fragments keep the heading levels they have in the source document.
 ## USAGE.md
 
 <!--
+Where: docs/USAGE.md, a new section immediately before "Additional features for applications"
+Replaced by: nothing; this section is withheld until the new control plane is released
+-->
+
+### Selecting a replication network (new control plane)
+
+With `settings.newControlPlane: true`, select the replication network when creating
+a ReplicatedStorageClass using `spec.systemNetworkNames`. The list accepts exactly
+one entry:
+
+- `Internal` uses the first `InternalIP` in each Node's `status.addresses`. This
+  option does not require the `sdn` module. If the RSC field is omitted, the
+  controller fills it with `["Internal"]`.
+- A SystemNetwork name uses the matching `SystemNetworkIP` published in
+  `NodeNetworkStatus/<node>.status.addresses` by the `sdn` module.
+
+The following example creates a class using Internal networking and three
+preconfigured LVMVolumeGroups on different nodes:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageClass
+metadata:
+  name: replicated-internal
+spec:
+  storage:
+    type: LVM
+    lvmVolumeGroups:
+      - name: lvg-1
+      - name: lvg-2
+      - name: lvg-3
+  failuresToTolerate: 1
+  guaranteedMinimumDataRedundancy: 1
+  topology: Ignored
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  systemNetworkNames: [Internal]
+```
+
+To use a dedicated replication network, first enable the `sdn` module and create
+a SystemNetwork with `spec.ipam` configured. Its underlay must connect the nodes
+that will participate in replication. Wait for SDN to assign addresses to those
+nodes. Then create a **separate** class from the example above, changing its name
+and network:
+
+```yaml
+metadata:
+  name: replicated-storage-net
+spec:
+  systemNetworkNames: [storage-net]
+```
+
+This fragment replaces the corresponding fields in the complete example; it is
+not a standalone manifest or an update to `replicated-internal`.
+The RSC controller creates an RSP with the selected network automatically.
+For manually created RSPs, set the same `spec.systemNetworkNames` field at creation.
+
+#### Availability and diagnostics
+
+Admission rejects an RSC referencing a nonexistent SystemNetwork, a network
+without `spec.ipam`, or a SystemNetwork while SDN support is unavailable.
+After enabling SDN, wait for the controller, agent and webhook workloads to
+roll out with SDN support before creating the class.
+
+A candidate node is eligible only if the selected SystemNetwork exists, is not
+being deleted, and has a usable matching `SystemNetworkIP` in NodeNetworkStatus.
+SystemNetwork readiness alone does not prove that every node has an address.
+Inspect the RSP's `status.eligibleNodes`, `status.message` and Ready condition;
+partial exclusion is reported in the message. If no candidates have the required
+network, the Ready condition is False with reason
+`NoNodesWithRequiredSystemNetworks`; the RSC also reports the pool's failure.
+If an agent cannot obtain a required address while reconciling a DRBDResource,
+its Configured condition is False with reason `SystemNetworkAddressUnavailable`.
+
+#### Current limitations
+
+- Once set, `spec.systemNetworkNames` is immutable in both RSC and RSP.
+  Removing the installed RSC field is also rejected. Choose another network by
+  creating a separate class for new volumes, not by updating an existing class.
+- Automatic migration of existing volumes between networks and automatic
+  network failover are not supported. A published address is not a link-health
+  check.
+- Do not delete a SystemNetwork or disable SDN while volumes use that network.
+  This version does not automatically move them to Internal.
+- The agent reads current addresses during reconciliation; changes to
+  NodeNetworkStatus do not independently trigger its DRBDResource reconciliation.
+  Immediate application of an IP change is not guaranteed.
+
+<!--
 Where: docs/USAGE.md, "Creating a ReplicatedStorageClass resource", the note after the paragraph on the controller creating the StorageClass
 Replaced by: the note saying that the spec fields cannot be changed after creation
 -->

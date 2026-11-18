@@ -552,7 +552,8 @@ var _ = Describe("Formation: Preconfigure", func() {
 		var updated v1alpha1.ReplicatedVolume
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), &updated)).To(Succeed())
 		Expect(updated.Status.DatameshTransitions).To(HaveLen(1))
-		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Address configuration mismatch"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("Waiting for replicas"))
+		Expect(updated.Status.DatameshTransitions[0].CurrentStep().Message).To(ContainSubstring("NodeNetworkStatus"))
 	})
 
 	It("detects replicas not on eligible nodes", func(ctx SpecContext) {

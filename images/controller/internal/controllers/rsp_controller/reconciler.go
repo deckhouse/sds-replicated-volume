@@ -20,9 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,6 +52,7 @@ import (
 // Reconciler reconciles ReplicatedStoragePool resources.
 // It calculates EligibleNodes based on LVMVolumeGroups, Nodes, and agent pod status.
 type Reconciler struct {
+	sdnEnabled        bool
 	cl                client.Client
 	log               logr.Logger
 	agentPodNamespace string
@@ -186,17 +191,34 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+	var actualNetworks sdn.SystemNetworkList
+	var actualNodeNetworks sdn.NodeNetworkStatusList
+	if r.sdnEnabled && hasSDNNetworks(rsp) {
+		if err := r.cl.List(rf.Ctx(), &actualNetworks); err != nil {
+			return rf.Failf(err, "listing SystemNetworks").ToCtrl()
+		}
+		if err := r.cl.List(rf.Ctx(), &actualNodeNetworks); err != nil {
+			return rf.Failf(err, "listing NodeNetworkStatuses").ToCtrl()
+		}
+	}
+	eligibleNodes, networkMessage := computeTargetNetworkEligibleNodes(rsp, eligibleNodes, r.sdnEnabled, actualNetworks.Items, actualNodeNetworks.Items)
 
 	// Apply changes to status.
 	changed := applyEligibleNodesAndIncrementRevisionIfChanged(rsp, eligibleNodes)
 
 	// Set condition and phase to success.
-	message := fmt.Sprintf("Eligible nodes calculated successfully: %d nodes", len(eligibleNodes))
-	changed = applyReadyCondTrue(rsp,
-		v1alpha1.ReplicatedStoragePoolCondReadyReasonReady,
-		message,
-	) || changed
-	changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseReady, message) || changed
+	message := computeReadyMessageReport(len(eligibleNodes), networkMessage)
+	if len(eligibleNodes) == 0 && networkMessage != "" {
+		changed = applyReadyCondFalse(rsp,
+			v1alpha1.ReplicatedStoragePoolCondReadyReasonNoNodesWithRequiredSystemNetworks, message) || changed
+		changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseInvalidConfiguration, message) || changed
+	} else {
+		changed = applyReadyCondTrue(rsp,
+			v1alpha1.ReplicatedStoragePoolCondReadyReasonReady,
+			message,
+		) || changed
+		changed = applyPhase(rsp, v1alpha1.ReplicatedStoragePoolPhaseReady, message) || changed
+	}
 
 	if changed {
 		if err := r.patchRSPStatus(rf.Ctx(), rsp, base); err != nil {
@@ -218,6 +240,89 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 //
 
 // --- Compute helpers ---
+
+// hasSDNNetworks keeps Internal-only reconciliation independent of SDN informers.
+func hasSDNNetworks(rsp *v1alpha1.ReplicatedStoragePool) bool {
+	for _, name := range rsp.Spec.SystemNetworkNames {
+		if name != "Internal" {
+			return true
+		}
+	}
+	return false
+}
+
+// computeTargetNetworkEligibleNodes filters candidates without treating published addresses as link-health checks.
+func computeTargetNetworkEligibleNodes(rsp *v1alpha1.ReplicatedStoragePool, actualCandidates []v1alpha1.ReplicatedStoragePoolEligibleNode, enabled bool, actualNetworks []sdn.SystemNetwork, actualNodeNetworks []sdn.NodeNetworkStatus) ([]v1alpha1.ReplicatedStoragePoolEligibleNode, string) {
+	if !hasSDNNetworks(rsp) || len(actualCandidates) == 0 {
+		return actualCandidates, ""
+	}
+	available := make(map[string]bool, len(actualNetworks))
+	for i := range actualNetworks {
+		network := &actualNetworks[i]
+		available[network.Name] = network.DeletionTimestamp.IsZero() && network.Spec.IPAM != nil
+	}
+	addresses := make(map[string]map[string]bool, len(actualNodeNetworks))
+	for i := range actualNodeNetworks {
+		nns := &actualNodeNetworks[i]
+		if !nns.DeletionTimestamp.IsZero() {
+			continue
+		}
+		addresses[nns.Name] = make(map[string]bool)
+		for _, address := range nns.Status.Addresses {
+			ip, err := netip.ParseAddr(address.Address)
+			if address.Type == sdn.NodeNetworkStatusAddressTypeSystemNetworkIP && err == nil && ip.IsGlobalUnicast() {
+				addresses[nns.Name][address.SystemNetworkName] = true
+			}
+		}
+	}
+	result := make([]v1alpha1.ReplicatedStoragePoolEligibleNode, 0, len(actualCandidates))
+	var diagnostics []string
+	for _, node := range actualCandidates {
+		var missing []string
+		for _, name := range rsp.Spec.SystemNetworkNames {
+			if name == "Internal" {
+				continue
+			}
+			switch {
+			case !enabled:
+				missing = append(missing, fmt.Sprintf("%s (SDN unavailable: disabled or required CRDs missing at startup; restart after enabling SDN)", name))
+			case !available[name]:
+				missing = append(missing, fmt.Sprintf("%s (SystemNetwork missing, deleting, or without IPAM)", name))
+			case !addresses[node.NodeName][name]:
+				missing = append(missing, fmt.Sprintf("%s (no usable SystemNetworkIP in NodeNetworkStatus)", name))
+			}
+		}
+		if len(missing) == 0 {
+			result = append(result, node)
+			continue
+		}
+		slices.Sort(missing)
+		diagnostics = append(diagnostics, fmt.Sprintf("%s: %s", node.NodeName, strings.Join(missing, ", ")))
+	}
+	slices.Sort(diagnostics)
+	if len(diagnostics) == 0 {
+		return result, ""
+	}
+	return result, fmt.Sprintf("Excluded nodes without required system networks: %d; examples: %s", len(diagnostics), strings.Join(diagnostics[:min(5, len(diagnostics))], "; "))
+}
+
+// computeReadyMessageReport bounds the complete Ready and phase report, including prefixes and truncation suffix.
+func computeReadyMessageReport(eligibleCount int, networkMessage string) string {
+	message := fmt.Sprintf("Eligible nodes calculated successfully: %d nodes", eligibleCount)
+	if networkMessage != "" {
+		if eligibleCount == 0 {
+			message = "No candidate nodes have all required system networks"
+		}
+		message += "; " + networkMessage
+	}
+	const limit = 4096
+	const suffix = "... (truncated)"
+	runes := []rune(message)
+	if len(runes) > limit {
+		message = string(runes[:limit-len([]rune(suffix))]) + suffix
+	}
+	return message
+}
 
 // computeActualEligibleNodes computes the list of eligible nodes for an RSP.
 //

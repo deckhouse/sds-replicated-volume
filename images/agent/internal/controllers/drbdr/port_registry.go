@@ -18,6 +18,7 @@ package drbdr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -54,7 +55,9 @@ type PortRegistry struct {
 
 	drbdPorts *DRBDPortCache
 
-	listenCfg net.ListenConfig
+	listenCfg interface {
+		Listen(context.Context, string, string) (net.Listener, error)
+	}
 }
 
 // cleanExpiredPending removes pending entries older than TTL for the given IP.
@@ -129,7 +132,7 @@ func NewPortRegistry(
 		cl:        cl,
 		nodeName:  nodeName,
 		drbdPorts: drbdPorts,
-		listenCfg: net.ListenConfig{
+		listenCfg: &net.ListenConfig{
 			Control: func(_, _ string, c syscall.RawConn) error {
 				var sErr error
 				err := c.Control(func(fd uintptr) {
@@ -193,7 +196,10 @@ func (r *PortRegistry) Allocate(ctx context.Context, ip string) (uint, error) {
 		}
 		l, listenErr := r.listenCfg.Listen(ctx, "tcp", fmt.Sprintf("%s:%d", ip, p))
 		if listenErr != nil {
-			continue
+			if errors.Is(listenErr, syscall.EADDRINUSE) {
+				continue
+			}
+			return 0, fmt.Errorf("listening on %s:%d: %w", ip, p, listenErr)
 		}
 		l.Close()
 

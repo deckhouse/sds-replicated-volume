@@ -425,7 +425,7 @@ type ReplicatedVolumeDatameshTransition struct {
 	// at dispatch time. Required for ChangeSystemNetworks. Must not be set for
 	// other types.
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=atomic
 	// +optional
 	FromSystemNetworkNames []string `json:"fromSystemNetworkNames,omitempty"`
@@ -435,7 +435,7 @@ type ReplicatedVolumeDatameshTransition struct {
 	// dispatch time. Required for ChangeSystemNetworks. Must not be set for
 	// other types.
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=atomic
 	// +optional
 	ToSystemNetworkNames []string `json:"toSystemNetworkNames,omitempty"`
@@ -623,7 +623,7 @@ type ReplicatedVolumeDatamesh struct {
 	// SystemNetworkNames is the list of system network names for DRBD communication.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="systemNetworkNames must be unique"
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:validation:items:MaxLength=253
 	// +kubebuilder:default={}
 	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`

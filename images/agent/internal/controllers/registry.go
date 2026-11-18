@@ -32,7 +32,7 @@ import (
 // Controllers consult env.GetConfig() (cached) for any configuration they need.
 // When ENABLED_CONTROLLERS env is not set, all controllers are started; otherwise
 // only the listed controllers are built.
-func BuildAll(mgr manager.Manager) error {
+func BuildAll(mgr manager.Manager, sdnAvailable bool) error {
 	log := mgr.GetLogger().WithName("controller-registry")
 
 	cfg, err := env.GetConfig()
@@ -46,7 +46,7 @@ func BuildAll(mgr manager.Manager) error {
 	}
 	builders := []builder{
 		{name: drbdm.ControllerName, build: drbdm.BuildController},
-		{name: drbdr.ControllerName, build: drbdr.BuildController},
+		{name: drbdr.ControllerName, build: func(mgr manager.Manager) error { return drbdr.BuildControllerWithSDN(mgr, sdnAvailable) }},
 		{name: drbdrop.ControllerName, build: drbdrop.BuildController},
 		{name: drbdkmsg.ControllerName, build: drbdkmsg.BuildController},
 	}

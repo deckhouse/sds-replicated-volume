@@ -19,6 +19,7 @@ package scheme
 import (
 	"fmt"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -31,6 +32,7 @@ func New() (*runtime.Scheme, error) {
 
 	var schemeFuncs = []func(s *runtime.Scheme) error{
 		corev1.AddToScheme,
+		sdn.AddToScheme,
 		v1alpha1.AddToScheme,
 		snc.AddToScheme,
 	}

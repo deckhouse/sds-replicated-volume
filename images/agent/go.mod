@@ -4,6 +4,7 @@ go 1.27.4
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
+	github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918
 	github.com/deckhouse/sds-common-lib v0.17.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
@@ -18,6 +19,9 @@ require (
 	k8s.io/client-go v0.35.1
 	sigs.k8s.io/controller-runtime v0.23.3
 )
+
+// Fetch the declared upstream module from Flant GitLab.
+replace github.com/deckhouse/sdn/api => github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect

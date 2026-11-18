@@ -8,6 +8,7 @@ require (
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/deckhouse/sds-replicated-volume/images/webhooks v0.0.0-00010101000000-000000000000
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918
 	github.com/go-logr/logr v1.4.3
 	github.com/onsi/ginkgo/v2 v2.28.2
 	github.com/onsi/gomega v1.39.1
@@ -295,3 +296,5 @@ require (
 )
 
 tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+// Fetch the declared upstream module from Flant GitLab.
+replace github.com/deckhouse/sdn/api => github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918

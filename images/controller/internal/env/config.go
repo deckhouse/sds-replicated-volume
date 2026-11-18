@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -29,6 +30,7 @@ import (
 )
 
 const (
+	SDNEnabledEnvVar           = "SDN_ENABLED"
 	PodNamespaceEnvVar         = "POD_NAMESPACE"
 	SchedulerExtenderURLEnvVar = "SCHEDULER_EXTENDER_URL"
 	// DataNodeSelectorEnvVar holds the module-wide data-node label selector
@@ -54,6 +56,7 @@ type Config struct {
 	podNamespace         string
 	schedulerExtenderURL string
 	dataNodeSelector     labels.Set
+	sdnEnabled           bool
 
 	storageClassLabelIgnoredPrefixes []string
 }
@@ -65,6 +68,9 @@ func (c *Config) StorageClassLabelIgnoredPrefixes() []string {
 func (c *Config) PodNamespace() string {
 	return c.podNamespace
 }
+
+// SDNEnabled reports whether SDN integration was requested by the deployment.
+func (c *Config) SDNEnabled() bool { return c.sdnEnabled }
 
 func (c *Config) SchedulerExtenderURL() string {
 	return c.schedulerExtenderURL
@@ -105,6 +111,13 @@ func GetConfig() (*Config, error) {
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{}
+	if raw := os.Getenv(SDNEnabledEnvVar); raw != "" {
+		var err error
+		cfg.sdnEnabled, err = strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s must be a boolean: %w", commonenv.ErrInvalidConfig, SDNEnabledEnvVar, err)
+		}
+	}
 
 	// Pod namespace (required): used to discover agent pods.
 	cfg.podNamespace = os.Getenv(PodNamespaceEnvVar)

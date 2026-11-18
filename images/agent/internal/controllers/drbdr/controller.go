@@ -42,6 +42,11 @@ import (
 
 // BuildController creates and registers the DRBD controller and scanner with the manager.
 func BuildController(mgr manager.Manager) error {
+	return BuildControllerWithSDN(mgr, false)
+}
+
+// BuildControllerWithSDN uses the effective availability established before cache creation.
+func BuildControllerWithSDN(mgr manager.Manager, sdnAvailable bool) error {
 	// Register field indexes
 	if err := indexes.RegisterDRBDRByNodeName(mgr); err != nil {
 		return fmt.Errorf("registering DRBDR index: %w", err)
@@ -100,6 +105,7 @@ func BuildController(mgr manager.Manager) error {
 
 	// Create reconciler (implements reconcile.TypedReconciler[DRBDReconcileRequest])
 	rec := NewReconciler(cl, nodeName, portRegistry, caches)
+	rec.sdnAvailable = sdnAvailable
 
 	// Build DRBD resource controller with TypedReconciler
 	if err := builder.TypedControllerManagedBy[DRBDReconcileRequest](mgr).

@@ -461,7 +461,7 @@ type ReplicatedVolumeReplicaStatusPeerStatus struct {
 	// ConnectionEstablishedOn lists system network names where connection to this peer is established.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectionEstablishedOn must be unique"
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=atomic
 	// +optional
 	ConnectionEstablishedOn []string `json:"connectionEstablishedOn,omitempty"`

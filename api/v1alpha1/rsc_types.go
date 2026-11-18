@@ -50,8 +50,9 @@ type ReplicatedStorageClass struct {
 	// > In the LINSTOR control-plane the spec cannot be changed after creation: changes to
 	// > most fields are rejected, and a change to replication switches the resource to the
 	// > InvalidConfiguration phase and leaves its StorageClass unchanged.
-	// > In the new control-plane topology, volumeAccess, and, once set, systemNetworkNames are
-	// > immutable. The other fields can be changed on an existing resource: a change to
+	// > In the new control-plane topology and volumeAccess are
+	// > immutable; systemNetworkNames is temporarily immutable once set until migration is supported.
+	// > The other fields can be changed on an existing resource: a change to
 	// > storage, zones, nodeLabelSelector or eligibleNodesPolicy moves the StorageClass's
 	// > volumes to a new storage pool, and a change to reclaimPolicy recreates the StorageClass
 	// > with the new policy.
@@ -156,11 +157,11 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // Immutable spec fields (transition rules; evaluated on update only).
 //
 // topology and volumeAccess are strictly immutable (never touched by the controller).
-// systemNetworkNames is immutable *once set*: the controller fills it from nil to its default
-// (rsc_controller applySpecDefaults), so the rule must permit that initial nil->value
-// transition while still rejecting later changes.
 //
-// Every other spec field is mutable. storage, zones, nodeLabelSelector, systemNetworkNames and
+// systemNetworkNames is temporarily immutable once set until network migration is supported.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
+//
+// The remaining spec fields are mutable. storage, zones, nodeLabelSelector, systemNetworkNames and
 // eligibleNodesPolicy make up the identity of the auto-generated storage pool (rsc_controller
 // computeStoragePoolChecksum), so a change to any mutable one of them moves the class to a new
 // pool and rolls the volumes out to it. eligibleNodesPolicy is filled from nil by the
@@ -180,7 +181,6 @@ func (rsc *ReplicatedStorageClass) GetStatusPhase() string { return string(rsc.S
 // +kubebuilder:validation:XValidation:rule="has(self.volumeAccess) == has(oldSelf.volumeAccess) && (!has(self.volumeAccess) || self.volumeAccess == oldSelf.volumeAccess)",message="spec.volumeAccess is immutable"
 // +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || (has(self.zones) == has(oldSelf.zones) && (!has(self.zones) || self.zones == oldSelf.zones))",message="spec.zones is immutable for the legacy control plane"
 // +kubebuilder:validation:XValidation:rule="(has(oldSelf.storage) && has(self.storage)) || self.reclaimPolicy == oldSelf.reclaimPolicy",message="spec.reclaimPolicy is immutable for the legacy control plane"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.systemNetworkNames) || (has(self.systemNetworkNames) && self.systemNetworkNames == oldSelf.systemNetworkNames)",message="spec.systemNetworkNames is immutable once set"
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
 	// Deprecated: in the new control-plane, use storage instead.
@@ -349,18 +349,19 @@ type ReplicatedStorageClassSpec struct {
 	// into the CRD description and the documentation site. This note is for
 	// whoever edits these fields, not for a user reading the API reference.
 
-	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
-	// Custom network support requires NetworkNode watch implementation in the controller.
-	// When multi-network support is implemented, raise MaxItems to 10.
+	// TODO(systemnetwork): When multi-network support is implemented, raise MaxItems to 10.
 
 	// Only meaningful with the new control-plane.
 	//
 	// SystemNetworkNames specifies network names used for DRBD replication traffic.
-	// At least one network name must be specified. Each name is limited to 64 characters.
+	// Specify exactly one network: Internal (the node network) or a SystemNetwork name
+	// in DNS-1123 subdomain format, limited to 253 characters.
+	// When omitted, the controller fills Internal. Once set, the field is temporarily
+	// immutable until network migration is supported.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
-	// +kubebuilder:validation:Items={type=string,maxLength=64}
-	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal' || (size(n) <= 253 && n.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$')))",message="Network must be Internal or a DNS-1123 subdomain of at most 253 characters"
 	// +listType=set
 	// +optional
 	SystemNetworkNames []string `json:"systemNetworkNames,omitempty"`

@@ -109,18 +109,19 @@ type ReplicatedStoragePoolSpec struct {
 	// +kubebuilder:validation:XValidation:rule="!has(self.matchExpressions) || self.matchExpressions.all(e, (e.operator in ['Exists', 'DoesNotExist']) ? (!has(e.values) || size(e.values) == 0) : (has(e.values) && size(e.values) > 0))",message="matchExpressions[].values must be empty for Exists/DoesNotExist operators, non-empty for In/NotIn"
 	// +optional
 	NodeLabelSelector *metav1.LabelSelector `json:"nodeLabelSelector,omitempty"`
-	// TODO(systemnetwork): Currently only "Internal" (default node network) is supported.
-	// Custom network support requires NetworkNode watch implementation in the controller.
-	// When multi-network support is implemented, raise MaxItems to 10.
+	// TODO(systemnetwork): When multi-network support is implemented, raise MaxItems to 10.
 
 	// Only meaningful with the new control-plane.
 	//
 	// SystemNetworkNames specifies network names used for DRBD replication traffic.
-	// At least one network name must be specified. Each name is limited to 64 characters.
+	// Specify exactly one network: Internal (the node network) or a SystemNetwork name
+	// in DNS-1123 subdomain format, limited to 253 characters. Defaults to Internal.
+	// Temporarily immutable until network migration is supported.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="systemNetworkNames is immutable"
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=1
-	// +kubebuilder:validation:Items={type=string,maxLength=64}
-	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal')",message="Only 'Internal' network is currently supported"
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self.all(n, n == 'Internal' || (size(n) <= 253 && n.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$')))",message="Network must be Internal or a DNS-1123 subdomain of at most 253 characters"
 	// +kubebuilder:default:={"Internal"}
 	// +listType=atomic
 	SystemNetworkNames []string `json:"systemNetworkNames"`

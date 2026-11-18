@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@ package env
 import (
 	"errors"
 	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	commonenv "github.com/deckhouse/sds-replicated-volume/lib/go/common/env"
 )
@@ -43,3 +46,22 @@ func TestParseStorageClassLabelIgnoredPrefixes(t *testing.T) {
 		t.Fatalf("want ErrInvalidConfig, got %v", err)
 	}
 }
+func TestConfig(t *testing.T) { RegisterFailHandler(Fail); RunSpecs(t, "Controller environment") }
+
+var _ = Describe("SDN_ENABLED", func() {
+	It("defaults off, enables explicitly, and rejects malformed values", func() {
+		GinkgoT().Setenv(PodNamespaceEnvVar, "test")
+		GinkgoT().Setenv(SchedulerExtenderURLEnvVar, "http://scheduler")
+		GinkgoT().Setenv(SDNEnabledEnvVar, "")
+		cfg, err := loadConfig()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.SDNEnabled()).To(BeFalse())
+		GinkgoT().Setenv(SDNEnabledEnvVar, "true")
+		cfg, err = loadConfig()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.SDNEnabled()).To(BeTrue())
+		GinkgoT().Setenv(SDNEnabledEnvVar, "bad")
+		_, err = loadConfig()
+		Expect(err).To(MatchError(ContainSubstring(SDNEnabledEnvVar)))
+	})
+})

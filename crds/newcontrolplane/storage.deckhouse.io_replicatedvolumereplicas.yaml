@@ -147,7 +147,7 @@ spec:
                       - port
                       type: object
                     systemNetworkName:
-                      maxLength: 64
+                      maxLength: 253
                       type: string
                   required:
                   - address
@@ -421,7 +421,7 @@ spec:
                       description: ConnectionEstablishedOn lists system network names
                         where connection to this peer is established.
                       items:
-                        maxLength: 64
+                        maxLength: 253
                         type: string
                       maxItems: 10
                       type: array

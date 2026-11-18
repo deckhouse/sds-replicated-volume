@@ -423,7 +423,7 @@ spec:
                                 - port
                                 type: object
                               systemNetworkName:
-                                maxLength: 64
+                                maxLength: 253
                                 type: string
                             required:
                             - address
@@ -549,7 +549,7 @@ spec:
                     description: SystemNetworkNames is the list of system network
                       names for DRBD communication.
                     items:
-                      maxLength: 64
+                      maxLength: 253
                       type: string
                     maxItems: 10
                     type: array
@@ -685,7 +685,7 @@ spec:
                         at dispatch time. Required for ChangeSystemNetworks. Must not be set for
                         other types.
                       items:
-                        maxLength: 64
+                        maxLength: 253
                         type: string
                       maxItems: 10
                       type: array
@@ -806,7 +806,7 @@ spec:
                         dispatch time. Required for ChangeSystemNetworks. Must not be set for
                         other types.
                       items:
-                        maxLength: 64
+                        maxLength: 253
                         type: string
                       maxItems: 10
                       type: array

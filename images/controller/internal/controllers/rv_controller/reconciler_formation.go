@@ -393,8 +393,8 @@ func (r *Reconciler) reconcileFormationStepPreconfigure(
 		okReplicas := formationReplicas.Difference(missingAddresses)
 
 		msg := fmt.Sprintf(
-			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v. "+
-				"This should not happen during normal formation. "+
+			"Waiting for replicas [%s] to report addresses for required networks %v. "+
+				"Check node InternalIP or SystemNetwork IPAM and NodeNetworkStatus addresses, and agent SDN availability. "+
 				"If not resolved automatically, formation will be restarted",
 			missingAddresses.String(), requiredNetworks,
 		)
@@ -1156,7 +1156,7 @@ func (r *Reconciler) reconcileAdoptStepVerifyPrerequisites(
 	if !missingAddresses.IsEmpty() {
 		okReplicas := all.Difference(missingAddresses)
 		msg := fmt.Sprintf(
-			"Address configuration mismatch: replicas [%s] do not have addresses for all required networks %v",
+			"Waiting for replicas [%s] to report addresses for required networks %v; check node InternalIP or SystemNetwork IPAM and NodeNetworkStatus addresses, and agent SDN availability",
 			missingAddresses.String(), requiredNetworks,
 		)
 		changed = applyDatameshTransitionStepMessage(step, msg) || changed

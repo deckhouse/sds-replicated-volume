@@ -22,12 +22,15 @@ import (
 	"fmt"
 	"os"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/fsreserve"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -98,6 +101,11 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	}
 
 	if isNewControlPlane {
+		if r, err := validateSystemNetworks(ctx, rsc, os.Getenv("SDN_ENABLED") == "true", func() (client.Reader, error) {
+			return NewKubeClient("")
+		}); err != nil || !r.Valid {
+			return r, err
+		}
 		// New control plane validations.
 		if rsc.Spec.StoragePool != "" { //nolint:staticcheck // legacy StoragePool check for new control plane
 			return &kwhvalidating.ValidatorResult{Valid: false,
@@ -134,6 +142,37 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 		}
 	}
 
+	return &kwhvalidating.ValidatorResult{Valid: true}, nil
+}
+
+// validateSystemNetworks reads current SDN state on both create and update, without a cache.
+// Internal networking must remain available even when the SDN API is unavailable.
+func validateSystemNetworks(ctx context.Context, rsc *srv.ReplicatedStorageClass, enabled bool, newReader func() (client.Reader, error)) (*kwhvalidating.ValidatorResult, error) {
+	for _, name := range rsc.Spec.SystemNetworkNames {
+		if name == "Internal" {
+			continue
+		}
+		if !enabled {
+			return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("spec.systemNetworkNames: SystemNetwork %q requires the sdn module to be enabled", name)}, nil
+		}
+		cl, err := newReader()
+		if err != nil {
+			return nil, fmt.Errorf("spec.systemNetworkNames: cannot access SystemNetwork %q: %w", name, err)
+		}
+		network := &sdn.SystemNetwork{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: name}, network); err != nil {
+			if apierrors.IsNotFound(err) {
+				return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("spec.systemNetworkNames: SystemNetwork %q not found", name)}, nil
+			}
+			if meta.IsNoMatchError(err) {
+				return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("spec.systemNetworkNames: SDN API unavailable for SystemNetwork %q", name)}, nil
+			}
+			return nil, fmt.Errorf("spec.systemNetworkNames: cannot get SystemNetwork %q: %w", name, err)
+		}
+		if network.Spec.IPAM == nil {
+			return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("spec.systemNetworkNames: SystemNetwork %q must have spec.ipam configured", name)}, nil
+		}
+	}
 	return &kwhvalidating.ValidatorResult{Valid: true}, nil
 }
 

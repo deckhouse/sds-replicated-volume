@@ -68,7 +68,7 @@ type IntendedPort struct {
 // computeIntendedIPs computes the intended IP addresses from the DRBDResource spec
 // and the Node's addresses. It returns the networks and IPs that should be used,
 // ignoring ports.
-func computeIntendedIPs(drbdr *v1alpha1.DRBDResource, node *corev1.Node) []IntendedIP {
+func computeIntendedIPs(drbdr *v1alpha1.DRBDResource, node *corev1.Node, snapshot networkSnapshot) []IntendedIP {
 	// No addresses for resources being torn down. Clearing them is also what
 	// keeps a doomed resource from taking a port it will never use: with no
 	// addresses left there is nothing to allocate for, so teardown stays
@@ -80,14 +80,21 @@ func computeIntendedIPs(drbdr *v1alpha1.DRBDResource, node *corev1.Node) []Inten
 	// Build address map from Node.status.addresses
 	nodeAddressesByType := make(map[corev1.NodeAddressType]string)
 	for _, addr := range node.Status.Addresses {
-		nodeAddressesByType[addr.Type] = addr.Address
+		// Intentionally select the first InternalIP to match bashible.
+		if _, exists := nodeAddressesByType[addr.Type]; !exists {
+			nodeAddressesByType[addr.Type] = addr.Address
+		}
 	}
 
 	result := make([]IntendedIP, 0, len(drbdr.Spec.SystemNetworks))
 	for _, snn := range drbdr.Spec.SystemNetworks {
-		addrType := systemNetworkToNodeAddressType(snn)
-		ip, ok := nodeAddressesByType[addrType]
-		if !ok {
+		ip := ""
+		if snn == "Internal" {
+			ip = nodeAddressesByType[corev1.NodeInternalIP]
+		} else {
+			ip = snapshot.addresses[snn]
+		}
+		if ip == "" {
 			continue
 		}
 		result = append(result, IntendedIP{
@@ -221,12 +228,13 @@ func ensureAddresses(
 	node *corev1.Node,
 	existingPorts ExistingPorts,
 	portAllocator PortAllocator,
+	snapshot networkSnapshot,
 ) (outcome flow.EnsureOutcome) {
 	ef := flow.BeginEnsure(ctx, "ensure-addresses")
 	defer ef.OnEnd(&outcome)
 
 	// Compute and apply IPs
-	intendedIPs := computeIntendedIPs(drbdr, node)
+	intendedIPs := computeIntendedIPs(drbdr, node, snapshot)
 	applyIPs(drbdr, intendedIPs)
 
 	// Compute and apply ports

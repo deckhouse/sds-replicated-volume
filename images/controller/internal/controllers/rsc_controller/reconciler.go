@@ -54,7 +54,7 @@ type Reconciler struct {
 	cl client.Client
 	// recorder records an Event on the RSC when a status patch moves its Ready
 	// condition. BuildController sets it; nil records nothing.
-	recorder conditions.EventRecorder
+	recorder             conditions.EventRecorder
 	ignoredLabelPrefixes []string
 }
 

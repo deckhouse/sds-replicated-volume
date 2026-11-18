@@ -40,6 +40,7 @@ import (
 
 // Reconciler reconciles DRBDResource objects for the current node.
 type Reconciler struct {
+	sdnAvailable bool
 	cl           client.Client
 	nodeName     string
 	portRegistry *PortRegistry
@@ -718,10 +719,12 @@ func (r *Reconciler) reconcileAddresses(
 	}
 
 	base := drbdr.DeepCopy()
+	snapshot := r.getNetworkSnapshot(rf.Ctx(), drbdr)
 	portErr = ConfiguredReasonError(
-		ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portRegistry.Allocate).Error(),
+		ensureAddresses(rf.Ctx(), drbdr, node, existingPorts, r.portRegistry.Allocate, snapshot).Error(),
 		v1alpha1.DRBDResourceCondConfiguredReasonPortAllocationFailed,
 	)
+	portErr = errors.Join(portErr, snapshot.err)
 
 	if !equality.Semantic.DeepEqual(base.Status.Addresses, drbdr.Status.Addresses) {
 		if err := r.patchDRBDRStatus(rf.Ctx(), drbdr, base, true); err != nil {

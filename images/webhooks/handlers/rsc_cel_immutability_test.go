@@ -290,8 +290,7 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			new: withZones(newCPStorage(), "zone-a", "zone-b", "zone-c"),
 		},
 		{
-			// systemNetworkNames is immutable once set; the controller fills it from nil, so
-			// the nil->value transition must be accepted.
+			// The controller fills systemNetworkNames from nil.
 			name: "systemNetworkNames added from nil (controller default) is accepted",
 			old:  base(),
 			new: func() srv.ReplicatedStorageClassSpec {

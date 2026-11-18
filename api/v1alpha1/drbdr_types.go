@@ -99,7 +99,7 @@ type DRBDResourceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:items:MaxLength=64
+	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=set
 	SystemNetworks []string `json:"systemNetworks"`
 
@@ -232,7 +232,7 @@ type DRBDResourcePath struct {
 	// System network name. Immutable, used as list map key.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:MaxLength=253
 	SystemNetworkName string `json:"systemNetworkName"`
 
 	// Network address (IPv4 and port) to connect to the peer at.
@@ -324,7 +324,7 @@ type DRBDResourceStatus struct {
 // +kubebuilder:object:generate=true
 type DRBDResourceAddressStatus struct {
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:MaxLength=253
 	SystemNetworkName string `json:"systemNetworkName"`
 
 	// +kubebuilder:validation:Required
@@ -433,7 +433,7 @@ type DRBDResourcePathStatus struct {
 	// Name of the system network of this path.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:MaxLength=253
 	SystemNetworkName string `json:"systemNetworkName"`
 
 	// Network address (IPv4 and port) of the connection with the peer.

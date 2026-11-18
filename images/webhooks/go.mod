@@ -6,6 +6,7 @@ require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20261103064126-5dae51e4461b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
+	github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918
 	github.com/go-logr/logr v1.4.3
 	github.com/slok/kubewebhook/v2 v2.7.0
 	k8s.io/api v0.35.1
@@ -287,3 +288,6 @@ tool (
 )
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
+
+// Fetch the declared upstream module from Flant GitLab.
+replace github.com/deckhouse/sdn/api => github.com/deckhouse/sdn/api v0.0.0-20261106141552-f345c3e93918

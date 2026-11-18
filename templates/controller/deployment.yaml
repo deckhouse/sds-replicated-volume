@@ -8,6 +8,7 @@
   "controllerMetricsProxyPort" (int .Values.sdsReplicatedVolume.internal.controllerMetricsProxyPort)
   "controllerMetricsInProcessAuthorization" true
   "additionalControllerEnvs" (list
+    (dict "name" "SDN_ENABLED" "value" (has "sdn-crd" .Values.global.enabledModules | toString))
     (dict "name" "POD_NAMESPACE" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
     (dict "name" "SCHEDULER_EXTENDER_URL" "value" "https://sds-common-scheduler-extender.d8-sds-node-configurator.svc:8099")
     (dict "name" "DATA_NODE_SELECTOR" "value" (.Values.sdsReplicatedVolume.dataNodes.nodeSelector | toJson))

@@ -54,6 +54,8 @@ const (
 	DRBDResourceCondConfiguredReasonSecondaryFailed          = "SecondaryFailed"
 	DRBDResourceCondConfiguredReasonStateQueryFailed         = "StateQueryFailed"
 	DRBDResourceCondConfiguredReasonSymlinkFailed            = "SymlinkFailed"
-	DRBDResourceCondConfiguredReasonWriteDevUUIDFailed       = "WriteDevUUIDFailed"
-	DRBDResourceCondConfiguredReasonInMaintenance            = "InMaintenance"
+	// DRBDResourceCondConfiguredReasonSystemNetworkAddressUnavailable indicates missing SDN node address data.
+	DRBDResourceCondConfiguredReasonSystemNetworkAddressUnavailable = "SystemNetworkAddressUnavailable"
+	DRBDResourceCondConfiguredReasonWriteDevUUIDFailed              = "WriteDevUUIDFailed"
+	DRBDResourceCondConfiguredReasonInMaintenance                   = "InMaintenance"
 )

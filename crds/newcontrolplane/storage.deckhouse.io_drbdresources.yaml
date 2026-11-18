@@ -175,7 +175,7 @@ spec:
                           systemNetworkName:
                             description: System network name. Immutable, used as list
                               map key.
-                            maxLength: 64
+                            maxLength: 253
                             minLength: 1
                             type: string
                         required:
@@ -273,7 +273,7 @@ spec:
               systemNetworks:
                 description: Names of the system networks used for DRBD connections.
                 items:
-                  maxLength: 64
+                  maxLength: 253
                   type: string
                 maxItems: 10
                 minItems: 1
@@ -373,7 +373,7 @@ spec:
                       - port
                       type: object
                     systemNetworkName:
-                      maxLength: 64
+                      maxLength: 253
                       type: string
                   required:
                   - address
@@ -535,7 +535,7 @@ spec:
                             type: boolean
                           systemNetworkName:
                             description: Name of the system network of this path.
-                            maxLength: 64
+                            maxLength: 253
                             minLength: 1
                             type: string
                         required:

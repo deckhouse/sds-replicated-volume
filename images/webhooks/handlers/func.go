@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 
+	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
 	"github.com/go-logr/logr"
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	kwhlog "github.com/slok/kubewebhook/v2/pkg/log"
@@ -66,6 +67,7 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+			sdn.AddToScheme,
 			v1alpha3.AddToScheme,
 			d8commonapi.AddToScheme,
 			snc.AddToScheme,
