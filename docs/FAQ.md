@@ -1159,6 +1159,42 @@ dmesg | grep 'Remote failed to finish a request within'
 
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
+### How do I clear out-of-sync data on a DRBD device?
+
+The `D8DrbdPeerDeviceIsOutOfSync` alert fires when a DRBD device has had out-of-sync data toward a peer for 5 minutes, one alert per connection: `name` is the DRBD resource, `node` is the node, and `conn_name` is the peer node.
+
+When both ends of the connection are `UpToDate` and the out-of-sync data does not go away, reconnecting the connection makes DRBD compare the current generation UUIDs of both ends again, and only a Primary that writes while it is not connected to the peer creates a new one. If the Primary is on neither end of the connection (for example, it is a diskless replica on another node), or it did not write while the connection was down, DRBD clears the out-of-sync bits of the connection without transferring or comparing data. If the Primary at one end wrote meanwhile, DRBD resyncs those blocks from the bitmap together with the new writes, and the other end stays `Inconsistent` until the resync ends. The reconnect does not check the data.
+
+Reconnect one connection at a time and check every replica of the resource before each reconnect. A reconnect takes its connection down for a moment: if another replica is already `Outdated`, `Inconsistent` or resyncing, the resource can lose quorum and suspend I/O. This is what happens when a node has out-of-sync data toward several peers and the connections are reconnected one right after another.
+
+1. Check every replica of the resource:
+
+   ```shell
+   alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+   linstor resource list -r <resource>
+   ```
+
+   Every diskful replica must be `UpToDate`, and every connection `Ok`. Then, on every node of the resource, enter the `linstor-satellite` container and print the status of the resource:
+
+   ```shell
+   kubectl -n d8-sds-replicated-volume exec -ti $(kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<node> -l app=linstor-node -o name) -c linstor-satellite -- bash
+   drbdsetup status <resource> --verbose --statistics
+   ```
+
+   It must show no `Outdated` or `Inconsistent` disk, no resync in progress (`replication:SyncSource` or `replication:SyncTarget`) and no `quorum:no`. If any of this does not hold, do not reconnect anything: wait for the resync to finish, or deal with the failed replica first.
+
+2. On the node from the alert, reconnect only this connection and check that its out-of-sync data is gone:
+
+   ```shell
+   drbdadm disconnect <resource>:<peer-node>
+   drbdadm connect <resource>:<peer-node>
+   drbdsetup status <resource> --statistics
+   ```
+
+3. Repeat step 1 before reconnecting the next connection. If the reconnect started a resync, wait until it finishes. If a replica stays `Outdated` or `Inconsistent`, or a node loses quorum, stop, do not reconnect anything else and contact tech support.
+
+A diskless replica can show a diskful peer as `peer-disk:Consistent` instead of `UpToDate`. DRBD does this when the current data generation of the peer differs from the one the diskless replica works with; here it is a symptom of the same out-of-sync data, not a separate failure.
+
 ## I deleted a ReplicatedStoragePool resource, but its Storage Pool in the backend is still there. Is that expected?
 
 Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the ReplicatedStoragePool resource.

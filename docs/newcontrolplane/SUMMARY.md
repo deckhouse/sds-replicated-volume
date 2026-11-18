@@ -312,28 +312,52 @@ This is safe: the up-to-date source is untouched, an `Inconsistent` replica does
 
 #### Clear out-of-sync data (`D8DrbdPeerDeviceIsOutOfSync`)
 
-When both ends of a connection are `UpToDate` but residual `out-of-sync` bytes stay frozen, DRBD will not resync them on its own (matching generation UUIDs mean no resync is triggered). Reconnecting the peer forces a bitmap-based resync of exactly those extents:
+When both ends of a connection are `UpToDate` but residual `out-of-sync` bytes stay frozen, DRBD will not resync them on its own (matching generation UUIDs mean no resync is triggered). Reconnecting the peer makes DRBD compare the current generation UUIDs of both ends again. Only a Primary that writes while it is not connected to the peer creates a new current UUID, so the outcome depends on where the Primary is:
 
-```shell
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
-# out-of-sync should become 0:
-d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --statistics
-```
+- the Primary is on neither end of this connection (for example, it is a diskless replica on another node), or it did not write while the connection was down: the UUIDs still match, and DRBD clears the out-of-sync bits of this connection without transferring or comparing any data, even if the volume was written meanwhile;
+- the Primary at one end wrote while the connection was down: the out-of-sync blocks are resynced from the bitmap together with the blocks written meanwhile. The larger the residual, the longer the resync: a residual covering the whole volume means a full resync, and the other end stays `Inconsistent` until it finishes;
+- the UUIDs already differed before the reconnect (a diskless replica shows the peer as `peer-disk:Consistent`, see below): DRBD decides on a resync, or reports a split brain, from the UUID history, whether or not anything was written.
+
+The reconnect does not check the data: if the blocks may really differ, verify them and re-mirror one copy instead (see "If a small residual persists" below).
+
+Reconnect one connection at a time and check every replica of the volume before each reconnect. A reconnect takes its connection down for a moment: if another replica is already `Outdated`, `Inconsistent` or resyncing, the volume can lose quorum and suspend I/O. This is what happens when a node has out-of-sync data toward several peers (one alert per connection) and the connections are reconnected one right after another.
+
+1. Check every replica of the volume. `<volume>` is the PersistentVolume name; the DRBD resource of a replica on its node is `sdsrv-<DRBDResource name>`, that is `sdsrv-<volume>-<N>`:
+
+   ```shell
+   d8 k --as=system:sudouser get drbdr -l sds-replicated-volume.deckhouse.io/replicated-volume=<volume>
+   ```
+
+   Every diskful replica must be `UpToDate` in `DISKSTATE`, and every replica must have `true` in `QUORUM`. On every node of the list, the status of its DRBD resource (see "Inspect a resource") must show no `Outdated` or `Inconsistent` disk, no resync in progress (`replication:SyncSource` or `replication:SyncTarget`) and no `quorum:no`. If any of this does not hold, do not reconnect anything: wait for the resync to finish, or deal with the failed replica first.
+
+2. Reconnect one connection and check that its out-of-sync data is gone:
+
+   ```shell
+   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup disconnect <resource> <peer-node-id>
+   # out-of-sync should become 0:
+   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup status <resource> --statistics
+   ```
+
+3. Repeat step 1 before reconnecting the next connection. If the reconnect started a resync, wait until it finishes. If a replica stays `Outdated` or `Inconsistent`, or a replica loses quorum, stop and do not reconnect anything else; for a lost quorum, see "Restore a lost quorum" above.
+
+A diskless replica can show a diskful peer as `peer-disk:Consistent` instead of `UpToDate`. DRBD does this when the current data generation of the peer differs from the one the diskless replica works with; here it is a symptom of the same out-of-sync data, not a separate failure.
 
 If a small residual persists:
 
-1. Run an online verification of that connection (reads both disks and reconciles matching/differing blocks):
+1. Run an online verification of that connection. It reads both disks and marks the blocks that differ as out-of-sync; it does not resync them and does not clear the bits of the blocks that are equal, so the counter does not go down:
 
    ```shell
    d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $POD -c agent -- drbdsetup verify <resource> <peer-node-id> 0
    ```
 
-2. If it still persists and the peer disk is `UpToDate`, fully re-mirror the peer copy. On the peer node (the one named by `conn_name`), invalidate its local copy — it becomes `Inconsistent` and does a full resync from an up-to-date replica. Quorum is held by the remaining up-to-date replicas during the resync:
+   When the connection is back to `replication:Established`, read the result in the kernel log of the node (`dmesg` on the node): the `Out of sync: start=..., size=...` lines list the blocks that verify found different. The final `Online verify found N blocks out of sync` line counts the whole bitmap of the connection, the old residual included, so it does not tell them apart. No `Out of sync:` lines means that both copies are identical and the residual is stale accounting, not a divergence. Do not reconnect after a verify that found differing blocks: with matching UUIDs the reconnect clears the bits verify set, without a resync.
+
+2. If verify found differing blocks, fully re-mirror one copy. Never invalidate the disk of the Primary: invalidate the end of the connection that is not Primary. If neither end is Primary, nothing tells which copy is right: stop and contact tech support. Before invalidating, check every replica of the volume as in step 1 of the reconnect above: every other diskful replica must be `UpToDate` and connected. The invalidated copy becomes `Inconsistent` and does a full resync from an up-to-date replica. Quorum is held by the remaining up-to-date replicas during the resync; with two diskful replicas (`2D+1TB`) the volume has no second up-to-date copy until the resync ends. On the node of the copy to invalidate:
 
    ```shell
-   PEER_POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<peer-node> -l app=agent -o name)
-   MIN=$(d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup status <peer-resource> --verbose | grep -oE 'minor:[0-9]+' | head -1 | cut -d: -f2)
-   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $PEER_POD -c agent -- drbdsetup invalidate $MIN
+   TARGET_POD=$(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName=<target-node> -l app=agent -o name)
+   MIN=$(d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $TARGET_POD -c agent -- drbdsetup status <target-resource> --verbose | grep -oE 'minor:[0-9]+' | head -1 | cut -d: -f2)
+   d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $TARGET_POD -c agent -- drbdsetup invalidate $MIN
    ```
 
 **Phantom counter.** If, after a full re-mirror, a Primary still reports a tiny `out-of-sync` toward a peer whose data was just re-read bit-for-bit, this is a stale accounting artifact on the Primary side, not a real divergence — the data on all replicas is identical. Reconnect, verify and re-mirror will not clear it, it resets only on a disruptive action (a failover or a reboot of the Primary node). For a live volume it is safe to leave it until the next maintenance window.

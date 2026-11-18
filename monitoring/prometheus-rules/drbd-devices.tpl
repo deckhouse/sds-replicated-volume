@@ -118,18 +118,28 @@
              dmesg --color=always | grep 'drbd {{ "{{" }} $labels.name {{ "}}" }}'
              ```
 
-          5. Consider reconnect resource with the peer node:
+          5. Before reconnecting, check every replica of the resource, not only this node. In the output of step 3, every diskful replica must be `UpToDate` and every connection `Ok`. On every node of the resource (enter its `linstor-satellite` container as in step 1), `drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --verbose` must show no `Outdated` or `Inconsistent` disk, no resync in progress and no `quorum:no`.
+
+             If any of this does not hold, do not reconnect anything: the reconnect takes this connection down for a moment, and with another replica already out the resource can lose quorum and suspend I/O. Wait for the resync to finish, or deal with the failed replica first.
+
+          6. Reconnect only this connection:
 
              ```shell
              drbdadm disconnect {{ "{{" }} $labels.name {{ "}}" }}:{{ "{{" }} $labels.conn_name {{ "}}" }}
              drbdadm connect {{ "{{" }} $labels.name {{ "}}" }}:{{ "{{" }} $labels.conn_name {{ "}}" }}
              ```
 
-          6. Check if problem has solved, device should have no out-of-sync data:
+          7. Check that the device has no out-of-sync data with {{ "{{" }} $labels.conn_name {{ "}}" }}:
 
              ```
              drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --statistics
              ```
+
+          8. Repeat step 5 before reconnecting any other connection of the resource: if the reconnect started a resync, wait until it finishes. When out-of-sync data is reported on several connections of the resource (one alert per connection), reconnect them one at a time and check all replicas after each. If a replica stays `Outdated` or `Inconsistent`, or a node loses quorum, stop and contact tech support.
+
+          A diskless replica of the resource can show a diskful peer as `peer-disk:Consistent` instead of `UpToDate`. DRBD does this when the current data generation of the peer differs from the one the diskless replica works with; here it is a symptom of the same out-of-sync data, not a separate failure.
+
+          For details, see the module FAQ section "How do I clear out-of-sync data on a DRBD device?".
 
     - alert: D8DrbdDeviceIsNotConnected
       expr: max by (node, conn_name, name) (drbd_connection_state{drbd_connection_state!="UpToDate", drbd_connection_state!="Connected"} == 1)
@@ -262,19 +272,31 @@
              d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=agent -o name) -c agent -- drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --verbose --statistics
              ```
 
-          2. Reconnect the peer connection to trigger a bitmap-based resync of the out-of-sync extents. Replace `<peer-node-id>` with the id from step 1 (the connection re-establishes automatically):
+          2. Before reconnecting, check every replica of the volume, not only this node. `<volume>` is the PersistentVolume name: the DRBD resource {{ "{{" }} $labels.name {{ "}}" }} is `sdsrv-<volume>-<N>`. Every diskful replica must be `UpToDate` and every replica must have quorum:
+
+             ```shell
+             d8 k --as=system:sudouser get drbdr -l sds-replicated-volume.deckhouse.io/replicated-volume=<volume>
+             ```
+
+             On every node of the list, step 1 (with the node and the DRBD resource `sdsrv-<DRBDResource name>` of that node) must show no `Outdated` or `Inconsistent` disk, no resync in progress and no `quorum:no`. If any of this does not hold, do not reconnect anything: the reconnect takes this connection down for a moment, and with another replica already out the volume can lose quorum and suspend I/O. Wait for the resync to finish, or deal with the failed replica first.
+
+          3. Reconnect only this connection. DRBD compares the current generation UUIDs of both ends again, and only a Primary that writes while it is not connected to the peer creates a new one. If the Primary is on neither end of this connection (for example, it is a diskless replica on another node), or it did not write while the connection was down, DRBD clears the out-of-sync bits of this connection without transferring or comparing data. If the Primary at one end wrote meanwhile, the out-of-sync blocks are resynced from the bitmap together with the new writes, and the other end stays `Inconsistent` until the resync ends: for a residual covering the whole volume that is a full resync. The reconnect does not check the data. Replace `<peer-node-id>` with the id from step 1 (the connection re-establishes automatically):
 
              ```shell
              d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=agent -o name) -c agent -- drbdsetup disconnect {{ "{{" }} $labels.name {{ "}}" }} <peer-node-id>
              ```
 
-          3. Check if the problem is solved, the device should have no out-of-sync data:
+          4. Check that the device has no out-of-sync data with {{ "{{" }} $labels.conn_name {{ "}}" }}:
 
              ```shell
              d8 k --as=system:sudouser -n d8-sds-replicated-volume exec -t $(d8 k -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ "{{" }} $labels.node {{ "}}" }} -l app=agent -o name) -c agent -- drbdsetup status {{ "{{" }} $labels.name {{ "}}" }} --statistics
              ```
 
-          4. If a small residual out-of-sync persists after the reconnect, see the module FAQ section "Diagnosing DRBD out-of-sync data or lost quorum (new control plane)" for online verification, full re-mirror, and the phantom-counter case.
+          5. Repeat step 2 before reconnecting any other connection of the volume: if the reconnect started a resync, wait until it finishes. When out-of-sync data is reported on several connections of the volume (one alert per connection), reconnect them one at a time and check all replicas after each. If a replica stays `Outdated` or `Inconsistent`, or a replica loses quorum, stop and do not reconnect anything else; if the quorum is lost, see the module FAQ section "Diagnosing DRBD out-of-sync data or lost quorum (new control plane)" or contact tech support.
+
+          6. If a small residual out-of-sync persists after the reconnect, see the module FAQ section "Diagnosing DRBD out-of-sync data or lost quorum (new control plane)" for online verification, full re-mirror, and the phantom-counter case.
+
+          A diskless replica of the volume can show a diskful peer as `peer-disk:Consistent` instead of `UpToDate`. DRBD does this when the current data generation of the peer differs from the one the diskless replica works with; here it is a symptom of the same out-of-sync data, not a separate failure.
 
     - alert: D8DrbdDeviceIsNotConnected
       expr: max by (node, conn_name, name) (drbd_connection_state{drbd_connection_state!="UpToDate", drbd_connection_state!="Connected"} == 1)
