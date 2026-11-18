@@ -27,41 +27,25 @@ rules:
   resources:
   - drbdmappers
   verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.deckhouse.io
   resources:
   - drbdnodeoperations
   verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.deckhouse.io
   resources:
   - drbdresourceoperations
   verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
-- apiGroups:
-  - storage.deckhouse.io
-  resources:
-  - drbdresources
-  verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.deckhouse.io
   resources:
@@ -87,31 +71,17 @@ rules:
   resources:
   - replicatedvolumeattachments
   verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.deckhouse.io
   resources:
   - replicatedvolumereplicas
   verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
-- apiGroups:
-  - storage.deckhouse.io
-  resources:
-  - replicatedvolumes
-  verbs:
-  - create
-  - delete
-  - deletecollection
-  - patch
-  - update
+  - get
+  - list
+  - watch
 {{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -128,19 +98,24 @@ rules:
 - apiGroups:
   - storage.deckhouse.io
   resources:
-  - drbdmappers
-  - drbdnodeoperations
-  - drbdresourceoperations
-  - drbdresources
   - replicatedstorageclasses
   - replicatedstoragepools
-  - replicatedvolumeattachments
-  - replicatedvolumereplicas
-  - replicatedvolumes
   verbs:
   - create
   - delete
   - deletecollection
   - patch
   - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - drbdmappers
+  - drbdnodeoperations
+  - drbdresourceoperations
+  - replicatedvolumeattachments
+  - replicatedvolumereplicas
+  verbs:
+  - get
+  - list
+  - watch
 {{- end }}

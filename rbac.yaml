@@ -63,23 +63,11 @@ resources:
     resource: drbdmappers
     system:
       manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
         - get
         - list
         - watch
     legacy:
       ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      User:
         - get
         - list
         - watch
@@ -87,23 +75,17 @@ resources:
     resource: drbdnodeoperations
     system:
       manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
         - get
         - list
         - watch
-    legacy:
-      ClusterEditor:
+      superadmin:
         - create
         - delete
-        - deletecollection
-        - patch
-        - update
-      User:
+    legacy:
+      ClusterAdmin:
+        - create
+        - delete
+      ClusterEditor:
         - get
         - list
         - watch
@@ -111,47 +93,29 @@ resources:
     resource: drbdresourceoperations
     system:
       manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
         - get
         - list
         - watch
-    legacy:
-      ClusterEditor:
+      superadmin:
         - create
         - delete
-        - deletecollection
-        - patch
-        - update
-      User:
+    legacy:
+      ClusterAdmin:
+        - create
+        - delete
+      ClusterEditor:
         - get
         - list
         - watch
   - group: storage.deckhouse.io
     resource: drbdresources
     system:
-      manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
+      superadmin:
         - get
         - list
         - watch
     legacy:
-      ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      User:
+      ClusterAdmin:
         - get
         - list
         - watch
@@ -207,23 +171,11 @@ resources:
     resource: replicatedvolumeattachments
     system:
       manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
         - get
         - list
         - watch
     legacy:
       ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      User:
         - get
         - list
         - watch
@@ -231,53 +183,37 @@ resources:
     resource: replicatedvolumereplicas
     system:
       manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
         - get
         - list
         - watch
     legacy:
       ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      User:
         - get
         - list
         - watch
   - group: storage.deckhouse.io
     resource: replicatedvolumes
     system:
-      manager:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      viewer:
+      superadmin:
         - get
         - list
         - watch
     legacy:
-      ClusterEditor:
-        - create
-        - delete
-        - deletecollection
-        - patch
-        - update
-      User:
+      ClusterAdmin:
         - get
         - list
         - watch
   - group: storage.deckhouse.io
     resource: replicatedstoragemetadatabackups
     noAccess: 'the encoded backups of the LINSTOR database; restoring or deleting them is an operation of the cluster administrator (see the FAQ), not of a storage user'
+capabilities:
+  system.superadmin:
+    title:
+      en: 'Module sds-replicated-volume: DRBD operations and volumes'
+      ru: 'Модуль sds-replicated-volume: операции DRBD и тома'
+    description:
+      en: 'Read ReplicatedVolume and DRBDResource resources, which hold the DRBD shared secret of every volume, and create and delete DRBDResourceOperation and DRBDNodeOperation resources, the DRBD maintenance operations of the new control plane, such as ForcePrimary, Invalidate, CreateNewUUID and UpdateDRBD.'
+      ru: 'Чтение ресурсов ReplicatedVolume и DRBDResource, которые хранят общий секрет DRBD каждого тома, а также создание и удаление ресурсов DRBDResourceOperation и DRBDNodeOperation — операций обслуживания DRBD новой управляющей плоскости, например ForcePrimary, Invalidate, CreateNewUUID и UpdateDRBD.'
 serviceAccounts:
   - name: agent
     path: agent
