@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -480,3 +481,95 @@ func Test_validateVolumeCleanupEdition(t *testing.T) {
 }
 
 func ptrMethod(m srv.VolumeCleanupMethod) *srv.VolumeCleanupMethod { return &m }
+
+func Test_validateNewControlPlaneTopology(t *testing.T) {
+	tests := []struct {
+		name         string
+		topology     srv.ReplicatedStorageClassTopology
+		clusterZones []string
+		wantValid    bool
+	}{
+		{name: "Ignored without zones", topology: "Ignored", wantValid: true},
+		{name: "Ignored with zones", topology: "Ignored", clusterZones: []string{"a"}, wantValid: false},
+		{name: "Zonal with zones", topology: "Zonal", clusterZones: []string{"a", "b"}, wantValid: true},
+		{name: "Zonal without zones", topology: "Zonal", wantValid: false},
+		{name: "TransZonal with zones", topology: "TransZonal", clusterZones: []string{"a", "b", "c"}, wantValid: true},
+		{name: "TransZonal without zones", topology: "TransZonal", wantValid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rsc := &srv.ReplicatedStorageClass{Spec: srv.ReplicatedStorageClassSpec{Topology: tt.topology}}
+			got := validateNewControlPlaneTopology(rsc, tt.clusterZones)
+			if got.Valid != tt.wantValid {
+				t.Fatalf("Valid = %v, want %v (message %q)", got.Valid, tt.wantValid, got.Message)
+			}
+			if !tt.wantValid && got.Message == "" {
+				t.Error("a rejection must carry a message")
+			}
+		})
+	}
+}
+
+func Test_topologyNeedsZoneCheck(t *testing.T) {
+	rscWith := func(topology srv.ReplicatedStorageClassTopology) *srv.ReplicatedStorageClass {
+		return &srv.ReplicatedStorageClass{Spec: srv.ReplicatedStorageClassSpec{Topology: topology}}
+	}
+	rawOf := func(t *testing.T, topology srv.ReplicatedStorageClassTopology) []byte {
+		t.Helper()
+		raw, err := json.Marshal(rscWith(topology))
+		if err != nil {
+			t.Fatalf("marshal the old ReplicatedStorageClass: %v", err)
+		}
+		return raw
+	}
+
+	tests := []struct {
+		name string
+		op   model.AdmissionReviewOp
+		old  srv.ReplicatedStorageClassTopology
+		new  srv.ReplicatedStorageClassTopology
+		want bool
+	}{
+		{name: "create", op: model.OperationCreate, new: "Ignored", want: true},
+		{name: "update keeping the topology", op: model.OperationUpdate, old: "Ignored", new: "Ignored", want: false},
+		{name: "update changing the topology", op: model.OperationUpdate, old: "Ignored", new: "Zonal", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ar := &model.AdmissionReview{Operation: tt.op}
+			if tt.op == model.OperationUpdate {
+				ar.OldObjectRaw = rawOf(t, tt.old)
+			}
+			got, err := topologyNeedsZoneCheck(ar, rscWith(tt.new))
+			if err != nil {
+				t.Fatalf("topologyNeedsZoneCheck() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("undecodable old object", func(t *testing.T) {
+		ar := &model.AdmissionReview{Operation: model.OperationUpdate, OldObjectRaw: []byte("{")}
+		if _, err := topologyNeedsZoneCheck(ar, rscWith("Ignored")); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+}
+
+func Test_listClusterZones(t *testing.T) {
+	cl := fake.NewClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"topology.kubernetes.io/zone": "a"}}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n2"}},
+	)
+	got, err := listClusterZones(context.Background(), cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("got %v, want [a]", got)
+	}
+}

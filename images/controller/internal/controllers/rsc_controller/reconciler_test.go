@@ -244,6 +244,51 @@ var _ = Describe("validateEligibleNodes", func() {
 		return node
 	}
 
+	Describe("Topology and zones", func() {
+		It("rejects Ignored when eligible nodes have zones", func() {
+			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-1", "zone-a", true),
+				makeNode("node-2", "", true),
+			}
+
+			err := validateEligibleNodes(nodes, v1alpha1.TopologyIgnored, 0, 1)
+
+			Expect(err).To(MatchError(ContainSubstring("Ignored topology is not allowed while the eligible nodes have zones")))
+		})
+
+		It("accepts Ignored when eligible nodes have no zones", func() {
+			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-1", "", true),
+				makeNode("node-2", "", true),
+			}
+
+			Expect(validateEligibleNodes(nodes, v1alpha1.TopologyIgnored, 0, 1)).To(Succeed())
+		})
+
+		It("rejects Zonal when eligible nodes have no zones", func() {
+			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-1", "", true),
+				makeNode("node-2", "", true),
+			}
+
+			err := validateEligibleNodes(nodes, v1alpha1.TopologyZonal, 0, 1)
+
+			Expect(err).To(MatchError(ContainSubstring("Zonal topology is not allowed while the eligible nodes have no zones")))
+		})
+
+		It("rejects TransZonal when eligible nodes have no zones", func() {
+			nodes := []v1alpha1.ReplicatedStoragePoolEligibleNode{
+				makeNode("node-1", "", true),
+				makeNode("node-2", "", true),
+				makeNode("node-3", "", true),
+			}
+
+			err := validateEligibleNodes(nodes, v1alpha1.TopologyTransZonal, 1, 1)
+
+			Expect(err).To(MatchError(ContainSubstring("TransZonal topology is not allowed while the eligible nodes have no zones")))
+		})
+	})
+
 	Describe("Replication None", func() {
 		It("passes with 1 node with disk", func() {
 			rsc := &v1alpha1.ReplicatedStorageClass{

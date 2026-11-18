@@ -1240,6 +1240,25 @@ func validateEligibleNodes(
 		}
 	}
 
+	nodesWithZone := 0
+	for _, n := range eligibleNodes {
+		if n.ZoneName != "" {
+			nodesWithZone++
+		}
+	}
+
+	switch topology {
+	case v1alpha1.TopologyIgnored:
+		if nodesWithZone > 0 {
+			return fmt.Errorf("Ignored topology is not allowed while the eligible nodes have zones (%d of %d nodes); use Zonal or TransZonal, or remove the topology.kubernetes.io/zone labels",
+				nodesWithZone, totalNodes)
+		}
+	case v1alpha1.TopologyZonal, v1alpha1.TopologyTransZonal:
+		if nodesWithZone == 0 {
+			return fmt.Errorf("%s topology is not allowed while the eligible nodes have no zones; use Ignored, or label the nodes with topology.kubernetes.io/zone", topology)
+		}
+	}
+
 	// Group nodes by zone.
 	nodesByZone := make(map[string][]v1alpha1.ReplicatedStoragePoolEligibleNode)
 	for _, n := range eligibleNodes {

@@ -408,7 +408,7 @@ spec:
                     Required when replication is 'None'.
 
                   > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
-                  > In the LINSTOR control-plane 'Zonal' and 'TransZonal' can be used only if there are zones in the cluster.
+                  > 'Zonal' and 'TransZonal' can be used only if there are zones in the cluster.
 
                   > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
 

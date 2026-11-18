@@ -115,6 +115,19 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 			return &kwhvalidating.ValidatorResult{Valid: false,
 				Message: "spec.storage is required for new control plane"}, nil
 		}
+		check, err := topologyNeedsZoneCheck(arReview, rsc)
+		if err != nil {
+			return nil, err
+		}
+		if check {
+			clusterZoneList, err := listClusterZones(ctx, staticClient)
+			if err != nil {
+				return nil, err
+			}
+			if r := validateNewControlPlaneTopology(rsc, clusterZoneList); !r.Valid {
+				return r, nil
+			}
+		}
 	} else {
 		// Legacy control plane validations.
 		if r := validateLegacySpecFields(rsc); !r.Valid {
@@ -125,17 +138,9 @@ func RSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 				Message: "spec.storagePool is required for legacy control plane"}, nil
 		}
 
-		var clusterZoneList []string
-		nodes, err := staticClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		clusterZoneList, err := listClusterZones(ctx, staticClient)
 		if err != nil {
 			return nil, err
-		}
-		for _, node := range nodes.Items {
-			for label, value := range node.GetObjectMeta().GetLabels() {
-				if label == "topology.kubernetes.io/zone" {
-					clusterZoneList = append(clusterZoneList, value)
-				}
-			}
 		}
 		if r := validateLegacyControlPlaneTopology(rsc, clusterZoneList); !r.Valid {
 			return r, nil
@@ -278,6 +283,64 @@ func validateLegacySpecFields(rsc *srv.ReplicatedStorageClass) *kwhvalidating.Va
 			Message: "spec.volumeCleanup cannot be set for legacy control plane"}
 	}
 
+	return &kwhvalidating.ValidatorResult{Valid: true}
+}
+
+func listClusterZones(ctx context.Context, cl kubernetes.Interface) ([]string, error) {
+	nodes, err := cl.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var zones []string
+	for _, node := range nodes.Items {
+		if value, ok := node.GetLabels()["topology.kubernetes.io/zone"]; ok {
+			zones = append(zones, value)
+		}
+	}
+	return zones, nil
+}
+
+// topologyNeedsZoneCheck tells whether the zones of the cluster matter for the request: on
+// create always, on update only when the topology differs from the stored one. A class that
+// already holds an inconsistent topology stays editable, so a module update does not break it;
+// the controller reports such a class in its status instead.
+func topologyNeedsZoneCheck(ar *model.AdmissionReview, rsc *srv.ReplicatedStorageClass) (bool, error) {
+	if ar.Operation != model.OperationUpdate {
+		return true, nil
+	}
+	oldRSC := &srv.ReplicatedStorageClass{}
+	if err := json.Unmarshal(ar.OldObjectRaw, oldRSC); err != nil {
+		return false, fmt.Errorf("unable to decode the old ReplicatedStorageClass: %w", err)
+	}
+	return oldRSC.Spec.Topology != rsc.Spec.Topology, nil
+}
+
+// validateNewControlPlaneTopology applies the cluster-zone rules of the legacy control plane:
+// Zonal and TransZonal need zones in the cluster, Ignored needs none.
+func validateNewControlPlaneTopology(rsc *srv.ReplicatedStorageClass, clusterZoneList []string) *kwhvalidating.ValidatorResult {
+	switch rsc.Spec.Topology {
+	case topologyTransZonal:
+		if len(clusterZoneList) == 0 {
+			return &kwhvalidating.ValidatorResult{
+				Valid:   false,
+				Message: "transZonal topology denied in cluster without zones; use Ignored instead",
+			}
+		}
+	case topologyZonal:
+		if len(clusterZoneList) == 0 {
+			return &kwhvalidating.ValidatorResult{
+				Valid:   false,
+				Message: "zonal topology denied in cluster without zones; use Ignored instead",
+			}
+		}
+	case topologyIgnored:
+		if len(clusterZoneList) != 0 {
+			return &kwhvalidating.ValidatorResult{
+				Valid:   false,
+				Message: "in a cluster with existing zones, the Ignored topology should not be used",
+			}
+		}
+	}
 	return &kwhvalidating.ValidatorResult{Valid: true}
 }
 
