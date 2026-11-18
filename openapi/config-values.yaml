@@ -32,7 +32,7 @@ properties:
           DRBD ports range end
   dataNodes:
     type: object
-    description: Settings for Linstor on nodes with data
+    description: Settings for the nodes that store or access replicated volumes
     default: {}
     properties:
       nodeSelector:
@@ -44,7 +44,9 @@ properties:
         description: |
           The same as the Pod `spec.nodeSelector` parameter in Kubernetes.
 
-          Nodes that match the selector get the `storage.deckhouse.io/sds-replicated-volume-node: ""` label. Module components, including the LINSTOR satellite and the CSI node, run on nodes with this label.
+          Nodes that match the selector get the `storage.deckhouse.io/sds-replicated-volume-node: ""` label. The node agent of the current control plane and the CSI node run on nodes with this label.
+
+          Replicas are placed on the nodes of a ReplicatedStoragePool; a node without this label cannot hold a replica.
 
           The default value `kubernetes.io/os: linux` selects all Linux nodes. A custom value replaces the default one and is not merged with it.
 

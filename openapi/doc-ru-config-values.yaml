@@ -12,13 +12,15 @@ properties:
       maxPort:
         description: Конец диапазона портов DRBD
   dataNodes:
-    description: Настройки для узлов Linstor с данными
+    description: Настройки узлов, на которых хранятся реплицируемые тома или к которым они подключаются
     properties:
       nodeSelector:
         description: |
           Настройка аналогична параметру `spec.nodeSelector` пода в Kubernetes.
 
-          Узлы, которые соответствуют селектору, получают лейбл `storage.deckhouse.io/sds-replicated-volume-node: ""`. Компоненты модуля, в том числе сателлит LINSTOR (агент LINSTOR на узле) и узловой компонент CSI, работают на узлах с этим лейблом.
+          Узлы, которые соответствуют селектору, получают лейбл `storage.deckhouse.io/sds-replicated-volume-node: ""`. Агент узла текущего control plane и узловой компонент CSI работают на узлах с этим лейблом.
+
+          Реплики размещаются на узлах из ReplicatedStoragePool; узел без этого лейбла не может хранить реплику.
 
           Значение по умолчанию `kubernetes.io/os: linux` выбирает все узлы с Linux. Заданное значение заменяет значение по умолчанию, а не объединяется с ним.
 
