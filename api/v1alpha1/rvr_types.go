@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"math/bits"
+	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,6 +100,20 @@ func FormatReplicatedVolumeReplicaName(rvName string, id uint8) string {
 		panic("id must be in range 0-31")
 	}
 	return rvName + idSuffixes[id]
+}
+
+// ParseReplicatedVolumeReplicaName returns the ID of a canonical "<rvName>-N" name,
+// where N is in [0, 31]. Malformed names and names belonging to another RV are rejected.
+func ParseReplicatedVolumeReplicaName(rvName, name string) (uint8, bool) {
+	suffix, ok := strings.CutPrefix(name, rvName+"-")
+	if !ok || rvName == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(suffix, 10, 5)
+	if err != nil || strconv.FormatUint(id, 10) != suffix {
+		return 0, false
+	}
+	return uint8(id), true
 }
 
 // SetNameWithID sets the RVR name using the ReplicatedVolumeName and the given ID.
@@ -209,6 +225,13 @@ func (t ReplicaType) String() string {
 
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
+	// Evacuated records an irreversible automatic evacuation decision after removal
+	// from the persisted datamesh. It authorizes deletion of node-owned resources
+	// without waiting for the lost node, even if the node subsequently returns.
+	// This decision survives removal of the volume's evacuation progress marker.
+	// +optional
+	Evacuated *bool `json:"evacuated,omitempty"`
+
 	// Conditions reflecting the current state of the replica.
 	// +listType=map
 	// +listMapKey=type

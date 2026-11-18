@@ -155,7 +155,7 @@ func settleEffectiveLayout(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 ) {
-	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 	updateEffectiveLayout(p.Global(), &rv.Status.EffectiveLayout)
 }
 

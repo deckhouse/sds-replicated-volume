@@ -426,7 +426,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 	Describe("computeSatisfyEligibleNodesReport", func() {
 		DescribeTable("leaves the condition and the violations untouched",
 			func(rv *v1alpha1.ReplicatedVolume, rsp *rspView) {
-				Expect(computeSatisfyEligibleNodesReport(rv, nil, rsp)).
+				Expect(computeSatisfyEligibleNodesReport(rv, nil, rsp, evacuationView{})).
 					To(Equal(satisfyEligibleNodesReport{}))
 			},
 
@@ -455,7 +455,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				wantStatus metav1.ConditionStatus,
 				wantReason string,
 			) {
-				report := computeSatisfyEligibleNodesReport(rv, rvrs, rsp)
+				report := computeSatisfyEligibleNodesReport(rv, rvrs, rsp, evacuationView{})
 				Expect(report.present).To(BeTrue())
 				Expect(report.status).To(Equal(wantStatus))
 				Expect(report.reason).To(Equal(wantReason))
@@ -659,7 +659,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				rsp *rspView,
 				wantOffenders []string,
 			) {
-				report := computeSatisfyEligibleNodesReport(rv, rvrs, rsp)
+				report := computeSatisfyEligibleNodesReport(rv, rvrs, rsp, evacuationView{})
 
 				names := make([]string, 0, len(report.violations))
 				for _, v := range report.violations {
@@ -905,7 +905,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 					placementTestNode("n1", "zone-a"),
 					placementTestNode("n2", "zone-b"),
 					placementTestNode("n3", "zone-b"),
-					placementTestNode("n4", "zone-c")))
+					placementTestNode("n4", "zone-c")), evacuationView{})
 
 			names := make([]string, 0, len(report.violations))
 			for _, v := range report.violations {
@@ -927,7 +927,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				nil,
 				placementTestRSP([]string{"zone-a"},
 					placementTestNode("n0", "zone-a"),
-					placementTestNode("n1", "")))
+					placementTestNode("n1", "")), evacuationView{})
 
 			Expect(report.message).To(Equal(
 				`1/2 members are not on eligible nodes: replica rv-1 on node n1 ` +
@@ -944,7 +944,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				placementTestRSP([]string{"zone-a", "zone-b"},
 					placementTestNode("n0", "zone-a"),
 					placementTestNode("n1", "zone-a"),
-					placementTestNode("n2", "zone-b")))
+					placementTestNode("n2", "zone-b")), evacuationView{})
 
 			Expect(report.message).To(Equal(
 				`1/3 members are not on eligible nodes: replica rv-2 on node n2 ` +
@@ -964,7 +964,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 						v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch),
 					satisfiedRVR("rv-1"),
 				},
-				placementTestRSP(nil))
+				placementTestRSP(nil), evacuationView{})
 
 			Expect(report.message).To(HavePrefix("1/1 members are not on eligible nodes:"))
 		})
@@ -974,7 +974,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				newPlacementTestRV(v1alpha1.TopologyIgnored,
 					placementTestMember("rv-0", v1alpha1.DatameshMemberTypeAccess, "n0")),
 				nil,
-				placementTestRSP(nil))
+				placementTestRSP(nil), evacuationView{})
 
 			Expect(report.status).To(Equal(metav1.ConditionTrue))
 			Expect(report.message).To(Equal(
@@ -985,7 +985,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 			// "All 0 datamesh members are on eligible nodes" is true and useless; a volume
 			// whose datamesh is still empty should say that instead.
 			report := computeSatisfyEligibleNodesReport(
-				newPlacementTestRV(v1alpha1.TopologyTransZonal), nil, placementTestRSP([]string{"zone-a"}))
+				newPlacementTestRV(v1alpha1.TopologyTransZonal), nil, placementTestRSP([]string{"zone-a"}), evacuationView{})
 
 			Expect(report.status).To(Equal(metav1.ConditionTrue))
 			Expect(report.message).To(Equal("Datamesh has no members yet"))
@@ -1007,7 +1007,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 				},
 				placementTestRSP([]string{"zone-a", "zone-b"},
 					placementTestNode("n0", "zone-c"),
-					placementTestNode("n1", "zone-c")))
+					placementTestNode("n1", "zone-c")), evacuationView{})
 
 			Expect(report.violations).To(Equal([]v1alpha1.ReplicatedVolumeEligibleNodesViolation{
 				{
@@ -1040,7 +1040,7 @@ var _ = Describe("SatisfyEligibleNodes condition", func() {
 						metav1.ConditionFalse,
 						v1alpha1.ReplicatedVolumeReplicaCondSatisfyEligibleNodesReasonNodeMismatch),
 				},
-				placementTestRSP(nil))
+				placementTestRSP(nil), evacuationView{})
 
 			names := make([]string, 0, len(report.violations))
 			for _, v := range report.violations {
@@ -1193,7 +1193,7 @@ var _ = Describe("reconcilePlacementConditions", func() {
 		rsp := placementTestRSP([]string{"zone-a", "zone-b"},
 			placementTestNode("n0", "zone-a"), placementTestNode("n1", "zone-b"))
 
-		outcome := r.reconcilePlacementConditions(ctx, rv, rvrs, rsp)
+		outcome := r.reconcilePlacementConditions(ctx, rv, rvrs, rsp, evacuationView{})
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeTrue())
@@ -1230,7 +1230,7 @@ var _ = Describe("reconcilePlacementConditions", func() {
 		}}
 		before := rv.DeepCopy()
 
-		outcome := r.reconcilePlacementConditions(ctx, rv, nil, placementTestRSP(nil))
+		outcome := r.reconcilePlacementConditions(ctx, rv, nil, placementTestRSP(nil), evacuationView{})
 
 		Expect(outcome.Error()).To(BeNil())
 		Expect(outcome.DidChange()).To(BeFalse())

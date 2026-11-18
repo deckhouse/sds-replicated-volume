@@ -277,6 +277,29 @@ var _ = Describe("rvPredicates", func() {
 })
 
 var _ = Describe("rscPredicates", func() {
+	DescribeTable("wakes volumes when the effective repair strategy changes", func(
+		oldStrategy, newStrategy *v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy, want bool,
+	) {
+		oldRSC := &v1alpha1.ReplicatedStorageClass{Spec: v1alpha1.ReplicatedStorageClassSpec{EligibleNodesConflictResolutionStrategy: oldStrategy}}
+		newRSC := &v1alpha1.ReplicatedStorageClass{Spec: v1alpha1.ReplicatedStorageClassSpec{EligibleNodesConflictResolutionStrategy: newStrategy}}
+		for _, p := range rscPredicates() {
+			Expect(p.Update(event.UpdateEvent{ObjectOld: oldRSC, ObjectNew: newRSC})).To(Equal(want))
+		}
+	},
+		Entry("Manual to default RollingRepair",
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionManual}, nil, true),
+		Entry("default RollingRepair to Manual", nil,
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionManual}, true),
+		Entry("Manual to explicit RollingRepair",
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionManual},
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair}, true),
+		Entry("explicit RollingRepair to Manual",
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair},
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionManual}, true),
+		Entry("defaulting preserves RollingRepair", nil,
+			&v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair}, false),
+	)
+
 	Describe("UpdateFunc", func() {
 		var preds []func(event.TypedUpdateEvent[client.Object]) bool
 

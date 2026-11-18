@@ -123,6 +123,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			ToCtrl()
 	}
 
+	if outcome := r.reconcileEvacuatedResources(rf.Ctx(), rvr, rv, drbdr, llvs); outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	if rvr != nil {
 		// Reconcile the RVR metadata (finalizers and labels).
 		outcome := r.reconcileMetadata(rf.Ctx(), rvr, rv, llvs, drbdr)
@@ -411,6 +415,75 @@ func (r *Reconciler) reconcileMaintenance(
 
 	// We're done. Don't continue further reconciliation.
 	return rf.Done().ReportChangedIf(eo.DidChange())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: evacuated resources
+//
+
+// nodeConfiguratorFinalizer is the external LLV deletion finalizer. Evacuation
+// deliberately abandons on-node LV deletion after the node's grace period expires.
+const nodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
+
+// reconcileEvacuatedResources releases known node-owned finalizers after normal
+// deletion has been initiated. Unknown finalizers and foreign children are retained.
+// The persisted evacuation decision is independent of current Node readiness.
+//
+// Reconcile pattern: In-place reconciliation
+func (r *Reconciler) reconcileEvacuatedResources(
+	ctx context.Context,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
+	drbdr *v1alpha1.DRBDResource,
+	llvs []snc.LVMLogicalVolume,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "evacuated-resources")
+	defer rf.OnEnd(&outcome)
+
+	if rvr == nil || !ptr.Deref(rvr.Status.Evacuated, false) || !rvrShouldNotExist(rvr) {
+		return rf.Continue()
+	}
+	// Membership is checked defensively in addition to the RV finalizer gate.
+	if rv != nil && (rv.IsUnderMaintenance() || rv.Status.Datamesh.FindMemberByName(rvr.Name) != nil) {
+		return rf.Continue()
+	}
+
+	changed := false
+	if drbdr != nil && drbdr.DeletionTimestamp != nil &&
+		metav1.IsControlledBy(drbdr, rvr) && drbdr.Spec.NodeName == rvr.Spec.NodeName &&
+		!obju.HasFinalizer(drbdr, v1alpha1.RVRControllerFinalizer) &&
+		obju.HasFinalizer(drbdr, v1alpha1.AgentFinalizer) {
+		base := drbdr.DeepCopy()
+		obju.RemoveFinalizer(drbdr, v1alpha1.AgentFinalizer)
+		if err := client.IgnoreNotFound(r.patchDRBDR(rf.Ctx(), drbdr, base)); err != nil {
+			return rf.Failf(err, "releasing evacuated DRBDResource %s", drbdr.Name)
+		}
+		changed = true
+	}
+	for i := range llvs {
+		llv := &llvs[i]
+		if llv.DeletionTimestamp == nil || !metav1.IsControlledBy(llv, rvr) ||
+			obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer) {
+			continue
+		}
+		if !obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) && !obju.HasFinalizer(llv, nodeConfiguratorFinalizer) {
+			continue
+		}
+		base := llv.DeepCopy()
+		obju.RemoveFinalizer(llv, v1alpha1.AgentFinalizer)
+		obju.RemoveFinalizer(llv, nodeConfiguratorFinalizer)
+		if err := client.IgnoreNotFound(r.patchLLV(rf.Ctx(), llv, base)); err != nil {
+			return rf.Failf(err, "releasing evacuated LVMLogicalVolume %s", llv.Name)
+		}
+		changed = true
+	}
+	if changed {
+		rf.Log().Info("Released node-owned finalizers for evacuated replica", "replica", rvr.Name, "node", rvr.Spec.NodeName)
+		// Child update/delete events enqueue the next pass with refreshed objects
+		// before normal cleanup continues.
+		return rf.Done()
+	}
+	return rf.Continue()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -126,6 +126,7 @@ const (
 	//
 	// Reasons describe eligible nodes satisfaction state.
 	ReplicatedVolumeCondSatisfyEligibleNodesType                               = "SatisfyEligibleNodes"
+	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked    = "ConflictResolutionBlocked"    // Evacuation is blocked by a safety guard.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress = "ConflictResolutionInProgress" // Eligible nodes conflict resolution is in progress.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes  = "InConflictWithEligibleNodes"  // Some replicas are on non-eligible nodes.
 	ReplicatedVolumeCondSatisfyEligibleNodesReasonSatisfyEligibleNodes         = "SatisfyEligibleNodes"         // All replicas are on eligible nodes.

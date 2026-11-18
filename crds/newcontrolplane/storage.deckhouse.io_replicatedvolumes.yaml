@@ -983,6 +983,23 @@ spec:
                 x-kubernetes-validations:
                 - message: eligibleNodesViolations[].replicaName must be unique
                   rule: self.all(x, self.exists_one(y, x.replicaName == y.replicaName))
+              evacuatedReplicas:
+                description: |-
+                  EvacuatedReplicas lists replica names retired by automatic evacuation.
+                  Names are recorded when automatic ForceRemoveReplica starts and retained until
+                  the old replicas are absent or deleting, the layout is restored and replacement
+                  diskful replicas are UpToDate.
+                items:
+                  maxLength: 123
+                  minLength: 1
+                  pattern: ^.+-([0-9]|[12][0-9]|3[01])$
+                  type: string
+                maxItems: 32
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: evacuatedReplicas must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
               membershipLayout:
                 description: |-
                   MembershipLayout is a short, human-readable representation of the actual datamesh layout

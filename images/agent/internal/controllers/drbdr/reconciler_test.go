@@ -148,12 +148,26 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
 		},
 		{
-			name:  "resource belongs to different node - returns done (filtered by predicates)",
+			name:  "resource belongs to different node with no local DRBD - done",
 			drbdr: drbdrOnNode(testOtherNode, v1alpha1.DRBDResourceStateUp),
-			// When reconcile is triggered for a resource on different node,
-			// getDRBDRByName returns the object, but reconcileDRBDR checks
-			// node ownership and returns done (predicates should filter this normally)
+			// The local orphan lookup is a no-op when no resource remains on this node.
 			expectedCommands: []*fakedrbdutils.ExpectedCmd{},
+		},
+
+		{
+			name:             "returned node cleans orphan after name reuse on another node",
+			drbdr:            drbdrOnNode(testOtherNode, v1alpha1.DRBDResourceStateUp),
+			storeState:       configuredStatus(testDRBDResName),
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{downCmd(testDRBDResName)},
+			postCheck: func(t *testing.T, cl client.Client) {
+				current := &v1alpha1.DRBDResource{}
+				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, current); err != nil {
+					t.Fatal(err)
+				}
+				if current.Spec.NodeName != testOtherNode || current.Spec.State != v1alpha1.DRBDResourceStateUp {
+					t.Fatal("modified replacement resource")
+				}
+			},
 		},
 
 		// State=Up cases - verifies correct drbdsetup command sequence

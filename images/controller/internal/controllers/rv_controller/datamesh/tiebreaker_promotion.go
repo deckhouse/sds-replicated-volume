@@ -55,7 +55,7 @@ func isR2ToR3Promotion(gctx *globalContext) bool {
 // Storage preparation and conflicting pending replicas are admission-only checks:
 // layout convergence never reserves the TB while another diskful copy is in flight.
 func TieBreakerPromotionReadiness(rv *v1alpha1.ReplicatedVolume, rvrs []*v1alpha1.ReplicatedVolumeReplica, name string) (bool, string) {
-	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 	for i := range p.Global().allReplicas {
 		rctx := &p.Global().allReplicas[i]
 		if rctx.name == name {

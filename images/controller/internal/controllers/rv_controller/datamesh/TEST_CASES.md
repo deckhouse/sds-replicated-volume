@@ -685,6 +685,108 @@ Plan selection depends on two axes: voter parity (odd/even) and qmr lower needed
 - ⚡ **Orphan attached D → full ForceDetach → ForceRemove cycle.**
   3D, rv-1-2 dies: RVR removed, member still Attached=true. Both ForceDetach and ForceLeave requests provided. ForceDetach runs first (attachment dispatcher), clears Attached (confirmImmediate). Then ForceRemove runs (membership dispatcher), removes member. Final: rv-1-2 removed, 2 surviving voters, q correct.
 
+
+### Automatic diskful and tie-breaker evacuation
+
+Each dispatch pass selects one evacuee: the first voter by name, or the first tie-breaker
+by name when no evacuee voters remain. Removing a voter first can lower the quorum needed
+to evacuate a tie-breaker. A blocked candidate is not skipped.
+After removal, the next engine iteration selects from the reduced membership without
+waiting for the previous transition's confirmation.
+
+- **3D, one evacuee → diskful/v1.**
+  The member leaves immediately. Only the two live survivors confirm the new revision;
+  the dead RVR stays at its old revision and ForceRemove completes.
+
+- **3D, two evacuees → neither leaves.**
+  Only the first name is considered. One live voter is below the post-removal quorum of two;
+  the diagnostic reports both counts. The second evacuee is not dispatched.
+
+- **4D, two evacuees → sequential removal without waiting for confirmation.**
+  Names rv-1-10 and rv-1-2 prove lexical selection differs from replica ID order. The first uses
+  diskful-q-down/v1 with V=4; the next engine iteration uses diskful/v1 with V=3. Step revisions
+  are ordered. Both transitions complete after the two live survivors confirm; neither dead
+  replica confirms.
+
+- **2D+1TB, evacuee TB → tiebreaker/v1.**
+  The subject is not a voter: V'=2, q'=2, both surviving D are live and UpToDate.
+  The TB leaves without changing quorum; only the two D confirm the removal.
+
+- **2D+1TB, evacuee D → diskful-q-down/v1.**
+  V'=1, q'=1; the surviving live UpToDate D suffices. The TB supplies no live vote.
+  The remaining D and TB confirm the removal; the evacuee never confirms.
+
+- **2D+1TB, dead D and TB, D sorts first → both leave in order.**
+  D removal sees V=2 and lowers quorum to one. The next engine iteration evaluates TB
+  against the remaining V=1, so q'=1 and the live UpToDate D permits TB removal too.
+  Step revisions prove the order; the lone live D confirms both transitions.
+
+- **2D+1TB, dead D and TB, TB sorts first → voter priority lets D leave before TB.**
+  TB rv-1-10 precedes D rv-1-3 lexically, but voter priority selects D first.
+  diskful-q-down/v1 sees V=2, V'=1, q'=1 and removes D. The next iteration selects TB;
+  tiebreaker/v1 now sees V=1, V'=1, q'=1 and removes it too. Step revisions prove the
+  order; the lone live UpToDate D confirms both transitions. Name order cannot wedge
+  recovery by selecting TB while the dead D still keeps the required majority at two.
+
+- **Evacuee TB with another AgentNotReady D → blocked by live quorum.**
+  V'=2, q'=2, live=1: the TB subject is not subtracted from voterCount. A stale agent's
+  UpToDate report cannot supply the missing live vote.
+
+- **Evacuee TB with both live D Outdated → blocked by data freshness.**
+  The live quorum is sufficient, but no live UpToDate diskful copy would remain.
+
+- **No live UpToDate diskful copy → blocked.**
+  The surviving voters are Outdated; the evacuee's stale UpToDate report cannot satisfy the guard.
+  Diagnostic: "no live UpToDate diskful replica would remain".
+
+- **AgentNotReady remaining voter is not live.**
+  DRBDConfigured with reason AgentNotReady excludes the peer, even with an UpToDate backing
+  volume. In 3D, removing one evacuee leaves one live voter against quorum two.
+
+- **A live or evacuee tie-breaker cannot supply the missing live vote.**
+  3D+1TB with two diskful evacuees: the surviving D and TB cannot satisfy the live quorum of two.
+  The TB is excluded even if its RVR carries an UpToDate backing-volume report,
+  both when healthy and when included in the evacuee set.
+
+- **Another agent dies between passes → quorum rechecked.**
+  The first pass waits because a live peer sees the evacuee Connected. Before the next pass the
+  connection disappears and another voter reports AgentNotReady. Removal is then blocked by the
+  live quorum guard.
+
+- **Orphans retain emergency semantics.**
+  3D with two missing RVRs and an Outdated survivor still removes both orphans. Even explicitly
+  including the orphan names in the evacuee input does not apply the new guards.
+
+- **Explicit ForceLeave on an evacuee bypasses the new guards.**
+  3D with two evacuees and an Outdated live voter: ForceLeave removes its subject even when it is
+  not the selected automatic candidate; automatic evacuation of the other remains blocked.
+
+- **Evacuation takes precedence over Join, Leave and ChangeRole.**
+  Each pending request on the selected diskful evacuee yields ForceRemoveReplica.
+
+- **An active Leave is cancelled by ForceRemove.**
+  A LiminalDiskful evacuee is stuck in RemoveReplica with an unconfirmed revision. ForceRemove's
+  CancelActiveOnCreate replaces the Leave and removes the member.
+
+- **A blocked evacuation preserves active membership progress.**
+  Three consecutive passes with two evacuees in 3D retain an active `remove-diskful/v1` Leave.
+  The same holds for `a-to-d-q-up/v1` after its first step has raised quorum in 4D with three
+  evacuees. Transitions, membership, quorum and revision stay unchanged. Once other nodes recover,
+  automatic ForceRemove cancels the old transition and removes the remaining evacuee.
+
+- **Emergency cancellation still precedes a blocking guard.**
+  Manual ForceLeave on an evacuee and orphan removal both cancel an active Leave even when a
+  connected peer blocks the replacement ForceRemove.
+
+- **The evacuation report reuses the final dispatch verdict.**
+  Attached/detaching, reachable, insufficient live quorum and missing UpToDate copy block removal
+  and are reported from the same engine pass. Attachment transitions are settled by the engine;
+  no separate slot reconstruction or guard pass is used for reporting.
+
+- **Access and shadow members in the input are ignored.**
+  Access, ShadowDiskful and LiminalShadowDiskful cannot be automatically evacuated
+  by this path, even if their names are passed as evacuees.
+
 ---
 
 ## 13. ChangeQuorum

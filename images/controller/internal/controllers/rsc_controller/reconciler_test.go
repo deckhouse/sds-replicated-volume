@@ -804,9 +804,6 @@ var _ = Describe("isEligibleNodesConflictResolutionEnabled", func() {
 			Spec: v1alpha1.ReplicatedStorageClassSpec{
 				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
-					RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
-						MaxParallel: 10,
-					},
 				},
 			},
 		}
@@ -2685,7 +2682,7 @@ var _ = Describe("Reconciler", func() {
 			phase, message := computePhaseAndMessage(rsc)
 
 			Expect(phase).To(Equal(v1alpha1.ReplicatedStorageClassPhaseRollingOut))
-			Expect(message).To(ContainSubstring("1 volume(s) on non-eligible nodes (resolution strategy: RollingRepair, not implemented yet)"))
+			Expect(message).To(ContainSubstring("1 volume(s) on non-eligible nodes (resolution strategy: RollingRepair)"))
 			Expect(message).To(ContainSubstring("NewVolumesOnly"))
 		})
 

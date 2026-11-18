@@ -24,7 +24,6 @@ import (
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/dmte"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -278,7 +277,7 @@ func DiskfulRemovalReadiness(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	name string,
 ) (ready, upToDate bool, message string) {
-	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+	p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 	gctx := p.Global()
 	for i := range gctx.allReplicas {
 		rctx := &gctx.allReplicas[i]
@@ -763,22 +762,94 @@ func guardZoneTBSufficient(gctx *globalContext, rctx *ReplicaContext) dmte.Guard
 	}
 }
 
-// forceRemoveGuards are guards shared by all ForceRemoveReplica plans.
-var forceRemoveGuards = []any{
-	guardNotAttached,
-	guardMemberUnreachable,
+// forceRemoveGuards retain the cancel-before-guards semantics for manual ForceLeave
+// and orphan removal. Automatic evacuation is checked by membershipDispatcher
+// (guardEvacuation), before it yields a decision that can cancel an active transition.
+var forceRemoveGuards = []any{guardEmergencyForceRemove}
+
+func guardEmergencyForceRemove(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	if isAutomaticEvacuation(gctx, rctx) {
+		return dmte.GuardResult{} // Already checked by membershipDispatcher.
+	}
+	return firstBlockedGuard(gctx, rctx, guardNotAttached, guardMemberUnreachable)
+}
+
+// guardEvacuation is the ordered check for automatic evacuation: the emergency guards
+// plus the live-copy guards that manual ForceLeave and orphan removal do not apply.
+func guardEvacuation(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	return firstBlockedGuard(gctx, rctx,
+		guardNotAttached,
+		guardMemberUnreachable,
+		guardEvacuationLiveQuorum,
+		guardEvacuationLiveUpToDate,
+	)
+}
+
+func firstBlockedGuard(
+	gctx *globalContext,
+	rctx *ReplicaContext,
+	guards ...func(*globalContext, *ReplicaContext) dmte.GuardResult,
+) dmte.GuardResult {
+	for _, guard := range guards {
+		if result := guard(gctx, rctx); result.Blocked {
+			return result
+		}
+	}
+	return dmte.GuardResult{}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ForceRemove guards
 //
 
+// guardEvacuationLiveQuorum checks the post-removal majority against live voters.
+func guardEvacuationLiveQuorum(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	voters := voterCount(gctx)
+	if rctx.member.Type.IsVoter() {
+		voters--
+	}
+	quorum := computeTargetQ(voters)
+	live := 0
+	for i := range gctx.allReplicas {
+		if isLiveEvacuationVoter(gctx, &gctx.allReplicas[i], rctx) {
+			live++
+		}
+	}
+	if live < int(quorum) {
+		return dmte.GuardResult{Blocked: true, Message: fmt.Sprintf(
+			"evacuation would leave %d live voter(s), quorum after removal needs %d", live, quorum)}
+	}
+	return dmte.GuardResult{}
+}
+
+func guardEvacuationLiveUpToDate(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if isLiveEvacuationVoter(gctx, rc, rctx) && isUpToDateDiskful(rc) {
+			return dmte.GuardResult{}
+		}
+	}
+	return dmte.GuardResult{Blocked: true, Message: "no live UpToDate diskful replica would remain"}
+}
+
+// isLiveEvacuationVoter uses the same stale-agent signal as guardMemberUnreachable.
+// Tie-breakers are not voters and deliberately cannot satisfy either evacuation guard.
+func isLiveEvacuationVoter(gctx *globalContext, rc, subject *ReplicaContext) bool {
+	if rc == subject || rc.member == nil || !rc.member.Type.IsVoter() || rc.rvr == nil {
+		return false
+	}
+	if _, evacuating := gctx.evacuees[rc.name]; evacuating {
+		return false
+	}
+	return isAgentReady(rc.rvr)
+}
+
 // guardMemberUnreachable blocks force-removal if any member with a ready agent
 // reports a Connected DRBD connection to the subject. Prevents accidental
 // force-removal of a member that is actually alive and participating.
 func guardMemberUnreachable(gctx *globalContext, rctx *ReplicaContext) dmte.GuardResult {
 	memberName := rctx.Name()
-	var connectedFrom idset.IDSet
+	var connectedFrom []string
 
 	for i := range gctx.allReplicas {
 		rc := &gctx.allReplicas[i]
@@ -794,17 +865,18 @@ func guardMemberUnreachable(gctx *globalContext, rctx *ReplicaContext) dmte.Guar
 
 		for _, peer := range rc.rvr.Status.Peers {
 			if peer.Name == memberName && peer.ConnectionState == v1alpha1.ConnectionStateConnected {
-				connectedFrom.Add(rc.id)
+				connectedFrom = append(connectedFrom, rc.name)
 				break
 			}
 		}
 	}
 
-	if !connectedFrom.IsEmpty() {
+	if len(connectedFrom) > 0 {
+		slices.Sort(connectedFrom)
 		return dmte.GuardResult{
 			Blocked: true,
-			Message: fmt.Sprintf("member is reachable (connected from %d replica(s): [%s])",
-				connectedFrom.Len(), connectedFrom),
+			Message: fmt.Sprintf("member is reachable over DRBD (Connected from %d replica(s): [%s])",
+				len(connectedFrom), strings.Join(connectedFrom, ", ")),
 		}
 	}
 

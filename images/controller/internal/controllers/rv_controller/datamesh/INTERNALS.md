@@ -540,7 +540,8 @@ name via `composeBlocked` (see §6). For the full list of guard messages, see
 | `loseTBGuards` | RemoveReplica(TB), ChangeType(TB→...) | TBSufficient, ZoneTBSufficient |
 | `gainVoterGuards` | AddReplica(D), ChangeType(→D) | ZonalSameZone, TransZonalVoterPlacement |
 | `gainTBGuards` | AddReplica(TB), ChangeType(→TB) | ZonalSameZone, TransZonalTBPlacement |
-| `forceRemoveGuards` | All ForceRemoveReplica plans | NotAttached, MemberUnreachable |
+| `forceRemoveGuards` | All ForceRemoveReplica plans | Emergency path (manual ForceLeave, orphan): NotAttached, MemberUnreachable after cancellation; automatic evacuation: already checked by the dispatcher (`guardEvacuation`) |
+| `guardEvacuation` | Automatic evacuation dispatch, before cancellation | NotAttached, MemberUnreachable, EvacuationLiveQuorum, EvacuationLiveUpToDate |
 
 **Defense-in-depth guards** verify dispatcher decisions (should never fire in normal operation):
 

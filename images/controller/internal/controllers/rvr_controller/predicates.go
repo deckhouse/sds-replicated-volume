@@ -20,6 +20,7 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -29,7 +30,8 @@ import (
 
 // rvrPredicates returns predicates for ReplicatedVolumeReplica events.
 // Reacts to Generation changes (Spec) and Finalizers changes.
-// Skips pure Status updates and Labels/Annotations changes.
+// Also reacts to the persisted evacuation decision; skips other Status updates
+// and Labels/Annotations changes.
 func rvrPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
@@ -42,7 +44,12 @@ func rvrPredicates() []predicate.Predicate {
 				if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
 					return true
 				}
-				return false
+				oldRVR, oldOK := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
+				newRVR, newOK := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
+				if !oldOK || !newOK || oldRVR == nil || newRVR == nil {
+					return true
+				}
+				return ptr.Deref(oldRVR.Status.Evacuated, false) != ptr.Deref(newRVR.Status.Evacuated, false)
 			},
 		},
 	}

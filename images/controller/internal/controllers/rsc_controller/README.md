@@ -216,13 +216,31 @@ Indicates whether all volumes' replicas are placed on eligible nodes.
 | Status | Reason | When | Message |
 |--------|--------|------|---------|
 | True | AllVolumesSatisfy | No RV is known to be in conflict | `All volumes have replicas on eligible nodes` |
-| False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) | `N volume(s) have replicas on non-eligible nodes; automatic resolution (RollingRepair) is not implemented yet, move the replicas manually` |
+| False | ConflictResolutionInProgress | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=RollingRepair` (a nil strategy counts as RollingRepair) | `N volume(s) have replicas on non-eligible nodes: E evacuating, B blocked (needs attention); O in other conflicts` |
 | False | ManualConflictResolution | `inConflictWithEligibleNodes > 0` AND `EligibleNodesConflictResolutionStrategy.type=Manual` | `N volume(s) have replicas on non-eligible nodes; resolution strategy is Manual` |
 
-> **Note:** the `RollingRepair` strategy is **not implemented** yet: nothing moves replicas off
-> non-eligible nodes automatically. The reason still names the configured strategy (and the phase
-> is `RollingOut`), but the messages say that the replicas have to be moved manually. Conflict
-> resolution is read by strategy **type** only; its `maxParallel` is accepted and ignored.
+The RollingRepair message groups the same volumes as `status.volumes.inConflictWithEligibleNodes`:
+those with a present `SatisfyEligibleNodes` condition whose status is not True, including Unknown
+and conditions from an older generation. No additional freshness filter is applied to the groups.
+
+| RV `SatisfyEligibleNodes` reason | Message group |
+|--------------------------------|---------------|
+| `ConflictResolutionInProgress` | `E evacuating` (also includes a recognized manual removal or replacement after evacuation) |
+| `ConflictResolutionBlocked` | `B blocked (needs attention)` |
+| Any other reason | `O in other conflicts` |
+
+`E + B + O = N`; these are message counts, with no new status fields. The class reason stays
+`ConflictResolutionInProgress` even if every conflict is blocked or outside automatic
+repair's scope. It names the strategy, not a guarantee that any member is currently leaving.
+Manual retains its reason and message without the breakdown. The rollout phase message names
+`resolution strategy: RollingRepair`; higher-priority health conditions can still select another
+phase.
+
+RollingRepair evacuates diskful and tie-breaker members from non-eligible nodes that are not ready
+longer than the pool's grace period, or whose Node object is absent. Live-node label, zone and
+LVMVolumeGroup conflicts still need operator action. There is no separate limit on the number of
+volumes evacuated concurrently; replacement synchronization uses the per-node resync limiter.
+Configuration rollout retains its separate budget. See [Evacuation](../rv_controller/README.md#evacuation) for guards and recovery.
 
 ## Phase
 
@@ -443,7 +461,7 @@ flowchart TD
 |-------|---------|
 | `systemNetworkNames` | `["Internal"]` |
 | `configurationRolloutStrategy` | `{type: RollingUpdate, rollingUpdate: {maxParallel: 5}}` |
-| `eligibleNodesConflictResolutionStrategy` | `{type: RollingRepair, rollingRepair: {maxParallel: 5}}` |
+| `eligibleNodesConflictResolutionStrategy` | `{type: RollingRepair}` |
 | `eligibleNodesPolicy` | `{notReadyGracePeriod: 10m}` |
 
 ### ensureStoragePool Details

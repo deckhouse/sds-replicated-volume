@@ -275,7 +275,7 @@ flowchart TD
     GetGrace --> LoopStart{For each node}
     LoopStart -->|Done| Return([Return eligibleNodes, earliestExpiration])
 
-    LoopStart --> CheckGrace[isNodeReadyOrWithinGrace]
+    LoopStart --> CheckGrace["nodegrace.IsReadyOrWithinGrace"]
     CheckGrace -->|NotReady beyond grace| Skip[Skip node]
     Skip --> LoopStart
 
@@ -365,21 +365,24 @@ flowchart TD
 
 **Purpose:** Implements the `spec.eligibleNodesPolicy.notReadyGracePeriod` behavior. Nodes that became `NotReady` recently are kept in the eligible list for a grace period to avoid disruption during temporary node issues.
 
+Once a node is excluded after its grace period expires, volumes of classes using RollingRepair
+can evacuate their diskful and tie-breaker members, subject to safety guards;
+an absent Node qualifies too. See [Evacuation in the volume controller](../rv_controller/README.md#evacuation).
+
 **Algorithm:**
 
 ```mermaid
 flowchart TD
-    Start([isNodeReadyOrWithinGrace]) --> GetReadyCond[Get node Ready condition]
-    GetReadyCond -->|Not found| AssumeNotReady[Assume NotReady]
+    Start(["nodegrace.IsReadyOrWithinGrace"]) --> GetReadyCond[Get node Ready condition]
+    GetReadyCond -->|Not found| MissingReady["Ready: false, within grace,<br>expiration: zero"]
 
     GetReadyCond -->|Found| CheckStatus{Status == True?}
     CheckStatus -->|True| ReturnReady([Ready: true, expiration: zero])
 
     CheckStatus -->|False| GetTransition[Get LastTransitionTime]
-    AssumeNotReady --> GetTransition
     GetTransition --> CalcExpiration[expiration = transition + gracePeriod]
 
-    CalcExpiration --> CheckExpired{now >= expiration?}
+    CalcExpiration --> CheckExpired{"now > expiration?"}
     CheckExpired -->|Yes| ReturnExpired([Ready: false, expiration: zero, exclude from list])
     CheckExpired -->|No| ReturnWithinGrace([Ready: false, expiration: time, include with nodeReady=false])
 ```
@@ -389,8 +392,9 @@ flowchart TD
 | Node State | Action | `nodeReady` field | Requeue |
 |------------|--------|-------------------|---------|
 | Ready | Include | `true` | No |
-| NotReady < gracePeriod | Include | `false` | Yes, at expiration time |
-| NotReady >= gracePeriod | Exclude | — | No |
+| Ready condition absent | Include if other eligibility checks pass; not an evacuation candidate | `false` | No grace-period deadline |
+| NotReady for at most gracePeriod (Ready=False or Unknown) | Include | `false` | Yes, at expiration time |
+| NotReady longer than gracePeriod | Exclude | — | No |
 
 **Requeue logic:**
 
@@ -404,4 +408,5 @@ When any node is within grace period, the controller calculates the earliest exp
 | `rsp.Spec.EligibleNodesPolicy.NotReadyGracePeriod` | — |
 | `now` | — |
 | — | `nodeReady` (bool) |
-| — | `expiration` (time, zero if Ready or expired) |
+| — | `notReadyBeyondGrace` (bool) |
+| — | `expiration` (time, zero if Ready, expired or Ready condition absent) |

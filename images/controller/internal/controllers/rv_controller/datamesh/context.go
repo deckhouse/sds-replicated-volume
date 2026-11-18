@@ -74,6 +74,8 @@ type globalContext struct {
 	rsp RSP
 	// features describes cluster-level feature availability for path resolution.
 	features FeatureFlags
+	// evacuees is the controller's read-only snapshot for this engine cycle.
+	evacuees Evacuees
 
 	// changeSystemNetworksTransition points to the active ChangeSystemNetworks
 	// transition. Nil if no such transition exists. Read-only — must not be
@@ -385,6 +387,7 @@ func buildContexts(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	features FeatureFlags,
+	evacuees Evacuees,
 ) provider {
 	if rv.Status.Configuration == nil {
 		panic("datamesh.buildContexts: rv.Status.Configuration must be non-nil")
@@ -407,6 +410,7 @@ func buildContexts(
 		replicatedStorageClassName: rv.Spec.ReplicatedStorageClassName,
 		rsp:                        rsp,
 		features:                   features,
+		evacuees:                   evacuees,
 	}
 
 	// Step 1: Collect all known replica IDs from ID-bearing sources.

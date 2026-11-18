@@ -131,27 +131,26 @@ spec:
                 description: |-
                   Only meaningful with the new control-plane.
 
-                  EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-                  When not specified, the controller fills the default (RollingRepair, maxParallel=5).
+                  EligibleNodesConflictResolutionStrategy defines how volumes recover from eligible-node conflicts.
+                  RollingRepair evacuates diskful members (including liminal diskful members) and tie-breakers
+                  from nodes outside the storage pool's eligibleNodes only when the Node is absent or has
+                  remained not ready longer than eligibleNodesPolicy.notReadyGracePeriod. A Node without a
+                  Ready condition is not evacuated. Access and ShadowDiskful members are not evacuated.
+
+                  Evacuation removes the member first; normal layout convergence creates its replacement.
+                  Removal waits while the member is attached to a pod or an attachment transition is active,
+                  a live peer still sees it connected over DRBD, or the remaining live voters would lack a
+                  quorum or an UpToDate diskful copy. Tie-breakers do not count toward these live-copy guards.
+                  A live node excluded only by labels, zones, or LVMVolumeGroup changes is not evacuated.
+                  Manual disables automatic evacuation and leaves conflicts for the operator to resolve.
+                  When not specified, the controller fills the default (RollingRepair).
                 properties:
-                  rollingRepair:
-                    description: |-
-                      RollingRepair configures parameters for RollingRepair conflict resolution strategy.
-                      Required when type is RollingRepair.
-                    properties:
-                      maxParallel:
-                        default: 5
-                        description: MaxParallel is the maximum number of volumes
-                          being repaired simultaneously.
-                        format: int32
-                        maximum: 200
-                        minimum: 1
-                        type: integer
-                    required:
-                    - maxParallel
-                    type: object
                   type:
-                    description: Type specifies the conflict resolution strategy type.
+                    description: |-
+                      Type specifies the conflict resolution strategy type.
+                      RollingRepair enables evacuation after the not-ready grace period or Node deletion,
+                      subject to attachment, DRBD reachability, live quorum, and live UpToDate-copy guards.
+                      Manual disables automatic evacuation.
                     enum:
                     - Manual
                     - RollingRepair
@@ -159,11 +158,6 @@ spec:
                 required:
                 - type
                 type: object
-                x-kubernetes-validations:
-                - message: rollingRepair is required when type is RollingRepair
-                  rule: self.type != 'RollingRepair' || has(self.rollingRepair)
-                - message: rollingRepair must not be set when type is not RollingRepair
-                  rule: self.type == 'RollingRepair' || !has(self.rollingRepair)
               eligibleNodesPolicy:
                 description: |-
                   Only meaningful with the new control-plane.
@@ -181,6 +175,10 @@ spec:
                     description: |-
                       NotReadyGracePeriod specifies how long to wait before removing
                       a not-ready node from the eligible nodes list.
+                      If the node returns after evacuation, its former replicas have already been removed.
+                      Each replacement copies the entire volume through the per-node resync limiter,
+                      rather than catching up with bitmap-tracked changes. A shorter grace period restores
+                      redundancy sooner, but more often causes unnecessary full copies after temporary outages.
                     type: string
                 required:
                 - notReadyGracePeriod

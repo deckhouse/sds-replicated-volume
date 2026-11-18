@@ -360,8 +360,7 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 					RollingUpdate: &srv.ReplicatedStorageClassConfigurationRollingUpdateStrategy{MaxParallel: 5},
 				}
 				s.EligibleNodesConflictResolutionStrategy = &srv.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type:          srv.EligibleNodesConflictResolutionRollingRepair,
-					RollingRepair: &srv.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{MaxParallel: 5},
+					Type: srv.EligibleNodesConflictResolutionRollingRepair,
 				}
 				s.EligibleNodesPolicy = &srv.ReplicatedStoragePoolEligibleNodesPolicy{NotReadyGracePeriod: metav1.Duration{Duration: 10 * time.Minute}}
 				return s
@@ -418,8 +417,7 @@ func Test_RSCSpecImmutabilityCEL(t *testing.T) {
 			new: func() srv.ReplicatedStorageClassSpec {
 				s := base()
 				s.EligibleNodesConflictResolutionStrategy = &srv.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
-					Type:          srv.EligibleNodesConflictResolutionRollingRepair,
-					RollingRepair: &srv.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{MaxParallel: 5},
+					Type: srv.EligibleNodesConflictResolutionRollingRepair,
 				}
 				return s
 			}(),

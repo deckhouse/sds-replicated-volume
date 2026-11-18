@@ -102,7 +102,7 @@ func TestReconcileNormalOperationAgentReadErrors(t *testing.T) {
 			}}
 			var rvrs []*v1alpha1.ReplicatedVolumeReplica
 			var completed []v1alpha1.ReplicatedVolumeDatameshTransition
-			outcome := NewReconciler(cl, scheme).reconcileNormalOperation(t.Context(), rv, &rvrs, nil, nil, &completed)
+			outcome := NewReconciler(cl, scheme).reconcileNormalOperation(t.Context(), rv, &rvrs, nil, nil, &evacuationView{}, &completed)
 			if !errors.Is(outcome.Error(), readErr) {
 				t.Fatalf("got error %v, want %v", outcome.Error(), readErr)
 			}
@@ -159,7 +159,7 @@ var _ = Describe("agent ShadowDiskful capability in normal reconciliation", func
 		cl := newClientBuilder(scheme).WithObjects(objects...).Build()
 		rec := NewReconciler(cl, scheme)
 		var completed []v1alpha1.ReplicatedVolumeDatameshTransition
-		outcome := rec.reconcileNormalOperation(ctx, rv, &rvrs, nil, rsp, &completed)
+		outcome := rec.reconcileNormalOperation(ctx, rv, &rvrs, nil, rsp, &evacuationView{}, &completed)
 		Expect(outcome.Error()).NotTo(HaveOccurred())
 		Expect(rv.Status.DatameshTransitions).To(HaveLen(1))
 		Expect(rv.Status.DatameshTransitions[0].PlanID).To(Equal(wantPlan))

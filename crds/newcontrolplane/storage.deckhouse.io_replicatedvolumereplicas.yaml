@@ -380,6 +380,13 @@ spec:
                     - Access
                     type: string
                 type: object
+              evacuated:
+                description: |-
+                  Evacuated records an irreversible automatic evacuation decision after removal
+                  from the persisted datamesh. It authorizes deletion of node-owned resources
+                  without waiting for the lost node, even if the node subsequently returns.
+                  This decision survives removal of the volume's evacuation progress marker.
+                type: boolean
               initialQuorumReachedAt:
                 description: |-
                   InitialQuorumReachedAt is the first time the controller observed this replica

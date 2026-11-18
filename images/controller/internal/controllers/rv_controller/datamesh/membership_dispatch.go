@@ -40,6 +40,13 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 	return func(cp provider) iter.Seq[dmte.DispatchDecision] {
 		return func(yield func(dmte.DispatchDecision) bool) {
 			gctx := cp.Global()
+			// Fix one candidate for this dispatch pass: first voter by name, or first
+			// tie-breaker by name when no voter is an evacuee. Removing a voter first
+			// can lower the quorum needed to evacuate a tie-breaker.
+			// A blocked candidate is not skipped. After removeMember, the next engine
+			// iteration selects again using the reduced membership.
+			// Waiting for confirmation would deadlock on another unreachable evacuee.
+			evacuee := selectEvacuee(gctx)
 
 			for i := range gctx.allReplicas {
 				rctx := &gctx.allReplicas[i]
@@ -51,7 +58,23 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 				var tt dmte.TransitionType
 				var planFn func(*globalContext, *ReplicaContext) (dmte.PlanID, string)
 
-				if req := rctx.membershipRequest; req != nil {
+				req := rctx.membershipRequest
+				switch {
+				case hasForceLeaveRequest(rctx):
+					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
+					planFn = planForceRemoveReplica
+				case rctx == evacuee:
+					// ForceRemove cancels the active membership transition before its
+					// plan guards run. Automatic evacuation must pass every guard first.
+					if result := guardEvacuation(gctx, rctx); result.Blocked {
+						if !yield(dmte.NoDispatch(rctx, membershipSlot, result.Message, result.Details)) {
+							return
+						}
+						continue
+					}
+					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
+					planFn = planForceRemoveReplica
+				case req != nil:
 					// Explicit request from DatameshReplicaRequests.
 					switch req.Request.Operation {
 					case v1alpha1.DatameshMembershipRequestOperationJoin:
@@ -63,18 +86,15 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 					case v1alpha1.DatameshMembershipRequestOperationChangeRole:
 						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeChangeReplicaType
 						planFn = planChangeReplicaType
-					case v1alpha1.DatameshMembershipRequestOperationForceLeave:
-						tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
-						planFn = planForceRemoveReplica
 					default:
 						continue
 					}
-				} else if rctx.member != nil && rctx.rvr == nil {
+				case rctx.member != nil && rctx.rvr == nil:
 					// Orphan member: member exists but RVR is gone (node permanently lost).
 					// Auto-dispatch ForceRemoveReplica to restore configuration.
 					tt = v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica
 					planFn = planForceRemoveReplica
-				} else {
+				default:
 					continue
 				}
 
@@ -95,6 +115,46 @@ func membershipDispatcher() dmte.DispatchFunc[provider] {
 			}
 		}
 	}
+}
+
+// selectEvacuee shares the deterministic voter-first choice between dispatch and reporting.
+// Selection does not mutate the membership or evacuee set.
+func selectEvacuee(gctx *globalContext) *ReplicaContext {
+	if len(gctx.evacuees) == 0 {
+		return nil
+	}
+	var evacuee *ReplicaContext
+	for i := range gctx.allReplicas {
+		rc := &gctx.allReplicas[i]
+		if !isEvacuee(gctx, rc) {
+			continue
+		}
+		if evacuee == nil ||
+			(rc.member.Type.IsVoter() && !evacuee.member.Type.IsVoter()) ||
+			(rc.member.Type.IsVoter() == evacuee.member.Type.IsVoter() && rc.name < evacuee.name) {
+			evacuee = rc
+		}
+	}
+	return evacuee
+}
+
+// isEvacuee defensively limits automatic evacuation to diskful and tie-breaker layout members
+// with an RVR. Orphans keep their existing emergency path.
+func isEvacuee(gctx *globalContext, rctx *ReplicaContext) bool {
+	_, selected := gctx.evacuees[rctx.name]
+	return selected && rctx.rvr != nil && rctx.member != nil &&
+		(rctx.member.Type.IsVoter() || rctx.member.Type == v1alpha1.DatameshMemberTypeTieBreaker)
+}
+
+// isAutomaticEvacuation reports a ForceRemove admitted by the dispatcher's evacuee branch:
+// an explicit ForceLeave request takes the manual emergency path instead.
+func isAutomaticEvacuation(gctx *globalContext, rctx *ReplicaContext) bool {
+	return isEvacuee(gctx, rctx) && !hasForceLeaveRequest(rctx)
+}
+
+func hasForceLeaveRequest(rctx *ReplicaContext) bool {
+	return rctx.membershipRequest != nil &&
+		rctx.membershipRequest.Request.Operation == v1alpha1.DatameshMembershipRequestOperationForceLeave
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

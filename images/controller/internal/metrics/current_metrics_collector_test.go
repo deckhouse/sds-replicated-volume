@@ -361,6 +361,33 @@ func TestCollectRVConditionCountsCountsEveryConditionAndSkipsDeleting(t *testing
 	}
 }
 
+func TestCollectRVConditionCountsExportsConflictResolutionBlocked(t *testing.T) {
+	ch := make(chan prometheus.Metric, len(currentMetricsRVConditionTypes))
+	desc := prometheus.NewDesc("test_rv_condition_count", "test",
+		[]string{LabelStorageClass, LabelCondition, LabelStatus, LabelReason}, nil)
+	collectRVConditionCounts(ch, desc, []v1alpha1.ReplicatedVolume{{
+		Spec: v1alpha1.ReplicatedVolumeSpec{ReplicatedStorageClassName: "sc-a"},
+		Status: v1alpha1.ReplicatedVolumeStatus{Conditions: []metav1.Condition{{
+			Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+		}}},
+	}})
+	close(ch)
+	for _, metric := range collectTestMetrics(t, ch) {
+		if metric.labels[LabelCondition] == v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType {
+			assertMetric(t, metric, 1, map[string]string{
+				LabelStorageClass: "sc-a",
+				LabelCondition:    v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+				LabelStatus:       "False",
+				LabelReason:       v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+			})
+			return
+		}
+	}
+	t.Fatal("missing SatisfyEligibleNodes metric")
+}
+
 func TestCollectRVDeletingEmitsOnlyDeletingRVs(t *testing.T) {
 	deleteTime := metav1.Unix(100, 0)
 	ch := make(chan prometheus.Metric, 100)

@@ -50,12 +50,13 @@ func (r *Reconciler) reconcilePlacementConditions(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
+	evacuation evacuationView,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "placement-conditions")
 	defer rf.OnEnd(&outcome)
 
 	scheduled := computeScheduledReport(rv, rvrs)
-	satisfyEligibleNodes := computeSatisfyEligibleNodesReport(rv, rvrs, rsp)
+	satisfyEligibleNodes := computeSatisfyEligibleNodesReport(rv, rvrs, rsp, evacuation)
 
 	changed := applyScheduledCond(rv, scheduled)
 	changed = applySatisfyEligibleNodesCond(rv, satisfyEligibleNodes) || changed
@@ -290,10 +291,13 @@ func computeSchedulingVerdict(rvr *v1alpha1.ReplicatedVolumeReplica) (scheduling
 //  1. DeletionTimestamp set       → present=false (frozen at the last value)
 //  2. Configuration nil           → present=false (absent = not yet evaluated)
 //  3. RSP view unavailable        → present=false (absent = not yet evaluated)
-//  4. No violations               → True / SatisfyEligibleNodes
-//  5. An offender is being
-//     removed                     → False / ConflictResolutionInProgress
-//  6. Violations, no repair       → False / InConflictWithEligibleNodes
+//  4. Evacuated replica in RV status
+//     awaiting replacement       → False / ConflictResolutionInProgress
+//  5. Evacuee blocked by a guard  → False / ConflictResolutionBlocked
+//  6. An offender is being
+//     removed                    → False / ConflictResolutionInProgress
+//  7. No violations              → True / SatisfyEligibleNodes
+//  8. Violations, no repair      → False / InConflictWithEligibleNodes
 //
 // Rules 1-3 report absent rather than Unknown, deliberately. The condition has no Unknown reason,
 // and rsc_controller counts every volume whose condition is present and not True as a placement
@@ -315,6 +319,7 @@ func computeSatisfyEligibleNodesReport(
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rsp *rspView,
+	evacuation evacuationView,
 ) satisfyEligibleNodesReport {
 	// 1. Deletion: preserve the last known value.
 	if rv.DeletionTimestamp != nil {
@@ -370,8 +375,63 @@ func computeSatisfyEligibleNodesReport(
 		}
 	}
 
-	// 4. Everything is where it is allowed to be. The count is of the members actually judged,
-	// so the claim stays true on a volume whose Access members were skipped.
+	// Stable inventory, also retained alongside evacuation diagnostics.
+	slices.SortFunc(offenders, func(a, b placementOffender) int {
+		return cmp.Compare(a.violation.ReplicaName, b.violation.ReplicaName)
+	})
+	var violations []v1alpha1.ReplicatedVolumeEligibleNodesViolation
+	for _, o := range offenders {
+		violations = append(violations, o.violation)
+	}
+	message := ""
+	if len(offenders) > 0 {
+		first := offenders[0]
+		message = fmt.Sprintf("%d/%d members are not on eligible nodes: replica %s on node %s (%s)",
+			len(offenders), judged, first.violation.ReplicaName, first.violation.NodeName, first.detail)
+	}
+
+	// 4. Normal operation may already have removed the evacuee in memory.
+	// Replacing an evacuated replica takes precedence even when other misplaced members remain.
+	if replacement := computeEvacuationReplacementReport(rv, rvrs); replacement != "" {
+		if message != "" {
+			replacement += "; " + message
+		}
+		return satisfyEligibleNodesReport{
+			present:    true,
+			status:     metav1.ConditionFalse,
+			reason:     v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			message:    replacement,
+			violations: violations,
+		}
+	}
+
+	// 5. Reuse the final dispatch verdict, even before the RVR reports a violation.
+	if member := rv.Status.Datamesh.FindMemberByName(evacuation.candidate); member != nil && evacuation.blocked != "" {
+		diagnostic := fmt.Sprintf("Evacuation of replica %s from node %s is blocked: %s", member.Name, member.NodeName, evacuation.blocked)
+		if message != "" {
+			diagnostic += "; " + message
+		}
+		return satisfyEligibleNodesReport{
+			present:    true,
+			status:     metav1.ConditionFalse,
+			reason:     v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+			message:    diagnostic,
+			violations: violations,
+		}
+	}
+
+	// 6. One of the offending members is already being taken out.
+	if hasActiveConflictResolutionTransition(rv, offenders) {
+		return satisfyEligibleNodesReport{
+			present:    true,
+			status:     metav1.ConditionFalse,
+			reason:     v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			message:    message,
+			violations: violations,
+		}
+	}
+
+	// 7. The success count includes only the members whose placement was judged.
 	if len(offenders) == 0 {
 		message := fmt.Sprintf("All %d datamesh members are on eligible nodes", judged)
 		switch {
@@ -388,33 +448,7 @@ func computeSatisfyEligibleNodesReport(
 		}
 	}
 
-	// Sorted by replica name so the published list and the offender named in the message are
-	// stable across passes, whatever order the members happen to sit in.
-	slices.SortFunc(offenders, func(a, b placementOffender) int {
-		return cmp.Compare(a.violation.ReplicaName, b.violation.ReplicaName)
-	})
-
-	violations := make([]v1alpha1.ReplicatedVolumeEligibleNodesViolation, 0, len(offenders))
-	for _, o := range offenders {
-		violations = append(violations, o.violation)
-	}
-
-	first := offenders[0]
-	message := fmt.Sprintf("%d/%d members are not on eligible nodes: replica %s on node %s (%s)",
-		len(offenders), judged, first.violation.ReplicaName, first.violation.NodeName, first.detail)
-
-	// 5. One of the offending members is already being taken out.
-	if hasActiveConflictResolutionTransition(rv, offenders) {
-		return satisfyEligibleNodesReport{
-			present:    true,
-			status:     metav1.ConditionFalse,
-			reason:     v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
-			message:    message,
-			violations: violations,
-		}
-	}
-
-	// 6. Conflict with nothing resolving it.
+	// 8. Conflict with nothing resolving it.
 	return satisfyEligibleNodesReport{
 		present:    true,
 		status:     metav1.ConditionFalse,
@@ -422,6 +456,32 @@ func computeSatisfyEligibleNodesReport(
 		message:    message,
 		violations: violations,
 	}
+}
+
+// computeEvacuationReplacementReport keeps the RV's evacuation visible after its old
+// RVRs disappear, until membership and UpToDate diskful copies restore the intended layout.
+func computeEvacuationReplacementReport(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) string {
+	if computeEvacuationComplete(rv) {
+		return ""
+	}
+	actualD, actualTB := computeActualLayout(rv)
+	intendedD, intendedTB := rv.Status.Configuration.IntendedLayout()
+	for _, name := range computeActualEvacuatedReplicaNames(rv) {
+		if rv.Status.Datamesh.FindMemberByName(name) != nil {
+			continue
+		}
+		location := ""
+		if rvr := findRVRByName(rvrs, name); rvr != nil {
+			location = " on node " + rvr.Spec.NodeName
+		}
+		return fmt.Sprintf("Replacing evacuated replica %s%s: have %s, want %s; UpToDate voters %d/%d",
+			name, location, formatLayout(actualD, actualTB), formatLayout(intendedD, intendedTB),
+			rv.Status.EffectiveLayout.UpToDateVoters, intendedD)
+	}
+	return ""
 }
 
 // computeNodeEligibilityViolation mirrors the replica's SatisfyEligibleNodes condition into a
@@ -628,8 +688,9 @@ func memberZone(m *v1alpha1.DatameshMember, rsp *rspView) string {
 // replacement half of a create-first repair names the NEW replica, not the offender, so it is
 // indistinguishable from any other addition — and while it runs the offender is still in place
 // and the conflict is still real, which is what the report then says. Nothing resolves these
-// conflicts automatically today (the storage class RollingRepair strategy is a stub), so a
-// repair in flight means an operator is performing it, and an operator removes the offender.
+// conflicts through additions alone. Automatic evacuation uses ForceRemoveReplica; once
+// the offender leaves membership, the deficit rule in computeSatisfyEligibleNodesReport
+// tracks its replacement using the evacuated replica name in RV status.
 func hasActiveConflictResolutionTransition(rv *v1alpha1.ReplicatedVolume, offenders []placementOffender) bool {
 	for i := range rv.Status.DatameshTransitions {
 		t := &rv.Status.DatameshTransitions[i]

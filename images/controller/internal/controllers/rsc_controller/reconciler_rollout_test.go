@@ -526,8 +526,165 @@ var _ = Describe("ConfigurationRolledOut rollout strategy reason", func() {
 		Expect(satisfy).NotTo(BeNil())
 		Expect(satisfy.Status).To(Equal(metav1.ConditionFalse))
 		Expect(satisfy.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress))
-		// RollingRepair is not implemented yet, so the message must not promise a repair.
-		Expect(satisfy.Message).To(Equal("1 volume(s) have replicas on non-eligible nodes; " +
-			"automatic resolution (RollingRepair) is not implemented yet, move the replicas manually"))
+		Expect(satisfy.Message).To(Equal("1 volume(s) have replicas on non-eligible nodes: " +
+			"0 evacuating, 0 blocked (needs attention); 1 in other conflicts"))
+	})
+})
+
+var _ = Describe("VolumesSatisfyEligibleNodes conflict report", func() {
+	var (
+		ctx context.Context
+		rsc *v1alpha1.ReplicatedStorageClass
+	)
+
+	BeforeEach(func(specCtx SpecContext) {
+		ctx = flow.BeginRootReconcile(specCtx).Ctx()
+		rsc = &v1alpha1.ReplicatedStorageClass{
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				EligibleNodesConflictResolutionStrategy: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
+					Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
+				},
+			},
+		}
+	})
+
+	DescribeTable("reports volume reasons for the configured strategy",
+		func(manual bool, reasons []string, message string) {
+			reason := v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress
+			if manual {
+				rsc.Spec.EligibleNodesConflictResolutionStrategy.Type = v1alpha1.EligibleNodesConflictResolutionManual
+				reason = v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonManualConflictResolution
+			}
+			rvs := make([]rvView, len(reasons))
+			for i, volumeReason := range reasons {
+				rvs[i] = newRVView(&v1alpha1.ReplicatedVolume{
+					Status: v1alpha1.ReplicatedVolumeStatus{
+						Conditions: []metav1.Condition{{
+							Type:   v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType,
+							Status: metav1.ConditionFalse,
+							Reason: volumeReason,
+						}},
+					},
+				})
+			}
+
+			outcome := ensureVolumeSummaryAndConditions(ctx, rsc, rvs)
+
+			Expect(outcome.Error()).To(BeNil())
+			Expect(outcome.DidChange()).To(BeTrue())
+			Expect(*rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(int32(len(reasons))))
+			cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(reason))
+			Expect(cond.Message).To(Equal(message))
+
+			outcome = ensureVolumeSummaryAndConditions(ctx, rsc, rvs)
+			Expect(outcome.Error()).To(BeNil())
+			Expect(outcome.DidChange()).To(BeFalse())
+		},
+		Entry("RollingRepair: only evacuating", false, []string{
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+		}, "2 volume(s) have replicas on non-eligible nodes: "+
+			"2 evacuating, 0 blocked (needs attention); 0 in other conflicts"),
+		Entry("RollingRepair: evacuating, blocked and other conflicts", false, []string{
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			"FutureQueueReason",
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes,
+			"FutureConflictReason",
+			"",
+		}, "6 volume(s) have replicas on non-eligible nodes: "+
+			"1 evacuating, 1 blocked (needs attention); 4 in other conflicts"),
+		Entry("RollingRepair: only other conflicts", false, []string{
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes,
+			"FutureConflictReason",
+			"",
+		}, "3 volume(s) have replicas on non-eligible nodes: "+
+			"0 evacuating, 0 blocked (needs attention); 3 in other conflicts"),
+		Entry("RollingRepair: only blocked", false, []string{
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+		}, "1 volume(s) have replicas on non-eligible nodes: "+
+			"0 evacuating, 1 blocked (needs attention); 0 in other conflicts"),
+		Entry("RollingRepair: only unknown reasons", false, []string{
+			"FutureQueueReason",
+		}, "1 volume(s) have replicas on non-eligible nodes: "+
+			"0 evacuating, 0 blocked (needs attention); 1 in other conflicts"),
+		Entry("Manual: preserves the message regardless of volume reasons", true, []string{
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			"FutureQueueReason",
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+			v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonInConflictWithEligibleNodes,
+			"FutureConflictReason",
+		}, "5 volume(s) have replicas on non-eligible nodes; resolution strategy is Manual"),
+	)
+
+	It("groups exactly the conflicts counted by the summary", func() {
+		rvs := []rvView{
+			{conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+				present: true, status: metav1.ConditionFalse, current: false,
+				reason: v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			}}},
+			{conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+				present: true, status: metav1.ConditionUnknown, current: true,
+				reason: "FutureQueueReason",
+			}}},
+			{
+				configurationMode: v1alpha1.ReplicatedVolumeConfigurationModeManual,
+				conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+					present: true, status: metav1.ConditionFalse, current: true,
+					reason: v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+				}},
+			},
+			{conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+				present: true, status: metav1.ConditionTrue, current: false,
+				reason: v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress,
+			}}},
+			{conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+				present: false,
+				reason:  v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked,
+			}}},
+		}
+
+		Expect(ensureVolumeSummaryAndConditions(ctx, rsc, rvs).Error()).To(BeNil())
+
+		Expect(*rsc.Status.Volumes.Total).To(Equal(int32(5)))
+		Expect(*rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(int32(3)))
+		cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Message).To(Equal("3 volume(s) have replicas on non-eligible nodes: " +
+			"1 evacuating, 1 blocked (needs attention); 1 in other conflicts"))
+	})
+
+	It("updates the report when only a conflict reason changes and clears it after resolution", func() {
+		rvs := []rvView{{conditions: rvViewConditions{satisfyEligibleNodes: rvViewCondition{
+			present: true, status: metav1.ConditionFalse, current: true,
+			reason: "FutureQueueReason",
+		}}}}
+		Expect(ensureVolumeSummaryAndConditions(ctx, rsc, rvs).Error()).To(BeNil())
+
+		rvs[0].conditions.satisfyEligibleNodes.reason = v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked
+		outcome := ensureVolumeSummaryAndConditions(ctx, rsc, rvs)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(*rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(int32(1)))
+		cond := obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Message).To(Equal("1 volume(s) have replicas on non-eligible nodes: " +
+			"0 evacuating, 1 blocked (needs attention); 0 in other conflicts"))
+
+		rvs[0].conditions.satisfyEligibleNodes.status = metav1.ConditionTrue
+		outcome = ensureVolumeSummaryAndConditions(ctx, rsc, rvs)
+
+		Expect(outcome.Error()).To(BeNil())
+		Expect(outcome.DidChange()).To(BeTrue())
+		Expect(*rsc.Status.Volumes.InConflictWithEligibleNodes).To(Equal(int32(0)))
+		cond = obju.GetStatusCondition(rsc, v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesType)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonAllVolumesSatisfy))
+		Expect(cond.Message).To(Equal("All volumes have replicas on eligible nodes"))
 	})
 })

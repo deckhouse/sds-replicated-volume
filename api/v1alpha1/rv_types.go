@@ -296,6 +296,19 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	EligibleNodesViolations []ReplicatedVolumeEligibleNodesViolation `json:"eligibleNodesViolations,omitempty"`
 
+	// EvacuatedReplicas lists replica names retired by automatic evacuation.
+	// Names are recorded when automatic ForceRemoveReplica starts and retained until
+	// the old replicas are absent or deleting, the layout is restored and replacement
+	// diskful replicas are UpToDate.
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="evacuatedReplicas must be unique"
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=123
+	// +kubebuilder:validation:items:Pattern=`^.+-([0-9]|[12][0-9]|3[01])$`
+	// +listType=atomic
+	// +optional
+	EvacuatedReplicas []string `json:"evacuatedReplicas,omitempty"`
+
 	// DatameshRevision is a counter incremented when datamesh configuration changes.
 	DatameshRevision int64 `json:"datameshRevision"`
 

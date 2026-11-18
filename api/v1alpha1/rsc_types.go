@@ -373,8 +373,19 @@ type ReplicatedStorageClassSpec struct {
 	ConfigurationRolloutStrategy *ReplicatedStorageClassConfigurationRolloutStrategy `json:"configurationRolloutStrategy,omitempty"`
 	// Only meaningful with the new control-plane.
 	//
-	// EligibleNodesConflictResolutionStrategy defines how the controller handles volumes with eligible nodes conflicts.
-	// When not specified, the controller fills the default (RollingRepair, maxParallel=5).
+	// EligibleNodesConflictResolutionStrategy defines how volumes recover from eligible-node conflicts.
+	// RollingRepair evacuates diskful members (including liminal diskful members) and tie-breakers
+	// from nodes outside the storage pool's eligibleNodes only when the Node is absent or has
+	// remained not ready longer than eligibleNodesPolicy.notReadyGracePeriod. A Node without a
+	// Ready condition is not evacuated. Access and ShadowDiskful members are not evacuated.
+	//
+	// Evacuation removes the member first; normal layout convergence creates its replacement.
+	// Removal waits while the member is attached to a pod or an attachment transition is active,
+	// a live peer still sees it connected over DRBD, or the remaining live voters would lack a
+	// quorum or an UpToDate diskful copy. Tie-breakers do not count toward these live-copy guards.
+	// A live node excluded only by labels, zones, or LVMVolumeGroup changes is not evacuated.
+	// Manual disables automatic evacuation and leaves conflicts for the operator to resolve.
+	// When not specified, the controller fills the default (RollingRepair).
 	// +optional
 	EligibleNodesConflictResolutionStrategy *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy `json:"eligibleNodesConflictResolutionStrategy,omitempty"`
 	// Only meaningful with the new control-plane.
@@ -597,18 +608,19 @@ type ReplicatedStorageClassConfigurationRollingUpdateStrategy struct {
 	MaxParallel int32 `json:"maxParallel"`
 }
 
-// ReplicatedStorageClassEligibleNodesConflictResolutionStrategy defines how the controller resolves volumes with eligible nodes conflicts.
-// +kubebuilder:validation:XValidation:rule="self.type != 'RollingRepair' || has(self.rollingRepair)",message="rollingRepair is required when type is RollingRepair"
-// +kubebuilder:validation:XValidation:rule="self.type == 'RollingRepair' || !has(self.rollingRepair)",message="rollingRepair must not be set when type is not RollingRepair"
+// ReplicatedStorageClassEligibleNodesConflictResolutionStrategy selects automatic evacuation or manual resolution
+// of eligible-node conflicts. RollingRepair evacuates diskful members and tie-breakers from nodes
+// outside eligibleNodes after their not-ready grace period expires, or when the Node is absent.
+// Normal layout convergence then creates replacements. It does not handle live nodes excluded
+// by labels, zones, or LVMVolumeGroup changes, or evacuate Access or ShadowDiskful members.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategy struct {
 	// Type specifies the conflict resolution strategy type.
+	// RollingRepair enables evacuation after the not-ready grace period or Node deletion,
+	// subject to attachment, DRBD reachability, live quorum, and live UpToDate-copy guards.
+	// Manual disables automatic evacuation.
 	// +kubebuilder:validation:Enum=Manual;RollingRepair
 	Type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType `json:"type"`
-	// RollingRepair configures parameters for RollingRepair conflict resolution strategy.
-	// Required when type is RollingRepair.
-	// +optional
-	RollingRepair *ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair `json:"rollingRepair,omitempty"`
 }
 
 // GetType returns the effective eligible nodes conflict resolution strategy type.
@@ -628,24 +640,16 @@ func (s *ReplicatedStorageClassEligibleNodesConflictResolutionStrategy) GetType(
 type ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType string
 
 const (
-	// EligibleNodesConflictResolutionManual means conflicts are resolved manually.
+	// EligibleNodesConflictResolutionManual disables automatic evacuation; the operator resolves eligible-node conflicts.
 	EligibleNodesConflictResolutionManual ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "Manual"
-	// EligibleNodesConflictResolutionRollingRepair means replicas are moved automatically when eligible nodes change.
+	// EligibleNodesConflictResolutionRollingRepair evacuates diskful members and tie-breakers from non-eligible
+	// nodes past the not-ready grace period or with no Node object, subject to safety guards.
+	// Normal layout convergence creates replacements; live-node placement conflicts are not handled.
 	EligibleNodesConflictResolutionRollingRepair ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType = "RollingRepair"
 )
 
 func (t ReplicatedStorageClassEligibleNodesConflictResolutionStrategyType) String() string {
 	return string(t)
-}
-
-// ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair configures parameters for rolling repair conflict resolution strategy.
-// +kubebuilder:object:generate=true
-type ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair struct {
-	// MaxParallel is the maximum number of volumes being repaired simultaneously.
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=200
-	// +kubebuilder:default:=5
-	MaxParallel int32 `json:"maxParallel"`
 }
 
 // Displays current information about the Storage Class.

@@ -43,6 +43,8 @@ import (
 //
 // Guards: guardNotAttached (must ForceDetach first) + guardMemberUnreachable
 // (prevents accidental force-removal of a reachable member).
+// Automatic diskful or tie-breaker evacuation also requires a live post-removal quorum and an
+// UpToDate copy. Those guards do not restrict orphan removal or explicit ForceLeave.
 // No loseVoterGuards — emergency bypasses preconditions.
 func registerForceRemovePlans(
 	forceRemove *dmte.RegisteredTransition[*globalContext, *ReplicaContext],

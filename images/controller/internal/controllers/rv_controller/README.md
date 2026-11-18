@@ -15,13 +15,14 @@ The controller reconciles `ReplicatedVolume` with:
 
 | Direction | Resource/Controller | Relationship |
 |-----------|---------------------|--------------|
-| ← input | ReplicatedStorageClass | Reads configuration (FTT, GMDR, topology, storage pool); Auto mode only |
+| ← input | ReplicatedStorageClass | Reads configuration (FTT, GMDR, topology, storage pool), conflict resolution strategy; Auto mode only |
 | ← input | ReplicatedVolume.Spec.ManualConfiguration | Reads manual configuration directly; Manual mode only |
-| ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones for formation and attach eligibility |
+| ← input | ReplicatedStoragePool | Reads eligible nodes, system networks, zones and not-ready grace period for formation, placement, attachment and evacuation |
 | ← input | ReplicatedVolumeReplica | Reads replica status (scheduling, preconfiguration, connectivity, data sync, quorum, attachment) |
 | ← input | ReplicatedVolumeAttachment | Reads attachment intent (determines which nodes should be attached) |
+| ← input | Node | Reads Ready status and lastTransitionTime, or observes absence, to identify evacuation candidates |
 | ← input | Node with the agent label, agent Pod in the agent namespace | Reads installed ShadowDiskful capability from live agent Pods on every agent node |
-| → manages | ReplicatedVolumeReplica | Creates/deletes during formation, normal operation (Access replicas), and deletion |
+| → manages | ReplicatedVolumeReplica | Creates/deletes during formation, normal operation (Access replicas, evacuation and layout convergence), and deletion |
 | → manages | ReplicatedVolumeAttachment | Manages finalizers; updates conditions (Attached, ReplicaReady, Ready), phase, and message during normal operation and deletion |
 | → manages | DRBDResourceOperation | Creates for data bootstrap during formation |
 
@@ -44,6 +45,9 @@ if rv deleted (NotFound):
         reconcileRVAWaiting (set waiting conditions) + reconcileRVAMetadata (rv=nil) → Done
     else → Done
 
+if maintenance: reconcileMaintenance → Done
+reconcileDeleteEvacuatedReplicas (mark/delete RVRs absent from persisted membership)
+
 if shouldDelete (DeletionTimestamp + no other finalizers + no attached members + no Detach transitions):
     reconcileDeletion (reconcileRVAWaiting → force-delete RVRs → clear datamesh members)
     reconcileRVAMetadata (remove RVA finalizers — after conditions are set)
@@ -56,17 +60,25 @@ ensure datamesh replica membership requests (sync from RVR statuses)
 ensure status size (min usable size from diskful member RVRs)
 
 if configuration exists:
+    read RSP and Node readiness; compute evacuation candidates
     if formation in progress (DatameshRevision == 0 or Formation transition active):
         reconcile formation (3-step process; create: config frozen; adopt: accepts replicas as-is)
         reconcileRVAWaiting (datamesh forming)
     else:
         reconcileRVConfiguration (check for config updates + set ConfigurationReady condition)
+        check evacuation guards
         reconcile normal operation:
             create Access RVRs for Active RVAs on nodes without any RVR
+            snapshot member IDs with idset.FromAll
             datamesh.ProcessTransitions (membership, quorum, attachment, network)
+            record new automatic ForceRemoveReplica subjects in RV status.evacuatedReplicas; clear completed names
+            request requeue for marked RVRs whose members were removed in this pass
             update RVA conditions from datamesh replica contexts
             delete unnecessary Access RVRs (redundant or unused)
+            converge layout (P3 restores diskful copies; P2 restores tie-breakers)
+        reconcile layout status
 
+reconcile data-plane, configuration and placement conditions
 reconcileRVAMetadata (add/remove RVA finalizers + labels)
 reconcileRVRFinalizers (add/remove RVR finalizers)
 patch status if changed
@@ -84,6 +96,7 @@ Reconcile (root) [Pure orchestration]
 │       ├── applyUnderMaintenanceCond (UnderMaintenance condition; SINGLE writer)
 │       ├── reconcileDataPlaneConditions (Ready + Resilient + AttachedReady — the only live status)
 │       └── patchRVStatus
+├── reconcileDeleteEvacuatedReplicas [Target-state driven] (mark/delete RVRs absent from persisted membership)
 ├── rvShouldNotExist (DeletionTimestamp + no other finalizers + no attached + no Detach transitions) →
 │   ├── reconcileDeletion [In-place reconciliation] ← details
 │   │   ├── reconcileRVAWaiting ("ReplicatedVolume is terminating")
@@ -104,6 +117,7 @@ Reconcile (root) [Pure orchestration]
 ├── if config nil: reconcileRVConfiguration [In-place reconciliation] ← details
 ├── ensureDatameshReplicaRequests ← details
 ├── ensureStatusSize (min usable size from diskful member RVRs)
+├── if config exists: getRSP + reconcileEvacuationView (Node readiness; RollingRepair with an RSC only)
 ├── reconcileFormation [Pure orchestration]
 │   │   ensureFormationTransition (find or create Formation transition with all steps)
 │   ├── (create/v1)
@@ -140,10 +154,13 @@ Reconcile (root) [Pure orchestration]
 │   │       └── formation complete (accepts replicas as-is, even if degraded)
 │   └── reconcileRVAWaiting ("Datamesh formation is in progress")
 ├── reconcileRVConfiguration [In-place reconciliation] (config updates + ConfigurationReady condition)
-├── reconcileNormalOperation [Pure orchestration]
+├── reconcileNormalOperation [In-place reconciliation]
 │   ├── reconcileCreateAccessReplicas [In-place reconciliation] ← details
 │   ├── datamesh.ProcessTransitions (membership, quorum, attachment, network)
 │   │   └── see datamesh/README.md
+│   ├── datamesh.EvacuationBlock (reuse the final dispatch verdict for placement reporting)
+│   ├── computeTargetEvacuatedReplicaNames → status.evacuatedReplicas (in memory)
+│   ├── computeEvacuatedReplicaRemovalPending → ContinueAndRequeue (retirement after persistence)
 │   ├── reconcileRVAConditionsFromDatameshReplicaContext [In-place reconciliation] ← details
 │   │   ├── computeRVAAttachedCondition
 │   │   ├── computeRVAReplicaReadyCondition
@@ -187,6 +204,7 @@ Reconcile (root) [Pure orchestration]
 ├── reconcileConfiguredCondition [In-place reconciliation] (Configured condition; SINGLE writer)
 │   ├── computeConfiguredReport (pure: deletion→frozen, no config→absent, revision 0 / no members → ConfigurationUnknown, else per-member revision equality)
 │   └── applyConfiguredCond
+├── reconcilePlacementConditions (Scheduled + SatisfyEligibleNodes + violations; reuses evacuation admission)
 ├── reconcileRVAMetadata [Target-state driven] (same as deletion branch)
 ├── reconcileRVRFinalizers [Target-state driven]
 │   ├── add RVControllerFinalizer to non-deleting RVRs
@@ -224,12 +242,13 @@ flowchart TD
     EnsurePending --> CheckConfig{Configuration exists?}
     CheckConfig -->|No| Conditions
 
-    CheckConfig -->|Yes| CheckForming{Formation in progress?}
+    CheckConfig -->|Yes| EvacuationView["getRSP + reconcileEvacuationView<br/>(pool + Node readiness)"]
+    EvacuationView --> CheckForming{Formation in progress?}
     CheckForming -->|Yes| Formation[reconcileFormation]
     Formation --> FormingRVAWaiting["reconcileRVAWaiting<br/>(datamesh forming)"]
     FormingRVAWaiting --> Conditions
     CheckForming -->|No| UpdateConfig["reconcileRVConfiguration<br/>(config updates + condition)"]
-    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + RVA conditions +<br/>reconcileLayoutConvergence)"]
+    UpdateConfig --> NormalOp["reconcileNormalOperation<br/>(datamesh engine + evacuated RVR cleanup +<br/>RVA conditions + layout convergence)"]
     NormalOp --> LayoutStatus["reconcileLayoutStatus<br/>(status.membershipLayout + MembershipLayoutConverged)"]
     LayoutStatus --> Conditions
 
@@ -274,6 +293,165 @@ re-derivations left are the independent cross-checks in the e2e selftests
 (`pkg/framework/selftest/layout_test.go` and `pkg/framework/selftest/emulate_preexisting_test.go`),
 which recompute the expected layout by hand to validate the real cluster state against
 `ExpectedReplicas()` rather than to reuse the formula.
+
+## Evacuation
+
+**Evacuation** takes diskful and tie-breaker members off a node whose not-ready grace period has
+expired or whose Node object is absent, then restores the layout on eligible nodes.
+It starts with a member still counted in the layout;
+only after that member leaves can the existing heal create a missing copy.
+
+Automatic evacuation runs for formed volumes with an RSC whose
+`spec.eligibleNodesConflictResolutionStrategy.type` is `RollingRepair` (also the default when the
+strategy is unset). `Manual` disables new automatic removals; already marked replicas are still
+retired and replaced. A volume without an RSC, including a manually configured volume, has neither
+an evacuation strategy. `spec.maintenance` pauses the whole
+path, including transitions and cleanup.
+
+### Identifying an evacuee
+
+An **evacuee** is a current diskful member (`Diskful` or `LiminalDiskful`) or `TieBreaker` with an
+RVR, whose node is outside the volume's storage pool `status.eligibleNodes`, and for which either:
+
+- the Node object is absent; or
+- its `Ready` condition is not `True`, and the current time is strictly after
+  `lastTransitionTime + spec.eligibleNodesPolicy.notReadyGracePeriod` of the pool.
+
+If a node returns after evacuation, its former replicas have already been removed. Each
+replacement copies the entire volume through the per-node resync limiter, rather than catching
+up with bitmap-tracked changes. A shorter grace period restores redundancy sooner, but more
+often causes unnecessary full copies after temporary outages.
+
+A Node without a `Ready` condition is treated as still within the grace period and does not make
+its members evacuees. Both this controller and the pool controller use `nodegrace.IsReadyOrWithinGrace`.
+Node readiness is read once per reconcile for current D/TB members with an RVR outside
+`eligibleNodes`. Non-members need no Node reads: their cleanup and replacement report use the
+persistent evacuation status list.
+
+For a NotReady member outside `eligibleNodes` but still within grace, the controller requeues at
+the earliest grace expiration, with a minimum delay of one second. This covers nodes excluded by
+labels before becoming NotReady: their pool revision will not change again when grace expires.
+Eligibility and the requeue delay use the same clock snapshot. The deadline is merged with other
+requeues using the shortest delay. A Node without `Ready` has
+no deadline; nodes still in `eligibleNodes` rely on the pool controller's wake-up.
+
+Access and ShadowDiskful members are not evacuated. A member without an RVR uses the existing
+orphan removal path. Live nodes excluded by labels, zones or LVMVolumeGroup changes are outside
+this mechanism; those placement conflicts need operator action. A node that also lost a label
+still qualifies if it meets the not-ready or absent-Node test.
+
+### Guards and member order
+
+The membership dispatcher uses the existing `ForceRemoveReplica` plans. Automatic evacuation
+checks the following guards before yielding a removal decision. A blocked candidate yields
+`NoDispatch` with the guard message and retains its active membership transition. The placement
+condition reuses that message from the completed engine pass; it does not build separate contexts
+or evaluate the guards again:
+
+| Order | Removal waits when |
+|-------|--------------------|
+| 1 | The member is attached to a pod, or an Attach, Detach or ForceDetach transition is active |
+| 2 | Another member with an RVR not reporting `DRBDConfigured/AgentNotReady` sees it `Connected` over DRBD; the message lists those peers |
+| 3 | The remaining live voters cannot form the post-removal quorum; the message gives the live count and required quorum |
+| 4 | No remaining live voter has an UpToDate diskful copy |
+
+For these guards, a live voter has an RVR, is not another evacuee, and does not report
+`DRBDConfigured/AgentNotReady`. If `V'` voters remain after removal, the required quorum is
+`floor(V'/2) + 1`. Tie-breakers do not satisfy either live-voter guard. These two extra guards
+apply to automatic evacuation; orphan removal and explicit `ForceLeave` requests retain their
+existing emergency guards. Automatic evacuation neither issues `ForceLeave` nor force-detaches
+or fences a node.
+
+Selection is deterministic: voters first, then tie-breakers, each group ordered by member name.
+Only the first candidate is considered in a dispatch pass; a blocked candidate is not skipped.
+Removing a voter can lower the quorum required by the next removal. In `2D+1TB` with an unavailable
+D and TB, choosing the TB first would need two live voters and block both removals; choosing the D
+first leaves one voter and a quorum of one.
+
+The next candidate becomes eligible for selection as soon as the previous member leaves the
+configuration, using the reduced membership for its guards. It does **not** wait for the previous
+transition's confirmation: `confirmAllMembers` includes every remaining member, so another
+unreachable evacuee could never confirm it. Emergency transitions may therefore overlap while
+waiting for confirmation. The evacuation request takes precedence over a pending Join, Leave or
+ChangeRole for the selected member. Once every guard passes, `CancelActiveOnCreate` cancels a
+stuck membership transition and removes the member. While a guard blocks evacuation, the original
+transition keeps its progress and may still settle normally when its confirmations arrive.
+A blocked automatic removal is reported as `ConflictResolutionBlocked` even when a Leave remains
+active on that member. Manual `ForceLeave` and orphan removal retain their emergency order:
+cancel the active transition first, then check the attachment and reachability guards.
+
+### Removal, replacement and a returning node
+
+When the engine creates `ForceRemoveReplica` for an evacuee, the volume controller records its
+name in the RV's `status.evacuatedReplicas` list. Names are unique and sorted. Both active
+transitions and those completed in this pass are considered; manual `ForceLeave` and orphan
+removal do not add names. The controller computes the target list in memory and persists it in
+the same optimistically locked root status patch as membership changes. If that patch fails,
+neither the marker nor the removal is stored; the next pass recomputes both.
+
+The root calls `reconcileDeleteEvacuatedReplicas` once, after the maintenance gate and before the
+volume deletion branch. It deletes an RVR named in persisted evacuation status only if persisted
+membership already excludes it, regardless of current Node readiness, pool eligibility or RSC
+strategy. Transition confirmation is not required for this cleanup. A non-member RVR absent from
+the status list is never deleted by evacuation.
+
+Normal operation snapshots member IDs with `idset.FromAll` before running the engine. After
+computing the target evacuation list, `computeEvacuatedReplicaRemovalPending` checks for a name
+in that list which was a member at the start, is no longer a member, and still has an RVR. When
+this condition holds, normal operation merges `ContinueAndRequeue` into its flow outcome so the
+root can persist status before the next pass retires the RVR. This explicit requeue is necessary
+because the RV controller filters out its own status-only updates. A failed status patch must
+never leave an RVR deleted before its member has left.
+
+Deleting the RVR stops it counting as a pending creation. Once layout-changing transitions permit
+convergence, P3 creates the missing diskful copy and P2 fills the tie-breaker deficit. The scheduler
+chooses eligible nodes; replacement diskful replicas also pass through the existing resync-slot
+limiter. A lack of placement or resync capacity is reported by the normal scheduling and layout
+conditions. Names still in the evacuation status list are reserved when allocating new RVR IDs;
+otherwise a vanished RVR's name could be reused for its replacement and block its Join or cause
+its deletion.
+
+After observing the persisted removal, the RV controller writes `RVR.status.evacuated=true`
+before deleting that RVR. A failed status patch prevents deletion; a failed Delete retries from
+the persisted decision. Already deleting replicas still receive this decision while their name
+remains in the RV evacuation list, including during volume deletion.
+
+Expiration of the grace period is treated as permanent loss for an admitted evacuation. The RVR
+controller removes the known agent and sds-node-configurator finalizers from deleting, owned
+children without waiting for the node to return. It retains its own finalizer until the children
+are gone. Maintenance, datamesh membership, other RVR finalizers, and unknown child finalizers
+still prevent forced completion. A Node becoming Ready does not revoke the decision.
+The RV status marker keeps replacement progress visible even after the old RVR disappears. Membership
+requests from non-members named in that status list are
+excluded before the engine runs, including a stale or renewed Join copied into RV status, so
+this path cannot bring the old replica back into the datamesh. The per-RVR decision survives
+clearing of the RV progress marker.
+
+This completes Kubernetes object deletion, not physical data erasure on an unreachable node.
+A returning agent tears down orphan DRBD resources, including names now assigned to another node.
+Physical LVs whose API objects were removed may remain on the old disks; reclaiming that disk
+space is outside this controller's API cleanup. The grace period is therefore a destructive
+retirement boundary, not merely an availability timeout.
+
+If the node recovers before automatic removal starts, it ceases to qualify as an evacuee.
+Recovery between persisted removal and RVR deletion does not undo retirement: the status marker
+survives controller restarts, and the next pass deletes the old RVR and lets P2/P3 create a replacement.
+If a marked name is still (or again) a member and is no longer an evacuee, the removal did not take
+place and the controller drops that name.
+
+For a removed member, the controller clears its name only when its RVR is absent or deleting
+with `status.evacuated=true`, and **evacuation is complete**: there is no D/TB membership deficit and
+`status.effectiveLayout.upToDateVoters` is at least the intended diskful count. Joining as
+`LiminalDiskful` fills the membership count but does not by itself prove synchronization.
+The field counts voters with an UpToDate backing volume from their own agent or peer reports.
+The status list is cleared when no names remain; an old `Terminating` RVR does not delay completion.
+
+### Evacuation concurrency
+
+There is no separate limit on the number of volumes evacuated concurrently.
+Eligible volumes can evacuate concurrently after passing their safety guards.
+Replacement synchronization uses the per-node resync limiter.
+The configuration rollout budget is independent and remains enforced.
 
 ## Maintenance
 
@@ -723,17 +901,29 @@ condition that explains it.
 | Status | Reason | When |
 |--------|--------|------|
 | — | (absent) | `status.configuration` is nil, or the RSP view is unavailable — nothing has been evaluated yet |
-| True | SatisfyEligibleNodes | No violations |
-| False | ConflictResolutionInProgress | A `RemoveReplica` or `ForceRemoveReplica` transition is taking one of the offending members out |
-| False | InConflictWithEligibleNodes | Violations exist with nothing resolving them |
+| False | ConflictResolutionInProgress | The RV's `status.evacuatedReplicas` names a non-member and D/TB membership or the intended UpToDate voter count is not yet restored; or a `RemoveReplica` / `ForceRemoveReplica` targets a current offending member |
+| False | ConflictResolutionBlocked | The selected evacuee fails a safety guard; the message names the member, node and first blocking guard |
+| True | SatisfyEligibleNodes | No violations and none of the evacuation states above |
+| False | InConflictWithEligibleNodes | Other violations with no recognized repair, including Manual strategy and live-node label, zone or storage conflicts |
 
-`ConflictResolutionInProgress` requires both halves — a removal **and** an offending member as its
-subject. Membership churn as such proves nothing: adding an Access replica for a new consumer, or
-healing a tie-breaker, moves no misplaced member. A removal is also the only repair recognizable
-from the outside, because the replacement half of a create-first repair names the new replica, not
-the offender — and while it runs the offender is still in place and the conflict is still real.
-Nothing resolves these conflicts automatically today (the storage class `RollingRepair` strategy is
-a stub), so a repair in flight means an operator is performing it.
+Rules are evaluated in order: deletion freezes the report; missing configuration or RSP leaves it
+unevaluated; replacement after evacuation takes precedence over a removal of an offending member;
+both precede Blocked, then success or a generic conflict. Maintenance bypasses this
+reporter and freezes it as well. Blocked does not wait for the RVR eligibility condition
+to catch up: they use the same Node-based candidate and guard verdict as dispatch.
+
+Replacement reporting uses non-member names in the RV evacuation status list and lasts until both
+D/TB membership and the intended UpToDate voter count are restored. The old RVR may already be
+gone; Node readiness and eligibility do not matter, and switching to Manual does not hide the
+replacement. The message includes the replica name, node when its RVR still exists, have/want
+layout and UpToDate voter count. A lingering `Terminating` RVR alone is not a conflict after
+completion. This rule can report InProgress even with an empty violations list, and outranks a
+blocked second evacuee while the first copy is being replaced.
+
+The removal rule requires both a removal transition and a current offending member as its
+subject; unrelated membership churn does not count. Under Manual, this can still report an
+operator-initiated repair. See [Evacuation](#evacuation) for the automatic removal and replacement
+path and its limits.
 
 The condition reports **absent**, never `Unknown`, when it cannot evaluate. It has no `Unknown`
 reason, and `rsc_controller` counts every volume whose condition is present and not True as a
@@ -1485,7 +1675,7 @@ Key concepts:
 | Resource | Events | Handler |
 |----------|--------|---------|
 | ReplicatedVolume | Generation, DeletionTimestamp, ReplicatedStorageClass label, Finalizers changes | For() (primary) |
-| ReplicatedStorageClass | ConfigurationGeneration changes | mapRSCToRVs (index lookup) |
+| ReplicatedStorageClass | ConfigurationGeneration or effective conflict resolution strategy type changes (`Manual` / `RollingRepair`) | mapRSCToRVs (index lookup) |
 | ReplicatedVolumeAttachment | DeletionTimestamp, Finalizers, Attached condition status changes | mapRVAToRV |
 | ReplicatedVolumeReplica | Conditions (Scheduled, DRBDConfigured, SatisfyEligibleNodes, Ready, Attached), DatameshRequest, DatameshRevision, DatameshRevisionObservedByAgent, Addresses, Quorum, Attachment, BackingVolume, Peers (incl. BackingVolumeState, ConnectionEstablishedOn), DeletionTimestamp, Finalizers changes | mapRVRToRV |
 | ReplicatedStoragePool | EligibleNodesRevision changes; Create. Deletion deliberately ignored | mapRSPToRVs (index lookup) |
@@ -1506,22 +1696,37 @@ rollout. Deletion is not watched at all: a deleted pool has no eligible nodes to
 and `getRSP` treats a missing pool as an error, so each woken volume would only log a failure and
 back off; a pool that comes back arrives as a Create.
 
+There is no direct Node watch for evacuation. Exclusion after the grace period or Node deletion
+changes the pool's `EligibleNodesRevision` and wakes its volumes. For members on nodes already
+outside `eligibleNodes`, the RV schedules its own wake-up at the earliest known grace expiration.
+DRBD reachability changes arrive through RVR status. Switching the RSC strategy between Manual
+and RollingRepair wakes its volumes even before the class publishes a new configuration
+generation.
+
 ## Indexes
 
 | Index | Field | Purpose |
 |-------|-------|---------|
-| `IndexFieldRVByReplicatedStorageClassName` | `spec.replicatedStorageClassName` | Map RSC events to RVs |
+| `IndexFieldRVByReplicatedStorageClassName` | `spec.replicatedStorageClassName` | Map RSC events to RVs; list volumes for the configuration rollout budget |
 | `IndexFieldRVByStoragePoolName` | `status.configuration.replicatedStoragePoolName` | Map RSP events to RVs |
 | `IndexFieldRVAByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVAs for an RV |
 | `IndexFieldRVRByReplicatedVolumeName` | `spec.replicatedVolumeName` | List RVRs for an RV |
 
 ## Data Flow
 
+Evacuation reads the pool's grace period and Node Ready snapshots as well as the RSC strategy.
+Its admission decision is shared by the transition engine and placement reporting. The class-wide
+listing supplies only published RV status, not the replicas of sibling volumes.
+
 ```mermaid
 flowchart TD
     subgraph inputs [Inputs]
         RSCStatus[RSC.status.configuration]
+        RSCRepair["RSC.spec.eligibleNodesConflictResolutionStrategy"]
+        ClassRVs["Class RV statuses"]
+        Nodes["Node Ready snapshots / absent Nodes"]
         RSP[RSP.status]
+        RSPGrace["RSP.spec.eligibleNodesPolicy"]
         RVRStatus[RVR.status]
         RVAStatus[RVA.status]
     end
@@ -1531,6 +1736,8 @@ flowchart TD
         ReconcileFormation[reconcileFormation]
         ReconcileNormalOp[reconcileNormalOperation]
         ReconcileDeletion[reconcileDeletion]
+        Evacuation["Evacuation view + admission"]
+        Placement["Placement conditions"]
     end
 
     subgraph ensures [Ensure Helpers]
@@ -1552,6 +1759,17 @@ flowchart TD
     end
 
     RSCStatus --> ReconcileConfig
+    RSCRepair --> Evacuation
+    ClassRVs --> Evacuation
+    Nodes --> Evacuation
+    RSPGrace --> Evacuation
+    RSP --> Evacuation
+    RVRStatus --> Evacuation
+    Evacuation --> ReconcileNormalOp
+    Evacuation --> Placement
+    RSP --> Placement
+    RVRStatus --> Placement
+    Placement --> RVStatus
     RVRStatus --> EnsurePending
     RVRStatus --> EnsureSize
     RVRStatus --> ReconcileFormation

@@ -97,7 +97,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc0 := p.Replica(0)
 		Expect(rc0).NotTo(BeNil())
@@ -121,7 +121,7 @@ var _ = Describe("buildContexts", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-2"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-c"}},
 		}
 
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 
 		rc2 := p.Replica(2)
 		Expect(rc2).NotTo(BeNil())
@@ -142,7 +142,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc7 := p.Replica(7)
 		Expect(rc7).NotTo(BeNil())
@@ -163,7 +163,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc4 := p.Replica(4)
 		Expect(rc4).NotTo(BeNil())
@@ -182,7 +182,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		// No replica contexts should be created from global transitions.
 		for id := range uint8(32) {
@@ -208,7 +208,7 @@ var _ = Describe("buildContexts", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-5"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-x"}},
 		}
 
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 
 		rc5 := p.Replica(5)
 		Expect(rc5).NotTo(BeNil())
@@ -232,7 +232,7 @@ var _ = Describe("buildContexts", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "rvr-node"}},
 		}
 
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 
 		rc0 := p.Replica(0)
 		Expect(rc0.nodeName).To(Equal("rvr-node"))
@@ -254,7 +254,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 		rc2 := p.Replica(2)
 		Expect(rc2.Name()).To(Equal("rv-1-2"))
 	})
@@ -274,7 +274,7 @@ var _ = Describe("buildContexts", func() {
 			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-a"}},
 		}
 
-		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{}, nil)
 
 		rc0 := p.Replica(0)
 		Expect(rc0.rvas).To(HaveLen(1))
@@ -295,7 +295,7 @@ var _ = Describe("buildContexts", func() {
 			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-orphan"}},
 		}
 
-		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{}, nil)
 
 		gctx := p.Global()
 
@@ -337,7 +337,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc0 := p.Replica(0)
 		Expect(rc0.membershipTransition).To(BeNil())
@@ -348,7 +348,7 @@ var _ = Describe("buildContexts", func() {
 		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{Configuration: minimalConfig}}
 		rvrs := []*v1alpha1.ReplicatedVolumeReplica{{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "n"}}}
 
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{ShadowDiskful: true})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{ShadowDiskful: true}, nil)
 
 		gctx := p.Global()
 		Expect(gctx).NotTo(BeNil())
@@ -357,7 +357,7 @@ var _ = Describe("buildContexts", func() {
 
 	It("handles empty state", func() {
 		rv := &v1alpha1.ReplicatedVolume{Status: v1alpha1.ReplicatedVolumeStatus{Configuration: minimalConfig}}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		gctx := p.Global()
 		Expect(gctx).NotTo(BeNil())
@@ -380,7 +380,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc0 := p.Replica(0)
 		rc3 := p.Replica(3)
@@ -408,7 +408,7 @@ var _ = Describe("buildContexts", func() {
 			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-orphan-2"}},
 		}
 
-		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{}, nil)
 
 		// Known replicas still accessible by ID after reallocation.
 		rc0 := p.Replica(0)
@@ -434,7 +434,7 @@ var _ = Describe("buildContexts", func() {
 			},
 		}
 
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		rc2 := p.Replica(2)
 		Expect(rc2.membershipRequest).To(BeIdenticalTo(&rv.Status.DatameshReplicaRequests[0]))
@@ -455,7 +455,7 @@ var _ = Describe("buildContexts", func() {
 			{Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{NodeName: "node-orphan"}},
 		}
 
-		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, rvas, FeatureFlags{}, nil)
 
 		gctx := p.Global()
 		for i := range gctx.allReplicas {
@@ -476,7 +476,7 @@ var _ = Describe("writebackMembersFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		writebackMembersFromContexts(rv, p.Global())
 
@@ -499,7 +499,7 @@ var _ = Describe("writebackMembersFromContexts", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-0"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-a"}},
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-3"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-b"}},
 		}
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 
 		// Simulate apply: add member for replica 3.
 		rc3 := p.Replica(3)
@@ -524,7 +524,7 @@ var _ = Describe("writebackMembersFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		// Simulate apply: remove member for replica 3.
 		rc3 := p.Replica(3)
@@ -547,7 +547,7 @@ var _ = Describe("writebackMembersFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		// Simulate apply: replace member 0 with a new object (e.g., type change).
 		rc0 := p.Replica(0)
@@ -576,7 +576,7 @@ var _ = Describe("writebackMembersFromContexts", func() {
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-1"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-b"}},
 			{ObjectMeta: metav1.ObjectMeta{Name: "rv-1-5"}, Spec: v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-c"}},
 		}
-		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, rvrs, nil, FeatureFlags{}, nil)
 
 		// Remove replica 1, add replica 5, keep replica 0.
 		p.Replica(1).member = nil
@@ -597,7 +597,7 @@ var _ = Describe("writebackDatameshFromContext", func() {
 				Configuration: minimalConfig,
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		gctx := p.Global()
 		gctx.datamesh.quorum = 3
@@ -617,7 +617,7 @@ var _ = Describe("writebackRequestMessagesFromContexts", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			Status: v1alpha1.ReplicatedVolumeStatus{Configuration: minimalConfig},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		Expect(writebackRequestMessagesFromContexts(p.Global())).To(BeFalse())
 	})
@@ -631,7 +631,7 @@ var _ = Describe("writebackRequestMessagesFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		// Set same message via slot output field.
 		p.Replica(2).membershipMessage = "existing"
@@ -649,7 +649,7 @@ var _ = Describe("writebackRequestMessagesFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		p.Replica(2).membershipMessage = "Joining datamesh: 2/4 replicas confirmed revision 7"
 
@@ -667,7 +667,7 @@ var _ = Describe("writebackRequestMessagesFromContexts", func() {
 				},
 			},
 		}
-		p := buildContexts(rv, nil, nil, nil, FeatureFlags{})
+		p := buildContexts(rv, nil, nil, nil, FeatureFlags{}, nil)
 
 		p.Replica(0).membershipMessage = "stable"
 		p.Replica(5).membershipMessage = "updated"

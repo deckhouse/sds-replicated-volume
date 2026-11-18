@@ -79,6 +79,7 @@ func rvPredicates() []predicate.Predicate {
 // rscPredicates returns predicates for ReplicatedStorageClass events.
 // Reacts to:
 // - ConfigurationGeneration changes (triggers RV configuration update)
+// - Effective conflict resolution strategy changes (Manual / RollingRepair)
 func rscPredicates() []predicate.Predicate {
 	return []predicate.Predicate{
 		predicate.TypedFuncs[client.Object]{
@@ -91,6 +92,10 @@ func rscPredicates() []predicate.Predicate {
 
 				// React to ConfigurationGeneration change (configuration update).
 				if oldRSC.Status.ConfigurationGeneration != newRSC.Status.ConfigurationGeneration {
+					return true
+				}
+				if oldRSC.Spec.EligibleNodesConflictResolutionStrategy.GetType() !=
+					newRSC.Spec.EligibleNodesConflictResolutionStrategy.GetType() {
 					return true
 				}
 

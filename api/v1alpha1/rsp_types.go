@@ -138,6 +138,10 @@ type ReplicatedStoragePoolSpec struct {
 type ReplicatedStoragePoolEligibleNodesPolicy struct {
 	// NotReadyGracePeriod specifies how long to wait before removing
 	// a not-ready node from the eligible nodes list.
+	// If the node returns after evacuation, its former replicas have already been removed.
+	// Each replacement copies the entire volume through the per-node resync limiter,
+	// rather than catching up with bitmap-tracked changes. A shorter grace period restores
+	// redundancy sooner, but more often causes unnecessary full copies after temporary outages.
 	// +kubebuilder:default="10m"
 	NotReadyGracePeriod metav1.Duration `json:"notReadyGracePeriod"`
 }

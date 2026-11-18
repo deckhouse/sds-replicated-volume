@@ -100,17 +100,13 @@ func (r *Reconciler) Reconcile(
 	if err != nil {
 		return rf.Fail(err).ToCtrl()
 	}
-	if !ok {
+	if !ok || drbdr.Spec.NodeName != r.nodeName {
+		// A returning node can retain an evacuated resource whose name has since
+		// been reused on another node. That local resource is also an orphan.
 		// The object may have left without this agent removing its finalizer; release its
 		// metrics-only tracker entry here, where only the name is known.
 		r.configured.forget(req.Name)
 		return r.reconcileOrphanDRBD(rf.Ctx(), req.Name).ToCtrl()
-	}
-
-	// Skip if resource belongs to different node (predicates should filter this normally)
-	if drbdr.Spec.NodeName != r.nodeName {
-		rf.Log().V(1).Info("DRBDResource belongs to different node, skipping", "nodeName", drbdr.Spec.NodeName)
-		return rf.Done().ToCtrl()
 	}
 
 	return r.reconcileDRBDR(rf.Ctx(), drbdr).ToCtrl()

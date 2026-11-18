@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/datamesh"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/idset"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodegrace"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -114,6 +116,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.reconcileMaintenance(rf.Ctx(), rv, rvrs, rvas).ToCtrl()
 	}
 
+	// Finish transferring persisted evacuation decisions even if the volume is
+	// now deleting. Otherwise deletion could bypass normal-operation retirement.
+	if outcome := r.reconcileDeleteEvacuatedReplicas(rf.Ctx(), rv, rvrs); outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
 	// Handle deletion: force-cleanup children, then remove our finalizer from RV.
 	//
 	// rvShouldNotExist returns true only when:
@@ -186,6 +194,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// below needs it to judge placement, and it must run for a volume in any state, including
 	// one still forming.
 	var rsp *rspView
+	var evacuation evacuationView
 	// Transitions the datamesh engine completed during this pass, for the datamesh metrics.
 	var completedTransitions []v1alpha1.ReplicatedVolumeDatameshTransition
 	if rv.Status.Configuration != nil {
@@ -194,12 +203,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if err != nil {
 			return rf.Failf(err, "getting RSP").ToCtrl()
 		}
+		outcome = outcome.Merge(r.reconcileEvacuationView(rf.Ctx(), rv, rvrs, rsc, rsp, &evacuation))
+		if outcome.ShouldReturn() {
+			return outcome.ToCtrl()
+		}
 		if forming, formationStepIdx := isFormationInProgress(rv); forming {
 			outcome = outcome.Merge(r.reconcileFormation(rf.Ctx(), rv, &rvrs, rvas, rsp, rsc, formationStepIdx))
 		} else {
+			outcome = outcome.Merge(r.reconcileRVConfiguration(rf.Ctx(), rv, rsc))
+			if outcome.ShouldReturn() {
+				return outcome.ToCtrl()
+			}
 			outcome = flow.MergeReconciles(outcome,
-				r.reconcileRVConfiguration(rf.Ctx(), rv, rsc),
-				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp, &completedTransitions),
+				r.reconcileNormalOperation(rf.Ctx(), rv, &rvrs, rvas, rsp, &evacuation, &completedTransitions),
 				r.reconcileLayoutStatus(rf.Ctx(), rv, rvrs, rvas),
 			)
 		}
@@ -238,7 +254,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// normal operation, yet its scheduling progress is exactly what an operator watches then.
 	// The deletion branch does not write them at all — they freeze at their last value, like
 	// Resilient, AttachedReady and Configured.
-	outcome = outcome.Merge(r.reconcilePlacementConditions(rf.Ctx(), rv, rvrs, rsp))
+	outcome = outcome.Merge(r.reconcilePlacementConditions(rf.Ctx(), rv, rvrs, rsp, evacuation))
 	if outcome.ShouldReturn() {
 		return outcome.ToCtrl()
 	}
@@ -384,20 +400,117 @@ func applyUnderMaintenanceCond(rv *v1alpha1.ReplicatedVolume) bool {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: evacuation view
+//
+
+// reconcileEvacuationView snapshots Node readiness for current D/TB members outside
+// eligibleNodes and schedules a wake-up when their earliest grace period expires.
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileEvacuationView(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	rsp *rspView,
+	out *evacuationView,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "evacuation-view")
+	defer rf.OnEnd(&outcome)
+
+	if !isEvacuationEnabled(rsc, rsp) {
+		*out = evacuationView{}
+		return rf.Continue()
+	}
+
+	names := make(map[string]struct{})
+	for i := range rv.Status.Datamesh.Members {
+		if m := &rv.Status.Datamesh.Members[i]; isEvacuationCandidate(m, rvrs, rsp) {
+			names[m.NodeName] = struct{}{}
+		}
+	}
+	states := make(map[string]*nodegrace.ReadyState, len(names))
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		state, err := r.getNodeReadyState(rf.Ctx(), name)
+		if err != nil {
+			return rf.Failf(err, "getting Node %s readiness", name)
+		}
+		states[name] = state
+	}
+	now := time.Now()
+	*out = computeActualEvacuation(rv, rvrs, rsp, states, now)
+	if !out.graceExpiresAt.IsZero() {
+		return rf.ContinueAndRequeueAfter(max(time.Second, out.graceExpiresAt.Sub(now)))
+	}
+	return rf.Continue()
+}
+
+// computeActualEvacuation identifies current D/TB evacuees and the earliest grace
+// expiration among their not-yet-evacuable peers. A nil state means the Node is absent.
+// The caller must check isEvacuationEnabled first, which also guarantees a non-nil rsp.
+func computeActualEvacuation(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rsp *rspView,
+	states map[string]*nodegrace.ReadyState,
+	now time.Time,
+) evacuationView {
+	actual := evacuationView{evacuees: make(datamesh.Evacuees)}
+	for i := range rv.Status.Datamesh.Members {
+		m := &rv.Status.Datamesh.Members[i]
+		if !isEvacuationCandidate(m, rvrs, rsp) {
+			continue
+		}
+		if state := states[m.NodeName]; state != nil {
+			_, beyondGrace, graceExpiresAt := nodegrace.IsReadyOrWithinGrace(*state, rsp.NotReadyGracePeriod, now)
+			if !graceExpiresAt.IsZero() && (actual.graceExpiresAt.IsZero() || graceExpiresAt.Before(actual.graceExpiresAt)) {
+				actual.graceExpiresAt = graceExpiresAt
+			}
+			if !beyondGrace {
+				continue
+			}
+		}
+		actual.evacuees[m.Name] = struct{}{}
+	}
+	return actual
+}
+
+// isEvacuationEnabled reports that the storage class selects RollingRepair and the pool is known.
+func isEvacuationEnabled(rsc *v1alpha1.ReplicatedStorageClass, rsp *rspView) bool {
+	return rsc != nil && rsp != nil &&
+		rsc.Spec.EligibleNodesConflictResolutionStrategy.GetType() == v1alpha1.EligibleNodesConflictResolutionRollingRepair
+}
+
+// isEvacuationCandidate selects D/TB members with an RVR on a node outside eligibleNodes.
+// It is the single filter for both the Node fetch and the evacuee decision: a candidate
+// without a fetched state is treated as having no Node, so the two must never diverge.
+func isEvacuationCandidate(
+	m *v1alpha1.DatameshMember,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	rsp *rspView,
+) bool {
+	return (isDiskfulLayoutMemberType(m.Type) || m.Type == v1alpha1.DatameshMemberTypeTieBreaker) &&
+		findRVRByName(rvrs, m.Name) != nil && rsp.FindEligibleNode(m.NodeName) == nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: normal-operation
 //
 
 // reconcileNormalOperation handles the steady-state lifecycle of a formed datamesh
 // (attach handling, scaling, etc.).
 // The transitions the datamesh engine completed are stored in completedTransitions.
+// Status mutations, including evacuation markers, are persisted by the root reconcile.
+// Newly removed evacuees with RVRs request a requeue for retirement after persistence.
 //
-// Reconcile pattern: Pure orchestration
+// Reconcile pattern: In-place reconciliation
 func (r *Reconciler) reconcileNormalOperation(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	rvrs *[]*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	rsp *rspView,
+	evacuation *evacuationView,
 	completedTransitions *[]v1alpha1.ReplicatedVolumeDatameshTransition,
 ) (outcome flow.ReconcileOutcome) {
 	rf := flow.BeginReconcile(ctx, "normal-operation")
@@ -419,12 +532,30 @@ func (r *Reconciler) reconcileNormalOperation(
 	}
 	shadowDiskfulSupported := computeShadowDiskfulSupported(agentNodes, agentPods)
 
+	// Track membership before the engine changes it to schedule retirement after persistence.
+	membersAtStart := idset.FromAll(rv.Status.Datamesh.Members)
+
 	// Run datamesh transition engine: membership, quorum, attachment, network transitions.
+	transitionsAtStart := slices.Clone(rv.Status.DatameshTransitions)
 	changed, dmrctxs, completed := datamesh.ProcessTransitionsWithCompleted(
-		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{ShadowDiskful: shadowDiskfulSupported})
+		rf.Ctx(), rv, rsp, *rvrs, rvas, datamesh.FeatureFlags{ShadowDiskful: shadowDiskfulSupported}, evacuation.evacuees)
 	*completedTransitions = completed
+	evacuation.candidate, evacuation.blocked = datamesh.EvacuationBlock(dmrctxs)
 	if changed {
 		outcome = outcome.ReportChanged()
+	}
+
+	// Record automatic removals in the same status patch as membership changes.
+	// Deletion still waits for a later pass to observe the persisted removal.
+	targetEvacuatedReplicas := computeTargetEvacuatedReplicaNames(rv, *rvrs, evacuation.evacuees, completed, transitionsAtStart)
+	if !slices.Equal(rv.Status.EvacuatedReplicas, targetEvacuatedReplicas) {
+		rv.Status.EvacuatedReplicas = targetEvacuatedReplicas
+		outcome = outcome.ReportChanged()
+	}
+	if computeEvacuatedReplicaRemovalPending(rv, *rvrs, targetEvacuatedReplicas, membersAtStart) {
+		// RV status-only updates do not enqueue this controller. Finish persisting
+		// membership now; the next pass can retire the removed replicas.
+		outcome = outcome.Merge(rf.ContinueAndRequeue())
 	}
 
 	outcome = outcome.Merge(
@@ -442,6 +573,91 @@ func (r *Reconciler) reconcileNormalOperation(
 	// action per pass). Runs last so it sees any transition just created by ProcessTransitions
 	// and no-ops while a membership transition is in flight.
 	return outcome.Merge(r.reconcileLayoutConvergence(rf.Ctx(), rv, rvrs, rvas))
+}
+
+// computeActualEvacuatedReplicaNames reads valid names from controller-owned status.
+// Ignore malformed entries defensively, even though the API validates status writes.
+func computeActualEvacuatedReplicaNames(rv *v1alpha1.ReplicatedVolume) []string {
+	var names []string
+	for _, name := range rv.Status.EvacuatedReplicas {
+		if _, ok := v1alpha1.ParseReplicatedVolumeReplicaName(rv.Name, name); ok {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+// computeTargetEvacuatedReplicaNames retains removed names until their RVRs
+// are gone or deleting with their cleanup decision persisted, and the layout has
+// enough UpToDate voters. A still-present member that is no longer an evacuee
+// did not leave and needs no retirement marker.
+// New removals exclude existing transitions (which may originate from manual
+// ForceLeave), explicit ForceLeave requests and non-evacuees.
+func computeTargetEvacuatedReplicaNames(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	evacuees datamesh.Evacuees,
+	completed, transitionsAtStart []v1alpha1.ReplicatedVolumeDatameshTransition,
+) []string {
+	targetNames := make(map[string]struct{})
+	complete := computeEvacuationComplete(rv)
+	for _, name := range computeActualEvacuatedReplicaNames(rv) {
+		if rv.Status.Datamesh.FindMemberByName(name) != nil {
+			if _, evacuating := evacuees[name]; !evacuating {
+				continue
+			}
+		} else if rvr := findRVRByName(rvrs, name); complete && (rvr == nil || (rvr.DeletionTimestamp != nil && ptr.Deref(rvr.Status.Evacuated, false))) {
+			continue
+		}
+		targetNames[name] = struct{}{}
+	}
+	for _, transition := range slices.Concat(rv.Status.DatameshTransitions, completed) {
+		if transition.Type != v1alpha1.ReplicatedVolumeDatameshTransitionTypeForceRemoveReplica {
+			continue
+		}
+		if _, evacuating := evacuees[transition.ReplicaName]; !evacuating {
+			continue
+		}
+		if slices.ContainsFunc(transitionsAtStart, func(previous v1alpha1.ReplicatedVolumeDatameshTransition) bool {
+			return previous.Type == transition.Type && previous.ReplicaName == transition.ReplicaName
+		}) || slices.ContainsFunc(rv.Status.DatameshReplicaRequests, func(request v1alpha1.ReplicatedVolumeDatameshReplicaRequest) bool {
+			return request.Name == transition.ReplicaName && request.Request.Operation == v1alpha1.DatameshMembershipRequestOperationForceLeave
+		}) {
+			continue
+		}
+		targetNames[transition.ReplicaName] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(targetNames))
+}
+
+// computeEvacuatedReplicaRemovalPending reports whether a marked RVR's removal
+// from membership still needs to be persisted before retirement on the next pass.
+func computeEvacuatedReplicaRemovalPending(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+	targetEvacuatedReplicas []string,
+	membersAtStart idset.IDSet,
+) bool {
+	for _, name := range targetEvacuatedReplicas {
+		id, ok := v1alpha1.ParseReplicatedVolumeReplicaName(rv.Name, name)
+		if ok && membersAtStart.Contains(id) &&
+			rv.Status.Datamesh.FindMemberByName(name) == nil && findRVRByName(rvrs, name) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// computeEvacuationComplete requires both membership and synchronized diskful copies.
+// LiminalDiskful fills the membership count before its backing volume is UpToDate.
+func computeEvacuationComplete(rv *v1alpha1.ReplicatedVolume) bool {
+	if rv.Status.Configuration == nil {
+		return false
+	}
+	actualD, actualTB := computeActualLayout(rv)
+	intendedD, intendedTB := rv.Status.Configuration.IntendedLayout()
+	return actualD >= intendedD && actualTB >= intendedTB && int(rv.Status.EffectiveLayout.UpToDateVoters) >= intendedD
 }
 
 // computeShadowDiskfulSupported requires every labelled agent node to have at
@@ -516,6 +732,68 @@ func makeDatameshSingleStepTransition(
 			},
 		},
 	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reconcile: delete evacuated replicas
+//
+
+// reconcileDeleteEvacuatedReplicas retires RVRs named in persisted RV status whose
+// persisted membership no longer lists them. The root calls it once before the
+// deletion branch and before any in-memory membership changes.
+// Each RVR first records status.evacuated; that decision authorizes node-independent
+// cleanup after the volume progress marker is cleared.
+// deleteRVR marks the same objects in rvrs as deleting, allowing P2/P3 to stop counting
+// them as replicas in flight without waiting for the cache or the node to return.
+//
+// Reconcile pattern: Target-state driven
+func (r *Reconciler) reconcileDeleteEvacuatedReplicas(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) (outcome flow.ReconcileOutcome) {
+	rf := flow.BeginReconcile(ctx, "retire-evacuated-rvrs")
+	defer rf.OnEnd(&outcome)
+
+	targetNames := computeTargetEvacuatedReplicaDeletions(rv, rvrs)
+	for _, name := range targetNames {
+		rvr := findRVRByName(rvrs, name)
+		// Persist authorization before Delete. A crash or failed Delete must not
+		// lose the decision, and a failed status patch must not start deletion.
+		if !ptr.Deref(rvr.Status.Evacuated, false) {
+			base := rvr.DeepCopy()
+			rvr.Status.Evacuated = new(true)
+			if err := r.patchRVRStatus(rf.Ctx(), rvr, base); err != nil {
+				return rf.Failf(err, "recording evacuation of RVR %s", name)
+			}
+		}
+		if err := r.deleteRVR(rf.Ctx(), rvr); err != nil {
+			return rf.Failf(err, "deleting evacuated RVR %s", name)
+		}
+	}
+	return rf.Continue()
+}
+
+// computeTargetEvacuatedReplicaDeletions selects RVRs named in persisted evacuation
+// status and absent from persisted membership that still need marking or deletion,
+// independently of current Node readiness, pool eligibility or RSC strategy.
+func computeTargetEvacuatedReplicaDeletions(
+	rv *v1alpha1.ReplicatedVolume,
+	rvrs []*v1alpha1.ReplicatedVolumeReplica,
+) []string {
+	var targetNames []string
+	evacuatedNames := computeActualEvacuatedReplicaNames(rv)
+	for _, rvr := range rvrs {
+		if !slices.Contains(evacuatedNames, rvr.Name) ||
+			rv.Status.Datamesh.FindMemberByName(rvr.Name) != nil {
+			continue
+		}
+		if rvr.DeletionTimestamp == nil || !ptr.Deref(rvr.Status.Evacuated, false) {
+			targetNames = append(targetNames, rvr.Name)
+		}
+	}
+	slices.Sort(targetNames)
+	return targetNames
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -637,7 +915,7 @@ func (r *Reconciler) reconcileLayoutConvergence(
 		if targetAction.kind == layoutActionCreateDiskful {
 			replicaType = v1alpha1.ReplicaTypeDiskful
 		}
-		// The name is chosen deterministically by newRVR (ChooseNewName), so a repeated Create
+		// The name is chosen deterministically by newRVR, so a repeated Create
 		// after a stale-cache retry converges via AlreadyExists.
 		rvr, err := newRVR(rv, *rvrs, replicaType, "")
 		if err != nil {
@@ -2956,6 +3234,17 @@ func ensureDatameshReplicaRequests(
 	ef := flow.BeginEnsure(ctx, "datamesh-pending-replica-transitions")
 	defer ef.OnEnd(&outcome)
 
+	// A retired replica can report a stale or renewed Join when its node returns.
+	// Its persisted evacuation marker prevents re-entry, even before deletion and
+	// if automatic evacuation has since been disabled. Keep requests of members
+	// until removal is persisted so a marker alone never authorizes departure.
+	if evacuatedNames := computeActualEvacuatedReplicaNames(rv); len(evacuatedNames) > 0 {
+		rvrs = slices.DeleteFunc(slices.Clone(rvrs), func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+			return slices.Contains(evacuatedNames, rvr.Name) &&
+				rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil
+		})
+	}
+
 	changed := false
 	existing := rv.Status.DatameshReplicaRequests
 
@@ -3193,9 +3482,22 @@ func (r *Reconciler) reconcileDeletion(
 // View types
 //
 
+// evacuationView is computed once from the RSC strategy, RSP eligibility and Node readiness.
+// evacuees contains current members only; graceExpiresAt schedules the next readiness check.
+// Both are empty when automatic RollingRepair is disabled or no RSC exists.
+type evacuationView struct {
+	evacuees       datamesh.Evacuees
+	graceExpiresAt time.Time
+	// The engine's final dispatch verdict, reused by placement reporting.
+	candidate string
+	blocked   string
+}
+
 // rspView contains pre-fetched RSP data for RV reconciliation.
 // Used to avoid I/O in compute/ensure helpers.
 type rspView struct {
+	// NotReadyGracePeriod is the pool's readiness grace period, shared with nodegrace.
+	NotReadyGracePeriod time.Duration
 	// Type is the RSP type (LVM or LVMThin).
 	Type v1alpha1.ReplicatedStoragePoolType
 	// EligibleZones is the zone span of the whole pool: the distinct, non-empty zones of its
@@ -3237,7 +3539,9 @@ func (v *rspView) FindEligibleNode(nodeName string) *v1alpha1.ReplicatedStorageP
 
 // newRVR constructs a new in-memory ReplicatedVolumeReplica for rv: it picks the first free ID
 // name (deterministic, so a repeated Create after a stale-cache retry converges via
-// AlreadyExists) and adds the RV controller finalizer.
+// AlreadyExists) and adds the RV controller finalizer. Evacuated names remain reserved
+// until their status marker is cleared, even if the old RVRs have already disappeared.
+// All replicas in rvrs must belong to rv.
 //
 // It is a pure constructor: no receiver, no I/O, no mutation of its inputs. The controller owner
 // reference (which needs the runtime scheme) and the Create call belong to the Reconcile method
@@ -3256,9 +3560,16 @@ func newRVR(
 			NodeName:             nodeName,
 		},
 	}
-	if !rvr.ChooseNewName(rvrs) {
+	reserved := idset.FromAll(rvrs).
+		Union(idset.FromFunc(computeActualEvacuatedReplicaNames(rv), func(name string) (uint8, bool) {
+			return v1alpha1.ParseReplicatedVolumeReplicaName(rv.Name, name)
+		}))
+
+	id, ok := reserved.MinMissing()
+	if !ok {
 		return nil, fmt.Errorf("no available ID for new RVR")
 	}
+	rvr.SetNameWithID(id)
 	obju.AddFinalizer(rvr, v1alpha1.RVControllerFinalizer)
 	return rvr, nil
 }
@@ -3440,10 +3751,11 @@ func (r *Reconciler) getRSP(
 	})
 
 	return &rspView{
-		Type:               unsafeRSP.Spec.Type,
-		EligibleZones:      eligibleZones,
-		SystemNetworkNames: slices.Clone(unsafeRSP.Spec.SystemNetworkNames),
-		EligibleNodes:      eligibleNodes,
+		NotReadyGracePeriod: unsafeRSP.Spec.EligibleNodesPolicy.NotReadyGracePeriod.Duration,
+		Type:                unsafeRSP.Spec.Type,
+		EligibleZones:       eligibleZones,
+		SystemNetworkNames:  slices.Clone(unsafeRSP.Spec.SystemNetworkNames),
+		EligibleNodes:       eligibleNodes,
 	}, nil
 }
 
@@ -3544,6 +3856,10 @@ func (r *Reconciler) createRVR(ctx context.Context, obj *v1alpha1.ReplicatedVolu
 	return r.cl.Create(ctx, obj)
 }
 
+func (r *Reconciler) patchRVRStatus(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {
+	return r.cl.Status().Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+}
+
 func (r *Reconciler) patchRVR(ctx context.Context, obj, base *v1alpha1.ReplicatedVolumeReplica) error {
 	return r.cl.Patch(ctx, obj, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
@@ -3597,6 +3913,16 @@ func (r *Reconciler) deleteRVRWithForcedFinalizerRemoval(ctx context.Context, ob
 }
 
 // --- Node ---
+
+// getNodeReadyState copies the Ready condition from a cached Node. NotFound means
+// the Node is absent and returns (nil, nil), distinct from a missing Ready condition.
+func (r *Reconciler) getNodeReadyState(ctx context.Context, name string) (*nodegrace.ReadyState, error) {
+	var unsafeNode corev1.Node
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: name}, &unsafeNode, client.UnsafeDisableDeepCopy); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	return new(nodegrace.NewReadyState(&unsafeNode)), nil
+}
 
 // getAgentNodes returns an unordered slice of labelled agent Nodes from the cache.
 func (r *Reconciler) getAgentNodes(ctx context.Context) ([]corev1.Node, error) {

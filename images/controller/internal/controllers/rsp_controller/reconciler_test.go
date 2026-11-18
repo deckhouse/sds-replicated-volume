@@ -35,6 +35,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodegrace"
 )
 
 // testGracePeriod is the grace period used in tests for NotReady nodes.
@@ -46,6 +47,7 @@ func TestRSPController(t *testing.T) {
 }
 
 var _ = Describe("computeActualEligibleNodes", func() {
+	now := time.Date(2026, time.November, 12, 12, 0, 0, 0, time.UTC)
 	var (
 		rsp              *v1alpha1.ReplicatedStoragePool
 		lvgs             map[string]lvgView
@@ -77,9 +79,9 @@ var _ = Describe("computeActualEligibleNodes", func() {
 			{
 				name:     "node-1",
 				zoneName: "zone-a",
-				ready: nodeViewReady{
-					hasCondition: true,
-					status:       true,
+				ready: nodegrace.ReadyState{
+					HasCondition: true,
+					Status:       true,
 				},
 			},
 		}
@@ -89,7 +91,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 	})
 
 	It("returns eligible node when all conditions match", func() {
-		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].NodeName).To(Equal("node-1"))
@@ -108,7 +110,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		It("extracts zone label from node", func() {
 			nodes[0].zoneName = "zone-x"
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].ZoneName).To(Equal("zone-x"))
@@ -117,7 +119,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		It("sets empty zone when label is missing", func() {
 			nodes[0].zoneName = ""
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].ZoneName).To(BeEmpty())
@@ -130,7 +132,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 				{Name: "lvg-2"}, // This LVG does not exist on node-1.
 			}
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			// Node is still eligible but without LVGs.
 			Expect(result).To(HaveLen(1))
@@ -141,25 +143,25 @@ var _ = Describe("computeActualEligibleNodes", func() {
 
 	Context("node readiness", func() {
 		It("excludes node NotReady beyond grace period", func() {
-			nodes[0].ready = nodeViewReady{
-				hasCondition:       true,
-				status:             false,
-				lastTransitionTime: time.Now().Add(-10 * time.Minute),
+			nodes[0].ready = nodegrace.ReadyState{
+				HasCondition:       true,
+				Status:             false,
+				LastTransitionTime: now.Add(-10 * time.Minute),
 			}
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(BeEmpty())
 		})
 
 		It("includes node NotReady within grace period", func() {
-			nodes[0].ready = nodeViewReady{
-				hasCondition:       true,
-				status:             false,
-				lastTransitionTime: time.Now().Add(-2 * time.Minute),
+			nodes[0].ready = nodegrace.ReadyState{
+				HasCondition:       true,
+				Status:             false,
+				LastTransitionTime: now.Add(-2 * time.Minute),
 			}
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].NodeReady).To(BeFalse())
@@ -172,7 +174,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 			lvg.unschedulable = true
 			lvgs["lvg-1"] = lvg
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].LVMVolumeGroups[0].Unschedulable).To(BeTrue())
@@ -183,7 +185,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		It("marks node as unschedulable when spec.unschedulable is true", func() {
 			nodes[0].unschedulable = true
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].Unschedulable).To(BeTrue())
@@ -194,7 +196,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		It("populates AgentReady from agentReadyByNode map", func() {
 			agentReadyByNode["node-1"] = false
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].AgentReady).To(BeFalse())
@@ -203,7 +205,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		It("sets AgentReady to false when node not in map", func() {
 			delete(agentReadyByNode, "node-1")
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].AgentReady).To(BeFalse())
@@ -216,7 +218,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 			lvg.ready = false
 			lvgs["lvg-1"] = lvg
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeFalse())
@@ -229,7 +231,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 			}
 			// thin pool not in thinPoolReady set = not ready
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeFalse())
@@ -244,7 +246,7 @@ var _ = Describe("computeActualEligibleNodes", func() {
 			lvg.thinPoolReady = map[string]struct{}{"thin-pool-1": {}}
 			lvgs["lvg-1"] = lvg
 
-			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(result).To(HaveLen(1))
 			Expect(result[0].LVMVolumeGroups[0].Ready).To(BeTrue())
@@ -253,20 +255,20 @@ var _ = Describe("computeActualEligibleNodes", func() {
 
 	Context("worldStateExpiresAt", func() {
 		It("returns nil when no grace period is active", func() {
-			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(expiresAt).To(BeNil())
 		})
 
 		It("returns earliest grace expiration time", func() {
-			transitionTime := time.Now().Add(-2 * time.Minute)
-			nodes[0].ready = nodeViewReady{
-				hasCondition:       true,
-				status:             false,
-				lastTransitionTime: transitionTime,
+			transitionTime := now.Add(-2 * time.Minute)
+			nodes[0].ready = nodegrace.ReadyState{
+				HasCondition:       true,
+				Status:             false,
+				LastTransitionTime: transitionTime,
 			}
 
-			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+			_, expiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 			Expect(expiresAt).NotTo(BeNil())
 			expected := transitionTime.Add(testGracePeriod)
@@ -283,13 +285,13 @@ var _ = Describe("computeActualEligibleNodes", func() {
 		rsp.Spec.LVMVolumeGroups = append(rsp.Spec.LVMVolumeGroups, v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: "lvg-2"})
 		nodes = append(nodes, nodeView{
 			name: "node-2",
-			ready: nodeViewReady{
-				hasCondition: true,
-				status:       true,
+			ready: nodegrace.ReadyState{
+				HasCondition: true,
+				Status:       true,
 			},
 		})
 
-		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+		result, _ := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, now)
 
 		Expect(result).To(HaveLen(2))
 		Expect(result[0].NodeName).To(Equal("node-1"))
@@ -469,65 +471,6 @@ var _ = Describe("isLVGReady", func() {
 		result := isLVGReady(lvg, "thin-pool-1")
 
 		Expect(result).To(BeFalse())
-	})
-})
-
-var _ = Describe("isNodeReadyOrWithinGrace", func() {
-	var ready nodeViewReady
-
-	BeforeEach(func() {
-		ready = nodeViewReady{
-			hasCondition: true,
-			status:       true,
-		}
-	})
-
-	It("returns (true, false, zero) for Ready node", func() {
-		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(ready, testGracePeriod)
-
-		Expect(isReady).To(BeTrue())
-		Expect(excluded).To(BeFalse())
-		Expect(expiresAt.IsZero()).To(BeTrue())
-	})
-
-	It("returns (false, false, zero) for node without Ready condition (unknown state)", func() {
-		ready.hasCondition = false
-
-		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(ready, testGracePeriod)
-
-		Expect(isReady).To(BeFalse())
-		Expect(excluded).To(BeFalse()) // Unknown state is treated as within grace.
-		Expect(expiresAt.IsZero()).To(BeTrue())
-	})
-
-	It("returns (false, true, zero) for NotReady beyond grace period", func() {
-		ready = nodeViewReady{
-			hasCondition:       true,
-			status:             false,
-			lastTransitionTime: time.Now().Add(-10 * time.Minute),
-		}
-
-		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(ready, testGracePeriod)
-
-		Expect(isReady).To(BeFalse())
-		Expect(excluded).To(BeTrue())
-		Expect(expiresAt.IsZero()).To(BeTrue())
-	})
-
-	It("returns (false, false, expiresAt) for NotReady within grace period", func() {
-		transitionTime := time.Now().Add(-2 * time.Minute)
-		ready = nodeViewReady{
-			hasCondition:       true,
-			status:             false,
-			lastTransitionTime: transitionTime,
-		}
-
-		isReady, excluded, expiresAt := isNodeReadyOrWithinGrace(ready, testGracePeriod)
-
-		Expect(isReady).To(BeFalse())
-		Expect(excluded).To(BeFalse())
-		expected := transitionTime.Add(testGracePeriod)
-		Expect(expiresAt.Sub(expected)).To(BeNumerically("<", time.Second))
 	})
 })
 

@@ -21,6 +21,22 @@ The controller reconciles `ReplicatedVolumeReplica` with:
 | → manages | LVMLogicalVolume | Creates/resizes/deletes backing volumes |
 | → manages | DRBDResource | Creates/configures/resizes/deletes DRBD resources |
 
+## Evacuated replica deletion
+
+`status.evacuated=true` is a persisted decision written by the RV controller only after the
+replica has left the persisted datamesh through automatic evacuation. It is not a user request
+or a readiness observation, and a recovered Node does not clear it.
+
+Normal deletion first releases the RVR controller's child finalizers and issues Delete. On a
+subsequent pass, evacuated replicas release `sds-replicated-volume.deckhouse.io/agent` from their
+DRBDResource and LLVs, and `storage.deckhouse.io/sds-node-configurator` from their LLVs. The
+controller checks child owner UID, and additionally the DRBDResource node. Unknown finalizers
+are preserved. The existing metadata step removes the RVR finalizer only after all children
+have disappeared. Maintenance and the RV controller finalizer remain gates for this path.
+
+These API deletions do not confirm on-node DRBD teardown or physical LV erasure. For ordinary
+replica deletion, the node agents still own and complete those operations before finalization.
+
 ## Algorithm
 
 The controller reconciles individual RVRs:

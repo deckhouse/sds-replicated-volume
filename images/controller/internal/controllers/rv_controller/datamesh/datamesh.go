@@ -31,6 +31,12 @@ type FeatureFlags struct {
 	ShadowDiskful bool
 }
 
+// Evacuees is the read-only set of replica names eligible for automatic diskful or tie-breaker evacuation.
+// The dispatcher chooses one current member per pass: first voter by name, or first
+// tie-breaker by name when no voter is an evacuee. A blocked candidate is not skipped;
+// guards exclude the entire set from the surviving live voters.
+type Evacuees map[string]struct{}
+
 // registry is the package-level plan registry, initialized once at startup.
 var registry *dmte.Registry[*globalContext, *ReplicaContext]
 
@@ -84,12 +90,13 @@ func ProcessTransitions(
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	features FeatureFlags,
 ) (bool, []ReplicaContext) {
-	changed, allReplicas, _ := ProcessTransitionsWithCompleted(ctx, rv, rsp, rvrs, rvas, features)
+	changed, allReplicas, _ := ProcessTransitionsWithCompleted(ctx, rv, rsp, rvrs, rvas, features, nil)
 	return changed, allReplicas
 }
 
-// ProcessTransitionsWithCompleted is ProcessTransitions that also returns snapshots of
-// the transitions completed during this cycle (see dmte.Engine.CompletedTransitions).
+// ProcessTransitionsWithCompleted additionally admits automatic diskful or tie-breaker evacuation
+// for the supplied replica names and returns snapshots of the transitions completed
+// during this cycle (see dmte.Engine.CompletedTransitions).
 func ProcessTransitionsWithCompleted(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
@@ -97,9 +104,10 @@ func ProcessTransitionsWithCompleted(
 	rvrs []*v1alpha1.ReplicatedVolumeReplica,
 	rvas []*v1alpha1.ReplicatedVolumeAttachment,
 	features FeatureFlags,
+	evacuees Evacuees,
 ) (bool, []ReplicaContext, []v1alpha1.ReplicatedVolumeDatameshTransition) {
 	// 1. Build contexts.
-	cp := buildContexts(rv, rsp, rvrs, rvas, features)
+	cp := buildContexts(rv, rsp, rvrs, rvas, features, evacuees)
 	gctx := cp.Global()
 
 	// 2. Update member zones from RSP (zone may change if RSP is updated).
@@ -146,4 +154,18 @@ func ProcessTransitionsWithCompleted(
 	}
 
 	return changed, gctx.allReplicas, engine.CompletedTransitions()
+}
+
+// EvacuationBlock reports the remaining candidate's dispatch message from a completed
+// engine pass. It reuses the engine's contexts and slot status without reevaluating
+// guards. A successfully dispatched ForceRemove has already removed its member.
+func EvacuationBlock(replicas []ReplicaContext) (name, message string) {
+	if len(replicas) == 0 {
+		return "", ""
+	}
+	rctx := selectEvacuee(replicas[0].gctx)
+	if rctx == nil {
+		return "", ""
+	}
+	return rctx.name, rctx.membershipMessage
 }

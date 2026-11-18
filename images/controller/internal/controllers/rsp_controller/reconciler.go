@@ -34,7 +34,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	nodeutil "k8s.io/component-helpers/node/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -42,6 +41,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/nodegrace"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/reconciliation/flow"
 )
 
@@ -190,7 +190,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return rf.Failf(err, "listing agent Pods").ToCtrl()
 	}
 
-	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode)
+	eligibleNodes, worldStateExpiresAt := computeActualEligibleNodes(rsp, lvgs, nodes, agentReadyByNode, time.Now())
 	var actualNetworks sdn.SystemNetworkList
 	var actualNodeNetworks sdn.NodeNetworkStatusList
 	if r.sdnEnabled && hasSDNNetworks(rsp) {
@@ -337,6 +337,7 @@ func computeActualEligibleNodes(
 	lvgs map[string]lvgView,
 	nodes []nodeView,
 	agentReadyByNode map[string]bool,
+	now time.Time,
 ) (eligibleNodes []v1alpha1.ReplicatedStoragePoolEligibleNode, worldStateExpiresAt *time.Time) {
 	// Build LVG lookup by node name.
 	lvgByNode := buildLVGByNodeMap(lvgs, rsp)
@@ -351,7 +352,7 @@ func computeActualEligibleNodes(
 		node := &nodes[i]
 
 		// Check node readiness and grace period.
-		nodeReady, notReadyBeyondGrace, graceExpiresAt := isNodeReadyOrWithinGrace(node.ready, gracePeriod)
+		nodeReady, notReadyBeyondGrace, graceExpiresAt := nodegrace.IsReadyOrWithinGrace(node.ready, gracePeriod, now)
 		if notReadyBeyondGrace {
 			// Node has been not-ready beyond grace period - exclude from eligible nodes.
 			continue
@@ -394,35 +395,18 @@ type nodeView struct {
 	name          string
 	zoneName      string
 	unschedulable bool
-	ready         nodeViewReady
-}
-
-// nodeViewReady contains Ready condition state needed for grace period calculation.
-type nodeViewReady struct {
-	status             bool      // True if Ready condition is True
-	hasCondition       bool      // True if Ready condition exists
-	lastTransitionTime time.Time // For grace period calculation
+	ready         nodegrace.ReadyState
 }
 
 // newNodeView creates a nodeView from a Node.
 // The unsafeNode may come from cache without DeepCopy; nodeView copies only the needed scalar fields.
 func newNodeView(unsafeNode *corev1.Node) nodeView {
-	view := nodeView{
+	return nodeView{
 		name:          unsafeNode.Name,
 		zoneName:      unsafeNode.Labels[corev1.LabelTopologyZone],
 		unschedulable: unsafeNode.Spec.Unschedulable,
+		ready:         nodegrace.NewReadyState(unsafeNode),
 	}
-
-	_, readyCond := nodeutil.GetNodeCondition(&unsafeNode.Status, corev1.NodeReady)
-	if readyCond != nil {
-		view.ready = nodeViewReady{
-			hasCondition:       true,
-			status:             readyCond.Status == corev1.ConditionTrue,
-			lastTransitionTime: readyCond.LastTransitionTime.Time,
-		}
-	}
-
-	return view
 }
 
 // lvgView is a lightweight read-only snapshot of LVMVolumeGroup fields needed for RSP reconciliation.
@@ -489,30 +473,6 @@ func isLVGReady(lvg *lvgView, thinPoolName string) bool {
 	// For LVMThin, also check thin pool readiness.
 	_, ready := lvg.thinPoolReady[thinPoolName]
 	return ready
-}
-
-// isNodeReadyOrWithinGrace checks node readiness and grace period status.
-// Returns:
-//   - nodeReady: true if node is Ready
-//   - notReadyBeyondGrace: true if node is NotReady and beyond grace period (should be excluded)
-//   - graceExpiresAt: when the grace period will expire (zero if node is Ready or beyond grace)
-func isNodeReadyOrWithinGrace(ready nodeViewReady, gracePeriod time.Duration) (nodeReady bool, notReadyBeyondGrace bool, graceExpiresAt time.Time) {
-	if !ready.hasCondition {
-		// No Ready condition - consider not ready but within grace (unknown state).
-		return false, false, time.Time{}
-	}
-
-	if ready.status {
-		return true, false, time.Time{}
-	}
-
-	// Node is not ready - check grace period.
-	graceExpiresAt = ready.lastTransitionTime.Add(gracePeriod)
-	if time.Now().After(graceExpiresAt) {
-		return false, true, time.Time{} // Beyond grace period.
-	}
-
-	return false, false, graceExpiresAt // Within grace period.
 }
 
 // --- Comparison helpers ---

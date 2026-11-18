@@ -433,9 +433,6 @@ func applySpecDefaults(rsc *v1alpha1.ReplicatedStorageClass) {
 	if rsc.Spec.EligibleNodesConflictResolutionStrategy == nil {
 		rsc.Spec.EligibleNodesConflictResolutionStrategy = &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionStrategy{
 			Type: v1alpha1.EligibleNodesConflictResolutionRollingRepair,
-			RollingRepair: &v1alpha1.ReplicatedStorageClassEligibleNodesConflictResolutionRollingRepair{
-				MaxParallel: 5,
-			},
 		}
 	}
 	if rsc.Spec.EligibleNodesPolicy == nil {
@@ -707,14 +704,11 @@ func ensureVolumeSummaryAndConditions(
 	conflictResolutionEnabled := isEligibleNodesConflictResolutionEnabled(rsc)
 
 	// Apply VolumesSatisfyEligibleNodes condition (calculated regardless of acknowledgment).
-	// RollingRepair is not implemented yet, so the message says that nothing repairs the
-	// conflicts automatically even though the reason names the configured strategy.
 	if conflicts := *rsc.Status.Volumes.InConflictWithEligibleNodes; conflicts > 0 {
 		if conflictResolutionEnabled {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
 				v1alpha1.ReplicatedStorageClassCondVolumesSatisfyEligibleNodesReasonConflictResolutionInProgress,
-				fmt.Sprintf("%d volume(s) have replicas on non-eligible nodes; "+
-					"automatic resolution (RollingRepair) is not implemented yet, move the replicas manually", conflicts),
+				computeEligibleNodesConflictReport(rvs),
 			) || changed
 		} else {
 			changed = applyVolumesSatisfyEligibleNodesCondFalse(rsc,
@@ -765,6 +759,30 @@ func ensureVolumeSummaryAndConditions(
 	return ef.Ok().ReportChangedIf(changed)
 }
 
+// computeEligibleNodesConflictReport groups the same conflicts as InConflictWithEligibleNodes
+// by the volume's reported reason, including Unknown and stale-generation conditions.
+func computeEligibleNodesConflictReport(rvs []rvView) string {
+	var evacuating, blocked, other int
+	for i := range rvs {
+		cond := rvs[i].conditions.satisfyEligibleNodes
+		if !cond.isPresentAndNotTrue() {
+			continue
+		}
+		switch cond.reason {
+		case v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionInProgress:
+			evacuating++
+		case v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesReasonConflictResolutionBlocked:
+			blocked++
+		default:
+			other++
+		}
+	}
+
+	return fmt.Sprintf("%d volume(s) have replicas on non-eligible nodes: "+
+		"%d evacuating, %d blocked (needs attention); %d in other conflicts",
+		evacuating+blocked+other, evacuating, blocked, other)
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // View types
 //
@@ -787,6 +805,8 @@ type rvView struct {
 type rvViewCondition struct {
 	present bool
 	status  metav1.ConditionStatus
+	// reason is projected only for SatisfyEligibleNodes, whose conflicts are grouped by reason.
+	reason string
 	// current reports that the condition was written for the volume's current generation;
 	// a condition left over from an older generation carries no verdict about the volume now.
 	current bool
@@ -844,11 +864,15 @@ func newRVViewCondition(unsafeRV *v1alpha1.ReplicatedVolume, condType string) rv
 	if cond == nil {
 		return rvViewCondition{}
 	}
-	return rvViewCondition{
+	view := rvViewCondition{
 		present: true,
 		status:  cond.Status,
 		current: cond.ObservedGeneration == unsafeRV.Generation,
 	}
+	if condType == v1alpha1.ReplicatedVolumeCondSatisfyEligibleNodesType {
+		view.reason = cond.Reason
+	}
+	return view
 }
 
 // isConfigurationRolloutEnabled reports whether configuration changes are rolled out to volumes
@@ -858,15 +882,15 @@ func isConfigurationRolloutEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return rsc.Spec.ConfigurationRolloutStrategy.GetType() == v1alpha1.ConfigurationRolloutRollingUpdate
 }
 
-// isEligibleNodesConflictResolutionEnabled reports whether volumes placed on non-eligible nodes
-// are repaired automatically. A strategy the controller has not defaulted yet counts as
+// isEligibleNodesConflictResolutionEnabled reports whether automatic conflict resolution is
+// enabled. RollingRepair evacuates diskful and tie-breaker members from non-eligible nodes past
+// the not-ready grace period. A strategy the controller has not defaulted yet counts as
 // RollingRepair — the default it is about to write.
 //
 // Both strategies are read by type only. For the configuration rollout that is a deliberate
 // narrowing: rv_controller does enforce rollingUpdate.maxParallel, but a throttled volume is
 // stale for this aggregate exactly like a volume that has not been reached yet, so the budget
-// cannot change the reported state. For conflict resolution, rollingRepair.maxParallel is simply
-// not implemented — the parameter is accepted and ignored.
+// cannot change the reported state.
 func isEligibleNodesConflictResolutionEnabled(rsc *v1alpha1.ReplicatedStorageClass) bool {
 	return rsc.Spec.EligibleNodesConflictResolutionStrategy.GetType() == v1alpha1.EligibleNodesConflictResolutionRollingRepair
 }
@@ -1164,7 +1188,7 @@ func composeRolloutMessage(
 			buf.WriteString(". ")
 		}
 		if nodesRepairEnabled {
-			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: RollingRepair, not implemented yet)",
+			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: RollingRepair)",
 				*rsc.Status.Volumes.InConflictWithEligibleNodes)
 		} else {
 			fmt.Fprintf(&buf, "%d volume(s) on non-eligible nodes (resolution strategy: Manual)",
