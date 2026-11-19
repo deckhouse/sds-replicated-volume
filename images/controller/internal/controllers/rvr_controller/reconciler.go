@@ -421,12 +421,10 @@ func (r *Reconciler) reconcileMaintenance(
 // Reconcile: evacuated resources
 //
 
-// nodeConfiguratorFinalizer is the external LLV deletion finalizer. Evacuation
-// deliberately abandons on-node LV deletion after the node's grace period expires.
-const nodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
-
-// reconcileEvacuatedResources releases known node-owned finalizers after normal
-// deletion has been initiated. Unknown finalizers and foreign children are retained.
+// reconcileEvacuatedResources releases only our agent's finalizers after normal
+// deletion has been initiated. Foreign finalizers and foreign children are retained.
+// LLVs retain foreign finalizers and remain Terminating until sds-node-configurator
+// deletes their LVs when the node returns; see "Evacuated replica deletion" in README.md.
 // The persisted evacuation decision is independent of current Node readiness.
 //
 // Reconcile pattern: In-place reconciliation
@@ -462,23 +460,18 @@ func (r *Reconciler) reconcileEvacuatedResources(
 	}
 	for i := range llvs {
 		llv := &llvs[i]
-		if llv.DeletionTimestamp == nil || !metav1.IsControlledBy(llv, rvr) ||
-			obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer) {
-			continue
-		}
-		if !obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) && !obju.HasFinalizer(llv, nodeConfiguratorFinalizer) {
+		if !isEvacuatedLLVDetached(rvr, llv) || !obju.HasFinalizer(llv, v1alpha1.AgentFinalizer) {
 			continue
 		}
 		base := llv.DeepCopy()
 		obju.RemoveFinalizer(llv, v1alpha1.AgentFinalizer)
-		obju.RemoveFinalizer(llv, nodeConfiguratorFinalizer)
 		if err := client.IgnoreNotFound(r.patchLLV(rf.Ctx(), llv, base)); err != nil {
 			return rf.Failf(err, "releasing evacuated LVMLogicalVolume %s", llv.Name)
 		}
 		changed = true
 	}
 	if changed {
-		rf.Log().Info("Released node-owned finalizers for evacuated replica", "replica", rvr.Name, "node", rvr.Spec.NodeName)
+		rf.Log().Info("Released agent finalizers for evacuated replica", "replica", rvr.Name, "node", rvr.Spec.NodeName)
 		// Child update/delete events enqueue the next pass with refreshed objects
 		// before normal cleanup continues.
 		return rf.Done()
@@ -486,11 +479,19 @@ func (r *Reconciler) reconcileEvacuatedResources(
 	return rf.Continue()
 }
 
+// isEvacuatedLLVDetached reports whether an owned LLV has entered deletion
+// and the RVR controller has released it.
+func isEvacuatedLLVDetached(rvr *v1alpha1.ReplicatedVolumeReplica, llv *snc.LVMLogicalVolume) bool {
+	return llv.DeletionTimestamp != nil && metav1.IsControlledBy(llv, rvr) &&
+		!obju.HasFinalizer(llv, v1alpha1.RVRControllerFinalizer)
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Reconcile: metadata (finalizers + labels)
 //
 
 // reconcileMetadata reconciles the RVR metadata (finalizers and labels).
+// Child deletion gates are described in "Evacuated replica deletion" in README.md.
 //
 // Reconcile pattern: Target-state driven
 func (r *Reconciler) reconcileMetadata(
@@ -505,10 +506,15 @@ func (r *Reconciler) reconcileMetadata(
 
 	// Compute target finalizer state.
 	shouldExist := !rvrShouldNotExist(rvr)
-	hasLLVs := len(llvs) > 0
+	evacuatedOutsideDatamesh := ptr.Deref(rvr.Status.Evacuated, false) &&
+		(rv == nil || rv.Status.Datamesh.FindMemberByName(rvr.Name) == nil)
+	llvsBlockDeletion := slices.ContainsFunc(llvs, func(llv snc.LVMLogicalVolume) bool {
+		return !evacuatedOutsideDatamesh || !isEvacuatedLLVDetached(rvr, &llv) ||
+			obju.HasFinalizer(&llv, v1alpha1.AgentFinalizer)
+	})
 	hasDRBDR := drbdr != nil
-	// Keep finalizer if RVR should exist or if there are still child resources.
-	targetFinalizerPresent := shouldExist || hasLLVs || hasDRBDR
+	// Keep finalizer if RVR should exist or if children still need this module's cleanup.
+	targetFinalizerPresent := shouldExist || llvsBlockDeletion || hasDRBDR
 
 	// Kubernetes rejects adding new finalizers to a deleting object.
 	// If our finalizer is not already present and the object is deleting,

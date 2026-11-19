@@ -226,8 +226,10 @@ func (t ReplicaType) String() string {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
 	// Evacuated records an irreversible automatic evacuation decision after removal
-	// from the persisted datamesh. It authorizes deletion of node-owned resources
-	// without waiting for the lost node, even if the node subsequently returns.
+	// from the persisted datamesh. It allows RVR and DRBDResource deletion without
+	// waiting for the lost node, even if the node subsequently returns. LLVs retain
+	// foreign finalizers and remain Terminating until sds-node-configurator deletes
+	// their LVs when the node returns.
 	// This decision survives removal of the volume's evacuation progress marker.
 	// +optional
 	Evacuated *bool `json:"evacuated,omitempty"`

@@ -29,13 +29,18 @@ or a readiness observation, and a recovered Node does not clear it.
 
 Normal deletion first releases the RVR controller's child finalizers and issues Delete. On a
 subsequent pass, evacuated replicas release `sds-replicated-volume.deckhouse.io/agent` from their
-DRBDResource and LLVs, and `storage.deckhouse.io/sds-node-configurator` from their LLVs. The
-controller checks child owner UID, and additionally the DRBDResource node. Unknown finalizers
-are preserved. The existing metadata step removes the RVR finalizer only after all children
-have disappeared. Maintenance and the RV controller finalizer remain gates for this path.
+DRBDResource and LLVs. All foreign finalizers, including
+`storage.deckhouse.io/sds-node-configurator`, are preserved. The controller checks child owner
+UID, and additionally the DRBDResource node. Once the DRBDResource is gone, deleting owned LLVs
+without either `RVRControllerFinalizer` or `AgentFinalizer` no longer hold the evacuated RVR's
+finalizer. Maintenance, datamesh membership and other RVR finalizers remain gates for this path.
 
-These API deletions do not confirm on-node DRBD teardown or physical LV erasure. For ordinary
-replica deletion, the node agents still own and complete those operations before finalization.
+RVR and DRBDResource deletion can finish without the node. LLV deletion follows the normal
+sds-node-configurator path: its agent deletes the LV when the node returns, then releases its
+finalizer. Until then the LLV remains visible as `Terminating`.
+If the node never returns, LLVs remain until sds-node-configurator releases them.
+A returning sds-rv agent tears down orphan DRBD resources. Ordinary replica deletion still waits
+for all children to disappear.
 
 ## Algorithm
 
@@ -578,13 +583,13 @@ The backing volume size is taken as `max(AlignTo4Ki(rv.Spec.Size), AlignTo4Ki(rv
 1. **Wait for old deletion**: If the intended LLV exists but is being deleted (from a previous RVR incarnation) and the RVR is not yet a datamesh member, remove our finalizer and wait for full deletion before creating a new one
 2. **Create**: When intended LLV does not exist, create it with ownerRef, finalizer, and labels. `spec.volumeCleanup` is taken from `rv.Spec.VolumeCleanup` (fixed when the volume was created), and only in the editions where sds-node-configurator can wipe (`lib/go/common/feature`); `Discard` is not set on a thin LLV, which the LLV CRD refuses it for
 3. **Resize**: When LLV is ready but actual size < intended size, patch spec.size
-4. **Delete**: Remove finalizer, then delete LLV. sds-node-configurator wipes the LV (when `spec.volumeCleanup` is set) and removes it only once its own finalizer is the last one left; the agent of this module keeps a finalizer on the LLV for as long as DRBD has the LV attached, so the wipe never runs under DRBD
+4. **Delete**: Remove the RVR controller finalizer, then delete LLV. sds-node-configurator wipes the LV (when `spec.volumeCleanup` is set) and removes it only once its own finalizer is the last one left. During ordinary deletion, this module's agent keeps its finalizer while DRBD has the LV attached. See [Evacuated replica deletion](#evacuated-replica-deletion) for the evacuation exception
 
 ## Managed Metadata
 
 | Type | Key | Managed On | Purpose |
 |------|-----|------------|---------|
-| Finalizer | `sds-replicated-volume.deckhouse.io/rvr-controller` | RVR | Prevent deletion while children exist |
+| Finalizer | `sds-replicated-volume.deckhouse.io/rvr-controller` | RVR | Wait for children; see [evacuation exception](#evacuated-replica-deletion) |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rvr-controller` | LLV | Prevent premature deletion |
 | Finalizer | `sds-replicated-volume.deckhouse.io/rvr-controller` | DRBDResource | Prevent premature deletion |
 | Label | `sds-replicated-volume.deckhouse.io/replicated-volume` | RVR | Link to parent ReplicatedVolume |

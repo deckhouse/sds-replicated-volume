@@ -417,21 +417,18 @@ the persisted decision. Already deleting replicas still receive this decision wh
 remains in the RV evacuation list, including during volume deletion.
 
 Expiration of the grace period is treated as permanent loss for an admitted evacuation. The RVR
-controller removes the known agent and sds-node-configurator finalizers from deleting, owned
-children without waiting for the node to return. It retains its own finalizer until the children
-are gone. Maintenance, datamesh membership, other RVR finalizers, and unknown child finalizers
-still prevent forced completion. A Node becoming Ready does not revoke the decision.
+controller releases this module's finalizers as described in
+[Evacuated replica deletion](../rvr_controller/README.md#evacuated-replica-deletion).
+A Node becoming Ready does not revoke the decision.
 The RV status marker keeps replacement progress visible even after the old RVR disappears. Membership
 requests from non-members named in that status list are
 excluded before the engine runs, including a stale or renewed Join copied into RV status, so
 this path cannot bring the old replica back into the datamesh. The per-RVR decision survives
 clearing of the RV progress marker.
 
-This completes Kubernetes object deletion, not physical data erasure on an unreachable node.
 A returning agent tears down orphan DRBD resources, including names now assigned to another node.
-Physical LVs whose API objects were removed may remain on the old disks; reclaiming that disk
-space is outside this controller's API cleanup. The grace period is therefore a destructive
-retirement boundary, not merely an availability timeout.
+LLVs retain foreign finalizers and remain `Terminating` until sds-node-configurator deletes their
+LVs when the node returns.
 
 If the node recovers before automatic removal starts, it ceases to qualify as an evacuee.
 Recovery between persisted removal and RVR deletion does not undo retirement: the status marker
