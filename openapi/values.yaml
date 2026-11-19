@@ -21,7 +21,7 @@ properties:
         default: "9.2.19-flant.22"
       drbdLegacyVersion:
         type: string
-        default: "9.2.16"
+        default: "9.2.21"
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"

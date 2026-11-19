@@ -49,6 +49,38 @@ shell:
 
     - install /dev/null /usr/local/bin/lbvers.py
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
+    - |
+      # Restore the 9.30 compatibility macros. Use lazy definitions so ALT RPM
+      # expands the feature name when the macro is called, not when it is defined.
+      sed -i '1i\
+      %if !%{defined bcond_without}\
+      %define bcond_without() %{expand:%%{!?_without_%{1}:%%global with_%{1} 1}}\
+      %define bcond_with() %{expand:%%{?_with_%{1}:%%global with_%{1} 1}}\
+      %define with() %{expand:%%{?with_%{1}:1}%%{!?with_%{1}:0}}\
+      %define without() %{expand:%%{?with_%{1}:0}%%{!?with_%{1}:1}}\
+      %endif' drbd.spec
+
+      # Only drbd-utils is shipped. Do not add weak dependencies on the companion RPMs.
+      # Avoid upstream rich/weak dependency syntax on older ALT RPM versions.
+      sed -i \
+        -e 's/^%global richdeps .*/%global richdeps 0/' \
+        -e '/^Recommends:/d' \
+        drbd.spec
+
+      # The optional TNF fencing helper would add Python module dependencies to
+      # the standalone legacy RPM, which LINSTOR installs directly with rpm.
+      sed -i \
+        -e '/\/tnf-drbd-fence\.py[co]\?$/d' \
+        -e '/^make .*install/a rm -f %{buildroot}%{_prefix}/lib/drbd/tnf-drbd-fence.py' \
+        drbd.spec
+
+      # Since 9.36, the spec always packages systemd files. Use the same RPM
+      # paths for configure and %files, even when systemd.pc is unavailable.
+      # Use systemd scriptlet macros only when ALT's build environment provides them.
+      sed -i \
+        -e 's/--with-initscripttype=systemd/--with-systemdunitdir=%{_unitdir} --with-systemdpresetdir=%{_presetdir} --with-initscripttype=systemd/' \
+        -e 's/^%systemd_\([a-z]*\) \(.*\)$/%{?systemd_\1:%systemd_\1 \2}/' \
+        drbd.spec
     # substitute ubuntu packages with ALTLinux's ones
     - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
     # fix upstream_version/rpm_version: configure.ac has base version (e.g. 9.30.0),
@@ -67,9 +99,7 @@ shell:
     {{- $_ := set $ctx "version" (include "get_oss_version_by_id" (list "DRBD_UTILS_LEGACY" $.Root)) }}
     {{- $_ := set $ctx "spec" "drbd.spec" }}
     {{- $_ := set $ctx "arch" "x86_64" }}
-    # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
-    # PS. ./configure --with-initscripttype=sysv does not work for some reason
-    {{- $_ := set $ctx "rpmbuild_args" "--without=manual --define \\'initscripttype sysv\\'" }}
+    {{- $_ := set $ctx "rpmbuild_args" "--without=manual" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     # clone thin-send-recv git repo
