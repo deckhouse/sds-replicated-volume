@@ -65,6 +65,16 @@ rules:
       - replicatedvolumeattachments/status
     verbs: ["patch"]
 
+  # --- storage.deckhouse.io: sensitive subresources ---
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - replicatedvolumes/sensitive
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["storage.deckhouse.io"]
+    resources:
+      - drbdresources/sensitive
+    verbs: ["get", "list", "watch", "create", "patch"]
+
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get"]

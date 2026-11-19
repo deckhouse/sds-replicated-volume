@@ -474,3 +474,12 @@ access:
           - deletecollection
           - patch
           - update
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - drbdresources/sensitive
+          - replicatedvolumes/sensitive
+        verbs:
+          - get
+          - list
+          - watch

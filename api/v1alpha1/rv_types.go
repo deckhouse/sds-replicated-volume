@@ -642,8 +642,11 @@ type ReplicatedVolumeDatamesh struct {
 	SystemNetworkNames []string `json:"systemNetworkNames"`
 
 	// SharedSecret is the shared secret for DRBD authentication.
+	//
+	// If the caller is not allowed to read the `replicatedvolumes/sensitive` subresource, the API returns `<omitted>` instead of the value.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
+	// +crd-enricher:deckhouse:sensitive-data
 	SharedSecret string `json:"sharedSecret,omitempty"`
 
 	// SharedSecretAlg is the hashing algorithm for the shared secret.

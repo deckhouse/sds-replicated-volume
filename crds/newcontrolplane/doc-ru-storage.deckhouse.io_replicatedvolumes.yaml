@@ -193,6 +193,8 @@ spec:
                     sharedSecret:
                       description: |
                         Общий секрет для аутентификации соединений DRBD.
+
+                        Если у вызывающей стороны нет прав на подресурс `replicatedvolumes/sensitive`, API возвращает `<omitted>` вместо значения.
                     sharedSecretAlg:
                       description: |
                         Алгоритм хеширования для общего секрета. Может быть: SHA256, SHA1, DummyForTest.

@@ -32,6 +32,10 @@ const (
 
 	// drbdNamePrefix is the prefix used for standard DRBD resource names.
 	drbdNamePrefix = "sdsrv-"
+
+	// maskedSensitiveValue is what the kube-apiserver returns instead of a field
+	// marked x-kubernetes-sensitive-data.
+	maskedSensitiveValue = "<omitted>"
 )
 
 // deviceSymlinkDir is the directory where stable device symlinks are created.

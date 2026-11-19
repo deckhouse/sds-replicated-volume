@@ -455,6 +455,73 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 		},
 		{
+			name: "masked shared secret - leaves DRBD as it is",
+			drbdr: func() *v1alpha1.DRBDResource {
+				dr := drbdrOnNode(testNodeName, v1alpha1.DRBDResourceStateUp)
+				dr.Spec.Peers = []v1alpha1.DRBDResourcePeer{{
+					Name:            "peer-1",
+					NodeID:          1,
+					Type:            v1alpha1.DRBDResourceTypeDiskful,
+					Protocol:        v1alpha1.DRBDProtocolC,
+					SharedSecret:    "<omitted>",
+					SharedSecretAlg: v1alpha1.SharedSecretAlgSHA256,
+				}}
+				return dr
+			}(),
+			storeState: drbdutils.StatusResult{
+				{
+					Name:   testDRBDResName,
+					NodeID: 0,
+					Role:   "Secondary",
+					Devices: []drbdutils.Device{
+						{Volume: 0, Minor: 1000, DiskState: "UpToDate", Quorum: true},
+					},
+					Connections: []drbdutils.Connection{
+						{
+							PeerNodeID:      1,
+							Name:            "peer-1",
+							ConnectionState: "Connected",
+							PeerDevices: []drbdutils.PeerDevice{
+								{Volume: 0, ReplicationState: "Established", PeerDiskState: "UpToDate"},
+							},
+						},
+					},
+				},
+			},
+			expectedCommands: []*fakedrbdutils.ExpectedCmd{
+				showCmd(&drbdutils.ShowResource{
+					Resource: testDRBDResName,
+					Options: drbdutils.ShowOptions{
+						AutoPromote:                false,
+						Quorum:                     "off",
+						QuorumMinimumRedundancy:    "off",
+						OnNoQuorum:                 "suspend-io",
+						OnNoDataAccessible:         "suspend-io",
+						OnSuspendedPrimaryOutdated: "force-secondary",
+					},
+					Connections: []drbdutils.ShowConnection{
+						{PeerNodeID: 1, Net: drbdutils.ShowNet{Protocol: "C", SharedSecret: "real-secret", CRAMHMACAlg: "sha256"}},
+					},
+				}),
+			},
+			expectedReconcileErr: "drbdresources/sensitive",
+			postCheck: func(t *testing.T, cl client.Client) {
+				dr := &v1alpha1.DRBDResource{}
+				if err := cl.Get(t.Context(), client.ObjectKey{Name: testDRBDRName}, dr); err != nil {
+					t.Fatalf("get DRBDResource: %v", err)
+				}
+				for _, cond := range dr.Status.Conditions {
+					if cond.Type == v1alpha1.DRBDResourceCondConfiguredType {
+						if cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha1.DRBDResourceCondConfiguredReasonSharedSecretMasked {
+							t.Errorf("Configured = %s/%s, want False/%s", cond.Status, cond.Reason, v1alpha1.DRBDResourceCondConfiguredReasonSharedSecretMasked)
+						}
+						return
+					}
+				}
+				t.Errorf("no Configured condition")
+			},
+		},
+		{
 			name:  "state up, diskful, metadata probe killed - no create-md over the disk",
 			drbdr: drbdrDiskfulUp(testNodeName, testLLVName),
 			objs: []client.Object{

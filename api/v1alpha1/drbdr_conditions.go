@@ -52,6 +52,7 @@ const (
 	DRBDResourceCondConfiguredReasonResizeFailed             = "ResizeFailed"
 	DRBDResourceCondConfiguredReasonResourceOptionsFailed    = "ResourceOptionsFailed"
 	DRBDResourceCondConfiguredReasonSecondaryFailed          = "SecondaryFailed"
+	DRBDResourceCondConfiguredReasonSharedSecretMasked       = "SharedSecretMasked"
 	DRBDResourceCondConfiguredReasonStateQueryFailed         = "StateQueryFailed"
 	DRBDResourceCondConfiguredReasonSymlinkFailed            = "SymlinkFailed"
 	// DRBDResourceCondConfiguredReasonSystemNetworkAddressUnavailable indicates missing SDN node address data.

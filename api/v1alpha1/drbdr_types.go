@@ -206,8 +206,11 @@ type DRBDResourcePeer struct {
 	Protocol DRBDProtocol `json:"protocol,omitempty"`
 
 	// Shared secret that authenticates the connection with the peer.
+	//
+	// If the caller is not allowed to read the `drbdresources/sensitive` subresource, the API returns `<omitted>` instead of the value.
 	// +kubebuilder:validation:MaxLength=256
 	// +optional
+	// +crd-enricher:deckhouse:sensitive-data
 	SharedSecret string `json:"sharedSecret,omitempty"`
 
 	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest

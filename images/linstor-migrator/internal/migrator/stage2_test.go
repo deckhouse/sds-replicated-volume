@@ -19,13 +19,16 @@ package migrator
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -225,5 +228,69 @@ func TestClearDRBDRMaintenanceIfSet(t *testing.T) {
 				t.Fatalf("maintenance = %q, want %q", got.Spec.Maintenance, tt.want)
 			}
 		})
+	}
+}
+
+func TestStage2PatchesLeaveMaskedSharedSecretOut(t *testing.T) {
+	t.Parallel()
+
+	const masked = "<omitted>"
+
+	drbdr := &srvv1alpha1.DRBDResource{
+		ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+		Spec: srvv1alpha1.DRBDResourceSpec{
+			Maintenance: srvv1alpha1.MaintenanceModeNoResourceReconciliation,
+			Peers:       []srvv1alpha1.DRBDResourcePeer{{Name: "rvr-2", NodeID: 2, SharedSecret: masked}},
+		},
+	}
+	rv := &srvv1alpha1.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "rv-1",
+			Annotations: map[string]string{
+				srvv1alpha1.AdoptRVRAnnotationKey:          "",
+				srvv1alpha1.AdoptSharedSecretAnnotationKey: "linstor-secret",
+			},
+		},
+		Status: srvv1alpha1.ReplicatedVolumeStatus{
+			Datamesh: srvv1alpha1.ReplicatedVolumeDatamesh{SharedSecret: masked},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = srvv1alpha1.AddToScheme(scheme)
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(drbdr, rv).Build()
+
+	var patches []string
+	cl := interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c kubecl.WithWatch, obj kubecl.Object, patch kubecl.Patch, opts ...kubecl.PatchOption) error {
+			data, err := patch.Data(obj)
+			if err != nil {
+				return err
+			}
+			patches = append(patches, string(data))
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+		Update: func(_ context.Context, _ kubecl.WithWatch, obj kubecl.Object, _ ...kubecl.UpdateOption) error {
+			t.Errorf("stage 2 updates %T %s; an update sends the whole object, a masked shared secret included", obj, obj.GetName())
+			return nil
+		},
+	})
+
+	m := &Migrator{client: cl, log: slog.Default()}
+	if err := m.clearDRBDRMaintenanceIfSet(context.Background(), drbdr); err != nil {
+		t.Fatalf("clearDRBDRMaintenanceIfSet() error = %v", err)
+	}
+	if err := m.patchRVRemoveAdoptAnnotations(context.Background(), rv); err != nil {
+		t.Fatalf("patchRVRemoveAdoptAnnotations() error = %v", err)
+	}
+
+	if len(patches) != 2 {
+		t.Fatalf("got %d patches, want 2: %v", len(patches), patches)
+	}
+	for _, p := range patches {
+		if strings.Contains(p, "sharedSecret") || strings.Contains(p, masked) {
+			t.Errorf("patch carries the shared secret: %s", p)
+		}
 	}
 }

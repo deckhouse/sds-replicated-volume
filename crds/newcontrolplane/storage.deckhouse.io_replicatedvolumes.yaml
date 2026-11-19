@@ -526,9 +526,13 @@ spec:
                     minimum: 0
                     type: integer
                   sharedSecret:
-                    description: SharedSecret is the shared secret for DRBD authentication.
+                    description: |-
+                      SharedSecret is the shared secret for DRBD authentication.
+
+                      If the caller is not allowed to read the `replicatedvolumes/sensitive` subresource, the API returns `<omitted>` instead of the value.
                     maxLength: 256
                     type: string
+                    x-kubernetes-sensitive-data: true
                   sharedSecretAlg:
                     description: SharedSecretAlg is the hashing algorithm for the
                       shared secret.

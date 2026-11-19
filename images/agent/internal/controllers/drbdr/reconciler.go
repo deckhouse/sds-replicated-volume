@@ -234,8 +234,12 @@ func (r *Reconciler) reconcileDRBDR(
 			aErr = ConfiguredReasonError(diskErr, v1alpha1.DRBDResourceCondConfiguredReasonStateQueryFailed)
 		}
 	}
+	var secretErr error
+	if upAndNotInCleanup {
+		secretErr = ConfiguredReasonError(maskedSharedSecretError(drbdr), v1alpha1.DRBDResourceCondConfiguredReasonSharedSecretMasked)
+	}
 	var targetActions DRBDActions
-	if aErr == nil {
+	if aErr == nil && secretErr == nil {
 		iState := computeIntendedDRBDState(drbdr, intendedDisk, upAndNotInCleanup)
 		targetActions = computeTargetDRBDActions(iState, aState)
 	}
@@ -283,7 +287,7 @@ func (r *Reconciler) reconcileDRBDR(
 	// which may initialize ActiveConfiguration.
 	// addrPortErr comes first: getConfiguredReason takes the first reason in the
 	// joined tree, and port exhaustion is the root cause of what follows it.
-	reconcileErr := errors.Join(addrPortErr, llvErr, aErr, aErr2, drbdErr)
+	reconcileErr := errors.Join(addrPortErr, secretErr, llvErr, aErr, aErr2, drbdErr)
 	if ensureOutcome := ensureReportState(rf.Ctx(), aState, drbdr, currentDiskLLV, reconcileErr, maintenanceMode); ensureOutcome.Error() != nil {
 		reconcileErr = errors.Join(reconcileErr, ensureOutcome.Error())
 	}
@@ -340,6 +344,20 @@ func (r *Reconciler) reconcileDRBDR(
 		return rf.Fail(reconcileErr)
 	}
 	return rf.Done()
+}
+
+func maskedSharedSecretError(drbdr *v1alpha1.DRBDResource) error {
+	var peers []string
+	for i := range drbdr.Spec.Peers {
+		if drbdr.Spec.Peers[i].SharedSecret == maskedSensitiveValue {
+			peers = append(peers, drbdr.Spec.Peers[i].Name)
+		}
+	}
+	if len(peers) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the shared secret of peers %s reads as %q: the agent is not allowed to read drbdresources/sensitive, so DRBD is left as it is",
+		strings.Join(peers, ", "), maskedSensitiveValue)
 }
 
 // reconcileOrphanDRBD handles owned DRBD resources with no matching K8S object.

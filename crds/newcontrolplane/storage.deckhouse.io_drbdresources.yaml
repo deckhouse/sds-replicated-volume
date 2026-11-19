@@ -206,10 +206,13 @@ spec:
                       - message: protocol is immutable
                         rule: self == oldSelf
                     sharedSecret:
-                      description: Shared secret that authenticates the connection
-                        with the peer.
+                      description: |-
+                        Shared secret that authenticates the connection with the peer.
+
+                        If the caller is not allowed to read the `drbdresources/sensitive` subresource, the API returns `<omitted>` instead of the value.
                       maxLength: 256
                       type: string
+                      x-kubernetes-sensitive-data: true
                     sharedSecretAlg:
                       description: SharedSecretAlg enumerates possible hashing algorithms
                         for DRBD shared secrets.

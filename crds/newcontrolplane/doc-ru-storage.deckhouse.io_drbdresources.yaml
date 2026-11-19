@@ -85,6 +85,8 @@ spec:
                       sharedSecret:
                         description: |
                           Общий секрет для аутентификации соединения с пиром.
+
+                          Если у вызывающей стороны нет прав на подресурс `drbdresources/sensitive`, API возвращает `<omitted>` вместо значения.
                       sharedSecretAlg:
                         description: |
                           Алгоритм хеширования для общего секрета DRBD. Может быть: SHA256, SHA1, DummyForTest.
