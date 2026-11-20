@@ -1,0 +1,101 @@
+# drbd-sysext — DRBD kernel module compiled against the Olcedar kernel and packaged
+# as a systemd-sysext (erofs + dm-verity) for Deckhouse Olcedar nodes. Driven by a
+# NodeExtensionRequest (node-manager resolves it into NodeConfig.spec.extensions[]);
+# nodelet downloads <name>.raw + <name>.raw.roothash and merges via systemd-sysext.
+#
+# Two stages, each following a proven example:
+#   compile  — alt:sisyphus (like sds-replicated-volume-kernel-module/drbd-builder):
+#              gcc14 (kernel 6.12+ needs -fmin-function-alignment=16), coccinelle
+#              (DRBD kernel-compat spatch), patch. Kernel build tree comes from the
+#              stable Olcedar kernel-devel image (Module.symvers present).
+#   package  — builder/distroless (like 007-registrypackages/containerd sysext):
+#              pm install erofs-utils cryptsetup; mkfs.erofs + veritysetup, then
+#              cat erofs+verity into <name>.raw with the root hash as a sidecar.
+# The kernel-devel tag is re-pinned on kernel rebuild.
+---
+image: kernel-devel-src
+from: dev-registry.deckhouse.io/container-factory/kernel:b5e1f632dccc37c8a562d2b14f4d756447cf29945db736d78adfd35b-1784912011538
+final: false
+---
+image: {{ $.ImageName }}-compile
+from: alt:sisyphus
+final: false
+import:
+  - image: kernel-devel-src
+    add: /usr/src
+    to: /usr/src
+    before: install
+  - image: drbd-artifact
+    add: /drbd
+    to: /drbd
+    before: install
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update
+    - apt-get install -y gcc14 make binutils bc kmod coccinelle patch elfutils-devel bison flex m4 perl coreutils
+    - apt-get clean && rm -rf /var/lib/apt/lists/*
+    # ALT ships the compiler as x86_64-alt-linux-gcc-14. DRBD's Makefile.spatch host
+    # step (GENPATCHNAMES) invokes the unversioned x86_64-alt-linux-gcc; the kernel
+    # module compile uses CC=gcc-14. Provide every default name pointing at gcc-14.
+    - for n in gcc-14 gcc cc x86_64-alt-linux-gcc; do ln -sf x86_64-alt-linux-gcc-14 /usr/bin/$n; done
+  install:
+    - export KDIR="$(ls -d /usr/src/linux-headers-* | head -1)"
+    - export KREL="$(basename ${KDIR} | sed 's/^linux-headers-//')"
+    - make -C /drbd module KDIR="${KDIR}" KVER="${KREL}" CC=gcc-14
+    # Lay the modules into the sysext tree path the node overlays onto /usr.
+    - mkdir -p /out/usr/lib/modules/${KREL}/updates
+    - cp /drbd/drbd/build-current/drbd.ko /drbd/drbd/build-current/drbd_transport_tcp.ko /out/usr/lib/modules/${KREL}/updates/
+---
+image: {{ $.ImageName }}-artifact
+from: {{ index $.Images "builder/distroless" }}
+final: false
+import:
+  - image: {{ $.ImageName }}-compile
+    add: /out/usr
+    to: /sysext/usr
+    before: install
+git:
+  - add: /images/{{ $.ImageName }}/sysext
+    to: /scripts
+    includePaths:
+      - extension-release.drbd
+      - sysext-drbd.service
+    stageDependencies:
+      install:
+        - extension-release.drbd
+        - sysext-drbd.service
+shell:
+  beforeInstall:
+    - pm install erofs-utils coreutils cryptsetup
+    - mkdir -p /out
+  install:
+    - mkdir -p /sysext/usr/lib/extension-release.d /sysext/usr/lib/systemd/system
+    - cp -f /scripts/sysext-drbd.service /sysext/usr/lib/systemd/system/sysext-drbd.service
+    - cp -f /scripts/extension-release.drbd /sysext/usr/lib/extension-release.d/
+    - mkfs.erofs -L _sysext -U 00000000-0000-0000-0000-000000000000 -z lzma,9 drbd.erofs sysext/
+    - veritysetup format drbd.erofs drbd.verity > verity.txt
+    - export ROOTHASH=$(awk '/^Root hash:/ {print $3}' verity.txt)
+    - cat drbd.erofs drbd.verity > /out/drbd.raw
+    - printf '%s\n' "$ROOTHASH" > /out/drbd.raw.roothash
+---
+image: {{ $.ImageName }}
+from: {{ index $.Images "builder/scratch" }}
+import:
+  - image: {{ $.ImageName }}-artifact
+    add: /out
+    to: /
+    includePaths:
+      - '**/*'
+    before: setup
+imageSpec:
+  config:
+    labels:
+      distro: olcedar
+      sysext_level: "1.0"
+      drbd: {{ include "get_oss_version_by_id" (list "DRBD" $.Root) }}
+    clearUser: true
+    clearWorkingDir: true
+    clearCmd: true
+    clearEntrypoint: true
+    removeEnv: ["/.*/"]

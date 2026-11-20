@@ -1,0 +1,11 @@
+# systemd-sysext metadata. Placed at /usr/lib/extension-release.d/extension-release.drbd
+# inside the sysext; systemd-sysext refuses to merge an extension whose metadata
+# does not match the host.
+#
+# ID=_any merges onto any host OS. The drbd.ko ABI match is guaranteed by
+# compiling against the exact Olcedar kernel, not by this metadata.
+# TODO(olcedar): pin ID/VERSION_ID to the Olcedar os-release and add a
+# SYSEXT_LEVEL / kernel guard once the Olcedar os-release ID is fixed.
+ID=_any
+ARCHITECTURE=x86-64
+EXTENSION_RELOAD_MANAGER=1
