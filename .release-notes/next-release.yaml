@@ -4,6 +4,9 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+fixes:
+  - "In the new control plane, DRBD connections now use `crc32c` as the online-verify algorithm instead of `crct10dif-pclmul`. Kernels that no longer provide the `crct10dif-pclmul` driver (such as 7.0) rejected every new connection with `VERIFYAlgNotAvail`, so a replica on such a node never joined its volume and volumes with more than one replica, or a tie-breaker, on that node stayed in formation. Existing connections switch to `crc32c` in place."
+
 # Optional sections — delete rather than leave empty.
 # new_features: []
 # improvements: []
