@@ -12,7 +12,8 @@ highlights: []
 # breaking: []
 # upgrade_notes: []
 # known_issues: []
-# docs: []
+docs:
+  - "The FAQ explains how to take a node with DRBD replicas out of the cluster: that draining and rebooting keep the data, that a volume whose only up-to-date replica is on the node loses its data, how to move the replicas off the node with `evict.sh` in the LINSTOR control plane, and how to check in the new control plane that every volume of the node has an up-to-date replica on another node."
 # dependencies:
 #   - name: component
 #     from: "1.0"

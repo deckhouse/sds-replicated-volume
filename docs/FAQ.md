@@ -422,6 +422,32 @@ Example invocation:
 - `--ignore-advise` — Proceeds with the operations despite warnings from the `linstor advise resource` command. Use if the script was interrupted and the number of replicas for some resources does not match the value specified in the `ReplicatedStorageClass`.
 - `--exclude-resources-from-check` — Excludes from checks the resources listed using the `|` (vertical bar) as a separator.
 
+## How do I take a node with DRBD replicas out of the cluster?
+
+The module keeps the replicas of a volume on the disks of the cluster nodes. A replica on a node that leaves the cluster is not moved to another node, and its data is lost when the server of the node is reinstalled, when its disks are wiped or reused, and when the virtual machine of the node is deleted with its disks. A volume whose only up-to-date replica is on that node, including every volume of a ReplicatedStorageClass with `replication: None` placed there, loses its data.
+
+Draining and rebooting a node keep the data, as described in [How to properly reboot a node with DRBD resources](#how-to-properly-reboot-a-node-with-drbd-resources).
+
+Take nodes out of the cluster one at a time, including master nodes, and move the replicas off each node first:
+
+- With the LINSTOR control plane, list the resources of the node:
+
+  ```shell
+  d8 k -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor resource list --nodes <node-name>
+  ```
+
+  Move them to other nodes with the `evict.sh` script, as described in [How to evict DRBD resources from a node?](#how-to-evict-drbd-resources-from-a-node). In the `--delete-node` mode the script also removes the node from LINSTOR and Kubernetes; in the `--delete-resources-only` mode the node stays in the cluster. Wait until the new replicas are synchronized before you take the next node out.
+
+- With the new control plane, deleting the Node object makes the module remove the replicas of that node from the volumes and create new ones on other nodes from the remaining up-to-date replicas. Before you take a node out, check that each volume with a replica on the node has an up-to-date `Diskful` replica on another node:
+
+  ```shell
+  d8 k get rvr -o json | jq -r --arg node <node-name> '.items as $all | $all[] | select(.spec.nodeName == $node) | .spec.replicatedVolumeName as $rv | [$rv, ([$all[] | select(.spec.replicatedVolumeName == $rv and .spec.nodeName != $node and .spec.type == "Diskful" and any(.status.conditions[]?; .type == "BackingVolumeUpToDate" and .status == "True"))] | length)] | @tsv'
+  ```
+
+  The command prints the volumes of the node and the number of their up-to-date `Diskful` replicas on other nodes. A volume with `0` loses its data together with the node.
+
+Then take the node out of the cluster as described in [How do I take a node with volume data out of the cluster?](/modules/node-manager/faq.html#how-do-i-take-a-node-with-volume-data-out-of-the-cluster) in the `node-manager` documentation.
+
 ## How do I clean a node of DRBD and module volumes when the cluster is unavailable?
 
 {{< alert level="danger" >}}
