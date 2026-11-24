@@ -309,6 +309,7 @@ remove_files() {
   echo "== Files and directories"
   remove_if_content "${ROOT}/etc/modprobe.d/drbd.conf" "options drbd usermode_helper=disabled"
   remove_if_content "${ROOT}/etc/modules-load.d/d8_drbd.conf" "drbd"
+  remove_if_content "${ROOT}/etc/dracut.conf.d/d8_drbd.conf" 'omit_drivers+=" drbd "'
 
   if [[ -f "${ROOT}/etc/modules" ]] && grep -q -E '^drbd$' "${ROOT}/etc/modules"; then
     act "remove the drbd line from /etc/modules" sed -i '/^drbd$/d' "${ROOT}/etc/modules" || true

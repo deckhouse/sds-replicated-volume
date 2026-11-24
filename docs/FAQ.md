@@ -503,7 +503,7 @@ The `cleanup_static_node.sh` script of the `node-manager` module does not know a
 
    ```shell
    lsmod | grep drbd
-   ls /etc/modprobe.d/drbd.conf /etc/modules-load.d/d8_drbd.conf /etc/multipath/conf.d/drbd.conf /opt/deckhouse/drbd
+   ls /etc/modprobe.d/drbd.conf /etc/modules-load.d/d8_drbd.conf /etc/dracut.conf.d/d8_drbd.conf /etc/multipath/conf.d/drbd.conf /opt/deckhouse/drbd
    ```
 
    Both commands must print nothing (the second one must only report missing files).
@@ -525,7 +525,7 @@ It removes:
 - the running containers of the module (`crictl stop` for the `d8-sds-replicated-volume` namespace), so that the agent does not bring the resources back, and disables `bashible.timer` and `bashible.service`, which would otherwise start again after a reboot, re-enable `kubelet` and put the files of the module back;
 - DRBD resources (`drbdsetup down`) and the `drbd` kernel module with its transport modules (`drbd_transport_tcp`, `drbd_transport_lb_tcp`, `drbd_transport_rdma`), if they are loaded and are version 9 (the module the cluster installed); a DRBD module of another version that comes with the kernel is not touched. If the module stays in use, the script says so: it stays loaded until the node is rebooted, which `cleanup_static_node.sh` does at the end, and it is not loaded again, since its files and configuration are removed;
 - the module files of that version (`drbd*.ko*`) from `/lib/modules/<kernel>/` and the result of `depmod`;
-- `/etc/modprobe.d/drbd.conf` and `/etc/modules-load.d/d8_drbd.conf`, if they hold only what the module wrote (a modified file is left and reported), the `drbd` line in `/etc/modules`, and `/etc/multipath/conf.d/drbd.conf` (with a reload of `multipathd`);
+- `/etc/modprobe.d/drbd.conf`, `/etc/modules-load.d/d8_drbd.conf` and `/etc/dracut.conf.d/d8_drbd.conf`, if they hold only what the module wrote (a modified file is left and reported), the `drbd` line in `/etc/modules`, and `/etc/multipath/conf.d/drbd.conf` (with a reload of `multipathd`). The script does not rebuild the initramfs: on a node whose initramfs is built by `dracut`, the images keep their copies of these files until they are rebuilt, and an image built before the module kept DRBD out of it may also carry a `drbd` module, which the node would load at boot. To leave nothing of DRBD in them, run `dracut -f --regenerate-all` after the script and check with `lsinitrd /boot/initramfs-$(uname -r).img | grep drbd` (`/boot/initrd.img-$(uname -r)` on Debian and Ubuntu);
 - `/opt/deckhouse/drbd`, `/var/cache/registrypackages/drbd`, `/var/cache/registrypackages/drbdLegacy` and `/dev/sdsrv`;
 - the `"r|^/dev/drbd|"` element of `devices/global_filter` and the `global/use_lvmetad = 0` line in `/etc/lvm/lvm.conf`. The module leaves no marker on these edits, so the script rewrites the lines by their content, prints the difference first and saves a copy as `/etc/lvm/lvm.conf.srv-cleanup.<date>` before changing the file. A `global_filter` that the script cannot rewrite (for example, one spread over several lines) is reported for manual editing. The `lvm2-lvmetad` units that the module masked stay masked; unmask them with `systemctl unmask lvm2-lvmetad.socket lvm2-lvmetad.service` if the node needs them;
 - with `--delete-volumes`, in the volume groups from `--vg` only, the logical volumes whose names match `pvc-<uuid>_NNNNN` (LINSTOR control plane) or `pvc-<uuid>-N-<hash>` (new control plane). Other logical volumes, including the snapshots of the module, are listed as kept. Snapshots of the module have other names: remove them by hand with `lvs` and `lvremove` if they are no longer needed.
@@ -859,6 +859,7 @@ remove_files() {
   echo "== Files and directories"
   remove_if_content "${ROOT}/etc/modprobe.d/drbd.conf" "options drbd usermode_helper=disabled"
   remove_if_content "${ROOT}/etc/modules-load.d/d8_drbd.conf" "drbd"
+  remove_if_content "${ROOT}/etc/dracut.conf.d/d8_drbd.conf" 'omit_drivers+=" drbd "'
 
   if [[ -f "${ROOT}/etc/modules" ]] && grep -q -E '^drbd$' "${ROOT}/etc/modules"; then
     act "remove the drbd line from /etc/modules" sed -i '/^drbd$/d' "${ROOT}/etc/modules" || true

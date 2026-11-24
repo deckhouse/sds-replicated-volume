@@ -43,9 +43,10 @@ HASH="0123456789abcdef0123456789abcdef"
 
 make_root() {
   rm -rf "${ROOT_DIR}"
-  mkdir -p "${ROOT_DIR}"/{etc/modprobe.d,etc/modules-load.d,etc/multipath/conf.d,etc/lvm,opt/deckhouse/drbd,var/cache/registrypackages/drbd,var/cache/registrypackages/semver,dev/sdsrv,proc,sys/module/drbd,var/log,lib/modules/6.1/updates}
+  mkdir -p "${ROOT_DIR}"/{etc/modprobe.d,etc/modules-load.d,etc/dracut.conf.d,etc/multipath/conf.d,etc/lvm,opt/deckhouse/drbd,var/cache/registrypackages/drbd,var/cache/registrypackages/semver,dev/sdsrv,proc,sys/module/drbd,var/log,lib/modules/6.1/updates}
   echo "options drbd usermode_helper=disabled" >"${ROOT_DIR}/etc/modprobe.d/drbd.conf"
   echo "drbd" >"${ROOT_DIR}/etc/modules-load.d/d8_drbd.conf"
+  echo 'omit_drivers+=" drbd "' >"${ROOT_DIR}/etc/dracut.conf.d/d8_drbd.conf"
   printf 'blacklist {\n        devnode "^drbd[0-9]+"\n}\n' >"${ROOT_DIR}/etc/multipath/conf.d/drbd.conf"
   printf 'loop\ndrbd\nnbd\n' >"${ROOT_DIR}/etc/modules"
   cat >"${ROOT_DIR}/etc/lvm/lvm.conf" <<'CONF'
@@ -169,7 +170,7 @@ check "dry run does not stop containers" test "$(grep -c 'WOULD  crictl stop c0f
 check "apply brings the resource down" test ! -s "${STATE}/drbd"
 check "apply unloads the modules" test ! -s "${ROOT_DIR}/proc/modules"
 check "apply removes module files" test ! -e "${ROOT_DIR}/lib/modules/6.1/updates/drbd.ko"
-check "apply removes the configs" test ! -e "${ROOT_DIR}/etc/modprobe.d/drbd.conf" -a ! -e "${ROOT_DIR}/etc/modules-load.d/d8_drbd.conf" -a ! -e "${ROOT_DIR}/etc/multipath/conf.d/drbd.conf"
+check "apply removes the configs" test ! -e "${ROOT_DIR}/etc/modprobe.d/drbd.conf" -a ! -e "${ROOT_DIR}/etc/modules-load.d/d8_drbd.conf" -a ! -e "${ROOT_DIR}/etc/dracut.conf.d/d8_drbd.conf" -a ! -e "${ROOT_DIR}/etc/multipath/conf.d/drbd.conf"
 check "apply removes the sources, the package state and /dev/sdsrv" test ! -e "${ROOT_DIR}/opt/deckhouse/drbd" -a ! -e "${ROOT_DIR}/var/cache/registrypackages/drbd" -a ! -e "${ROOT_DIR}/dev/sdsrv"
 check "apply keeps other registry packages" test -d "${ROOT_DIR}/var/cache/registrypackages/semver"
 check "apply cleans /etc/modules" test "$(tr '\n' ' ' <"${ROOT_DIR}/etc/modules")" == "loop nbd "

@@ -521,7 +521,7 @@ fio --name=write-iops --filename=/data/fio.test --size=4G --direct=1 \
 
    ```shell
    lsmod | grep drbd
-   ls /etc/modprobe.d/drbd.conf /etc/modules-load.d/d8_drbd.conf /etc/multipath/conf.d/drbd.conf /opt/deckhouse/drbd
+   ls /etc/modprobe.d/drbd.conf /etc/modules-load.d/d8_drbd.conf /etc/dracut.conf.d/d8_drbd.conf /etc/multipath/conf.d/drbd.conf /opt/deckhouse/drbd
    ```
 
    Обе команды не должны ничего выводить (вторая должна только сообщить об отсутствии файлов).
@@ -543,7 +543,7 @@ fio --name=write-iops --filename=/data/fio.test --size=4G --direct=1 \
 - работающие контейнеры модуля (`crictl stop` для пространства имён `d8-sds-replicated-volume`), чтобы агент не вернул ресурсы, и отключает `bashible.timer` и `bashible.service`: иначе после перезагрузки они запустятся снова, включат `kubelet` и вернут файлы модуля;
 - DRBD-ресурсы (`drbdsetup down`) и модуль ядра `drbd` вместе с транспортными модулями (`drbd_transport_tcp`, `drbd_transport_lb_tcp`, `drbd_transport_rdma`), если они загружены и имеют версию 9 (модуль, который установил кластер); модуль DRBD другой версии, поставляемый с ядром, не затрагивается. Если модуль остаётся занятым, скрипт сообщает об этом: он остаётся загруженным до перезагрузки узла, которую в конце выполняет `cleanup_static_node.sh`, и после неё не загрузится, так как его файлы и конфигурация удалены;
 - файлы модуля этой версии (`drbd*.ko*`) в `/lib/modules/<ядро>/` и пересобирает `depmod`;
-- `/etc/modprobe.d/drbd.conf` и `/etc/modules-load.d/d8_drbd.conf`, если в них только то, что записал модуль (изменённый файл остаётся, о нём выводится сообщение), строку `drbd` в `/etc/modules` и `/etc/multipath/conf.d/drbd.conf` (с перечитыванием `multipathd`);
+- `/etc/modprobe.d/drbd.conf`, `/etc/modules-load.d/d8_drbd.conf` и `/etc/dracut.conf.d/d8_drbd.conf`, если в них только то, что записал модуль (изменённый файл остаётся, о нём выводится сообщение), строку `drbd` в `/etc/modules` и `/etc/multipath/conf.d/drbd.conf` (с перечитыванием `multipathd`). initramfs скрипт не пересобирает: на узле, где initramfs собирает `dracut`, в образах остаются копии этих файлов до их пересборки, а образ, собранный до того, как модуль стал исключать из него DRBD, может содержать и модуль `drbd`, который узел загрузит при старте. Чтобы в образах не осталось ничего от DRBD, после скрипта выполните `dracut -f --regenerate-all` и проверьте командой `lsinitrd /boot/initramfs-$(uname -r).img | grep drbd` (`/boot/initrd.img-$(uname -r)` в Debian и Ubuntu);
 - `/opt/deckhouse/drbd`, `/var/cache/registrypackages/drbd`, `/var/cache/registrypackages/drbdLegacy` и `/dev/sdsrv`;
 - элемент `"r|^/dev/drbd|"` в `devices/global_filter` и строку `global/use_lvmetad = 0` в `/etc/lvm/lvm.conf`. Модуль не оставляет маркера этих правок, поэтому скрипт переписывает строки по содержимому, сначала печатает разницу и сохраняет копию `/etc/lvm/lvm.conf.srv-cleanup.<дата>` перед изменением файла. `global_filter`, который скрипт не может переписать (например, записанный в несколько строк), выводится для ручной правки. Юниты `lvm2-lvmetad`, которые модуль замаскировал, остаются замаскированными; снимите маскировку командой `systemctl unmask lvm2-lvmetad.socket lvm2-lvmetad.service`, если узлу они нужны;
 - с `--delete-volumes` — только в группах томов из `--vg` — логические тома с именами `pvc-<uuid>_NNNNN` (LINSTOR control plane) или `pvc-<uuid>-N-<hash>` (новый control plane). Остальные логические тома, включая снимки модуля, выводятся как сохранённые. Снимки модуля называются иначе: удалите их вручную через `lvs` и `lvremove`, если они не нужны.
@@ -877,6 +877,7 @@ remove_files() {
   echo "== Files and directories"
   remove_if_content "${ROOT}/etc/modprobe.d/drbd.conf" "options drbd usermode_helper=disabled"
   remove_if_content "${ROOT}/etc/modules-load.d/d8_drbd.conf" "drbd"
+  remove_if_content "${ROOT}/etc/dracut.conf.d/d8_drbd.conf" 'omit_drivers+=" drbd "'
 
   if [[ -f "${ROOT}/etc/modules" ]] && grep -q -E '^drbd$' "${ROOT}/etc/modules"; then
     act "remove the drbd line from /etc/modules" sed -i '/^drbd$/d' "${ROOT}/etc/modules" || true
