@@ -82,6 +82,13 @@ func NewReconciler(
 // 500 volumes per node transition, so the periodic re-check is the progress mechanism instead.
 const resyncSlotRequeueInterval = 5 * time.Second
 
+// schedulingFailedRequeueInterval is how often a replica with no suitable candidate re-checks placement.
+//
+// Space is judged by the scheduler-extender; freeing it changes nothing this controller watches.
+// The periodic re-check is the progress mechanism. It applies to every SchedulingFailed: for a
+// failure left by local filters alone the watches already wake the volume, and it is a backstop.
+const schedulingFailedRequeueInterval = 30 * time.Second
+
 // resyncSlotWaitMessage is what a replica waiting for a resync slot reports. It carries no live
 // numbers on purpose — those would repatch every waiting replica whenever any resync finished.
 const resyncSlotWaitMessage = "Waiting for a resync slot: a node that would send this volume's " +
@@ -774,8 +781,9 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 	// receiver slot. A promoting diskless member without an LVG occupies no
 	// owed end yet; other partial placements keep their existing admission.
 	//
-	// The stage sits last among the filters, so everything it saw had already survived the others:
-	// when it admitted none of them, the budget alone is what left the replica nowhere to land.
+	// The stage sits last among the local filters, so everything it saw had survived those filters.
+	// Extender scoring runs after it, and candidates it admits can still fail there: that stays
+	// SchedulingFailed.
 	resyncSeen, resyncAdmitted := 0, 0
 	if isDiskful && needsResyncAdmission && sctx.ResyncOccupancy != nil {
 		resyncOccupancy := sctx.ResyncOccupancy
@@ -917,7 +925,8 @@ func (r *Reconciler) reconcileOneRVRScheduling(
 		}
 
 		return r.reconcileRVRCondition(rf.Ctx(), rvr, metav1.ConditionFalse,
-			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary)
+			v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed, summary).
+			Merge(rf.ContinueAndRequeueAfter(schedulingFailedRequeueInterval))
 	}
 
 	// Both ends of the transfer this placement is about to start, claimed together before anything

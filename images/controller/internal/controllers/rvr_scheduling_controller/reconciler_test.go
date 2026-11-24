@@ -356,7 +356,7 @@ var _ = Describe("Reconciler", func() {
 
 			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(reconcile.Result{}))
+			Expect(result.RequeueAfter).To(Equal(schedulingFailedRequeueInterval))
 			expectScheduledCondition(ctx, cl, rvr0, metav1.ConditionFalse,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed)
 			expectScheduledCondition(ctx, cl, rvr1, metav1.ConditionFalse,
@@ -723,8 +723,9 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
 
-			_, err := reconcileRV(ctx, rec)
+			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(schedulingFailedRequeueInterval))
 
 			expectScheduledCondition(ctx, cl, tb, metav1.ConditionFalse,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed)
@@ -1630,7 +1631,7 @@ var _ = Describe("Reconciler", func() {
 	//
 
 	Describe("Requeue Behavior", func() {
-		It("no capacity → Reconcile without error, no requeue", func() {
+		It("no capacity → periodic requeue places the replica when capacity returns", func() {
 			rv := newRV(defaultConfig())
 			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
 				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
@@ -1644,17 +1645,43 @@ var _ = Describe("Reconciler", func() {
 				Build()
 			mock := &reconcilerMockExtender{
 				filterAndScoreFn: func(_ []schext.LVMVolumeGroup) ([]schext.ScoredLVMVolumeGroup, error) {
-					return nil, nil // no scores
+					return nil, nil // no capacity
 				},
 			}
 			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
 
 			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(reconcile.Result{}))
+			Expect(result.RequeueAfter).To(Equal(schedulingFailedRequeueInterval))
 
 			expectScheduledCondition(ctx, cl, rvr, metav1.ConditionFalse,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed)
+			updated := getUpdatedRVR(ctx, cl, rvr)
+			cond := obju.GetStatusCondition(updated, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond.Message).To(Equal("1 candidates (node×LVG) from 1 eligible nodes; 1 excluded: scoring (no capacity)"))
+
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rsp), rsp)).To(Succeed())
+			rvVersion, rspVersion := rv.ResourceVersion, rsp.ResourceVersion
+
+			// A retry with nothing changed requeues again without repatching the condition.
+			result, err = reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(schedulingFailedRequeueInterval))
+			Expect(getUpdatedRVR(ctx, cl, rvr).ResourceVersion).To(Equal(updated.ResourceVersion))
+
+			// Only the extender changes: no fake-client object is written between the passes.
+			mock.filterAndScoreFn = nil // the mock's default scores every LVG at 5
+			result, err = reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+			expectNodeName(ctx, cl, rvr, "node-a")
+			expectScheduledCondition(ctx, cl, rvr, metav1.ConditionTrue,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled)
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rsp), rsp)).To(Succeed())
+			Expect(rv.ResourceVersion).To(Equal(rvVersion))
+			Expect(rsp.ResourceVersion).To(Equal(rspVersion))
 		})
 	})
 
@@ -3879,8 +3906,9 @@ var _ = Describe("Reconciler", func() {
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
 			rec.resyncLimit = resyncEndsPerNode
 
-			_, err := reconcileRV(ctx, rec)
+			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(resyncSlotRequeueInterval))
 
 			expectScheduledCondition(ctx, cl, newD, metav1.ConditionUnknown,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonWaitingForResyncSlot)
@@ -3890,6 +3918,44 @@ var _ = Describe("Reconciler", func() {
 				"a tie-breaker receives no data, so a full node is still a node it may use")
 			expectScheduledCondition(ctx, cl, tb, metav1.ConditionTrue,
 				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonScheduled)
+		})
+
+		It("fails and requeues when the budget cuts one node and capacity cuts the other", func() {
+			rv := deficitRV()
+			rsp := newRSP(v1alpha1.ReplicatedStoragePoolTypeLVM,
+				[]v1alpha1.ReplicatedStoragePoolEligibleNode{
+					makeNode("node-a", "zone-a", makeLVG("vg-a", true)),
+					makeNode("node-b", "zone-a", makeLVG("vg-b", true)),
+					makeNode("node-c", "zone-a", makeLVG("vg-c", true)),
+				})
+			sender := senderDiskful()
+			newD := newRVR(1, v1alpha1.ReplicaTypeDiskful)
+
+			cl := newClientBuilder(scheme).
+				WithObjects(rv, rsp, sender, newD, saturatingRVR("rv-other-0", "node-b")).
+				WithStatusSubresource(sender, newD).
+				Build()
+			var scoredLVGs []schext.LVMVolumeGroup
+			mock := &reconcilerMockExtender{
+				filterAndScoreFn: func(lvgs []schext.LVMVolumeGroup) ([]schext.ScoredLVMVolumeGroup, error) {
+					scoredLVGs = slices.Clone(lvgs)
+					return nil, nil
+				},
+			}
+			rec := NewReconciler(cl, logr.Discard(), scheme, mock)
+			rec.resyncLimit = resyncEndsPerNode
+
+			result, err := reconcileRV(ctx, rec)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(schedulingFailedRequeueInterval))
+			// Only vg-c passes the budget and reaches scoring.
+			Expect(scoredLVGs).To(Equal([]schext.LVMVolumeGroup{{LVGName: "vg-c"}}))
+			expectScheduledCondition(ctx, cl, newD, metav1.ConditionFalse,
+				v1alpha1.ReplicatedVolumeReplicaCondScheduledReasonSchedulingFailed)
+			updated := getUpdatedRVR(ctx, cl, newD)
+			cond := obju.GetStatusCondition(updated, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
+			Expect(cond.Message).To(ContainSubstring("no free resync end"))
+			Expect(cond.Message).To(ContainSubstring("scoring (no capacity)"))
 		})
 
 		It("lets a partially placed Diskful finish on its own node", func() {
@@ -3952,8 +4018,9 @@ var _ = Describe("Reconciler", func() {
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
 			rec.resyncLimit = resyncEndsPerNode
 
-			_, err := reconcileRV(ctx, rec)
+			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(resyncSlotRequeueInterval))
 
 			expectNodeName(ctx, cl, first, "node-b")
 			expectScheduledCondition(ctx, cl, first, metav1.ConditionTrue,
@@ -4008,8 +4075,9 @@ var _ = Describe("Reconciler", func() {
 			rec := NewReconciler(cl, logr.Discard(), scheme, &reconcilerMockExtender{})
 			rec.resyncLimit = resyncEndsPerNode
 
-			_, err := reconcileRV(ctx, rec)
+			result, err := reconcileRV(ctx, rec)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(resyncSlotRequeueInterval))
 
 			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
 				"node-b and node-c are both free: only the queue says the sender is spoken for")
@@ -4317,10 +4385,11 @@ var _ = Describe("Reconciler", func() {
 
 			staleOccupancy = peerNewD.Name
 
-			_, err = rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: testRVName},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(resyncSlotRequeueInterval))
 
 			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
 				"node-c is already receiving rv-peer's copy, and one end per node leaves no room")
@@ -4413,10 +4482,11 @@ var _ = Describe("Reconciler", func() {
 			Expect(getUpdatedRVR(ctx, cl, peerNewD).Spec.NodeName).To(Equal("node-b"),
 				"node-b is the only node rv-zeta's missing copy can land on")
 
-			_, err = rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: client.ObjectKey{Name: testRVName},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(resyncSlotRequeueInterval))
 
 			Expect(getUpdatedRVR(ctx, cl, newD).Spec.NodeName).To(BeEmpty(),
 				"node-c is already feeding rv-zeta's copy, and one end per node leaves no room")

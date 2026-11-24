@@ -257,13 +257,19 @@ Indicates whether the replica's placement is complete for its type (see [Schedul
 | Status | Reason | When |
 |--------|--------|------|
 | True | Scheduled | Placement is complete for the replica type: node only for TieBreaker; node + LVG + ThinPool (if applicable) for Diskful/ShadowDiskful |
-| False | SchedulingFailed | No suitable candidate found (pipeline summary in message) |
+| False | SchedulingFailed | No suitable candidate found (pipeline summary in message); re-checked every `schedulingFailedRequeueInterval` |
 | False | ExtenderUnavailable | Scheduler extender is unreachable or reservation failed |
 | Unknown | WaitingForReplicatedVolume | RV not found, RV has no configuration, or RSP not found |
 | Unknown | WaitingForResyncSlot | Placement of a not-yet-placed Diskful is deferred by the resync budget — either a node that would *send* the replica its data is at its limit, or every candidate node that could *receive* it is (see [Resync Budget](#resync-budget)) |
 | (absent) | — | Access replica (condition removed by this controller) |
 
 `Unknown` rather than `False` for `WaitingForResyncSlot` is deliberate: the buckets of `computeActualSchedulingFailureMessages` key on `IsFalse()`, so `False` would be reported as a scheduling failure. Waiting for a slot is not a failure.
+
+Space is judged by the scheduler-extender, and freeing space changes nothing this controller
+watches. The periodic re-check of `SchedulingFailed` (`schedulingFailedRequeueInterval`, 30 s) is
+the progress mechanism; when the failure is unchanged, the retry does not write status again. It
+applies to every `SchedulingFailed`: a failure left by local filters alone is already woken by the
+watches, and the re-check is only a backstop there.
 
 ## Resync Budget
 
@@ -308,10 +314,11 @@ chosen in different places:
 - **Receiving side** — a `no free resync end` filter inside the pipeline, next to `node not ready`
   and the zone filters, because the receiving node is chosen there.
 
-Both sides report `Scheduled=Unknown` / `WaitingForResyncSlot` and requeue, never `SchedulingFailed`.
-The filter stage sits last, so when it admits none of the candidates that reached it the budget
-alone is what left the replica nowhere to land; anything a later stage rejects stays a scheduling
-failure with the usual pipeline summary.
+The sending-side gate and a receiving-side filter that rejects every candidate reaching it report
+`Scheduled=Unknown` / `WaitingForResyncSlot` and requeue. The budget is the last local filter;
+extender scoring runs after it. If the budget rejects some candidates and extender scoring rejects
+the rest, the result stays `SchedulingFailed` with the usual pipeline summary and is re-checked
+every `schedulingFailedRequeueInterval`.
 
 Nothing wakes a waiting replica when a resync elsewhere finishes; the fixed requeue
 (`resyncSlotRequeueInterval`) is the progress mechanism. A fan-out over nodes was rejected: a node
@@ -598,7 +605,7 @@ flowchart TD
     SelectStep[SelectBest]
     SelectStep --> CheckBest{Best found?}
     CheckBest -->|No| SetFailed["Scheduled=False<br/>SchedulingFailed<br/>(pipeline summary)"]
-    SetFailed --> ReturnFail([Return])
+    SetFailed --> ReturnFail(["Continue + requeue after<br/>schedulingFailedRequeueInterval"])
 
     CheckBest -->|Yes| NarrowRes{Diskful?}
     NarrowRes -->|Yes| CallNarrow[NarrowReservation]

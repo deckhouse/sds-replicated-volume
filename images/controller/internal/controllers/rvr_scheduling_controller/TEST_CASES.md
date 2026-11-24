@@ -86,7 +86,7 @@ be requested; the tests pin the scheduler engine for a future lift of the cap.
    All 4 replicas (2 Diskful + 2 TieBreaker) are successfully scheduled, each on a separate node.
 
 4. **small-1z: all nodes occupied — TB is not scheduled.**
-   2 existing Diskful on both nodes. TieBreaker cannot be scheduled — `SchedulingFailed`.
+   2 existing Diskful on both nodes. TieBreaker cannot be scheduled — `SchedulingFailed`, with `RequeueAfter == schedulingFailedRequeueInterval`.
 
 ---
 
@@ -255,8 +255,14 @@ disagree with reality.
 
 ## Requeue Behavior
 
-1. ⚡ **No capacity anywhere → Reconcile completes without error, no explicit requeue.**
-   Extender returns empty scores (no capacity). Replicas receive `Scheduled=False` / `SchedulingFailed`. Reconcile completes without error and without `RequeueAfter` — re-reconciliation happens naturally when the watched resources (RSP, RVR, RV) change.
+1. ⚡ **No capacity anywhere → periodic requeue places the replica when capacity returns.**
+   One Diskful, node-a with vg-a. Extender returns empty scores (no capacity). The replica receives `Scheduled=False` / `SchedulingFailed` with the exact pipeline summary, and Reconcile returns `RequeueAfter == schedulingFailedRequeueInterval`. A second pass with nothing changed requeues again and leaves the RVR `ResourceVersion` unchanged. Switch only the extender's capacity to score 5: the next pass places the replica on node-a with `Scheduled=True`, while RV and RSP `ResourceVersion` stay unchanged.
+
+2. ⚡ **Mixed resync budget and capacity rejection → `SchedulingFailed`, periodic requeue.**
+   A sender occupies node-a; node-b has no free resync end. Node-c passes the budget and reaches the extender as vg-c, but gets no capacity score. The replica receives `Scheduled=False` / `SchedulingFailed`, not `WaitingForResyncSlot`; its message contains both `no free resync end` and `scoring (no capacity)`. Reconcile returns `schedulingFailedRequeueInterval`.
+
+3. **Resync-only waits keep their shorter retry.**
+   Receiver-budget exhaustion, the sender-side queue gate, sender exhaustion after one placement, and in-flight receiver/sender reservations return `RequeueAfter == resyncSlotRequeueInterval` with `Scheduled=Unknown` / `WaitingForResyncSlot`.
 
 ---
 
@@ -401,7 +407,7 @@ penalty. D = FTT + GMDR + 1.
    3 Access RVRs (some may have had `Scheduled` condition from a previous type). After Reconcile: `Scheduled` condition is removed from all Access RVRs. No scheduling pipeline runs. Reconcile returns Done.
 
 3. **0 eligible nodes in RSP — all Diskful get `SchedulingFailed`.**
-   RSP exists but `EligibleNodes` is empty. 2 Diskful RVRs. Both receive `Scheduled=False` / `SchedulingFailed`. Pipeline summary: "0 candidates (node×LVG) from 0 eligible nodes".
+   RSP exists but `EligibleNodes` is empty. 2 Diskful RVRs. Both receive `Scheduled=False` / `SchedulingFailed`. Pipeline summary: "0 candidates (node×LVG) from 0 eligible nodes". Reconcile returns `RequeueAfter == schedulingFailedRequeueInterval`.
 
 4. ⚡ **RVR with unknown ReplicaType — silently skipped.**
    RVR with a type that is not Diskful, TieBreaker, or Access. It is in `All` but not in any type set. It does not appear in `unscheduledDiskful` or `unscheduledTieBreaker` → silently skipped. No condition set, no error.
