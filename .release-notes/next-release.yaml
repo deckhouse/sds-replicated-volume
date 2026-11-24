@@ -6,6 +6,7 @@ highlights: []
 
 fixes:
   - "In the new control plane, DRBD connections now use `crc32c` as the online-verify algorithm instead of `crct10dif-pclmul`. Kernels that no longer provide the `crct10dif-pclmul` driver (such as 7.0) rejected every new connection with `VERIFYAlgNotAvail`, so a replica on such a node never joined its volume and volumes with more than one replica, or a tie-breaker, on that node stayed in formation. Existing connections switch to `crc32c` in place."
+  - "The `NodeGroupConfiguration` script that builds DRBD now also builds it for every installed kernel that is newer than the running one and lacks the required DRBD version, and it no longer removes the headers packages of installed kernels, only those of kernels that are gone. Before, DRBD was built only for the running kernel, so the first boot into a new kernel loaded the DRBD that came with it (8.4 on RED OS) or none, and the node stayed without DRBD 9 until bashible ran again, which waits for update approval. Now a kernel installed by a `NodeGroupConfiguration` script gets DRBD in the same bashible run, before the reboot. A failure to build for such a kernel is a warning in the bashible log and does not stop the run; DRBD is then built after the node boots into that kernel, as before. On ALT Linux only the newest kernel of each flavour is handled, since the headers package exists only for it."
 
 # Optional sections — delete rather than leave empty.
 # new_features: []

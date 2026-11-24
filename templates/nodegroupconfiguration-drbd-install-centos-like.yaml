@@ -51,6 +51,220 @@ spec:
       done
     }
 
+    drbd_newer_kernels() {
+      local modules_dir="$1"
+      local running="$2"
+      local kernel_dir kernel
+      for kernel_dir in "$modules_dir"/*/; do
+        kernel="$(basename "$kernel_dir")"
+        if [ "$kernel" = "$running" ] || [ ! -d "${kernel_dir}kernel" ]; then
+          continue
+        fi
+        if [ "$(printf '%s\n%s\n' "$running" "$kernel" | sort -V | tail -n 1)" = "$kernel" ]; then
+          echo "$kernel"
+        fi
+      done
+    }
+
+    drbd_kernel_needs_build() {
+      local module="$1/$2/updates/drbd.ko"
+      local desired="$3"
+      local regex="$4"
+      local version
+      version="$(modinfo -F version "$module" 2>/dev/null || true)"
+      if [ -z "$version" ] || [[ ! "$version" =~ $regex ]]; then
+        return 0
+      fi
+      [ "$(d8-semver compare "$version" "$desired")" == "-1" ]
+    }
+
+    drbd_kernels_to_build() {
+      local kernel
+      for kernel in $(drbd_newer_kernels "$1" "$2"); do
+        if drbd_kernel_needs_build "$1" "$kernel" "$3" "$4"; then
+          echo "$kernel"
+        fi
+      done
+    }
+
+    drbd_try() {
+      set +e
+      ( set -e; "$@" )
+      drbd_try_rc=$?
+      set -e
+    }
+
+    drbd_install_semver() {
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
+      bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
+    }
+
+    drbd_install_sources() {
+      local package_name sibling_package_name sibling_installed drbd_config sources_version
+      # Registry-package may skip install when the digest marker matches even if
+      # /opt/deckhouse/drbd is stale. Both drbd and drbdLegacy unpack to the same
+      # path; remove the inactive sibling too so a later uninstall of the old hold
+      # cannot wipe the active sources. Sibling uninstall clears the shared tree,
+      # so the active package must be removed as well to force reinstall.
+      package_name="{{ include "drbd_package_name" . }}"
+      if [ "$package_name" = "drbd" ]; then
+        sibling_package_name="drbdLegacy"
+      else
+        sibling_package_name="drbd"
+      fi
+      sibling_installed="false"
+      if [ -f "/var/cache/registrypackages/${sibling_package_name}/uninstall" ]; then
+        sibling_installed="true"
+      fi
+      drbd_config="/opt/deckhouse/drbd/drbd/linux/drbd_config.h"
+      sources_version=""
+      if [ -f "$drbd_config" ]; then
+        sources_version="$(sed -ne '/^#define REL_VERSION/{s/^[^"]*"\([^ "]*\).*/\1/;p;q;}' "$drbd_config")"
+      fi
+      if [ "$sibling_installed" = "true" ] || [ -z "$sources_version" ] || [ "$sources_version" != "$desired_version" ]; then
+        bb-log-info "DRBD package reinstall required (sources='${sources_version:-none}', desired='${desired_version}', sibling_${sibling_package_name}=${sibling_installed})"
+        bb-package-remove "$sibling_package_name" "$package_name"
+      fi
+      bb-package-module-install "${package_name}:{{ include "helm_lib_module_image_digest" (list . (include "drbd_package_name" .) "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    }
+
+    drbd_spaas_url() {
+      local attempt
+      if [ -n "${SPAAS_URL:-}" ]; then
+        return 0
+      fi
+
+      attempt=0
+      until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+      do
+        if [ $attempt -gt 60 ]; then
+          bb-log-info "Cluster DNS isn't accessible, can't get SPAAS service IP for DRBD building"
+          return 1
+        fi
+
+        ((attempt=attempt+1))
+        bb-log-info "Waiting for cluster DNS response (try #$attempt)"
+        sleep 10
+      done
+
+      bb-log-info "Cluster DNS responded, got SPAAS service IP"
+
+      export SPAAS_URL="https://${SPAAS_IP}:2020"
+
+      attempt=0
+      until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $SPAAS_URL'/api/v1/hello')" == "200" ]]
+      do
+        if [ $attempt -gt 60 ]; then
+          bb-log-info "SPAAS service isn't accessible, can't continue DRBD building"
+          unset SPAAS_URL
+          return 1
+        fi
+
+        ((attempt=attempt+1))
+        bb-log-info "Waiting for SPAAS service is being accessible (try #$attempt)"
+        sleep 10
+      done
+
+      bb-log-info "SPAAS service is accessible, starting DRBD building"
+    }
+
+    drbd_build_and_install() {
+      local kernel="$1"
+      if [[ "$(mokutil --sb-state || echo "Not supported")" == "SecureBoot enabled" ]]; then
+        bb-log-info "SecureBoot is enabled, so DRBD is not built for kernel ${kernel}"
+        return 0
+      fi
+      drbd_install_sources
+      drbd_spaas_url
+      drbd_build_dir="$(mktemp -d /var/tmp/d8-drbd-build.XXXXXX)"
+      trap 'rm -rf "$drbd_build_dir"' EXIT
+      cp -a /opt/deckhouse/drbd/. "$drbd_build_dir"
+      cd "$drbd_build_dir"
+      make clean || true
+      make KDIR="/lib/modules/${kernel}/build"
+      make install
+      depmod -a "$kernel"
+      bb-log-info "DRBD $(modinfo -F version "/lib/modules/${kernel}/updates/drbd.ko") is built for kernel ${kernel}"
+    }
+
+    drbd_build_for_newer_kernels() {
+      local kernels kernel
+      drbd_try drbd_install_semver
+      if [ "$drbd_try_rc" -ne 0 ]; then
+        bb-log-warning "d8-semver is not installed, so DRBD is not built for the installed kernels the node has not booted yet"
+        return 0
+      fi
+      kernels="$(drbd_kernels_to_build /lib/modules "$kernel_version_in_use" "$desired_version" "$current_version_regex")"
+      for kernel in $kernels; do
+        bb-log-info "Building DRBD ${desired_version} for kernel ${kernel}, which is installed and not booted yet"
+        drbd_try drbd_build_for_kernel "$kernel"
+        if [ "$drbd_try_rc" -ne 0 ]; then
+          bb-log-warning "DRBD ${desired_version} is not built for kernel ${kernel}, so the node builds it after it boots into that kernel"
+        fi
+      done
+    }
+
+    kernel_devel_package_name() {
+      rpm -qf --qf "%{NAME}\t" "$1" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g'
+    }
+
+    install_kernel_devel() {
+      local kernel="$1"
+      local log="$2"
+      local package_name devel_package package_manager os_id devel_installed url
+      package_name="$(kernel_devel_package_name "/lib/modules/${kernel}")"
+      devel_package="${package_name}-${kernel}"
+      if ! bb-dnf-package? "$devel_package"; then
+        package_manager="$(bb-check-dnf)"
+        if [ "$package_manager" = "dnf" ]; then
+          bb-dnf-update
+        fi
+        bb-set-proxy
+        if "$package_manager" -q list available "$devel_package" >/dev/null 2>&1; then
+          bb-log-info "${devel_package} is in the configured repositories"
+        else
+          os_id="$(. /etc/os-release && echo "${ID:-}")"
+          devel_installed="false"
+          if [ "$os_id" = "rocky" ]; then
+            for url in $(rocky_vault_package_urls "$devel_package" "$kernel" || true); do
+              bb-log-info "${devel_package} is not in the configured repositories, trying ${url}"
+              if "$package_manager" install -y --setopt=localpkg_gpgcheck=True "$url"; then
+                devel_installed="true"
+                break
+              fi
+            done
+          fi
+          if [ "$devel_installed" != "true" ]; then
+            bb-unset-proxy
+            "$log" "${devel_package} for kernel ${kernel} is in neither the configured repositories nor the archives the script knows, so DRBD cannot be built for that kernel on this node. Add a repository or mirror that provides the package, or boot the node into a kernel whose headers are available."
+            return 1
+          fi
+        fi
+        bb-unset-proxy
+      fi
+      bb-dnf-install "$devel_package"
+    }
+
+    kernel_devel_packages_without_kernel() {
+      local package_name="$1"
+      local modules_dir="$2"
+      local package
+      for package in $(rpm -q "$package_name" 2>/dev/null | grep "^${package_name}-" || true); do
+        if [ ! -d "${modules_dir}/${package#"${package_name}-"}/kernel" ]; then
+          echo "$package"
+        fi
+      done
+    }
+
+    drbd_build_for_kernel() {
+      install_kernel_devel "$1" bb-log-warning
+      bb-dnf-install make gcc bind-utils patch mokutil
+      drbd_build_and_install "$1"
+    }
+
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
@@ -137,6 +351,7 @@ spec:
         bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
 
         bb-log-info "Desired drbd version is already loaded, nothing to do"
+        drbd_build_for_newer_kernels
         exit 0
       fi
     fi
@@ -151,39 +366,11 @@ spec:
     #   kernel-modules-core   --> kernel-devel
     #   kernel-lt             --> kernel-lt-devel
     #   kernel-lt-core        --> kernel-lt-devel
-    package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
-    devel_package="${package_name}-${kernel_version_in_use}"
-    if ! bb-dnf-package? "$devel_package"; then
-      package_manager="$(bb-check-dnf)"
-      if [ "$package_manager" = "dnf" ]; then
-        bb-dnf-update
-      fi
-      bb-set-proxy
-      if "$package_manager" -q list available "$devel_package" >/dev/null 2>&1; then
-        bb-log-info "${devel_package} is in the configured repositories"
-      else
-        os_id="$(. /etc/os-release && echo "${ID:-}")"
-        devel_installed="false"
-        if [ "$os_id" = "rocky" ]; then
-          for url in $(rocky_vault_package_urls "$devel_package" "$kernel_version_in_use" || true); do
-            bb-log-info "${devel_package} is not in the configured repositories, trying ${url}"
-            if "$package_manager" install -y --setopt=localpkg_gpgcheck=True "$url"; then
-              devel_installed="true"
-              break
-            fi
-          done
-        fi
-        if [ "$devel_installed" != "true" ]; then
-          bb-log-error "${devel_package} for the running kernel is in neither the configured repositories nor the archives the script knows, so DRBD cannot be built on this node. Add a repository or mirror that provides the package, or boot the node into a kernel whose headers are available."
-          exit 1
-        fi
-      fi
-      bb-unset-proxy
-    fi
-    bb-dnf-install "$devel_package"
+    install_kernel_devel "$kernel_version_in_use" bb-log-error
 
     # Remove unused kernel-headers
-    packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
+    devel_package_name="$(kernel_devel_package_name "/lib/modules/${kernel_version_in_use}")"
+    packages_to_remove="$(kernel_devel_packages_without_kernel "$devel_package_name" /lib/modules)"
     if [ -n "$packages_to_remove" ]; then
       bb-dnf-remove $packages_to_remove
     fi
@@ -195,63 +382,9 @@ spec:
       exit 0
     fi
 
-    # Registry-package may skip install when the digest marker matches even if
-    # /opt/deckhouse/drbd is stale. Both drbd and drbdLegacy unpack to the same
-    # path; remove the inactive sibling too so a later uninstall of the old hold
-    # cannot wipe the active sources. Sibling uninstall clears the shared tree,
-    # so the active package must be removed as well to force reinstall.
-    package_name="{{ include "drbd_package_name" . }}"
-    if [ "$package_name" = "drbd" ]; then
-      sibling_package_name="drbdLegacy"
-    else
-      sibling_package_name="drbd"
-    fi
-    sibling_installed="false"
-    if [ -f "/var/cache/registrypackages/${sibling_package_name}/uninstall" ]; then
-      sibling_installed="true"
-    fi
-    drbd_config="/opt/deckhouse/drbd/drbd/linux/drbd_config.h"
-    sources_version=""
-    if [ -f "$drbd_config" ]; then
-      sources_version="$(sed -ne '/^#define REL_VERSION/{s/^[^"]*"\([^ "]*\).*/\1/;p;q;}' "$drbd_config")"
-    fi
-    if [ "$sibling_installed" = "true" ] || [ -z "$sources_version" ] || [ "$sources_version" != "$desired_version" ]; then
-      bb-log-info "DRBD package reinstall required (sources='${sources_version:-none}', desired='${desired_version}', sibling_${sibling_package_name}=${sibling_installed})"
-      bb-package-remove "$sibling_package_name" "$package_name"
-    fi
-    bb-package-module-install "${package_name}:{{ include "helm_lib_module_image_digest" (list . (include "drbd_package_name" .) "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    drbd_install_sources
 
-    attempt=0
-    until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
-    do
-      if [ $attempt -gt 60 ]; then
-        bb-log-info "Cluster DNS isn't accessible, can't get SPAAS service IP for DRBD building"
-        exit 1
-      fi
-
-      ((attempt=attempt+1))
-      bb-log-info "Waiting for cluster DNS response (try #$attempt)"
-      sleep 10
-    done
-
-    bb-log-info "Cluster DNS responded, got SPAAS service IP"
-
-    export SPAAS_URL="https://${SPAAS_IP}:2020"
-
-    attempt=0
-    until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $SPAAS_URL'/api/v1/hello')" == "200" ]]
-    do
-      if [ $attempt -gt 60 ]; then
-        bb-log-info "SPAAS service isn't accessible, can't continue DRBD building"
-        exit 1
-      fi
-
-      ((attempt=attempt+1))
-      bb-log-info "Waiting for SPAAS service is being accessible (try #$attempt)"
-      sleep 10
-    done
-
-    bb-log-info "SPAAS service is accessible, starting DRBD building"
+    drbd_spaas_url
 
     cd /opt/deckhouse/drbd
     make clean || true
@@ -280,3 +413,5 @@ spec:
         bb-flag-set reboot
       fi
     fi
+
+    drbd_build_for_newer_kernels
