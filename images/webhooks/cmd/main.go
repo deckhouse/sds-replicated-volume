@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"os"
 
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-replicated-volume/images/webhooks/handlers"
 )
@@ -61,6 +63,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
 		os.Exit(1)
 	}
+	ctrllog.SetLogger(log.GetLogger())
 	cfg := initFlags()
 
 	hs, err := handlers.Handlers(log)

@@ -19,3 +19,6 @@ highlights: []
 #     to: "1.1"
 #     changelog_url: "https://..."
 #     notes: "..."
+
+fixes:
+  - "The `webhooks` container no longer drops the internal messages of controller-runtime and of the Kubernetes client, such as API warnings, and writes them to its log in the same format as its other messages."

@@ -22,7 +22,6 @@ import (
 	"os"
 
 	sdn "github.com/deckhouse/sdn/api/network.deckhouse.io/v1alpha1"
-	"github.com/go-logr/logr"
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	kwhlog "github.com/slok/kubewebhook/v2/pkg/log"
 	"github.com/slok/kubewebhook/v2/pkg/model"
@@ -36,9 +35,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -52,8 +49,6 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 	if kubeconfigPath == "" {
 		kubeconfigPath = os.Getenv("kubeconfig")
 	}
-
-	controllerruntime.SetLogger(logr.New(ctrllog.NullLogSink{}))
 
 	if kubeconfigPath != "" {
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
